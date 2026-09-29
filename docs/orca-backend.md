@@ -1,26 +1,26 @@
 # Orca runtime backend
 
-Orca is an experimental macOS backend in which the Orca app owns both the task worktree and terminal endpoint.
+Orca is an experimental runtime backend. FirstMate owns each linked Git checkout; Orca supplies its Git Bash terminal.
 The crewmate harness remains the agent process launched inside that endpoint.
 Firstmate agents load [`firstmate-orca`](../.agents/skills/firstmate-orca/SKILL.md) before operating or recovering this backend.
 
 ## Setup
 
-Pick Orca when you already use the Orca macOS app and want Orca-managed worktrees and terminals instead of Treehouse plus a session multiplexer.
-Orca is macOS-only, explicit-only, and does not support secondmate spawns.
+Pick Orca only for a Windows Git Bash installation where Orca is already running and the project ignores `.worktrees/`.
+The current Windows path is explicit-only and does not support secondmate spawns. The former macOS Orca-owned checkout flow is not this contract.
 
 Prerequisites:
 
-- `/Applications/Orca.app` installed, running, and ready.
-- The `orca` CLI, installed with `brew install orca`.
+- The Orca app running with its `orca` CLI on `PATH`.
+- Git Bash with `cygpath`, Git, and a target repository that ignores `.worktrees/`.
 - The universal harness and toolchain requirements in [`configuration.md`](configuration.md#toolchain).
 
 Select Orca with local `config/backend` containing `orca`, `FM_BACKEND=orca` for one launch, or an explicit request to Firstmate.
 It is never auto-detected.
 
-Before any spawn mutates repository state, Firstmate requires `orca status --json` to report `reachable=true` and `state="ready"`.
-The first task for a project registers that repository with `orca repo add --path` when needed.
-No manual repository registration is required.
+Before any spawn mutates repository state, FirstMate requires `orca status --json` to report `reachable=true` and `state="ready"`.
+FirstMate creates the linked checkout at `<project>/.worktrees/<task-id>`, refusing an existing path or unignored directory. It verifies the Git common directory and exact registration, then registers the project with `orca repo add --path` only after a structured `repo_not_found` response.
+`orca worktree show --worktree path:<native-path>` must resolve that existing checkout. Orca never creates the checkout.
 
 Open the Orca app to watch a task's terminal.
 Routine supervision uses the recorded endpoint through `bin/fm-peek.sh <id>` and `FM_HOME=<home> bin/fm-send.sh <id> '<text>'`.
@@ -28,26 +28,27 @@ Enter and Ctrl-C are supported; Escape is not.
 
 ## Task shape and metadata
 
-Each task has one Orca-managed git worktree and one Orca terminal.
-`fm-spawn.sh` does not call Treehouse for Orca tasks.
+Each task has one FirstMate-owned linked Git worktree and one Orca Git Bash terminal.
+`fm-spawn.sh` does not call Treehouse or `orca worktree create` for Orca tasks.
 The normal isolation and unlanded-work refusal rules still apply.
 
 ```text
 backend=orca
 window=fm-<id>
 terminal=<orca terminal handle>
-orca_worktree_id=<orca repo id>::<absolute worktree path>
-worktree=<absolute Orca worktree path>
+orca_worktree_id=<resolved Orca id or linked>::<absolute Git Bash checkout path>
+worktree=<absolute Git Bash checkout path>
 ```
 
-`window=` remains the caller-facing Firstmate alias.
-`terminal=` and `orca_worktree_id=` are the backend authority used by operation and cleanup paths.
-Orca returns `orca_worktree_id=` as that composite of the Orca repo id and the worktree path, and cleanup validation requires both halves rather than treating the value as a simple name.
+`window=` remains the caller-facing FirstMate alias.
+`terminal=` is the exact Orca handle; `orca_worktree_id=` retains the checkout path for recovery. If Orca's id contains the `::` separator, FirstMate stores `linked::<path>` rather than embedding an ambiguous id.
+The checkout path and Orca's `worktree show` path must agree before a terminal opens.
 
 ## Current lifecycle and safety
 
-Spawn registers the repository, creates an independent worktree, reuses only the verified `result.terminal.handle` returned by Orca or creates a terminal explicitly, installs harness hooks, records metadata, and launches the selected harness.
+Spawn first creates and verifies the linked checkout, then resolves its native Windows path through Orca. Before creating a terminal it durably records the checkout, resolved Orca worktree id, and unique terminal title in `state/<id>.orca-create`. It creates one `--shell git-bash --title <unique-title>` terminal at that path and accepts the handle only if `terminal.worktreeId` matches the prior `worktree show` id. The shared POSIX send path launches the harness in that terminal.
 Exact command flags and response parsing are owned by `bin/backends/orca.sh` and script help.
+After successful task metadata publication, FirstMate retires the creation intent. If creation returns an ambiguous outcome, abort attempts a complete `terminal list` for that exact checkout and accepts only one matching title and worktree id; otherwise it retains the intent and recovery metadata without retrying creation. A later teardown may bind that uniquely identified handle under the task metadata lock, then still blocks after close. If the process stops before recovery metadata is published, the intent alone remains for operator reconciliation; it does not authorize a fresh terminal or checkout removal.
 
 `fm-peek.sh` reads with `orca terminal read`.
 An ordinary metadata-routed `fm-send.sh` text steer becomes a durable steering-inbox record, and only its best-effort constant doorbell passes through Orca's submit machinery.
@@ -60,22 +61,18 @@ Grok alone retains its isolated rendered-tail fallback.
 Cleanup keeps all shared Firstmate safety checks.
 A scout still requires its report and completed decision inventory.
 A ship still refuses dirty or unlanded work.
-Before release, cleanup resolves the recorded Orca worktree id and verifies its path matches the recorded worktree path.
-A missing, unreadable, or mismatched identity preserves metadata and stops rather than deleting anything.
-After those checks, Firstmate closes the exact terminal and releases the exact worktree with Orca's worktree command.
-It never raw-deletes an Orca worktree.
-A close the CLI never attempted, because `orca` is not on the path, stops cleanup with the metadata intact even under `--force`: removing those records would leave nothing on disk naming a terminal that may still be live.
-Reinstall the CLI and rerun; [`verification/runtime-backends.md`](verification/runtime-backends.md) "Endpoint close" owns what this arm can and cannot prove about its own close.
+Before closing, teardown verifies the recorded Orca checkout path against `worktree show`; unreadable or mismatched identity preserves metadata.
+It closes only the exact recorded terminal. A successful close, including `ptyKilled:true`, does not prove the agent child process tree is dead (`stop_unverified`). Teardown returns a blocked result under `--force` too, retaining the checkout, metadata, and backlog item. It neither removes Git worktrees nor calls `orca worktree rm` or prune.
+A failed close is also reported and blocked; an absent CLI is not evidence that the endpoint is gone. An existing pending backlog-close marker blocks Orca teardown before terminal close, and the blocked Orca path never stages a new replayable close marker.
+Reconcile the terminal and process tree before any separate qualified cleanup. [`verification/runtime-backends.md`](verification/runtime-backends.md#orca) records the synthetic and real terminal evidence.
 
 ## Active limits
 
-- Orca is macOS-only and explicit-only.
-- The app must be running and report ready.
-- Secondmate spawns are unsupported.
-- Escape is unsupported.
-- Orca exposes no stable CLI version or protocol marker, so readiness is the compatibility gate rather than a version floor.
-- Only the verified terminal-handle and worktree result fields are accepted; speculative response shapes are rejected.
-- Orca's worktree shape is unverified against the spawn-time Claude workspace-trust check in `bin/fm-claude-trust.sh`, which refuses any path that is not a linked git worktree sharing the project's git common dir, so a claude spawn on Orca fails loudly at that check rather than launching if Orca clones instead of linking.
+- The changed checkout and Git Bash terminal flow is qualified on Windows only; macOS is not requalified.
+- The app must be running and report ready; production activation also needs a pinned, requalified Orca version.
+- Secondmate spawns and Escape are unsupported.
+- `terminal create` returns a handle and `terminal.worktreeId`, not a `worktree.path`; FirstMate requires that id to match the prior path-resolved worktree.
+- No automatic checkout cleanup exists while Orca can only report `stop_unverified`. Operators must retain both checkout and metadata until independent process-tree proof and a separate cleanup contract exist.
 
 ## Regression entry points
 

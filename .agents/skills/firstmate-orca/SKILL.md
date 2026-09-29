@@ -12,8 +12,8 @@ Use this as the operator checklist for Firstmate's experimental Orca runtime bac
 It does not replace `AGENTS.md`, `docs/orca-backend.md`, or `harness-adapters`.
 
 Orca is a runtime backend, not an agent harness.
-The runtime backend owns the task endpoint and, for Orca, the task worktree.
-The harness is the agent process launched inside that endpoint, such as `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, or `kimi`.
+Orca owns the terminal endpoint; FirstMate owns the linked task checkout under the project's ignored `.worktrees/` directory.
+The harness is the agent process launched inside that endpoint, such as `omp`, `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, or `kimi`.
 Load `harness-adapters` for harness-specific launch, interrupt, resume, trust-dialog, and skill-invocation facts.
 
 Implementation details, metadata fields, teardown guarantees, and limitations live in `docs/orca-backend.md`.
@@ -30,6 +30,7 @@ Before switching or spawning against Orca:
 
 - Confirm Orca is intentionally selected through `--backend orca`, `FM_BACKEND=orca`, or local `config/backend`.
 - Confirm the Orca app is running and the backend readiness checks pass before expecting spawn to work.
+- Confirm this is the qualified Windows Git Bash path and the target repository ignores `.worktrees/`. Do not infer compatibility from app readiness alone.
 - Inspect active `state/*.meta` records before changing backend selection.
 - Treat a backend switch as affecting future spawns only; existing tasks keep their recorded backend.
 - Reconcile watcher wakes before unrelated work, especially if Orca tasks are already in flight.
@@ -46,8 +47,8 @@ After spawn, check the task with firstmate helpers:
 - `bin/fm-crew-state.sh <id>` when the current run state matters.
 - `bin/fm-watch.sh` whenever there are tasks in flight and this session owns supervision.
 
-Do not manually create the Orca worktree or terminal for a normal firstmate task.
-Do not manually patch metadata to make an externally-created Orca terminal look like a firstmate task.
+Do not use `orca worktree create`, `orca worktree rm`, or Git worktree removal for a normal FirstMate Orca task.
+Do not manually patch metadata to make an externally-created Orca terminal look like a FirstMate task.
 
 ## Supervision
 
@@ -67,26 +68,27 @@ For harness-specific interrupts or exits, load `harness-adapters`.
 
 For a messy Orca-backed task:
 
-1. Read `state/<id>.meta` and the relevant status tail first.
+1. Read `state/<id>.meta`, `state/<id>.orca-create` when present, and the relevant status tail first.
 2. Confirm the task is actually Orca-backed before using Orca-specific assumptions.
-3. Use the recorded `terminal=`, `orca_worktree_id=`, and `worktree=` as the task identity.
+3. Use the recorded `terminal=`, `orca_worktree_id=`, and `worktree=` as the task identity. If creation was ambiguous, the sidecar's unique title and resolved worktree id are recovery evidence, not permission to launch another terminal.
 4. Prefer firstmate helpers for peek, send, state, and teardown.
 5. Avoid raw deletion of Orca worktrees or manual branch cleanup.
-6. Stop and inspect if the recorded worktree path, Orca worktree id, or project checkout no longer matches expectations.
+6. Stop and inspect if the recorded checkout path, Orca worktree id, or project Git common directory no longer matches expectations.
+
+For a partial recovery record without `terminal=`, teardown binds a handle only after a complete exact-worktree terminal inventory yields one title/id match. Zero, duplicate, truncated, or failed inventory leaves both records untouched. An intent without task metadata requires operator reconciliation; never infer that the terminal was not created.
 
 Teardown remains governed by the normal firstmate landing rules.
 Scout work can be torn down after the report exists and the `captain-hold-lifecycle` completion gate passes.
 Ship work can be torn down only after the work is landed by its project mode.
+Orca terminal close reports `stop_unverified`, not whole-process-tree absence. Teardown blocks and retains the checkout, task metadata, and backlog identity even with `--force`; a pending backlog-close marker is a refusal before close. Never delete or prune the checkout without a separate, qualified process-tree and cleanup contract.
 
 ## Smoke Test
 
-Keep Orca smoke tests focused on lifecycle plumbing:
+Keep Orca smoke tests focused on lifecycle plumbing, using a disposable linked checkout and a harmless Git Bash marker. Before real agent deployment:
 
-1. Select Orca intentionally for a disposable task or scout.
-2. Spawn through `bin/fm-spawn.sh`.
-3. Confirm metadata records the Orca backend, terminal, Orca worktree id, and isolated worktree path.
-4. Verify `bin/fm-peek.sh`, a short `bin/fm-send.sh` steer, watcher wake behavior, and `bin/fm-crew-state.sh`.
-5. Tear down through `bin/fm-teardown.sh` after the task is safely disposable or landed.
-6. Restore the previous backend selection if Orca was selected only for the smoke test.
+1. Confirm Orca's installed version and exact path selector in the disposable project.
+2. Create one Git Bash terminal through Orca, confirm its returned `terminal.worktreeId` matches `worktree show`, send and read a harmless marker, then close that exact handle.
+3. Expect a blocked teardown and retain checkout and metadata; `ptyKilled:true` is not proof the agent process tree is dead.
+4. Qualify the stop, guard, approval, and rollback boundaries separately before launching an actual FirstMate worker.
 
 Do not mix a backend smoke test with unrelated feature work.
