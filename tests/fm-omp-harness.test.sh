@@ -19,8 +19,8 @@
 #      ancestor: it beats an inherited CLAUDECODE under omp and is inert when it
 #      leaks into a worker whose ancestry holds no omp.
 #   3. Every omp launch clears foreign markers, carries the tracked posture
-#      overlay, --auto-approve, --cwd, and (for a crewmate) one -e pointing at
-#      state/<id>.omp-ext.ts; a secondmate launch names no -e at all.
+#      overlay, --approval-mode always-ask, --cwd, and (for a crewmate) one -e
+#      pointing at state/<id>.omp-ext.ts; a secondmate names no -e.
 #   4. A <provider>/<id> model is validated only when `omp models --json` lists
 #      that provider; an unlisted provider passes through with a notice.
 #   5. Busy state: agent_start is busy, agent_end with willContinue stays busy,
@@ -161,12 +161,16 @@ test_spawn_launch_line_and_worker_wiring() {
   assert_grep "harness=omp" "$state/$id.meta" "meta missing harness=omp"
   assert_grep "model=openai-codex/gpt-6-astra" "$state/$id.meta" "meta missing the pinned model"
   assert_grep "effort=medium" "$state/$id.meta" "meta missing the pinned effort"
+  assert_grep "approval_mode=always-ask" "$state/$id.meta" "meta missing the effective omp approval mode"
   assert_present "$state/$id.omp-ext.ts" "omp spawn did not write the per-task extension"
   launch=$(cat "$LAUNCH_LOG")
   assert_contains "$launch" "env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 '$FAKEBIN_DIR/omp'" \
     "omp launch did not clear foreign markers and establish its own at the launch boundary"
-  assert_contains "$launch" "--config '$ROOT/.omp/fm-worker-overlay.yml' --auto-approve --cwd '$WT_DIR'" \
-    "omp launch did not carry the tracked posture overlay, --auto-approve, and the pinned working directory"
+  assert_contains "$launch" "--config '$ROOT/.omp/fm-worker-overlay.yml' --approval-mode always-ask --cwd '$WT_DIR'" \
+    "omp launch did not require approval with the tracked posture overlay and pinned working directory"
+  case "$launch" in
+    *"--auto-approve"*|*"--approval-mode yolo"*) fail "omp scout launch must not bypass tool approval: $launch" ;;
+  esac
   assert_contains "$launch" "--model 'openai-codex/gpt-6-astra' --thinking 'medium' -e '$state/$id.omp-ext.ts'" \
     "omp launch did not pass the model, thinking level, and the state-resident worker extension"
   assert_contains "$launch" "encode launch-brief < '$HOME_DIR/data/$id/launch-brief.md'" "omp launch lost the canonical typed launch-brief envelope"
@@ -241,7 +245,11 @@ test_secondmate_launch_relies_on_discovery() {
   case "$launch" in
     *" -e "*) fail "an omp secondmate launch must name no -e: omp auto-discovers .omp/extensions and a file named both ways loads twice: $launch" ;;
   esac
-  assert_contains "$launch" "--config '$ROOT/.omp/fm-worker-overlay.yml' --auto-approve --cwd '$home'" "secondmate launch lost the posture overlay or the pinned home directory: $launch"
+  assert_contains "$launch" "--config '$ROOT/.omp/fm-worker-overlay.yml' --approval-mode always-ask --cwd '$home'" "secondmate launch lost manual approval, posture overlay, or pinned home directory: $launch"
+  assert_grep "approval_mode=always-ask" "$world/home/state/sm.meta" "secondmate meta missing the effective omp approval mode"
+  case "$launch" in
+    *"--auto-approve"*|*"--approval-mode yolo"*) fail "omp secondmate launch must not bypass tool approval: $launch" ;;
+  esac
   assert_contains "$launch" "FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 '$fakebin/omp'" "secondmate launch lost the omp marker or executable"
   assert_contains "$launch" "FM_SUPERVISION_MODEL=extension" "an omp secondmate must run the extension supervision model"
   assert_absent "$world/home/state/sm.omp-ext.ts" "a secondmate must not receive a per-task worker extension"

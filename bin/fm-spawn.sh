@@ -187,13 +187,11 @@
 #   refuses when it is absent. Every omp launch clears the foreign harness
 #   markers (omp publishes none of its own), sets the Firstmate-owned
 #   FM_OMP_HARNESS=omp detection marker, suppresses the first-run provider
-#   wizard with OMP_SKIP_SETUP=1, forces --auto-approve, pins the working
-#   directory with --cwd, and passes the tracked worker posture overlay
-#   .omp/fm-worker-overlay.yml through --config. That overlay pins composer
-#   shape, plan mode off, prewalk off, and the non-interactive usage-reserve
-#   policy for the one session only (--auto-approve alone owns approval); the
-#   captain's own ~/.omp/agent/config.yml (model roles, providers, theme) is
-#   never written.
+#   wizard with OMP_SKIP_SETUP=1, pins --approval-mode always-ask and the
+#   working directory with --cwd, and passes the tracked worker posture overlay
+#   .omp/fm-worker-overlay.yml through --config. The approval flag overrides a
+#   captain-level yolo setting; tool prompts may park a worker until the captain
+#   responds. The captain's own ~/.omp/agent/config.yml is never written.
 #   A model written as <provider>/<id> is validated against `omp models --json`
 #   only when that provider appears in the listing; a provider absent from the
 #   listing (an extension-registered provider such as claude-bridge, which omp
@@ -2036,15 +2034,15 @@ launch_template() {
   # the launch boundary and documented in the header above: foreign markers
   # cleared (omp has none of its own, so an inherited CLAUDECODE would win),
   # FM_OMP_HARNESS=omp established for bin/fm-harness.sh, OMP_SKIP_SETUP=1
-  # against the fresh-profile provider wizard, --auto-approve so no approval
-  # prompt can park an unattended worker, the tracked posture overlay so a
-  # captain-level plan, prewalk, or usage dialog cannot either, and --cwd
-  # pinned to the worktree because omp's extension discovery is cwd-only. A
-  # secondmate loads its two primary extensions by that discovery alone:
+  # against the fresh-profile provider wizard, --approval-mode always-ask
+  # so tool calls require approval even under a captain-level yolo setting,
+  # the tracked posture overlay for composer, plan, prewalk, and usage settings,
+  # and --cwd pinned to the worktree because omp's extension discovery is
+  # cwd-only. A secondmate loads its two primary extensions by that discovery:
   # naming them with -e as well loads each twice (verified), doubling every
   # session_stop continuation.
   omp)
-    printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 __OMPBIN__ --config __OMPWORKERCFG__ --auto-approve --cwd __WORKTREE__'
+    printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 __OMPBIN__ --config __OMPWORKERCFG__ --approval-mode always-ask --cwd __WORKTREE__'
     if [ "$kind" = secondmate ]; then
       printf '%s' ' __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
@@ -2315,7 +2313,7 @@ omp)
   }
   OMP_WORKER_CFG="$FM_ROOT/.omp/fm-worker-overlay.yml"
   [ -f "$OMP_WORKER_CFG" ] || {
-    echo "error: omp worker posture overlay missing at $OMP_WORKER_CFG; a worker launched without it can park on the captain's own approval or plan-mode settings" >&2
+    echo "error: omp worker posture overlay missing at $OMP_WORKER_CFG; a worker launched without it can inherit incompatible composer or plan settings" >&2
     exit 1
   }
   ;;
@@ -4814,7 +4812,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo approval_mode branch tasktmp model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -4827,6 +4825,7 @@ preserve_relaunch_meta() {
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
   echo "kind=$KIND"
+  [ "$HARNESS" != omp ] || echo "approval_mode=always-ask"
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
   [ -z "${BRANCH:-}" ] || echo "branch=$BRANCH"

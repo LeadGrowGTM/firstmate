@@ -9,7 +9,7 @@ Cross-harness provider and credential identity is owned by `references/common/mo
 | Fact | Value |
 |---|---|
 | Binary | `omp`, a single Bun-compiled executable resolved from `PATH` by `../../../bin/fm-spawn.sh`; a missing binary refuses the spawn. |
-| Launch | Foreign markers cleared (`CLAUDECODE`, `PI_CODING_AGENT`, `GROK_AGENT`, `FM_PI_HARNESS`, `GEMINI_CLI`, Cursor's), `FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1`, then `omp --config <.omp/fm-worker-overlay.yml> --auto-approve --cwd <worktree> [--model] [--thinking] -e state/<id>.omp-ext.ts <one positional brief>`; a secondmate passes no `-e` and relies on auto-discovery. |
+| Launch | Foreign markers cleared (`CLAUDECODE`, `PI_CODING_AGENT`, `GROK_AGENT`, `FM_PI_HARNESS`, `GEMINI_CLI`, Cursor's), `FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1`, then `omp --config <.omp/fm-worker-overlay.yml> --approval-mode always-ask --cwd <worktree> [--model] [--thinking] -e state/<id>.omp-ext.ts <one positional brief>`; a secondmate passes no `-e` and relies on auto-discovery. |
 | Busy state | `../../../bin/fm-busy-lib.sh` source `omp-ext`: the per-task extension marks busy at `agent_start` and idle at `agent_end` only when `willContinue` is not true; `ctx.isIdle()` is deliberately not consulted because it reads false at a natural TUI `agent_end` (`session_stop` is awaited before settle). |
 | Exit command | `/quit` (`/exit` and `/q` are aliases). |
 | Interrupt | Single Escape; the composer is left empty, no clear key. |
@@ -19,7 +19,7 @@ Cross-harness provider and credential identity is owned by `references/common/mo
 | Model discovery | `omp models [--json]` lists built-in and auto-discovered providers only; extension-registered providers such as `claude-bridge` never appear, so those models pass through the spawn unvalidated with a stderr notice. `omp usage` shows provider windows; `quota-axi` covers the `claude` provider when the bridge is in use. |
 | Marker | None of omp's own (verified: `PI_CODING_AGENT` absent from the binary, no `PI_CODING_AGENT_DIR` or `OMP_PROFILE` in the default profile). `FM_OMP_HARNESS=omp` is Firstmate's launch marker; ancestry matches the exact process name `omp`. |
 | Composer | Pinned to `composer.shape: borderless` by the overlay, a bare `❯` (U+276F) row the shared classifier already reads; busy text is `Working…` (U+2026), the only spelling the omp busy regex accepts (the three-dot form its headless `-p` mode writes never reaches a supervised pane), with the status row's braille spinner plus elapsed cell as the second signal. |
-| Autonomy | `--auto-approve` owns approval (omp forces `tools.approvalMode: yolo` for the session under it); the overlay pins `plan.defaultOnStartup: false`, `prewalk.enabled: false`, `retry.usageReservePolicy: auto`. |
+| Approval | `--approval-mode always-ask` overrides a captain-level `tools.approvalMode: yolo` and records `approval_mode=always-ask` in task `.meta`; a pending tool call parks the worker for captain approval. The overlay still pins `plan.defaultOnStartup: false`, `prewalk.enabled: false`, `retry.usageReservePolicy: auto`. |
 | Trust | No project-trust gate at all; a fresh profile shows a provider-login wizard instead, suppressed by `OMP_SKIP_SETUP=1`. |
 | Resume | `-c/--continue` and `-r/--resume` exist but carry no verified pane-resume contract; use deterministic relaunch. |
 
