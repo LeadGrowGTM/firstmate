@@ -94,10 +94,10 @@
 #   docs/cmux-backend.md),
 #   then tmux.
 #   Spawn-capable backends are the reference tmux adapter, verified herdr
-#   adapter, and experimental zellij, orca, and cmux adapters. Orca owns both
-#   the task worktree and terminal, so ship/scout Orca spawns do not run
-#   treehouse get; cmux is a session provider only, exactly like herdr/zellij,
-#   so it does. Auto-detected herdr stays silent like tmux; auto-detected cmux
+#   adapter, and experimental zellij, orca, and cmux adapters. Orca is the
+#   terminal only; FirstMate creates the linked checkout, so ship/scout Orca
+#   spawns do not run treehouse get. cmux is a session provider only, exactly
+#   like herdr/zellij, so it does. Auto-detected herdr stays silent like tmux; auto-detected cmux
 #   prints a loud stderr notice; zellij and orca are never auto-detected.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
@@ -1171,6 +1171,8 @@ BACKEND=
 ORCA_ABORT_CLEANUP=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
+ORCA_TERMINAL_TITLE=
+ORCA_CREATE_INTENT=
 HERDR_PROJECTION_ABORT_CLEANUP=0
 HERDR_PROJECTION_ABORT_SESSION=
 HERDR_PROJECTION_ABORT_TASK_PANE=
@@ -1211,23 +1213,6 @@ spawn_fresh_commit_rollback() {
   fi
   echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
   return 1
-}
-
-parse_orca_worktree_result() {
-  local raw=$1 rest
-  ORCA_WORKTREE_ID=${raw%%$'\t'*}
-  if [ "$raw" = "$ORCA_WORKTREE_ID" ]; then
-    WT=
-    ORCA_TERMINAL=
-    return 1
-  fi
-  rest=${raw#*$'\t'}
-  WT=${rest%%$'\t'*}
-  if [ "$rest" != "$WT" ]; then
-    ORCA_TERMINAL=${rest#*$'\t'}
-  else
-    ORCA_TERMINAL=
-  fi
 }
 
 spawn_abort_cleanup() {
@@ -1276,41 +1261,56 @@ spawn_abort_cleanup() {
   fi
   if [ "$ORCA_ABORT_CLEANUP" = 1 ]; then
     ORCA_ABORT_CLEANUP=0
-    if [ -n "${ORCA_TERMINAL:-}" ]; then
-      fm_backend_kill orca "$ORCA_TERMINAL" 2>/dev/null && SPAWN_ENDPOINT_CLOSED=1 || true
+    if [ -z "${ORCA_TERMINAL:-}" ] && [ -n "${ORCA_TERMINAL_TITLE:-}" ]; then
+      ORCA_TERMINAL=$(fm_backend_orca_terminal_lookup "$ORCA_NATIVE" "$ORCA_RESOLVED" "$ORCA_TERMINAL_TITLE") || {
+        echo "error: Orca terminal create remains unverified for title $ORCA_TERMINAL_TITLE; recover using $ORCA_CREATE_INTENT before any retry" >&2
+        ORCA_TERMINAL=
+      }
     fi
-    if [ -n "${ORCA_WORKTREE_ID:-}" ]; then
-      if ! fm_backend_remove_worktree orca "$ORCA_WORKTREE_ID" 2>/dev/null; then
-        if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
-          if ! spawn_fresh_commit_rollback; then
+    if [ -n "${ORCA_TERMINAL:-}" ]; then
+      if fm_backend_kill orca "$ORCA_TERMINAL"; then
+        SPAWN_ENDPOINT_CLOSED=1
+      else
+        echo "error: Orca terminal close failed during spawn abort for $ORCA_TERMINAL; the failure is not masked and does not prove the terminal is absent" >&2
+        status=1
+      fi
+    fi
+    if [ -n "${WT:-}" ]; then
+      if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
+        if ! spawn_fresh_commit_rollback; then
+          status=1
+        fi
+        SPAWN_FRESH_COMMIT_PENDING=0
+      fi
+      mkdir -p "$STATE" 2>/dev/null || true
+      if [ -d "$STATE" ] && [ ! -d "$STATE/$ID.meta" ]; then
+        SPAWN_META_TMP="$STATE/.$ID.meta.orca-recovery.${BASHPID:-$$}"
+        {
+          echo "window=$W"
+          echo "endpoint_task_id=$ID"
+          echo "cleanup_recovery=orca"
+          echo "worktree=${WT:-}"
+          echo "project=$PROJ_ABS"
+          echo "harness=$HARNESS"
+          echo "kind=$KIND"
+          [ -z "${MODE:-}" ] || echo "mode=$MODE"
+          [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
+          [ -z "${BRANCH:-}" ] || echo "branch=$BRANCH"
+          echo "tasktmp=${TASK_TMP:-}"
+          echo "model=${MODEL:-default}"
+          echo "effort=${EFFORT:-default}"
+          echo "backend=orca"
+          echo "orca_worktree_id=${ORCA_WORKTREE_ID:-linked::$WT}"
+          [ -z "${ORCA_TERMINAL_TITLE:-}" ] || echo "orca_terminal_title=$ORCA_TERMINAL_TITLE"
+          [ -z "${ORCA_TERMINAL:-}" ] || echo "terminal=$ORCA_TERMINAL"
+        } >"$SPAWN_META_TMP" 2>/dev/null &&
+          fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE" || {
+            echo "error: Orca spawn abort could not record recovery metadata for $ID at $STATE/$ID.meta; checkout $WT is retained and was not deleted" >&2
             status=1
-          fi
-          SPAWN_FRESH_COMMIT_PENDING=0
-        fi
-        mkdir -p "$STATE" 2>/dev/null || true
-        if [ -d "$STATE" ]; then
-          SPAWN_META_TMP="$STATE/.$ID.meta.orca-recovery.${BASHPID:-$$}"
-          {
-            echo "window=$W"
-            echo "endpoint_task_id=$ID"
-            echo "cleanup_recovery=orca"
-            echo "worktree=${WT:-}"
-            echo "project=$PROJ_ABS"
-            echo "harness=$HARNESS"
-            echo "kind=$KIND"
-            [ -z "${MODE:-}" ] || echo "mode=$MODE"
-            [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
-            [ -z "${BRANCH:-}" ] || echo "branch=$BRANCH"
-            echo "tasktmp=${TASK_TMP:-}"
-            echo "model=${MODEL:-default}"
-            echo "effort=${EFFORT:-default}"
-            echo "backend=orca"
-            echo "orca_worktree_id=$ORCA_WORKTREE_ID"
-            [ -z "${ORCA_TERMINAL:-}" ] || echo "terminal=$ORCA_TERMINAL"
-          } >"$SPAWN_META_TMP" 2>/dev/null &&
-            fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE" ||
-            true
-        fi
+          }
+      else
+        echo "error: Orca spawn abort could not record recovery metadata for $ID at $STATE/$ID.meta; checkout $WT is retained and was not deleted" >&2
+        status=1
       fi
     fi
   fi
@@ -3490,6 +3490,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # uncommitted changes are exactly as the previous agent left them, and nothing
   # below may touch them.
   [ "$KIND" = secondmate ] || WT=$RELAUNCH_WT
+  if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
+    fm_backend_orca_assert_recorded_checkout "$PROJ_ABS" "$ID" "$WT" || exit 1
+    ORCA_NATIVE=$(fm_backend_orca_native_path "$WT") || exit 1
+    fm_backend_orca_resolve_existing "$ORCA_NATIVE" >/dev/null || exit 1
+  fi
   if [ "$RELAUNCH_REBIND" -eq 0 ]; then
     # Adopt the recorded endpoint instead of creating one. This is what keeps a
     # relaunch a REPLACEMENT rather than a second copy of the task: no new
@@ -3780,27 +3785,49 @@ EOF
     ;;
   orca)
     set +e
-    ORCA_WT_RAW=$(fm_backend_orca_worktree_create "$PROJ_ABS" "$W")
+    ORCA_WT_RAW=$(fm_backend_orca_prepare_linked_checkout "$PROJ_ABS" "$ID")
     ORCA_WT_STATUS=$?
     set -e
     if [ "$ORCA_WT_STATUS" -ne 0 ]; then
-      if [ "$ORCA_WT_STATUS" -eq 2 ] && [ -n "$ORCA_WT_RAW" ]; then
-        if parse_orca_worktree_result "$ORCA_WT_RAW" && [ -n "$ORCA_WORKTREE_ID" ]; then
+      if [ "$ORCA_WT_STATUS" -eq 2 ]; then
+        ORCA_EXPECTED=$(fm_backend_orca_expected_dir "$PROJ_ABS" "$ID" 2>/dev/null || true)
+        if [ -n "$ORCA_EXPECTED" ]; then
+          WT=$ORCA_EXPECTED
+          if [ -d "$WT" ] && [ ! -L "$WT" ]; then
+            WT=$(cd "$WT" && pwd) || WT=$ORCA_EXPECTED
+          fi
+          ORCA_WORKTREE_ID=$(fm_backend_orca_compose_id "" "$WT")
           ORCA_ABORT_CLEANUP=1
         fi
       fi
       exit 1
     fi
-    parse_orca_worktree_result "$ORCA_WT_RAW" || true
-    ORCA_ABORT_CLEANUP=1
-    if [ -z "$ORCA_WORKTREE_ID" ] || [ -z "$WT" ]; then
-      echo "error: orca did not return a worktree id/path for $W" >&2
+    WT=${ORCA_WT_RAW%%$'\t'*}
+    ORCA_NATIVE=${ORCA_WT_RAW#*$'\t'}
+    if [ -z "$WT" ] || [ "$WT" = "$ORCA_WT_RAW" ] || [ -z "$ORCA_NATIVE" ]; then
+      echo "error: FirstMate linked checkout did not return a bash path and native path for $ID" >&2
       exit 1
     fi
-    validate_spawn_worktree "orca worktree create" "$W"
-    if [ -z "$ORCA_TERMINAL" ]; then
-      ORCA_TERMINAL=$(fm_backend_orca_terminal_create "$ORCA_WORKTREE_ID" "$W") || exit 1
+    ORCA_WORKTREE_ID=$(fm_backend_orca_compose_id "" "$WT")
+    ORCA_ABORT_CLEANUP=1
+    validate_spawn_worktree "FirstMate linked checkout" "$W"
+    fm_backend_orca_repo_ensure "$PROJ_ABS" >/dev/null || exit 1
+    ORCA_RESOLVED=$(fm_backend_orca_resolve_existing "$ORCA_NATIVE") || exit 1
+    [ -n "$ORCA_RESOLVED" ] || { echo "error: Orca worktree show returned no identity for $ORCA_NATIVE; refusing terminal creation" >&2; exit 1; }
+    ORCA_WORKTREE_ID=$(fm_backend_orca_compose_id "$ORCA_RESOLVED" "$WT")
+    ORCA_TERMINAL_TITLE="fm-$ID-$(node -e 'process.stdout.write(require("crypto").randomUUID())')" || exit 1
+    ORCA_CREATE_INTENT="$STATE/$ID.orca-create"
+    if [ -e "$ORCA_CREATE_INTENT" ] || [ -L "$ORCA_CREATE_INTENT" ]; then
+      echo "error: Orca terminal creation intent already exists at $ORCA_CREATE_INTENT; reconcile it before launching another terminal" >&2
+      exit 1
     fi
+    ORCA_CREATE_TMP="$STATE/.$ID.orca-create.${BASHPID:-$$}"
+    {
+      printf 'worktree=%s\norca_worktree_id=%s\norca_resolved_id=%s\norca_terminal_title=%s\n' \
+        "$WT" "$ORCA_WORKTREE_ID" "$ORCA_RESOLVED" "$ORCA_TERMINAL_TITLE"
+    } >"$ORCA_CREATE_TMP" || exit 1
+    fm_backlog_atomic_transition publish "$ORCA_CREATE_TMP" "$ORCA_CREATE_INTENT" "Orca terminal intent" "$STATE" || exit 1
+    ORCA_TERMINAL=$(fm_backend_orca_terminal_create "$ORCA_NATIVE" "$ORCA_RESOLVED" "$ORCA_TERMINAL_TITLE") || exit 1
     T="$ORCA_TERMINAL"
     ;;
   esac
@@ -4077,13 +4104,18 @@ rovo_spawn_fail() { # <detail>
 # ORCA_ABORT_CLEANUP is already cleared and neither the abort trap nor a
 # teardown owns this endpoint yet, so a gate failure must close the launched
 # process here or it keeps running as an orphaned autonomous agent outside
-# task control. Mirrors fm-teardown.sh's own generic kill call. On orca only
-# the exact terminal is closed: that stops the CLI while its worktree stays
-# for the record's own teardown, which owns worktree deletion.
+# task control. Mirrors fm-teardown.sh's own generic kill call. On orca the
+# exact terminal is closed without hiding a close error. Close success is
+# not process-tree death (stop_unverified), and the checkout stays.
 rovo_endpoint_cleanup() {
   if [ "$BACKEND" = orca ]; then
-    fm_backend_kill orca "$T" 2>/dev/null && SPAWN_ENDPOINT_CLOSED=1 || true
-    return 0
+    if fm_backend_kill orca "$T"; then
+      SPAWN_ENDPOINT_CLOSED=1
+    else
+      echo "error: Orca terminal close failed after launch for $T; the close error is not masked" >&2
+    fi
+    echo "error: Orca close for terminal $T on task $ID is not proof the child process tree is dead (stop_unverified). Checkout ${WT:-<missing>} and metadata stay." >&2
+    return 1
   fi
   local tab_id=
   [ "$BACKEND" = zellij ] && tab_id=$ZELLIJ_TAB_ID
@@ -4961,7 +4993,15 @@ if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
   fm_lock_release "$SPAWN_TASK_SET_LOCK"
 fi
 "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
-[ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
+if [ "$BACKEND" = orca ]; then
+  ORCA_ABORT_CLEANUP=0
+  if [ -n "${ORCA_CREATE_INTENT:-}" ]; then
+    rm -f -- "$ORCA_CREATE_INTENT" || {
+      echo "error: Orca terminal creation intent at $ORCA_CREATE_INTENT could not be retired; task metadata retains the exact terminal handle" >&2
+      exit 1
+    }
+  fi
+fi
 
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")

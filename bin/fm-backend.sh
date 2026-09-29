@@ -301,8 +301,9 @@ fm_backend_validate_spawn() {  # <name>
 #     paths parse the backend's JSON output (see each adapter's
 #     tool check, e.g. fm_backend_herdr_tool_check);
 #   - the treehouse worktree provider for every session-provider-only backend
-#     (tmux, herdr, zellij, cmux); orca owns its own task worktree and terminal,
-#     so it drops both treehouse and any other backend's session CLI.
+#     (tmux, herdr, zellij, cmux); orca is the terminal only and FirstMate
+#     creates the linked checkout, so orca drops treehouse and any other
+#     backend's session CLI.
 # Prints a single space-separated line and returns 0 for a known backend; returns
 # 1 and prints nothing for an unknown backend.
 fm_backend_required_tools() {  # <backend>
@@ -385,12 +386,10 @@ fm_backend_endpoint_atom_valid() {  # <value>
   esac
 }
 
-# An Orca worktree id is the composite `<orca id>::<absolute worktree path>`
-# that Orca itself returns, so the `:` and `/` characters every real value
-# carries make the simple-atom check reject it. Firstmate hands the id back to
-# Orca opaquely and resolves it through Orca before removing anything, so this
-# proves only the shape that can name one worktree: both halves of the first
-# `::` split present, and the path half absolute.
+# An Orca worktree id is `<token>::<absolute bash worktree path>`. The path
+# half is the Git Bash pwd form (starts with /), including linked::<path>
+# when Orca's resolved id embeds the separator. The check proves only that
+# shape. It does not authorize deleting the checkout.
 fm_backend_orca_worktree_id_valid() {  # <value>
   case "$1" in
     *$'\n'*|*$'\r'*|*$'\t'*) return 1 ;;
@@ -519,7 +518,7 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
         return 1
       }
       [ -n "$worktree_id" ] || {
-        echo "REFUSED: missing orca_worktree_id in $meta; cannot remove Orca worktree; preserving task state." >&2
+        echo "REFUSED: missing orca_worktree_id in $meta; cannot reconcile the retained Orca checkout; preserving task state." >&2
         return 1
       }
       if [ "$window" != "fm-$id" ] \
@@ -832,8 +831,9 @@ fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sl
 # naming the endpoint (bin/fm-teardown.sh's retain-and-stop path).
 # How much each adapter can prove differs, and no arm ever guesses: tmux
 # resolves a failed close against the window's exact recorded identity, Orca
-# reports a close its missing CLI never attempted, and the remaining arms
-# still report 0 for a close command that failed after being accepted.
+# returns a close its missing CLI never attempted and also returns a failed
+# close, and the remaining arms still report 0 for a close command that
+# failed after being accepted. Orca close success is not process-tree death.
 # docs/verification/runtime-backends.md "Endpoint close" is the per-backend
 # record.
 fm_backend_kill() {  # <backend> <target>

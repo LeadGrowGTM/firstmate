@@ -376,22 +376,18 @@ That is the only close where continuing is actually reachable: the worktree is a
 A forced run still prints the full diagnosis naming the backend, the target, and that the close failed, so what may survive is never silent.
 It states what `--force` authorizes rather than what will have happened, because a later refusal in the same run - the Herdr confirmed-gone gate, or the inactive-reconcile delivery gate - can still stop it with every record retained.
 
-The Orca close refuses under `--force` too.
-The step immediately after it removes the Orca worktree through the same CLI whose absence is the only thing that arm ever reports, so a forced continue would die there having removed nothing while claiming the records were already gone.
+The Orca close refuses under `--force` too. FirstMate no longer delegates checkout removal to Orca; `ptyKilled:true` does not establish whole-process-tree death, so both close success and close failure retain the linked checkout and metadata.
 The two child close sites inside forced secondmate cleanup also keep refusing: that path is only ever reached under `--force`, so honoring force there would delete the refusal rather than override it, and would contradict the adjacent Herdr child gate that stops forced cleanup for the same hazard.
 
-The retained record is this run's, not a durable guarantee.
-A task carrying a backlog transition writes its pending-close marker before the endpoint close, and the marker survives the refusal; the next `bin/fm-bootstrap.sh` replays it and removes the retained record.
-The pre-existing Herdr confirmed-gone gate has the identical property.
-The refusal message says so rather than promising a retention teardown does not own, so an operator reconciles the surviving endpoint instead of trusting the record to still be there later.
+The generic close refusal's retained record is this run's, not necessarily a durable guarantee: non-Orca tasks may have staged a pending backlog close before their endpoint close, and the next bootstrap can replay it. The Orca branch does not stage a replayable close marker and refuses an already-present one before closing its terminal. Its blocked close therefore does not itself authorize session-start removal of the retained Orca task record.
 
 Both directions are proven non-vacuous.
 Restoring the swallowed status makes the refusal case report `teardown <id> complete`, delete the endpoint record, and leave the window live.
 Keeping the refusal but dropping the exact re-read makes an already-exited endpoint refuse its own cleanup, and also fails the cleanup identity case above.
 Letting an unreadable inventory pass for absence makes the unreadable case complete and remove the record while the window is still there.
-Removing the `--force` arm makes the forced generic case refuse; honoring `--force` at the child sites makes forced secondmate cleanup continue past a child endpoint it could not close, and honoring it at the Orca site makes that forced cleanup abort on the missing CLI after announcing that it was continuing.
-Restoring `fm_backend_orca_kill`'s swallowed tool check makes the CLI-absent adapter case report success.
-Dropping the retention-is-not-durable line makes the refusal claim a retention teardown does not own.
+Removing the `--force` arm makes the forced generic case refuse; honoring `--force` at a child close site can discard the only identity of a surviving endpoint. The Orca branch blocks even after an accepted terminal close because `stop_unverified` is not process-tree proof.
+Restoring `fm_backend_orca_kill`'s swallowed tool check makes the CLI-absent adapter case report success; restoring a swallowed close error hides an uncertain live endpoint.
+Dropping the generic retention-is-not-durable line makes the generic refusal claim a guarantee its pending-close replay does not own.
 
 ## Claude workspace trust
 
@@ -1802,8 +1798,7 @@ result.runtime.reachable=true
 result.runtime.state=ready
 ```
 
-`orca terminal create --json` returned `result.terminal.handle`.
-`orca worktree create` returned `result.worktree.id` and `result.worktree.path`.
+The historical macOS 1.4.116 probe observed `result.terminal.handle` from terminal create and `result.worktree.id`/`path` from Orca's former worktree-create flow. The latter is not used by the current FirstMate-owned checkout path.
 Speculative bare ids and nested terminal fields were deliberately rejected.
 
 ```sh
@@ -1813,6 +1808,9 @@ tests/fm-bootstrap.test.sh
 ```
 
 The fake-Orca suite covers readiness, registration, create response parsing, metadata routing, popup-safe submit, and path-matched release refusal.
+
+On Windows, the installed Orca 1.4.216 CLI recognized an existing synthetic linked Git checkout through `worktree show --worktree path:<native-path>` without copying it. A harmless `terminal create --worktree path:<native-path> --shell git-bash --json` returned `result.terminal.handle` and `result.terminal.worktreeId`, but no `result.worktree.path`. The `worktreeId` exactly matched the prior `worktree show` id. A `terminal send` of `printf FM_ORCA_POSIX_OK` returned success; `terminal read` showed the marker in Git Bash. Closing that exact handle returned `ptyKilled:true`, which does not establish child process-tree absence.
+The WSL synthetic Orca backend suite passed 58 cases covering linked checkout ownership, identity binding, lookup errors, abort retention, unique terminal-intent recovery, and blocked teardown. This is not a live FirstMate agent launch or a production stop proof. A crash between writing the terminal-create intent and recovery metadata needs operator reconciliation. The 1.4.215 probe receipt remains historical; version drift to 1.4.216 and the unresolved stop/guard/approval gates block live deployment.
 
 ## cmux
 
