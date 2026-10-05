@@ -267,14 +267,22 @@ harness_process_verdict() {  # <pid>
 
 # Print the verdict for the NEAREST harness process in the parent chain, or
 # nothing when the walk finds none. The nearest match wins, so a worker nested
-# inside another harness resolves to its own harness. The walk climbs sixteen
-# levels, the same bound as bin/fm-session-lock-lib.sh, because a bounded
-# session-start child under Git Bash sits more than eight levels below omp.
+# inside another harness resolves to its own harness. It normally climbs eight
+# levels. On Windows only, it examines eight further parents for omp alone:
+# the bounded session-start child under Git Bash sits more than eight levels
+# below omp, but a foreign harness beyond the normal bound must not override a
+# marker.
 harness_ancestry() {  # [<pid>]
-  local pid=${1:-$$} verdict
+  local pid=${1:-$$} verdict hop deep_omp=0
   [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+  case "$(uname -s 2>/dev/null)" in
+    MSYS*|MINGW*|CYGWIN*) deep_omp=1 ;;
+  esac
+  for hop in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
     verdict=$(harness_process_verdict "$pid")
+    if [ "$hop" -gt 8 ]; then
+      [ "$deep_omp" -eq 1 ] && [ "$verdict" = "comm omp" ] || verdict=
+    fi
     [ -z "$verdict" ] || { echo "$verdict"; return; }
     pid=$(fm_proc_field ppid "$pid")
     # Stop only once the walk has EXAMINED the top of the chain. Inside a PID
@@ -286,6 +294,7 @@ harness_ancestry() {  # [<pid>]
     # and can introduce no false positive.
     case "$pid" in '' | *[!0-9]*) break ;; esac
     [ "$pid" -ge 1 ] || break
+    [ "$hop" -lt 8 ] || [ "$deep_omp" -eq 1 ] || break
   done
   return 0
 }
