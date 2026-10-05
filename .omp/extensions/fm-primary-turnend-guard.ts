@@ -38,6 +38,14 @@ import {
   encodeFirstmateOperationalInput,
 } from "../../.pi/extensions/lib/fm-operational-input.ts";
 
+// Windows cannot exec a .sh file directly (spawn throws EFTYPE synchronously),
+// and the bare `bash` on PATH is often WSL's, which cannot see Windows paths.
+// Route scripts through Git Bash there; elsewhere exec them as before.
+const gitBash = process.env.FM_GIT_BASH || "C:/Program Files/Git/bin/bash.exe";
+function scriptCommand(script: string, args: string[]): [string, string[]] {
+  return process.platform === "win32" ? [gitBash, [script, ...args]] : [script, args];
+}
+
 // The omp extension API surface this file uses, declared locally: omp ships no
 // separately installable type package and is a Pi fork whose event names match
 // where they are used here.
@@ -273,17 +281,21 @@ function runSessionstartHook(generation: SessionstartGeneration): Promise<Sessio
     // "silent exit 3 on an intentional stand-down" contract, not a Pi-only path.
     let child: ChildProcess;
     try {
-      child = spawn(
-        supervised ? "node" : runner,
-        supervised
-          ? [
+      const [cmd, cmdArgs] = supervised
+        ? [
+            "node",
+            [
               `${root}/.pi/extensions/lib/fm-sessionstart-supervisor.mjs`,
               runner,
               "--source",
               generation.source,
               "--pi-prerequisite",
-            ]
-          : ["--source", generation.source, "--pi-prerequisite"],
+            ],
+          ]
+        : scriptCommand(runner, ["--source", generation.source, "--pi-prerequisite"]);
+      child = spawn(
+        cmd,
+        cmdArgs,
         {
           detached: supervised,
           stdio: supervised
@@ -462,9 +474,14 @@ async function claimSessionstartMessage(
 // forced continuation per turn.
 function runGuard(stopHookActive: boolean): Promise<{ code: number; stderr: string }> {
   return new Promise((resolveResult) => {
-    const child = spawn(`${root}/bin/fm-turnend-guard.sh`, {
-      stdio: ["pipe", "ignore", "pipe"],
-    });
+    let child: ChildProcess;
+    try {
+      const [cmd, args] = scriptCommand(`${root}/bin/fm-turnend-guard.sh`, []);
+      child = spawn(cmd, args, { stdio: ["pipe", "ignore", "pipe"] });
+    } catch {
+      resolveResult({ code: 0, stderr: "" });
+      return;
+    }
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
@@ -484,9 +501,14 @@ function runGuard(stopHookActive: boolean): Promise<{ code: number; stderr: stri
 // decision and is inert outside the real primary checkout.
 function runChecker(script: string, command: string): Promise<{ code: number; stderr: string }> {
   return new Promise((resolveResult) => {
-    const child = spawn(`${root}/bin/${script}`, ["--command", command], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    let child: ChildProcess;
+    try {
+      const [cmd, args] = scriptCommand(`${root}/bin/${script}`, ["--command", command]);
+      child = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
+    } catch {
+      resolveResult({ code: 0, stderr: "" });
+      return;
+    }
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();

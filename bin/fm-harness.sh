@@ -76,6 +76,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
 . "$SCRIPT_DIR/fm-gemini-lib.sh"
+# shellcheck source=bin/fm-proc-lib.sh
+. "$SCRIPT_DIR/fm-proc-lib.sh"
 
 # Print the harness named by a verified environment marker, or nothing when no
 # marker is present. Markers only report what the environment CLAIMS; detect_own
@@ -155,15 +157,17 @@ harness_marker() {
   return 0
 }
 
-# True when an exact `omp` process sits within eight parents of this one. The
+# True when an exact `omp` process sits within sixteen parents of this one. The
 # same anchored match as the ancestry walk below, kept separate so the marker
 # precedence above can demand real process evidence before trusting FM_OMP_HARNESS.
 ancestry_names_omp() {
   local pid=$$ comm
-  for _ in 1 2 3 4 5 6 7 8; do
-    comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
+  [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+    comm=$(fm_proc_field comm "$pid") || return 1
     [ "$(basename -- "$comm")" = omp ] && return 0
-    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    fm_proc_is_omp_runtime "$comm" "$(fm_proc_field args "$pid")" && return 0
+    pid=$(fm_proc_field ppid "$pid")
     [ -n "$pid" ] && [ "$pid" -gt 1 ] || return 1
   done
   return 1
@@ -179,7 +183,7 @@ ancestry_names_omp() {
 #          used only when no marker is present.
 harness_process_verdict() {  # <pid>
   local pid=$1 comm args argv0
-  comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 0
+  comm=$(fm_proc_field comm "$pid") || return 0
   argv0=$(fm_cursor_argv0_for_pid "$pid" "$comm" 2>/dev/null || true)
   if fm_cursor_process_matches "$comm" '' "$argv0"; then
     echo "comm cursor"
@@ -239,9 +243,14 @@ harness_process_verdict() {  # <pid>
     # detected by ancestry alone.
     agy) echo "comm agy"; return ;;
     devin) echo "comm devin"; return ;;
+    # omp's runtime when it is Bun running the installed CLI rather than the
+    # compiled binary (bin/fm-proc-lib.sh owns the exact match). The package
+    # path is an exact install location, not a loose name, so it is structural.
+    bun|bun.exe)
+      fm_proc_is_omp_runtime "$comm" "$(fm_proc_field args "$pid")" && { echo "comm omp"; return; } ;;
     node*|python*)
       # Bare interpreter: match the harness name in its script path.
-      args=$(ps -o args= -p "$pid" 2>/dev/null)
+      args=$(fm_proc_field args "$pid")
       if fm_gemini_args_are_gemini "$args"; then
         echo "args gemini"
         return
@@ -258,13 +267,16 @@ harness_process_verdict() {  # <pid>
 
 # Print the verdict for the NEAREST harness process in the parent chain, or
 # nothing when the walk finds none. The nearest match wins, so a worker nested
-# inside another harness resolves to its own harness.
+# inside another harness resolves to its own harness. The walk climbs sixteen
+# levels, the same bound as bin/fm-session-lock-lib.sh, because a bounded
+# session-start child under Git Bash sits more than eight levels below omp.
 harness_ancestry() {  # [<pid>]
   local pid=${1:-$$} verdict
-  for _ in 1 2 3 4 5 6 7 8; do
+  [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
     verdict=$(harness_process_verdict "$pid")
     [ -z "$verdict" ] || { echo "$verdict"; return; }
-    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    pid=$(fm_proc_field ppid "$pid")
     # Stop only once the walk has EXAMINED the top of the chain. Inside a PID
     # namespace the harness itself is pid 1 - a container, or the `codex sandbox`
     # this boundary was proven in - so breaking as soon as the next pid is 1
@@ -281,8 +293,8 @@ harness_ancestry() {  # [<pid>]
 # Print the pids on the UPWARD path between the deepest descendant of <root> and
 # <root> itself, deepest first. Optional <eligible-leaf-pid> values restrict which
 # descendants may be chosen as that deepest one; with none given every descendant
-# is eligible. Bounded to the same eight levels harness_ancestry climbs, so a deep
-# or pathological tree cannot make this walk unbounded.
+# is eligible. Bounded to eight levels, so a deep or pathological tree cannot
+# make this walk unbounded.
 process_descent_path() {  # <root> [<eligible-leaf-pid>...]
   local root=${1:-$$} eligible any hit pairs frontier next pid child parent verdict
   local parents='' depth=0 best best_depth=0 best_strength='' hops=0
@@ -427,6 +439,8 @@ detect_own() {
   local marker ancestry strength harness pin
   pin=$(supervision_primary_pin) || exit 2
   [ -z "$pin" ] || { echo "$pin"; return; }
+  # One process snapshot shared by the marker and ancestry walks (bin/fm-proc-lib.sh).
+  fm_proc_prime
   marker=$(harness_marker)
   ancestry=$(harness_ancestry)
   if [ -z "$ancestry" ]; then

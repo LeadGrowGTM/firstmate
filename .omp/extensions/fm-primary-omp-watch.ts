@@ -141,6 +141,14 @@ const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
 const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
 const armScript = `${fmRoot}/bin/fm-watch-arm.sh`;
 const hostScript = `${fmRoot}/bin/fm-supervision-host.sh`;
+// On Windows `bash` on PATH is usually WSL's launcher, which runs these scripts
+// against /mnt/c and a process tree with no omp in it. Use Git Bash there, with
+// the same FM_GIT_BASH override as fm-primary-turnend-guard.ts; CHERE_INVOKING
+// stops its login shell from changing to $HOME.
+const bashCommand = process.platform === "win32"
+  ? process.env.FM_GIT_BASH || "C:/Program Files/Git/bin/bash.exe"
+  : "bash";
+const bashEnv: NodeJS.ProcessEnv = process.platform === "win32" ? { CHERE_INVOKING: "1" } : {};
 const marker = `${state}/.omp-watch-extension-loaded`;
 const handoffDir = `${state}/extensions/omp-primary-watch`;
 const actionableHandoff = `${handoffDir}/session-replacement-actionable.json`;
@@ -586,12 +594,12 @@ export default function (pi: ExtensionAPI) {
   } {
     try {
       const result = spawnSync(
-        "bash",
+        bashCommand,
         [armScript, "--handling-delivered", recovery.generation, "--watcher-pid", recovery.watcherPid],
         {
           cwd: fmRoot,
           encoding: "utf8",
-          env: { ...process.env, FM_HOME: fmHome, FM_STATE_OVERRIDE: state, FM_ROOT_OVERRIDE: fmRoot },
+          env: { ...process.env, ...bashEnv, FM_HOME: fmHome, FM_STATE_OVERRIDE: state, FM_ROOT_OVERRIDE: fmRoot },
         },
       );
       if (result.status === 0) return { ok: true, detail: "" };
@@ -940,6 +948,7 @@ export default function (pi: ExtensionAPI) {
     const hostMode = existsSync(`${config}/supervision-host`);
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      ...bashEnv,
       FM_HOME: fmHome,
       FM_ROOT_OVERRIDE: fmRoot,
       FM_CONFIG_OVERRIDE: config,
@@ -948,7 +957,7 @@ export default function (pi: ExtensionAPI) {
     };
     if (hostMode) env.FM_SUPERVISION_HOST_PRIMARY = "omp";
     const command = hostMode ? "exec \"$FM_WATCH_ARM_SCRIPT\" park --restart" : "exec \"$FM_WATCH_ARM_SCRIPT\" --restart";
-    const armChild = spawn("bash", ["-lc", `config_dir="\${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"; [ -f "$config_dir/x-mode.env" ] && . "$config_dir/x-mode.env"; ${command}`], {
+    const armChild = spawn(bashCommand, ["-lc", `config_dir="\${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"; [ -f "$config_dir/x-mode.env" ] && . "$config_dir/x-mode.env"; ${command}`], {
       cwd: fmRoot,
       env,
       stdio: ["ignore", "pipe", "pipe"],

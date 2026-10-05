@@ -12,10 +12,24 @@ FM_WAKE_QUEUE_LOCK="${FM_WAKE_QUEUE_LOCK:-$STATE/.wake-queue.lock}"
 FM_LOCK_STALE_AFTER="${FM_LOCK_STALE_AFTER:-2}"
 # shellcheck source=bin/fm-path-lib.sh
 . "$FM_WAKE_LIB_DIR/fm-path-lib.sh"
+# shellcheck source=bin/fm-proc-lib.sh
+. "$FM_WAKE_LIB_DIR/fm-proc-lib.sh"
 # Resolved once at source time: fm_pid_identity and fm_path_mtime run inside 0.2s
 # confirm and 0.5s attach polls, and forking uname per call is a measurable cost on
 # the platform (Git Bash/MSYS) that already pays the highest fork price.
 _FM_UNAME=$(uname 2>/dev/null || echo unknown)
+# Every lock here is an `ln -s` symlink. Git Bash/MSYS by default satisfies
+# `ln -s` with a deep COPY of the target, which leaves an ownerless directory
+# every later acquirer spins on. nativestrict makes ln create a real Windows
+# symlink or fail, so a lock claim is either genuine or refused.
+case "$_FM_UNAME" in
+  MINGW*|MSYS*|CYGWIN*)
+    case "${MSYS:-}" in
+      *winsymlinks:nativestrict*) ;;
+      *) export MSYS="${MSYS:+$MSYS }winsymlinks:nativestrict" ;;
+    esac
+    ;;
+esac
 mkdir -p "$STATE"
 
 # Most wake-library consumers need only queue and lock primitives, including
@@ -57,12 +71,10 @@ else
   fm_epoch_seconds_to() { printf -v "$1" '%s' "$(date +%s)"; }
 fi
 
+# Liveness is owned by bin/fm-proc-lib.sh so a Windows-native harness pid in
+# the session lock is not misread as dead under Git Bash.
 fm_pid_alive() {
-  local pid=$1
-  case "$pid" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  kill -0 "$pid" 2>/dev/null
+  fm_proc_alive "$1"
 }
 
 fm_pid_identity() {
