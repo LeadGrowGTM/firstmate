@@ -14,6 +14,8 @@
 # at the top of the MSYS tree (MSYS parent 1) does the walk cross to the Windows
 # parent - the real Windows process that launched Git Bash - and every pid past
 # that point is a Windows pid.
+# A bare pid which is both an MSYS pid with a different Windows pid and a live
+# Windows pid is ambiguous, so field lookups fail closed instead of guessing.
 #
 # A snapshot costs about a second, so a walking shell calls fm_proc_prime once
 # before it walks; the command-substitution subshells of the walk then share
@@ -36,28 +38,49 @@ fm_proc_prime() {
     </dev/null 2>/dev/null | tr -d '\r')
 }
 
-# Print the snapshot line for pid $1, or return 1 when no live process has it.
-_fm_proc_windows_line() {  # <pid>
-  local pid=$1 winpid
+# Print the snapshot line for a Windows pid $1, or return 1 when absent.
+_fm_proc_windows_snapshot_line() {  # <windows-pid>
   [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
-  if printf '%s\n' "$FM_PROC_SNAPSHOT" | awk -F'\t' -v p="$pid" '$1 == p { print; found = 1; exit } END { exit !found }'; then
-    return 0
-  fi
-  if [ -r "/proc/$pid/winpid" ]; then
-    winpid=$(cat "/proc/$pid/winpid" 2>/dev/null) && [ -n "$winpid" ] && pid=$winpid
-  fi
-  printf '%s\n' "$FM_PROC_SNAPSHOT" | awk -F'\t' -v p="$pid" '$1 == p { print; found = 1; exit } END { exit !found }'
+  printf '%s\n' "$FM_PROC_SNAPSHOT" | awk -F'\t' -v p="$1" '$1 == p { print; found = 1; exit } END { exit !found }'
 }
 
-_fm_proc_is_windows_pid() {  # <pid>
+# Print msys, native, ambiguous, or unknown for bare pid $1. A numeric collision
+# between different MSYS and Windows processes cannot be disambiguated by callers.
+_fm_proc_windows_pid_kind() {  # <pid>
+  local pid=$1 winpid snapshot=0
   [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
-  printf '%s\n' "$FM_PROC_SNAPSHOT" | awk -F'\t' -v p="$1" '$1 == p { found = 1; exit } END { exit !found }'
+  _fm_proc_windows_snapshot_line "$pid" >/dev/null && snapshot=1
+  if [ -r "/proc/$pid/winpid" ]; then
+    winpid=$(cat "/proc/$pid/winpid" 2>/dev/null) || return 1
+    case "$winpid" in ''|*[!0-9]*) return 1 ;; esac
+    if [ "$winpid" != "$pid" ] && [ "$snapshot" -eq 1 ]; then
+      printf '%s\n' ambiguous
+    else
+      printf '%s\n' msys
+    fi
+    return 0
+  fi
+  [ "$snapshot" -eq 1 ] && printf '%s\n' native || printf '%s\n' unknown
+}
+
+# Print the snapshot line for bare pid $1, rejecting ambiguous MSYS/Windows pids.
+_fm_proc_windows_line() {  # <pid>
+  local pid=$1 kind winpid
+  kind=$(_fm_proc_windows_pid_kind "$pid") || return 1
+  case "$kind" in
+    msys)
+      winpid=$(cat "/proc/$pid/winpid" 2>/dev/null) || return 1
+      _fm_proc_windows_snapshot_line "$winpid"
+      ;;
+    native) _fm_proc_windows_snapshot_line "$pid" ;;
+    *) return 1 ;;
+  esac
 }
 
 # Print field comm, args, or ppid of pid $1, or return 1 when the process is
 # not found.
 fm_proc_field() {  # <comm|args|ppid> <pid>
-  local field=$1 pid=$2 line
+  local field=$1 pid=$2 line kind
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   if [ "$_FM_PROC_WINDOWS" -eq 0 ]; then
     case "$field" in
@@ -66,7 +89,9 @@ fm_proc_field() {  # <comm|args|ppid> <pid>
     esac
     return
   fi
-  if [ "$field" = ppid ] && ! _fm_proc_is_windows_pid "$pid" && [ -r "/proc/$pid/ppid" ]; then
+  kind=$(_fm_proc_windows_pid_kind "$pid") || return 1
+  [ "$kind" = ambiguous ] && return 1
+  if [ "$field" = ppid ] && [ "$kind" = msys ] && [ -r "/proc/$pid/ppid" ]; then
     line=$(cat "/proc/$pid/ppid" 2>/dev/null) || return 1
     if [ "$line" != 1 ]; then
       printf '%s\n' "$line"
@@ -86,12 +111,14 @@ fm_proc_field() {  # <comm|args|ppid> <pid>
 # kill -0; a Windows-native pid (the harness, recorded in the session lock) is
 # checked with tasklist, which costs a fraction of a snapshot.
 fm_proc_alive() {  # <pid>
+  local kind
   case "$1" in ''|*[!0-9]*) return 1 ;; esac
   if [ "$_FM_PROC_WINDOWS" -eq 0 ]; then
     kill -0 "$1" 2>/dev/null
     return
   fi
-  if ! _fm_proc_is_windows_pid "$1"; then
+  kind=$(_fm_proc_windows_pid_kind "$1") || return 1
+  if [ "$kind" = msys ] || [ "$kind" = ambiguous ]; then
     kill -0 "$1" 2>/dev/null && return 0
   fi
   case "$(tasklist.exe //FI "PID eq $1" //NH //FO CSV 2>/dev/null)" in
