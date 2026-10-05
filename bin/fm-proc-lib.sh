@@ -36,15 +36,22 @@ fm_proc_prime() {
     </dev/null 2>/dev/null | tr -d '\r')
 }
 
-# Print the snapshot line for pid $1 (translated to its Windows pid), or
-# return 1 when no live process has it.
+# Print the snapshot line for pid $1, or return 1 when no live process has it.
 _fm_proc_windows_line() {  # <pid>
   local pid=$1 winpid
+  [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
+  if printf '%s\n' "$FM_PROC_SNAPSHOT" | awk -F'\t' -v p="$pid" '$1 == p { print; found = 1; exit } END { exit !found }'; then
+    return 0
+  fi
   if [ -r "/proc/$pid/winpid" ]; then
     winpid=$(cat "/proc/$pid/winpid" 2>/dev/null) && [ -n "$winpid" ] && pid=$winpid
   fi
-  [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
   printf '%s\n' "$FM_PROC_SNAPSHOT" | awk -F'\t' -v p="$pid" '$1 == p { print; found = 1; exit } END { exit !found }'
+}
+
+_fm_proc_is_windows_pid() {  # <pid>
+  [ -n "$FM_PROC_SNAPSHOT" ] || fm_proc_prime
+  printf '%s\n' "$FM_PROC_SNAPSHOT" | awk -F'\t' -v p="$1" '$1 == p { found = 1; exit } END { exit !found }'
 }
 
 # Print field comm, args, or ppid of pid $1, or return 1 when the process is
@@ -59,7 +66,7 @@ fm_proc_field() {  # <comm|args|ppid> <pid>
     esac
     return
   fi
-  if [ "$field" = ppid ] && [ -r "/proc/$pid/ppid" ]; then
+  if [ "$field" = ppid ] && ! _fm_proc_is_windows_pid "$pid" && [ -r "/proc/$pid/ppid" ]; then
     line=$(cat "/proc/$pid/ppid" 2>/dev/null) || return 1
     if [ "$line" != 1 ]; then
       printf '%s\n' "$line"
@@ -80,8 +87,13 @@ fm_proc_field() {  # <comm|args|ppid> <pid>
 # checked with tasklist, which costs a fraction of a snapshot.
 fm_proc_alive() {  # <pid>
   case "$1" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$1" 2>/dev/null && return 0
-  [ "$_FM_PROC_WINDOWS" -eq 1 ] || return 1
+  if [ "$_FM_PROC_WINDOWS" -eq 0 ]; then
+    kill -0 "$1" 2>/dev/null
+    return
+  fi
+  if ! _fm_proc_is_windows_pid "$1"; then
+    kill -0 "$1" 2>/dev/null && return 0
+  fi
   case "$(tasklist.exe //FI "PID eq $1" //NH //FO CSV 2>/dev/null)" in
     *\""$1"\"*) return 0 ;;
   esac
