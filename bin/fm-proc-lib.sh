@@ -16,6 +16,7 @@
 # that point is a Windows pid.
 # A bare pid which is both an MSYS pid with a different Windows pid and a live
 # Windows pid is ambiguous, so field lookups fail closed instead of guessing.
+# Trap handlers must return lookup statuses explicitly: bare return inherits the prior trap status.
 #
 # A snapshot costs about a second, so a walking shell calls fm_proc_prime once
 # before it walks; the command-substitution subshells of the walk then share
@@ -87,7 +88,7 @@ fm_proc_field() {  # <comm|args|ppid> <pid>
       ppid) ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' ;;
       *) ps -o "$field=" -p "$pid" 2>/dev/null ;;
     esac
-    return
+    return $?
   fi
   kind=$(_fm_proc_windows_pid_kind "$pid") || return 1
   [ "$kind" = ambiguous ] && return 1
@@ -115,7 +116,7 @@ fm_proc_alive() {  # <pid>
   case "$1" in ''|*[!0-9]*) return 1 ;; esac
   if [ "$_FM_PROC_WINDOWS" -eq 0 ]; then
     kill -0 "$1" 2>/dev/null
-    return
+    return $?
   fi
   kind=$(_fm_proc_windows_pid_kind "$1") || return 1
   if [ "$kind" = msys ] || [ "$kind" = ambiguous ]; then
