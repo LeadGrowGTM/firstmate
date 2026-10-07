@@ -8,6 +8,9 @@ set -u
 
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tmux-lib.sh"
+FM_BACKEND_LIB_DIR="$ROOT/bin"
+# shellcheck source=bin/fm-tmux-lib.sh
+. "$ROOT/bin/backends/tmux.sh"
 
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-tmux-submit-busy.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -42,13 +45,31 @@ case "${1:-}" in
     fi
     cat "$COMPOSER" 2>/dev/null; exit 0 ;;
   send-keys)
-    shift; is_enter=0
+    shift; is_enter=0; is_escape=0; is_literal=0
     while [ "$#" -gt 0 ]; do
-      case "$1" in -t) shift ;; -l) ;; Enter) is_enter=1 ;; esac; shift
+      case "$1" in
+        -t) shift ;;
+        -l) is_literal=1 ;;
+        Enter) is_enter=1 ;;
+        Escape) is_escape=1 ;;
+      esac
+      shift
     done
+    if [ "$is_literal" = 1 ] && [ -n "${FM_FAKE_POPUP:-}" ]; then
+      printf '╭─────╮\n│ > @ │\n╰─────╯\n' > "$COMPOSER"
+      : > "$FM_FAKE_POPUP"
+    fi
+    if [ "$is_escape" = 1 ]; then
+      [ -z "${FM_FAKE_SENT:-}" ] || printf 'Escape\n' >> "$FM_FAKE_SENT"
+      [ -z "${FM_FAKE_POPUP:-}" ] || rm -f "$FM_FAKE_POPUP"
+    fi
     if [ "$is_enter" = 1 ]; then
       [ -z "${FM_FAKE_SENT:-}" ] || printf 'Enter\n' >> "$FM_FAKE_SENT"
-      if [ -n "${FM_FAKE_SWALLOW:-}" ] && [ -f "$FM_FAKE_SWALLOW" ]; then
+      if [ -n "${FM_FAKE_POPUP:-}" ] && [ -f "$FM_FAKE_POPUP" ]; then
+        :
+      elif [ -n "${FM_FAKE_SWALLOW_FIRST_ENTER:-}" ] && [ ! -e "${FM_FAKE_SWALLOW_FIRST_ENTER}" ]; then
+        : > "$FM_FAKE_SWALLOW_FIRST_ENTER"
+      elif [ -n "${FM_FAKE_SWALLOW:-}" ] && [ -f "$FM_FAKE_SWALLOW" ]; then
         [ "${FM_FAKE_PERSIST_SWALLOW:-0}" = 1 ] || rm -f "$FM_FAKE_SWALLOW"
         [ "${FM_FAKE_APPEND_BUSY:-0}" != 1 ] || printf '✻ Working…\n' >> "$COMPOSER"
       else
@@ -62,6 +83,56 @@ exit 1
 SH
   chmod +x "$fakebin/tmux"
   printf '%s\n' "$fakebin"
+}
+
+test_codex_idle_popup_escape_before_each_enter() {
+  local dir fakebin composer sent vfile popup first_enter
+  dir="$TMP_ROOT/codex-idle-popup"
+  fakebin=$(make_submit_mock "$dir")
+  composer="$dir/composer"
+  sent="$dir/sent.log"
+  vfile="$dir/verdict"
+  popup="$dir/popup"
+  first_enter="$dir/first-enter"
+  printf '╭─────╮\n│ >   │\n╰─────╯\n' > "$composer"
+  : > "$sent"
+  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" FM_FAKE_SENT="$sent" \
+    FM_FAKE_POPUP="$popup" FM_FAKE_SWALLOW_FIRST_ENTER="$first_enter" \
+    fm_backend_tmux_send_text_submit "win" '@digest' 2 0.01 0.01 '' codex > "$vfile" 2>/dev/null
+  [ "$(cat "$vfile")" = empty ] \
+    || fail "Codex idle popup should clear after Escape and a retried Enter, got '$(cat "$vfile")'"
+  [ "$(cat "$sent")" = $'Escape\nEnter\nEscape\nEnter' ] \
+    || fail "Codex idle popup should receive exactly one Escape before each Enter attempt: $(cat "$sent")"
+  pass "tmux submit: Codex idle popup gets one Escape before each Enter retry"
+}
+
+test_codex_busy_and_other_harnesses_do_not_escape() {
+  local dir fakebin composer sent vfile popup
+  dir="$TMP_ROOT/codex-negative-scope"
+  fakebin=$(make_submit_mock "$dir")
+  composer="$dir/composer"
+  sent="$dir/sent.log"
+  vfile="$dir/verdict"
+  popup="$dir/popup"
+  printf '╭─────╮\n│ >   │\n╰─────╯\n' > "$composer"
+  : > "$sent"
+  (
+    fm_pane_busy_state() { printf 'busy'; }
+    PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" FM_FAKE_SENT="$sent" \
+      FM_FAKE_POPUP="$popup" FM_FAKE_PANE_BUSY=1 \
+      fm_backend_tmux_send_text_submit "win" '@digest' 2 0.01 0.01 '' codex > "$vfile" 2>/dev/null
+  ) || fail "busy Codex submit failed"
+  [ "$(cat "$sent")" = $'Enter\nEnter' ] \
+    || fail "busy Codex pane must not receive Escape: $(cat "$sent")"
+  : > "$sent"
+  rm -f "$popup"
+  printf '╭─────╮\n│ >   │\n╰─────╯\n' > "$composer"
+  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" FM_FAKE_SENT="$sent" \
+    FM_FAKE_POPUP="$popup" FM_FAKE_PANE_BUSY=0 \
+    fm_backend_tmux_send_text_submit "win" '@digest' 2 0.01 0.01 '' claude > "$vfile" 2>/dev/null
+  [ "$(cat "$sent")" = $'Enter\nEnter' ] \
+    || fail "non-Codex pane must not receive Escape: $(cat "$sent")"
+  pass "tmux submit: busy Codex and idle non-Codex panes retain the existing Enter path"
 }
 
 test_busy_pane_pending_returns_empty() {
@@ -342,6 +413,8 @@ test_claude_busy_signature_uses_real_capture_shapes() {
   pass "fm_pane_is_busy: Claude spinner is scoped, multi-frame, and backward-compatible"
 }
 
+test_codex_idle_popup_escape_before_each_enter
+test_codex_busy_and_other_harnesses_do_not_escape
 test_busy_pane_pending_returns_empty
 test_idle_pane_pending_returns_pending
 test_wrapped_continuation_retries_swallowed_enter
