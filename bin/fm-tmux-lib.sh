@@ -220,7 +220,7 @@ fm_pane_is_busy() {  # <target> [harness]
 }
 
 # fm_tmux_submit_core: type <text> into <target> ONCE, then submit with Enter,
-# verifying the composer cleared. Retries Enter ONLY — never retypes, because a
+# verifying the composer cleared. Retries submission without retyping, because a
 # swallowed Enter leaves our text in the composer and retyping would duplicate
 # it. Echoes the final proof-carrying verdict on stdout so callers can require
 # exact `empty` before treating submission as confirmed.
@@ -246,6 +246,8 @@ fm_pane_is_busy() {  # <target> [harness]
 # transition evidence could mark an undelivered message delivered.
 # A Codex target with an idle pre-typing baseline gets one Escape and a short
 # settle before every Enter attempt so an autocomplete popup cannot consume it.
+# The optional harness scopes baseline and confirmation busy probes; omitting
+# it retains the combined busy signatures and never enables Escape.
 fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle] [harness]
   local target=$1 retries=$2 sleep_s=$3 baseline_idle=${4:-} harness=${5:-}
   local i=0 j state busy_state

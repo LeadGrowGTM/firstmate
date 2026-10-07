@@ -1468,13 +1468,13 @@ inject_msg() {  # <message> [state]
       return 1
     fi
   fi
-  # (4) Type the digest ONCE, then submit with Enter (retry Enter only, never
-  # retype) via the shared submit primitive. Success = the backend confirms
+  # (4) Type the digest ONCE, then retry submission without retyping
+  # via the shared submit primitive. Success = the backend confirms
   # submit. An unconfirmed/unknown pane does NOT count as delivered, so the
   # buffer is preserved (strict) rather than cleared.
   # Dispatches through fm_backend_send_text_submit (bin/fm-backend.sh): for
-  # backend=tmux this calls fm_backend_tmux_send_text_submit, a verbatim
-  # re-export of fm_tmux_submit_core - byte-identical to calling it directly.
+  # backend=tmux its adapter forwards the primary harness to fm_tmux_submit_core,
+  # which owns popup dismissal and submit confirmation in bin/fm-tmux-lib.sh.
   # The transport's stderr is kept so a failure names its cause. send-failed
   # means the text was never confirmed typed, or (herdr) it was typed but no
   # Enter could be sent, so no confirmation retry ran; every other non-empty
