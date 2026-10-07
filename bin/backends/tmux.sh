@@ -59,11 +59,12 @@ fm_backend_tmux_send_key() {  # <target> <key>
 }
 
 # fm_backend_tmux_send_text_submit: type <text> into <target> once, then
-# submit with Enter, retried (Enter only, never retyped) until the composer
-# clears. Re-exports fm_tmux_submit_core (bin/fm-tmux-lib.sh) verbatim; see
-# that file for the composer-verification contract and echoed verdicts.
-fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle>
-  fm_tmux_submit_core "$@"
+# submit without retyping until the composer clears. The optional harness
+# follows the expected label and is consumed only by fm-tmux-lib.sh. See that
+# file for the popup-dismissal and composer-verification contract and verdicts.
+fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [expected-label] [harness]
+  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 harness=${7:-}
+  fm_tmux_submit_core "$target" "$text" "$retries" "$sleep_s" "$settle" "$harness"
 }
 
 # fm_backend_tmux_container_ensure: reuse the current tmux session when
