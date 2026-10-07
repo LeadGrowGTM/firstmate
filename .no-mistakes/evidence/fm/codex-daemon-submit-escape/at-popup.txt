@@ -1,0 +1,40 @@
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation probe. No tools or repository actions. Reply only ACK. Literal
+  token: $
+
+
+• ACK
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. No tools. Reply with the exact text Working... Literal
+  token: @
+
+
+• Working...
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. No tools. Reply only ACK. Literal token: $
+
+
+• ACK
+
+
+› Isolated validation only. No tools. Reply ACK. $
+
+
+• ACK
+
+
+› Isolated validation only. No tools. Reply ACK. @bin/
+
+> backends    bin/                                                                                                Dir
+  fm-lint.sh  bin/                                                                                                File
+  fm-lock.sh  bin/                                                                                                File
+  fm-mail.py  bin/                                                                                                File
+  fm-mail.sh  bin/                                                                                                File
+  fm-on.sh    bin/                                                                                                File
+  fm-peek.sh  bin/                                                                                                File
+  fm-send.sh  bin/                                                                                                File
+
+  enter insert · esc close · ←/→ switch search modes                         [All Results]   Filesystem Only    Plugins

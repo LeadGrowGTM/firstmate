@@ -1,0 +1,41 @@
+dollar_popup_rc=0 failure= attempted=1
+  token: $
+
+
+• ACK
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. No tools. Reply with the exact text Working... Literal
+  token: @
+
+
+• Working...
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. No tools. Reply only ACK. Literal token: $
+
+
+• ACK
+
+
+› Isolated validation only. No tools. Reply ACK. $
+
+
+• ACK
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. No tools. Reply ACK. @bin/
+
+
+• ACK
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. Do not invoke skills or tools. Reply ACK. $skill
+
+
+• ACK
+
+
+› Ask Codex to do anything
+
+  gpt-6-astra default · ~/.no-mistakes/worktrees/8be14fbb8fb5/01M4AFNX82CM02XCAMR2HX41G7 · Acknowledge validation probe

@@ -1,0 +1,40 @@
+⚠ 1 startup issue · ctrl + t for details
+
+• You have 1 usage limit reset available. Run /usage to use one.
+
+
+› Validation probe only. Do not run tools or perform repository work. Reply only ACK to this literal text: @
+
+
+• ACK
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation probe. No tools or repository actions. Reply only ACK. Literal
+  token: $
+
+
+• ACK
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. No tools. Reply with the exact text Working... Literal
+  token: @
+
+
+• Working...
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation only. No tools. Reply only ACK. Literal token: $
+
+
+• ACK
+
+
+› Isolated validation only. No tools. Reply ACK. $
+
+
+◦ Working (0s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  gpt-6-astra default · ~/.no-mistakes/worktrees/8be14fbb8fb5/01M4AFNX82CM02XCAMR2HX41G7 · Acknowledge validation probe

@@ -1,0 +1,42 @@
+inject_rc=0 failure= attempted=1
+busy_rc=1 failure=deferred: supervisor pane busy (agent mid-turn) attempted=0
+╭────────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                             │
+│                                                        │
+│ model:     gpt-6-astra   /model to change              │
+│ directory: ~/…/8be14fbb8fb5/01M4AFNX82CM02XCAMR2HX41G7 │
+╰────────────────────────────────────────────────────────╯
+
+  Tip: New Use /fast to enable our fastest inference with increased plan usage.
+
+⚠ 1 startup issue · ctrl + t for details
+
+• You have 1 usage limit reset available. Run /usage to use one.
+
+
+› Validation probe only. Do not run tools or perform repository work. Reply only ACK to this literal text: @
+
+
+• ACK
+
+
+› ⁣FIRSTMATE_OP: v1 away-supervisor: Isolated validation probe. No tools or repository actions. Reply only ACK. Literal
+  token: $
+
+
+• Working (0s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  gpt-6-astra default · ~/.no-mistakes/worktrees/8be14fbb8fb5/01M4AFNX82CM02XCAMR2HX41G7 · Acknowledge validation probe
+
+
+
+
+
+
+
+
+
+
