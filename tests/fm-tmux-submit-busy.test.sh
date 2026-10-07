@@ -94,17 +94,52 @@ test_codex_idle_popup_escape_before_each_enter() {
   vfile="$dir/verdict"
   popup="$dir/popup"
   first_enter="$dir/first-enter"
-  printf '╭─────╮\n│ >   │\n╰─────╯\n' > "$composer"
-  : > "$sent"
-  PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" FM_FAKE_SENT="$sent" \
-    FM_FAKE_POPUP="$popup" FM_FAKE_SWALLOW_FIRST_ENTER="$first_enter" \
-    fm_backend_tmux_send_text_submit "win" '@digest' 2 0.01 0.01 '' codex > "$vfile" 2>/dev/null
-  [ "$(cat "$vfile")" = empty ] \
-    || fail "Codex idle popup should clear after Escape and a retried Enter, got '$(cat "$vfile")'"
-  [ "$(cat "$sent")" = $'Escape\nEnter\nEscape\nEnter' ] \
-    || fail "Codex idle popup should receive exactly one Escape before each Enter attempt: $(cat "$sent")"
+  local other_busy
+  for other_busy in '' 'Working...'; do
+    rm -f "$first_enter"
+    printf '╭─────╮\n│ >   │\n╰─────╯\n%s\n' "$other_busy" > "$composer"
+    : > "$sent"
+    PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" FM_FAKE_SENT="$sent" \
+      FM_FAKE_POPUP="$popup" FM_FAKE_SWALLOW_FIRST_ENTER="$first_enter" \
+      fm_backend_tmux_send_text_submit "win" '@digest' 2 0.01 0.01 '' codex > "$vfile" 2>/dev/null
+    [ "$(cat "$vfile")" = empty ] \
+      || fail "Codex idle popup should clear after Escape and a retried Enter, got '$(cat "$vfile")'"
+    [ "$(cat "$sent")" = $'Escape\nEnter\nEscape\nEnter' ] \
+      || fail "Codex idle popup should receive exactly one Escape before each Enter attempt: $(cat "$sent")"
+  done
   pass "tmux submit: Codex idle popup gets one Escape before each Enter retry"
 }
+
+test_submit_confirmation_uses_supplied_harness() (
+  local dir fakebin composer vfile state token harness expected
+  . "$ROOT/bin/fm-tmux-lib.sh"
+  dir="$TMP_ROOT/scoped-confirmation"
+  fakebin=$(make_submit_mock "$dir")
+  composer="$dir/composer"
+  vfile="$dir/verdict"
+  touch "$dir/.swallow"
+  for state in pending unknown; do
+    for token in 'Working...' 'esc to interrupt'; do
+      for harness in codex ''; do
+        if [ "$state" = pending ]; then
+          printf '╭────────────╮\n│ > fix      │\n╰────────────╯\n%s\n' "$token" > "$composer"
+        else
+          printf '│ > unbounded\n%s\n' "$token" > "$composer"
+        fi
+        expected=empty
+        if [ "$harness" = codex ] && [ "$token" = 'Working...' ]; then
+          expected=$state
+        fi
+        PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" \
+          FM_FAKE_SWALLOW="$dir/.swallow" FM_FAKE_PERSIST_SWALLOW=1 \
+          fm_tmux_submit_enter_core win 1 0.01 1 "$harness" > "$vfile" 2>/dev/null
+        [ "$(cat "$vfile")" = "$expected" ] \
+          || fail "$state confirmation with harness '$harness' and '$token': expected $expected, got $(cat "$vfile")"
+      done
+    done
+  done
+  pass "tmux submit: confirmation scopes busy tokens and preserves unscoped callers"
+)
 
 test_codex_busy_and_other_harnesses_do_not_escape() {
   local dir fakebin composer sent vfile popup
@@ -415,6 +450,7 @@ test_claude_busy_signature_uses_real_capture_shapes() {
 }
 
 test_codex_idle_popup_escape_before_each_enter
+test_submit_confirmation_uses_supplied_harness
 test_codex_busy_and_other_harnesses_do_not_escape
 test_busy_pane_pending_returns_empty
 test_idle_pane_pending_returns_pending

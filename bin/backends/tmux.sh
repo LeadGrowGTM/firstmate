@@ -61,7 +61,7 @@ fm_backend_tmux_send_key() {  # <target> <key>
 # fm_backend_tmux_send_text_submit: type <text> into <target> once, then
 # submit with Enter, retried (Enter only, never retyped) until the composer
 # clears. The optional harness follows the expected label and is consumed only
-# by the Codex idle-popup guard in fm-tmux-lib.sh. See that file for the
+# by fm-tmux-lib.sh. See that file for the
 # composer-verification contract and echoed verdicts.
 fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [expected-label] [harness]
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 harness=${7:-}

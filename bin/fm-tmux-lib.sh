@@ -263,7 +263,7 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
         if [ "$baseline_idle" = 1 ]; then
           j=0
           while [ "$j" -lt "$retries" ]; do
-            if fm_pane_is_busy "$target"; then
+            if fm_pane_is_busy "$target" "$harness"; then
               printf 'empty'
               return 0
             fi
@@ -286,7 +286,7 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
   # Retries exhausted, composer still shows proven pending.
   # Busy conversion is owned by fm_composer_queued_enter_verdict.
   busy_state=idle
-  fm_pane_is_busy "$target" && busy_state=busy
+  fm_pane_is_busy "$target" "$harness" && busy_state=busy
   fm_composer_queued_enter_verdict "$state" "$busy_state"
 }
 
@@ -296,7 +296,7 @@ fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [har
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
-  baseline_state=$(fm_pane_busy_state "$target")
+  baseline_state=$(fm_pane_busy_state "$target" "$harness")
   [ "$baseline_state" = idle ] && baseline_idle=1
   # A failed literal send replays tmux's stderr (for example "command too
   # long") so the caller can log why nothing was typed.
