@@ -8,7 +8,7 @@ set -u
 
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tmux-lib.sh"
-FM_BACKEND_LIB_DIR="$ROOT/bin"
+export FM_BACKEND_LIB_DIR="$ROOT/bin"
 # shellcheck source=bin/fm-tmux-lib.sh
 . "$ROOT/bin/backends/tmux.sh"
 
@@ -117,6 +117,7 @@ test_codex_busy_and_other_harnesses_do_not_escape() {
   printf '╭─────╮\n│ >   │\n╰─────╯\n' > "$composer"
   : > "$sent"
   (
+    # shellcheck disable=SC2329
     fm_pane_busy_state() { printf 'busy'; }
     PATH="$fakebin:$PATH" FM_FAKE_COMPOSER="$composer" FM_FAKE_SENT="$sent" \
       FM_FAKE_POPUP="$popup" FM_FAKE_PANE_BUSY=1 \
