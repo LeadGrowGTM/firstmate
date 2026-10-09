@@ -472,6 +472,15 @@ test_claude_secondmate_arms_semantic_hooks_without_turnend() {
   [ "$out" = "idle claude-hook" ] || fail "a secondmate Stop must classify 'idle claude-hook', got '$out'"
   assert_absent "$state/$id.turn-ended" "a secondmate Stop must not wake its parent with a turn-ended marker"
 
+  # A Stop-hook exit-2 continuation or an asyncRewake wake turn keeps working
+  # with no UserPromptSubmit; its first tool call must re-open the record.
+  run_claude_hook "$settings" PreToolUse || fail "PreToolUse hook command failed"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "busy claude-hook" ] || fail "a tool call after Stop must classify busy, got '$out'"
+  run_claude_hook "$settings" Stop || fail "Stop hook command failed"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "idle claude-hook" ] || fail "the continued turn's Stop must classify idle, got '$out'"
+
   run_claude_hook "$settings" UserPromptSubmit || fail "UserPromptSubmit hook command failed"
   out=$(classify claude "$id" "$state")
   [ "$out" = "busy claude-hook" ] || fail "a secondmate UserPromptSubmit must classify busy, got '$out'"

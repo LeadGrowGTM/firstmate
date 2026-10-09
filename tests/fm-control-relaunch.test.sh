@@ -633,7 +633,7 @@ test_harness_switch_moves_the_record_and_clears_prior_wiring() {
   add_ship_task "$dir" rl4 claude
   # Wiring the previous claude incarnation left in the worktree.
   mkdir -p "$dir/wt/.claude"
-  printf '{"hooks":{}}\n' > "$dir/wt/.claude/settings.local.json"
+  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"fm-busy-event.sh apply"}]}]}}\n' > "$dir/wt/.claude/settings.local.json"
   printf 'codex' > "$dir/fake/becomes"
   out=$(run_control "$dir" rl4 relaunch --harness codex --note "switching runtime"); rc=$?
   expect_code 0 "$rc" "a harness switch should succeed"$'\n'"$out"
@@ -857,7 +857,7 @@ test_wiring_removal_failure_refuses_before_replacement_arm() {
   add_ship_task "$dir" rl29 claude
   hook="$dir/wt/.claude/settings.local.json"
   mkdir -p "${hook%/*}"
-  printf '{}\n' > "$hook"
+  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"fm-busy-event.sh apply"}]}]}}\n' > "$hook"
   real_rm=$(command -v rm)
   make_rm_failure_stub "$dir"
   out=$(FM_REAL_RM="$real_rm" FM_FAKE_RM_FAIL_PATH="$hook" \
@@ -1003,6 +1003,55 @@ test_secondmate_relaunch_arms_the_semantic_busy_record() {
   [ "$verdict" = "busy fm-spawn" ] \
     || fail "a superseded incarnation's hook must not change the replacement's record, got '$verdict'"
   pass "fm-control relaunch: a secondmate relaunch arms a fresh semantic busy record without turn-end wakes"
+}
+
+# An operator-owned settings.local.json in a secondmate home survives a relaunch
+# exactly as it survives a spawn: a claude replacement refuses before retiring
+# anything, and a switch away from claude leaves the file in place.
+test_secondmate_relaunch_never_removes_operator_settings() {
+  local dir home sm out rc settings
+  dir=$(new_case smoperator sm8)
+  home="$dir/home"
+  sm="$dir/smhome"
+  mkdir -p "$home/data/sm8"
+  printf '# secondmate brief\n' > "$home/data/sm8/brief.md"
+  fm_git_worktree "$dir/proj" "$sm" sm-operator-branch
+  mkdir -p "$sm/state" "$sm/data" "$sm/bin" "$sm/.claude"
+  printf 'sm8\n' > "$sm/.fm-secondmate-home"
+  printf '# agents\n' > "$sm/AGENTS.md"
+  settings="$sm/.claude/settings.local.json"
+  printf '{"permissions":{"allow":["Bash(ls)"]}}\n' > "$settings"
+  cp "$settings" "$dir/operator-settings"
+  {
+    echo "window=fmses:fm-sm8"
+    echo "endpoint_task_id=sm8"
+    echo "worktree=$sm"
+    echo "project=$sm"
+    echo "harness=claude"
+    echo "kind=secondmate"
+    echo "mode=secondmate"
+    echo "yolo=off"
+    echo "model=default"
+    echo "effort=default"
+    echo "home=$sm"
+  } > "$home/state/sm8.meta"
+  printf '%s\n' "fm-sm8" > "$dir/fake/windows"
+  printf '%s' "$sm" > "$dir/fake/cwd"
+
+  out=$(run_control "$dir" sm8 relaunch); rc=$?
+  [ "$rc" -ne 0 ] || fail "a claude secondmate relaunch must refuse an operator-owned settings.local.json"$'\n'"$out"
+  assert_contains "$out" "was not written by firstmate" \
+    "the refusal must name the operator-owned settings file"
+  cmp -s "$dir/operator-settings" "$settings" \
+    || fail "a refused claude secondmate relaunch removed or replaced the operator's settings.local.json"
+
+  printf 'claude' > "$dir/fake/command"
+  printf 'codex' > "$dir/fake/becomes"
+  out=$(run_control "$dir" sm8 relaunch --harness codex); rc=$?
+  expect_code 0 "$rc" "a secondmate switch away from claude should succeed"$'\n'"$out"
+  cmp -s "$dir/operator-settings" "$settings" \
+    || fail "a secondmate switch away from claude removed the operator's settings.local.json"
+  pass "fm-control relaunch: a secondmate's operator-owned settings.local.json is never removed or replaced"
 }
 
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop() {
@@ -2478,6 +2527,7 @@ test_wiring_removal_failure_refuses_before_replacement_arm
 test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
 test_secondmate_relaunch_arms_the_semantic_busy_record
+test_secondmate_relaunch_never_removes_operator_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop
 test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop
 test_explicit_secondmate_harness_ignores_configured_profile_axes
