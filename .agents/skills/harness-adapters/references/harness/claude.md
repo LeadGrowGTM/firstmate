@@ -70,6 +70,7 @@ A `--secondmate` launch omits the statement because a secondmate operates under 
 
 [`../../../../../docs/verification/supervision.md`](../../../../../docs/verification/supervision.md#turn-end-guard) records the current primary and Stop auto-arm live evidence.
 This differs from the busy-state hooks the spawn writes through `.claude/settings.local.json` into a worker's worktree or a secondmate's home, which record semantic busy state and, for a worker only, touch a task marker.
+A secondmate home's `.claude/settings.local.json` that never invokes `../../../bin/fm-busy-event.sh` is the operator's, so a claude secondmate spawn refuses rather than replace it, and `../../../bin/fm-control.sh` refuses such a relaunch before stopping the running mate.
 
 Primary `.claude/settings.json` registers `../../../bin/fm-turnend-guard.sh --claude` and `../../../bin/fm-claude-stop-autoarm.sh` with `asyncRewake: true` and `timeout: 28800`.
 Guard exit 2 plus stderr forces continuation.
