@@ -1397,14 +1397,6 @@ spawn_herdr_presentation_order_lock_acquire() {
   return 1
 }
 
-# A .claude/settings.local.json that never invokes fm-busy-event.sh was not
-# written by firstmate, so it is the operator's and firstmate never removes or
-# replaces it.
-claude_settings_operator_owned() {  # <worktree>
-  [ -e "$1/.claude/settings.local.json" ] &&
-    ! grep -qF 'fm-busy-event.sh' "$1/.claude/settings.local.json" 2>/dev/null
-}
-
 clear_relaunch_harness_wiring() {
   local harness=$1 wt=$2 state=$3 id=$4 token_path token auth_path path
   # The wiring arms above match on harness PREFIXES, because a task launched
@@ -1426,7 +1418,7 @@ clear_relaunch_harness_wiring() {
   fi
   while IFS= read -r path; do
     [ -n "$path" ] || continue
-    if [ "$path" = "$wt/.claude/settings.local.json" ] && claude_settings_operator_owned "$wt"; then
+    if [ "$path" = "$wt/.claude/settings.local.json" ] && fm_control_claude_settings_operator_owned "$wt"; then
       continue
     fi
     rm -f -- "$path" || return 1
@@ -4368,7 +4360,7 @@ exclude_path() {
 # replaced, on a spawn or a relaunch; the refusal comes before any retirement.
 case "$KIND:$HARNESS" in
 secondmate:claude*)
-  if claude_settings_operator_owned "$WT"; then
+  if fm_control_claude_settings_operator_owned "$WT"; then
     echo "error: $WT/.claude/settings.local.json was not written by firstmate; refusing to replace it with secondmate $ID's busy-state hooks; move it aside, then retry" >&2
     exit 1
   fi
@@ -4477,7 +4469,7 @@ fi
     j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
     j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
     cat >"$WT/.claude/settings.local.json" <<EOF
-{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"$j_pretool"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":".*","hooks":[{"type":"command","command":"$j_pretool"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
 EOF
     exclude_path '.claude/settings.local.json'
     ;;

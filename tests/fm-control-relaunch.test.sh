@@ -1006,8 +1006,8 @@ test_secondmate_relaunch_arms_the_semantic_busy_record() {
 }
 
 # An operator-owned settings.local.json in a secondmate home survives a relaunch
-# exactly as it survives a spawn: a claude replacement refuses before retiring
-# anything, and a switch away from claude leaves the file in place.
+# exactly as it survives a spawn: a claude replacement refuses before the old
+# agent is stopped, and a switch away from claude leaves the file in place.
 test_secondmate_relaunch_never_removes_operator_settings() {
   local dir home sm out rc settings
   dir=$(new_case smoperator sm8)
@@ -1044,8 +1044,10 @@ test_secondmate_relaunch_never_removes_operator_settings() {
     "the refusal must name the operator-owned settings file"
   cmp -s "$dir/operator-settings" "$settings" \
     || fail "a refused claude secondmate relaunch removed or replaced the operator's settings.local.json"
+  [ -z "$(cat "$dir/fake/literal")" ] || fail "a refused secondmate relaunch must send the old agent nothing"
+  [ "$(cat "$dir/fake/command")" = claude ] \
+    || fail "the refusal must land before the running agent is stopped"
 
-  printf 'claude' > "$dir/fake/command"
   printf 'codex' > "$dir/fake/becomes"
   out=$(run_control "$dir" sm8 relaunch --harness codex); rc=$?
   expect_code 0 "$rc" "a secondmate switch away from claude should succeed"$'\n'"$out"

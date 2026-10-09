@@ -827,6 +827,12 @@ resolve_relaunch_profile() {
   # transaction, where nothing has changed yet.
   fm_control_harness_supports_kind "$TARGET_HARNESS" "$KIND" \
     || die "'$TARGET_HARNESS' is not verified to run a $KIND task, so relaunching $ID onto it would stop the running agent for a launch that must be refused; choose an adapter verified for this kind"
+  # The launch owner also refuses to replace an operator-owned Claude settings
+  # file in a secondmate's home, so that refusal is asked here before the stop.
+  if [ "$KIND" = secondmate ] && [ "$TARGET_HARNESS" = claude ] \
+     && fm_control_claude_settings_operator_owned "$WT"; then
+    die "$WT/.claude/settings.local.json was not written by firstmate, so relaunching secondmate $ID onto claude would stop the running agent for a launch that must refuse to replace it; move it aside, then retry"
+  fi
   # A model or effort chosen for the previous harness does not transfer to a
   # different one, so an explicit harness change resets both axes unless the
   # caller names them too.
