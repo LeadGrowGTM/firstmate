@@ -1,0 +1,14 @@
+  Monitor or a background run.
+  Two ways forward:
+  - You run it yourself by typing ! python3 -c "import time; time.sleep(150)" in the prompt. That output lands here, and I'll reply done after it finishes.
+  - I use a Monitor loop that waits on a real condition, if you tell me what to wait for.
+✻ Baked for 3s · done 5:45 PM
+❯ Lab test computation: run this bash command in the foreground with a 300000ms timeout and report the number it prints: python3 -c "print(sum(ii for i in range(310**9)))"
+  Ran 1 shell command
+● Captain, the command finished within the 300000ms timeout and printed:
+  8999999995500000000500000000
+✻ Brewed for 3m 37s · done 5:49 PM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

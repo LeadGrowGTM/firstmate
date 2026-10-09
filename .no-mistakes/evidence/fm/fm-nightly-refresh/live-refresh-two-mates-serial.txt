@@ -1,0 +1,15 @@
+== before
+/tmp/fm-lab.53Qf7V/state/sm2.meta:spawn_gen=s1791582565.657967.17656
+/tmp/fm-lab.53Qf7V/state/sm1.meta:spawn_gen=s1791582590.664207.12873
+1791582608
+sm1: relaunched
+sm2: relaunched
+exit=0
+1791582685
+rc=0
+== after (spawn_gen epoch shows sm2 launched only after sm1 confirmed idle)
+/tmp/fm-lab.53Qf7V/state/sm1.meta:spawn_gen=s1791582622.670414.25123
+/tmp/fm-lab.53Qf7V/state/sm2.meta:spawn_gen=s1791582662.677847.21966
+sm1 replacement first idle (stop) ts:
+v1 gen=g1791582622.670897.7271 seq=5 state=idle source=claude-hook event=stop ts=1791582636
+v1 gen=g1791582662.678255.23249 seq=4 state=idle source=claude-hook event=stop ts=1791582674

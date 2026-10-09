@@ -1,0 +1,9 @@
+== after
+harness=claude
+model=haiku
+effort=low
+busy_gen=g1791582255.627188.20241
+spawn_gen=s1791582256.626681.5409
+v1 gen=g1791582255.627188.20241 seq=4 state=idle source=claude-hook event=stop ts=1791582269
+-rw------- 1 mitch mitch 350411 Oct  9 17:44 /home/mitch/.claude/projects/-tmp-fm-labsm-RqINzE-sm1-home/29e2625f-0fb2-4c80-ac3a-2871d894a68c.jsonl
+-rw------- 1 mitch mitch 348711 Oct  9 17:44 /home/mitch/.claude/projects/-tmp-fm-labsm-RqINzE-sm1-home/32849370-aec9-47e2-988f-e6ed8836fb43.jsonl

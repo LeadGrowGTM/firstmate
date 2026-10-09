@@ -1,0 +1,7 @@
+== before
+harness=claude
+model=haiku
+effort=low
+busy_gen=g1791582179.615768.30643
+spawn_gen=s1791582180.615334.1575
+v1 gen=g1791582179.615768.30643 seq=4 state=idle source=claude-hook event=stop ts=1791582189

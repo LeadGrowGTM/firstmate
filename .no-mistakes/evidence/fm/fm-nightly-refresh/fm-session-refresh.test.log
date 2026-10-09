@@ -9,3 +9,7 @@ ok - T5 each replacement must read idle before the next is touched
 ok - T5b the replacement's idle must hold across the settle window
 ok - T6 named ids narrow the run; invalid use is refused
 # all fm-session-refresh tests passed
+
+real	0m10.884s
+user	0m8.628s
+sys	0m3.678s

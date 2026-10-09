@@ -1,0 +1,4 @@
+Claude session files for the lab second mate's home after the live refresh:
+29e2625f-0fb2-4c80-ac3a-2871d894a68c.jsonl sessionId="sessionId":"29e2625f-0fb2-4c80-ac3a-2871d894a68c" models="model":"claude-haiku-5-5" 
+32849370-aec9-47e2-988f-e6ed8836fb43.jsonl sessionId="sessionId":"32849370-aec9-47e2-988f-e6ed8836fb43" models="model":"claude-haiku-5-5" 
+Home pin config/secondmate-harness during refresh: claude sonnet medium

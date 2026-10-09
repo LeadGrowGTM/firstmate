@@ -1,0 +1,10 @@
+== before
+/tmp/fm-lab.53Qf7V/state/sm2.meta:spawn_gen=s1791582565.657967.17656
+/tmp/fm-lab.53Qf7V/state/sm1.meta:spawn_gen=s1791582256.626681.5409
+sm1: FAILED relaunched but never came back idle within 0s
+stopped: remaining direct reports left as they are
+exit=1
+rc=0
+== after
+/tmp/fm-lab.53Qf7V/state/sm1.meta:spawn_gen=s1791582590.664207.12873
+/tmp/fm-lab.53Qf7V/state/sm2.meta:spawn_gen=s1791582565.657967.17656

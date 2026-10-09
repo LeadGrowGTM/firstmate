@@ -1,0 +1,8 @@
+== before
+/tmp/fm-lab.53Qf7V/state/sm3.meta:spawn_gen=s1791582696.684263.22654
+cat: /tmp/fm-lab.53Qf7V/state/sm3.busy-state: No such file or directory
+sm3: idle state unknown, next night
+exit=0
+rc=0
+== after
+/tmp/fm-lab.53Qf7V/state/sm3.meta:spawn_gen=s1791582696.684263.22654
