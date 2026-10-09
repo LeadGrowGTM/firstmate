@@ -427,6 +427,35 @@ test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven() {
   pass "fm-control relaunch: an unreadable composer fails safe before the exit command is typed"
 }
 
+# --only-if-idle refuses with exit 3 instead of interrupting a turn that is not
+# exactly idle at the exit point, and changes nothing else about relaunch.
+test_only_if_idle_refuses_instead_of_interrupting() {
+  local dir out rc
+  dir=$(new_case only-idle rl45)
+  add_ship_task "$dir" rl45 claude
+  "$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl45 \
+    --state busy --source claude-hook --event UserPromptSubmit >/dev/null
+
+  out=$(run_control "$dir" rl45 relaunch --only-if-idle --note "nightly"); rc=$?
+  expect_code 3 "$rc" "a busy agent must be refused with the distinct status"$'\n'"$out"
+  assert_contains "$out" "--only-if-idle refuses to interrupt it" "the refusal should name the option"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "a refused relaunch must leave the old agent running"
+  assert_no_grep "/exit" "$dir/fake/literal" "no exit command may be typed into a busy agent"
+  assert_equals "" "$(cat "$dir/fake/keys")" "no interrupt may be delivered to a busy agent"
+  assert_not_contains "$(cat "$dir/home/data/rl45/brief.md")" "Progress note" \
+    "a refused relaunch must restore the instructions"
+
+  out=$(run_control "$dir" rl45 exit --only-if-idle); rc=$?
+  expect_code 1 "$rc" "--only-if-idle applies to relaunch only"$'\n'"$out"
+
+  "$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl45 \
+    --state idle --source claude-hook --event Stop >/dev/null
+  out=$(run_control "$dir" rl45 relaunch --only-if-idle --note "nightly"); rc=$?
+  expect_code 0 "$rc" "an idle agent relaunches with --only-if-idle"$'\n'"$out"
+  assert_contains "$out" "relaunched rl45" "the idle relaunch should complete"
+  pass "fm-control relaunch: --only-if-idle refuses a non-idle agent instead of interrupting it"
+}
+
 test_relaunch_from_linked_home_preserves_recorded_worktree() {
   local dir out rc head fetch_head
   dir=$(new_case linked-home rl42)
@@ -2508,6 +2537,7 @@ test_relaunch_moves_a_drifted_item_back_in_flight() {
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
+test_only_if_idle_refuses_instead_of_interrupting
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_durable_task_metadata
 test_relaunch_serializes_concurrent_durable_metadata_publication

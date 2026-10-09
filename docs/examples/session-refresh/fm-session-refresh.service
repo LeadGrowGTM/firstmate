@@ -1,0 +1,18 @@
+# Opt-in systemd user service for bin/fm-session-refresh.sh (docs/session-refresh.md).
+# Copy this and fm-session-refresh.timer into ~/.config/systemd/user/, replace
+# both /path/to/... placeholders, then run:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now fm-session-refresh.timer
+# FM_HOME must name the firstmate home whose second mates are refreshed; the
+# script path is that home's tracked bin/ (or the code root it runs from).
+# PATH must reach the same tools an interactive firstmate session uses (tmux or
+# herdr, git, and every harness CLI a second mate runs on).
+[Unit]
+Description=Firstmate session refresh: relaunch idle second mates onto fresh sessions
+
+[Service]
+Type=oneshot
+TimeoutStartSec=30min
+Environment=FM_HOME=/path/to/firstmate-home
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/path/to/firstmate/bin/fm-session-refresh.sh

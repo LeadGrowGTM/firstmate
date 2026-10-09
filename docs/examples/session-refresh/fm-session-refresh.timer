@@ -1,0 +1,12 @@
+# Opt-in nightly schedule for fm-session-refresh.service (docs/session-refresh.md).
+# Pick a quiet hour, after any scheduled memory pass, so second mates have
+# written down what they hold before their conversation is replaced.
+[Unit]
+Description=Firstmate nightly session refresh
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

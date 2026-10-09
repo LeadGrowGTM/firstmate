@@ -349,6 +349,14 @@
       "audience": "operator-example"
     },
     {
+      "path": "docs/examples/session-refresh/fm-session-refresh.service",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/session-refresh/fm-session-refresh.timer",
+      "audience": "operator-example"
+    },
+    {
       "path": "docs/examples/watched-tools.json",
       "audience": "operator-example"
     },
@@ -406,6 +414,10 @@
     },
     {
       "path": "docs/scripts.md",
+      "audience": "operator-current"
+    },
+    {
+      "path": "docs/session-refresh.md",
       "audience": "operator-current"
     },
     {
