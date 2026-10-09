@@ -1,0 +1,11 @@
+ok - T1 idle relaunches on its recorded profile; busy and ships wait
+ok - T2 unknown, including Codex, is never treated as idle
+ok - T2b idle must hold across the settle window
+ok - T3 remote mates and unprovable backends are skipped
+ok - T3b Pi-family mates on herdr are skipped
+ok - T3c a turn that starts before the exit is left running
+ok - T4 a failed relaunch stops the run
+ok - T5 each replacement must read idle before the next is touched
+ok - T5b the replacement's idle must hold across the settle window
+ok - T6 named ids narrow the run; invalid use is refused
+# all fm-session-refresh tests passed

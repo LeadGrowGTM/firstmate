@@ -1,0 +1,12 @@
+== S4 stop at first failure (IDLE_WAIT=0 forces the replacement check to fail) ==
+$ FM_SESSION_REFRESH_SETTLE=0 FM_SESSION_REFRESH_IDLE_WAIT=0 bin/fm-session-refresh.sh sm1 sm3
+sm1: FAILED relaunched but never came back idle within 0s
+stopped: remaining direct reports left as they are
+REFRESH_RC=1
+-- sm1 meta generation diff
+< busy_gen=g1791572422.3511939.13236
+< spawn_gen=s1791572422.3511542.24632
+> busy_gen=g1791572503.3530076.18893
+> spawn_gen=s1791572503.3529528.5878
+-- sm3 meta generation diff
+(unchanged: left as it was)

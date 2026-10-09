@@ -1,0 +1,1 @@
+systemd-analyze --user verify fm-session-refresh.service fm-session-refresh.timer (placeholders substituted): rc=0; OnCalendar *-*-* 03:00:00 normalizes, next elapse 03:00 local

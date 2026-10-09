@@ -1,0 +1,16 @@
+sm1: busy, next night
+REFRESH_RC=0
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.5dC2qU
+error: task sm1 reads 'busy claude-hook' rather than idle at the exit point; --only-if-idle refuses to interrupt it, so its agent was left running
+error: relaunch of sm1 failed while stopping the old agent, which is still running; its original instructions were restored
+CONTROL_RC=3
+bash-5.2$
+--- sm1 pane after the refusal: the busy turn ran to completion, uninterrupted ---
+  Then reply 'done'.
+  Ran 1 shell command
+● done
+✻ Baked for 1m 36s · done 2:59 PM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

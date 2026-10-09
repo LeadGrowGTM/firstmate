@@ -1,0 +1,17 @@
+$ FM_SESSION_REFRESH_POLL=0 bin/fm-session-refresh.sh
+error: FM_SESSION_REFRESH_POLL must be above 0 seconds: 0
+rc=2
+$ FM_SESSION_REFRESH_POLL=0.0 bin/fm-session-refresh.sh
+error: FM_SESSION_REFRESH_POLL must be above 0 seconds: 0.0
+rc=2
+$ bin/fm-session-refresh.sh  (disposable records: pi on herdr, scout)
+pi1: skipped (herdr resumes the Pi session, not a fresh one)
+sc1: skipped (scout task, refreshed only by finishing its work)
+rc=0
+$ env -u FM_HOME bin/fm-session-refresh.sh
+error: FM_HOME is not set; fm-session-refresh refuses to resolve direct reports without an explicit firstmate home
+rc=1
+$ bin/fm-control.sh sm1 exit --only-if-idle
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.5dC2qU
+error: --harness, --model, --effort, --note, and --only-if-idle apply to 'relaunch' only
+rc=1

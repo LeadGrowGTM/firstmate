@@ -1,0 +1,20 @@
+== S3 serial run across claude sm1, codex sm2, claude sm3 ==
+15:00:39 sm1: relaunched
+15:00:39 sm2: idle state unknown, next night
+15:01:06 sm3: relaunched
+REFRESH_RC=0
+-- sm1 meta generation diff
+< busy_gen=g1791572164.3466870.1788
+< spawn_gen=s1791572164.3466347.21965
+> busy_gen=g1791572422.3511939.13236
+> spawn_gen=s1791572422.3511542.24632
+-- sm2 meta generation diff
+(unchanged)
+-- sm3 meta generation diff
+< busy_gen=g1791572362.3498932.22983
+< spawn_gen=s1791572362.3498352.3918
+> busy_gen=g1791572447.3518929.14274
+> spawn_gen=s1791572447.3518518.24142
+-- relaunch checkpoint timestamps (UTC; local = UTC-4)
+/tmp/fm-lab.5dC2qU/state/sm1.control-relaunch:ts=2026-10-09T19:00:24Z
+/tmp/fm-lab.5dC2qU/state/sm3.control-relaunch:ts=2026-10-09T19:00:48Z
