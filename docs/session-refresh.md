@@ -10,7 +10,7 @@ The script header is the authoritative owner of its arguments, output lines, env
 The command reads only the active `FM_HOME`'s own `state/<id>.meta` records, or the task ids named on its command line.
 For each one, in task-id order:
 
-- A `kind=secondmate` direct report whose semantic busy-state verdict is exactly `idle` is relaunched with `bin/fm-control.sh <id> relaunch`, on the harness, model, and effort its record names.
+- A `kind=secondmate` direct report whose semantic busy-state verdict is exactly `idle`, read twice a settle window apart, is relaunched with `bin/fm-control.sh <id> relaunch`, on the harness, model, and effort its record names.
 - A busy one waits for the next run.
 - One whose verdict is `unknown` also waits for the next run, because unknown is never idle under the [busy-state contract](../bin/fm-busy-lib.sh).
 - A ship or scout task is skipped: it is task-bound work in progress, its replacement would resume its instructions rather than settle idle, and its relaunch would append a progress note to those instructions every night.
@@ -19,6 +19,12 @@ For each one, in task-id order:
 After each relaunch the replacement must read idle again before the next second mate is touched, so a slow host never has two launches in flight.
 The first failure - a refused or failed relaunch, or a replacement that does not come back idle in time - stops the run, leaves every later second mate as it was, and exits non-zero with the control plane's own report.
 The control plane owns the relaunch checkpoint, journal, and rollback, and a second mate's charter is never rewritten; see [agent-control.md](agent-control.md#transactional-relaunch).
+
+## Why idle is read twice
+
+A Claude turn that a blocking Stop hook continues has already recorded idle, and it reads busy again only at its next tool call.
+The second read, after the settle window in the script header, catches such a turn as soon as it calls a tool.
+A continued turn that only writes text until its next Stop still reads idle on both reads; that is a limit of the busy-state sources, not of this command.
 
 ## Known gap: Codex
 

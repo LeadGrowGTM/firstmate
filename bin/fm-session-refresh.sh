@@ -30,6 +30,9 @@
 #
 # Idle is the semantic busy-state verdict owned by bin/fm-busy-lib.sh and
 # nothing else: only a positive `idle` relaunches, and unknown is never idle.
+# The verdict must read idle twice, FM_SESSION_REFRESH_SETTLE seconds apart,
+# because a turn can continue after its idle event was recorded (a blocking
+# Stop hook) and reads busy again only at its next tool call.
 # That contract has no verified Codex source yet, so a Codex second mate always
 # reads unknown and is never refreshed here.
 #
@@ -45,6 +48,7 @@
 # was. A busy or unknown one simply waits for the next run.
 #
 # Environment knobs:
+#   FM_SESSION_REFRESH_SETTLE     seconds between the two idle reads (30)
 #   FM_SESSION_REFRESH_IDLE_WAIT  seconds a replacement has to read idle (240)
 #   FM_SESSION_REFRESH_POLL       seconds between those reads (5)
 #   FM_CONTROL_LAUNCH_WAIT        passed through to bin/fm-control.sh unchanged
@@ -55,7 +59,7 @@
 set -u
 
 usage() {
-  sed -n '2,54{s/^# \{0,1\}//;p;}' "$0"
+  sed -n '2,58{s/^# \{0,1\}//;p;}' "$0"
 }
 
 for arg in "$@"; do
@@ -77,11 +81,15 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 IDLE_WAIT=${FM_SESSION_REFRESH_IDLE_WAIT:-240}
 POLL=${FM_SESSION_REFRESH_POLL:-5}
+SETTLE=${FM_SESSION_REFRESH_SETTLE:-30}
 case "$IDLE_WAIT" in
   ''|*[!0-9]*) echo "error: FM_SESSION_REFRESH_IDLE_WAIT must be a whole number of seconds: $IDLE_WAIT" >&2; exit 2 ;;
 esac
 case "$POLL" in
   ''|*[!0-9.]*|*.*.*) echo "error: FM_SESSION_REFRESH_POLL must be a number of seconds: $POLL" >&2; exit 2 ;;
+esac
+case "$SETTLE" in
+  ''|*[!0-9.]*|*.*.*) echo "error: FM_SESSION_REFRESH_SETTLE must be a number of seconds: $SETTLE" >&2; exit 2 ;;
 esac
 
 # shellcheck source=bin/fm-backend.sh
@@ -136,6 +144,12 @@ refresh_one() {
     echo "$id: skipped ($backend backend cannot prove an agent stopped)"
     return 0
   fi
+  case "$(verdict "$id")" in
+    idle) ;;
+    busy) echo "$id: busy, next night"; return 0 ;;
+    *) echo "$id: idle state unknown, next night"; return 0 ;;
+  esac
+  sleep "$SETTLE"
   case "$(verdict "$id")" in
     idle) ;;
     busy) echo "$id: busy, next night"; return 0 ;;

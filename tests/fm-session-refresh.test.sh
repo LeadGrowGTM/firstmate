@@ -6,8 +6,10 @@
 #
 #   1. An idle second mate is relaunched on the harness, model, and effort its
 #      record names - not the home's secondmate pin - and confirmed idle again.
-#   2. Only a positive idle verdict relaunches: busy and unknown (including a
-#      Codex mate, which has no verified idle source) wait for the next run.
+#   2. Only a positive idle verdict relaunches, read twice across the settle
+#      window: busy and unknown (including a Codex mate, which has no verified
+#      idle source) wait for the next run, as does a turn that resumes between
+#      the two reads.
 #   3. Ship and scout tasks, remote second mates, and backends that cannot
 #      prove a stop are skipped without being touched.
 #   4. The first failure stops the run, whether the relaunch itself fails or the
@@ -29,7 +31,8 @@ trap 'fm_test_remove_tree "$TMP_ROOT"' EXIT
 
 # The tmux stub: the harness exit command stops the agent on that window, a
 # launch brief starts the harness in `becomes`, and - when `idle-on-launch`
-# exists - the replacement's own lifecycle hook reports its first turn settled.
+# exists - the replacement's real installed Stop hook reports its first turn
+# settled.
 make_stub() {  # <case-dir>
   local fb="$1/fakebin"
   mkdir -p "$fb"
@@ -64,9 +67,10 @@ case "${1:-}" in
         *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
           cat "$D/becomes" > "$D/command.$target"
           if [ -e "$D/idle-on-launch" ]; then
-            id=${target##*:fm-}
-            "$FM_FAKE_BUSY_EVENT" apply "$FM_FAKE_STATE" "$id" idle \
-              --gen "$(cat "$FM_FAKE_STATE/$id.busy-gen")" --source claude-hook --event Stop \
+            # The replacement's first turn ends: run the Stop hook the launch
+            # itself installed in the mate's home, exactly as Claude would.
+            settings="$(cat "$D/cwd.$target")/.claude/settings.local.json"
+            sh -c "$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")" \
               >>"$D/busy-event.log" 2>&1 || true
           fi
           ;;
@@ -94,8 +98,17 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  # A wait elapses at once; when `busy-during-wait` names a mate, that mate's
+  # turn resumes during the first wait and its tool call records busy.
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
+D=$FM_FAKE_DIR
+if [ -f "$D/busy-during-wait" ]; then
+  id=$(cat "$D/busy-during-wait")
+  rm -f "$D/busy-during-wait"
+  "$FM_FAKE_BUSY_EVENT" apply "$FM_FAKE_STATE" "$id" busy \
+    --gen "$(cat "$FM_FAKE_STATE/$id.busy-gen")" --source claude-hook --event PreToolUse >/dev/null
+fi
 /bin/sleep 0.01
 exit 0
 SH
@@ -205,6 +218,22 @@ test_unknown_is_never_idle() {
   pass "T2 unknown, including Codex, is never treated as idle"
 }
 
+# --- T2b: idle must hold across the settle window ----------------------------
+test_idle_must_hold_across_the_settle_window() {
+  local dir out rc
+  dir=$(new_case settle)
+  add_mate "$dir" sm1 idle
+  # The turn continued past its recorded idle and calls a tool meanwhile.
+  printf 'sm1' > "$dir/fake/busy-during-wait"
+
+  out=$(run_refresh "$dir"); rc=$?
+
+  expect_code 0 "$rc" "a mate that turned busy is a wait, not a failure"$'\n'"$out"
+  assert_contains "$out" "sm1: busy, next night" "the second read must catch the resumed turn"
+  ! exited "$dir" sm1 || fail "a mate whose turn resumed was stopped"
+  pass "T2b idle must hold across the settle window"
+}
+
 # --- T3: remote mates and unprovable backends are skipped ---------------------
 test_unrefreshable_mates_are_skipped() {
   local dir out rc
@@ -283,6 +312,7 @@ test_named_ids_and_invalid_use() {
 
 test_idle_mate_relaunches_on_its_recorded_profile
 test_unknown_is_never_idle
+test_idle_must_hold_across_the_settle_window
 test_unrefreshable_mates_are_skipped
 test_failed_relaunch_stops_the_run
 test_replacement_must_read_idle_before_the_next
