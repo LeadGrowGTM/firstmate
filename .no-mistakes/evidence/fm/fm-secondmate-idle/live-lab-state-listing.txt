@@ -1,0 +1,12 @@
+total 44
+drwxrwxr-x 5 mitch mitch 4096 Oct  9 13:54 .
+drwx------ 8 mitch mitch 4096 Oct  9 13:54 ..
+-rw-rw-r-- 1 mitch mitch   13 Oct  9 13:54 .guard-watcher-stale-banner
+-rw------- 1 mitch mitch   26 Oct  9 13:54 design.busy-gen
+-rw------- 1 mitch mitch   95 Oct  9 13:54 design.busy-state
+dr-x------ 2 mitch mitch 4096 Oct  9 13:54 design.git-hooks
+drwxrwxr-x 3 mitch mitch 4096 Oct  9 13:54 design.inbox
+-rw-rw-r-- 1 mitch mitch  333 Oct  9 13:54 design.meta
+-rw-rw-r-- 1 mitch mitch   49 Oct  9 13:54 design.status
+-rw------- 1 mitch mitch 1326 Oct  9 13:54 home-summary.json
+drwx------ 2 mitch mitch 4096 Oct  9 13:54 pending-replies

@@ -1,0 +1,55 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4GT2VBMW2EZHRKS766HA8E7/bin/fm-busy-event.sh' apply '/tmp/fm-lab.HWPFYb/state' 'design' busy --gen 'g1791568442.1967583.27847' --source claude-hook --event user-prompt-submit 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4GT2VBMW2EZHRKS766HA8E7/bin/fm-busy-event.sh' apply '/tmp/fm-lab.HWPFYb/state' 'design' busy --gen 'g1791568442.1967583.27847' --source claude-hook --event pre-tool-use >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4GT2VBMW2EZHRKS766HA8E7/bin/fm-busy-event.sh' apply '/tmp/fm-lab.HWPFYb/state' 'design' idle --gen 'g1791568442.1967583.27847' --source claude-hook --event stop 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4GT2VBMW2EZHRKS766HA8E7/bin/fm-busy-event.sh' apply '/tmp/fm-lab.HWPFYb/state' 'design' idle --gen 'g1791568442.1967583.27847' --source claude-hook --event stop-failure 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4GT2VBMW2EZHRKS766HA8E7/bin/fm-busy-event.sh' apply '/tmp/fm-lab.HWPFYb/state' 'design' idle --gen 'g1791568442.1967583.27847' --source claude-hook --event session-end 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

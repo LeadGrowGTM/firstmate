@@ -1,0 +1,6 @@
+--- 13:46:16.346 queued stuck row in mate home; parent watcher starting
+signal: /tmp/fm-lab.V7c7Nn/state/smlab1.status
+WATCH_RC=0
+--- 13:47:15.480 parent watcher run 2 (mate record idle, row still queued)
+check: rearm-resurface
+WATCH_RC=0

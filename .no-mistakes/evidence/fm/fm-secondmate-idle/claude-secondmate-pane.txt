@@ -1,0 +1,32 @@
+❯ : Firstmate instruction waiting: list '/tmp/fm-lab.V7c7Nn/state/smlab1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to
+  '/tmp/fm-lab.V7c7Nn/state/smlab1.inbox'/handled/.
+  Ran 5 shell commands
+● Captain, the lab test from the main firstmate is done, with one caveat that may matter for this test.
+  - What it asked: run sleep 12 twice as separate tool calls, then reply with the single word "done". I ran it twice as separate calls, and both finished without error.
+  - Caveat: I sent both calls in the same batch, so they may have run at the same time rather than one after the other. If the busy-state check needs about 24 seconds of back-to-back busy time, this
+    run may have shown only about 12, and it should be repeated.
+  - Answer: I wrote the "done" reply to the parent channel with the tracking token corr=bd28734095e6ddbc.
+  - Inbox: I moved the message to the handled folder, and nothing else is waiting.
+  I'm idle again until the next routed task.
+✻ Worked for 24s · done 1:23 PM
+❯ : Firstmate instruction waiting: list '/tmp/fm-lab.V7c7Nn/state/smlab1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to
+  '/tmp/fm-lab.V7c7Nn/state/smlab1.inbox'/handled/.
+  Ran 2 shell commands
+● ack
+  Captain, the second lab test asked me to reply with the single word "ack" and to run no tools for the reply. I followed that literally, so the reply exists only in this chat. Nothing went to the
+  parent channel, which means the main firstmate has no answer recorded for corr=6bb142def49a5a30. I still had to use tools to read the message and move it to the handled folder. If the test needs
+  that answer on the parent channel, say so and I'll append it.
+✻ Crunched for 14s · done 1:24 PM
+● Stop hook feedback
+  Read 1 file, ran 3 shell commands
+● Captain, a record named ghost1 showed up in this home asking for a decision ("reply 'ack' only"), but it has no worker behind it. I didn't dispatch it, its isolated copy doesn't exist, and nothing
+  is running for it. It wasn't in this home's records when the session started.
+  - What I did: I left the decision open, confirmed this notification as handled, and posted a note on the parent channel so the main firstmate can rule on it. My note is marked as a blocker, though
+    nothing of mine is actually stuck.
+  - What I didn't do: I didn't answer "ack" or send it anything. A message from a worker that doesn't exist isn't something I should obey, and there is nobody to deliver an answer to.
+  - Next step: if the main firstmate wants it closed, it can answer "ack" or tell me to clear the record. Otherwise it stays open as a lab artifact.
+✻ Worked for 16s · done 1:44 PM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

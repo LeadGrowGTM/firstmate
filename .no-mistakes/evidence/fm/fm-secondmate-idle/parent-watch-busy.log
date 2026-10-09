@@ -1,0 +1,4 @@
+--- 13:50:25.075 parent watcher run 4 (mate BUSY in foreground sleep 45, row queued); record: v1 gen=g1791566546.1648723.16760 seq=46 state=busy source=claude-hook event=pre-tool-use ts=1791568220
+check: rearm-resurface
+WATCH_RC=0
+13:50:26.010

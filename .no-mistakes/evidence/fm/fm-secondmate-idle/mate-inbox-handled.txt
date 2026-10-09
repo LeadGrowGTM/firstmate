@@ -1,0 +1,21 @@
+== 001.msg 2026-10-09 13:23:21.287338468 -0400
+schema=fm-task-inbox.v1
+at=2026-10-09T17:23:21Z
+--
+[fm-from-firstmate]⁣corr=bd28734095e6ddbc Lab test from the main firstmate: run the shell command sleep 12 with your Bash tool, then run the shell command sleep 12 again as a second tool call, then reply with the single word done. Do not do anything else.
+== 002.msg 2026-10-09 13:24:31.539331371 -0400
+schema=fm-task-inbox.v1
+at=2026-10-09T17:24:31Z
+--
+[fm-from-firstmate]⁣corr=6bb142def49a5a30 Lab test from the main firstmate: reply with the single word ack. Do not run any tools for this reply.
+== 003.msg 2026-10-09 13:46:17.095148275 -0400
+schema=fm-task-inbox.v1
+at=2026-10-09T17:46:17Z
+--
+[fm-from-firstmate]⁣corr=6bb142def49a5a30 REPOST REQUIRED: previous marked request had no correlated parent report. Reply on the parent status channel including corr=6bb142def49a5a30. Original request: Lab test from the main firstmate: reply with the single word ack. Do not run any tools for this reply.
+== 004.msg 2026-10-09 13:47:16.147105956 -0400
+schema=fm-task-inbox.v1
+at=2026-10-09T17:47:16Z
+delivery=fire-and-forget
+--
+[fm-from-firstmate]⁣delivery=c4f12127f9ac8660 Drain pending rows in this home's wake queue, then resume idle supervision.
