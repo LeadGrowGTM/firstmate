@@ -198,12 +198,12 @@
 #   only when that provider appears in the listing; a provider absent from the
 #   listing (an extension-registered provider such as claude-bridge, which omp
 #   never lists) passes through unvalidated with a stderr notice, and a bare
-#   fuzzy pattern is left to omp's own matcher. A crewmate or scout loads its
-#   per-task busy-state extension with -e from state/ (outside the worktree, so
-#   auto-discovery cannot load it a second time); a secondmate passes no -e at
-#   all and relies on omp auto-discovering the home's tracked .omp/extensions/
-#   (verified, omp 18.1.11: a file named both ways loads twice, and discovery is
-#   cwd-only with no trust dialog).
+#   fuzzy pattern is left to omp's own matcher. Every kind loads its per-task
+#   busy-state extension with -e from state/ (outside the worktree, so
+#   auto-discovery cannot load it a second time); a secondmate names nothing
+#   else with -e and relies on omp auto-discovering the home's tracked
+#   .omp/extensions/ (verified, omp 18.1.11: a file named both ways loads twice,
+#   and discovery is cwd-only with no trust dialog).
 #   config/secondmate-harness may also carry an optional model and effort as extra
 #   whitespace-separated tokens ("<harness> [<model>] [<effort>]"). For a
 #   --secondmate spawn, those tokens apply only when this spawn also resolves its
@@ -2026,7 +2026,7 @@ launch_template() {
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIRESUME__'
     if [ "$kind" = secondmate ]; then
-      printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ -e __PIEXT__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
       printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PIEXT__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     fi
@@ -2042,11 +2042,12 @@ launch_template() {
   # pinned to the worktree because omp's extension discovery is cwd-only. A
   # secondmate loads its two primary extensions by that discovery alone:
   # naming them with -e as well loads each twice (verified), doubling every
-  # session_stop continuation.
+  # session_stop continuation. Its busy-state extension lives in state/,
+  # outside discovery, so that one is named with -e exactly as a worker's is.
   omp)
     printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 __OMPBIN__ --config __OMPWORKERCFG__ --auto-approve --cwd __WORKTREE__'
     if [ "$kind" = secondmate ]; then
-      printf '%s' ' __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __OMPEXT__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
       printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __OMPEXT__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     fi
@@ -4345,6 +4346,9 @@ exclude_path() {
   local rel=$1 EXCL
   EXCL=$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)
   [ -n "$EXCL" ] || return 0
+  # A plain clone (a standalone secondmate home) answers relative to $WT,
+  # while a linked worktree answers with an absolute path.
+  case "$EXCL" in /*) ;; *) EXCL="$WT/$EXCL" ;; esac
   mkdir -p "$(dirname "$EXCL")"
   grep -qxF "$rel" "$EXCL" 2>/dev/null || echo "$rel" >>"$EXCL"
 }
@@ -4363,9 +4367,15 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_REPLACEMENT_STATE=$STATE_REAL
   RELAUNCH_REPLACEMENT_WT=$WT
 fi
-if [ "$KIND" != secondmate ]; then
+{
   # Arm the semantic busy-state contract (bin/fm-busy-lib.sh) for every
-  # adapter with a verified semantic source. The launch brief sent below IS a
+  # adapter with a verified semantic source, for every kind. A secondmate gets
+  # the same semantic source but never the per-turn turn-ended NOTIFICATION:
+  # its idle endpoint is healthy and parent supervision relies on its routed
+  # status, so a parent wake on every mate turn would be noise. That is why the
+  # turn-end-only adapters (grok, kimi) install nothing for a secondmate, and
+  # why each semantic adapter below writes its notification touch only when
+  # TURNEND_NOTIFY is on. The launch brief (or charter) sent below IS a
   # submitted turn, so the seed record is busy/fm-spawn. The minted gen is
   # embedded into each adapter's wiring so an event from a superseded
   # incarnation is rejected as stale. Grok and rovo stay on their isolated
@@ -4373,6 +4383,25 @@ if [ "$KIND" != secondmate ]; then
   # fm_busy_kimi_verified opens, so none of the three is armed here. Gemini IS
   # armed: its BeforeAgent / AfterAgent / SessionEnd hooks are a verified
   # open-close pair.
+  TURNEND_NOTIFY=1
+  JS_TURNEND_NOTIFY=true
+  if [ "$KIND" = secondmate ]; then
+    TURNEND_NOTIFY=0
+    JS_TURNEND_NOTIFY=false
+  fi
+  # A claude secondmate's hook file lands in its persistent home rather than a
+  # disposable worktree, so a settings.local.json this spawn did not write (one
+  # that never invokes fm-busy-event.sh) is the operator's and is never
+  # replaced. A relaunch has already retired its predecessor's copy above.
+  case "$KIND:$HARNESS" in
+  secondmate:claude*)
+    if [ -e "$WT/.claude/settings.local.json" ] &&
+      ! grep -qF 'fm-busy-event.sh' "$WT/.claude/settings.local.json" 2>/dev/null; then
+      echo "error: $WT/.claude/settings.local.json was not written by firstmate; refusing to replace it with secondmate $ID's busy-state hooks; move it aside, then retry" >&2
+      exit 1
+    fi
+    ;;
+  esac
   BUSY_GEN=
   case "$HARNESS" in
   codex*)
@@ -4410,7 +4439,13 @@ if [ "$KIND" != secondmate ]; then
     fi
     ;;
   esac
-  case "$HARNESS" in
+  # grok's and kimi's wiring is a turn-end notification only, never a semantic
+  # source, so a secondmate (TURNEND_NOTIFY off) installs none of it.
+  WIRING_HARNESS=$HARNESS
+  case "$TURNEND_NOTIFY:$HARNESS" in
+  0:grok* | 0:kimi*) WIRING_HARNESS= ;;
+  esac
+  case "$WIRING_HARNESS" in
   claude*)
     # Semantic busy-state hooks (bin/fm-busy-lib.sh): UserPromptSubmit opens
     # a turn; Stop (normal completion), StopFailure (API-error turn end),
@@ -4418,14 +4453,16 @@ if [ "$KIND" != secondmate ]; then
     # never leave a stale busy record. Claude fires no hook for a manual
     # interrupt: fm-control preserves the adapter-owned state, while the
     # legacy fm-send --key Escape path records idle/fm-interrupt. Stop keeps
-    # the turn-ended NOTIFICATION touch for the watcher. Every
-    # hook command tolerates a refused event (|| true) so a stale-gen writer
-    # can never break Claude's own lifecycle.
+    # the turn-ended NOTIFICATION touch for the watcher when TURNEND_NOTIFY is
+    # on. Every hook command tolerates a refused event (|| true) so a stale-gen
+    # writer can never break Claude's own lifecycle.
     mkdir -p "$WT/.claude"
     busy_cmd_prefix="$(shell_quote "$FM_ROOT/bin/fm-busy-event.sh") apply $(shell_quote "$STATE_REAL") $(shell_quote "$ID")"
     busy_suffix="--gen $(shell_quote "$BUSY_GEN") --source claude-hook"
+    turnend_touch=
+    [ "$TURNEND_NOTIFY" -eq 0 ] || turnend_touch="touch $(shell_quote "$TURNEND"); "
     j_submit=$(json_escape "$busy_cmd_prefix busy $busy_suffix --event user-prompt-submit 2>/dev/null || true")
-    j_stop=$(json_escape "touch $(shell_quote "$TURNEND"); $busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
+    j_stop=$(json_escape "$turnend_touch$busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
     j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
     j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
     cat >"$WT/.claude/settings.local.json" <<EOF
@@ -4483,8 +4520,10 @@ EOF
 // only start while the main session is already busy) and ignores other
 // sessions' status until the latched session settles, so a child's idle can
 // never clear the worker's busy state. The session.idle touch stays the
-// watcher's wake NOTIFICATION, never current-state truth.
+// watcher's wake NOTIFICATION, never current-state truth, and a secondmate
+// launch writes none (notifyTurnEnd false).
 import { execFile } from "node:child_process";
+const notifyTurnEnd = $JS_TURNEND_NOTIFY;
 const busyEvent = (state, event) =>
   new Promise((resolve) => {
     execFile("$FM_ROOT/bin/fm-busy-event.sh", [
@@ -4515,9 +4554,11 @@ export const FmBusyState = async () => {
           activeSession = null;
           await busyEvent("idle", "session-idle");
         }
-        await new Promise((resolve) => {
-          execFile("touch", ["$TURNEND"], () => resolve());
-        });
+        if (notifyTurnEnd) {
+          await new Promise((resolve) => {
+            execFile("touch", ["$TURNEND"], () => resolve());
+          });
+        }
       }
     },
   };
@@ -4539,8 +4580,9 @@ EOF
 // that raced another extension's fresh run keeps state busy via isIdle().
 // "turn_end" fires at every inner turn boundary (one LLM response plus its
 // tool calls) and stays a wake NOTIFICATION touch for the watcher, never
-// current-state truth.
+// current-state truth; a secondmate launch writes none (notifyTurnEnd false).
 import { execFile } from "node:child_process";
+const notifyTurnEnd = $JS_TURNEND_NOTIFY;
 const busyEvent = (state: string, event: string) =>
   new Promise<void>((resolve) => {
     execFile("$FM_ROOT/bin/fm-busy-event.sh", [
@@ -4554,7 +4596,7 @@ export default function (pi: any) {
     if (ctx && typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
     return busyEvent("idle", "agent-settled");
   });
-  pi.on("turn_end", () => execFile("touch", ["$TURNEND"]));
+  if (notifyTurnEnd) pi.on("turn_end", () => execFile("touch", ["$TURNEND"]));
   // A native harness can make progress inside one Pi turn. This separate
   // marker prevents false wedge alarms without fabricating a completed turn.
   let lastProgress = 0;
@@ -4587,8 +4629,10 @@ EOF
 // because session_stop is awaited before the session settles, so gating on it
 // would leave every completed turn recorded busy. "turn_end" fires at every
 // inner turn boundary and stays a wake NOTIFICATION touch for the watcher,
-// never current-state truth.
+// never current-state truth; a secondmate launch writes none (notifyTurnEnd
+// false).
 import { execFile } from "node:child_process";
+const notifyTurnEnd = $JS_TURNEND_NOTIFY;
 const busyEvent = (state: string, event: string) =>
   new Promise<void>((resolve) => {
     execFile("$FM_ROOT/bin/fm-busy-event.sh", [
@@ -4602,7 +4646,7 @@ export default function (pi: any) {
     if (event && event.willContinue === true) return;
     return busyEvent("idle", "agent-end");
   });
-  pi.on("turn_end", () => execFile("touch", ["$TURNEND"]));
+  if (notifyTurnEnd) pi.on("turn_end", () => execFile("touch", ["$TURNEND"]));
 }
 EOF
     ;;
@@ -4732,7 +4776,7 @@ EOF
     exclude_path '.fm-kimi-turnend'
     ;;
   esac
-fi
+}
 
 # Per-task git hooksPath that strips AI commit trailers at the commit object.
 # Installed for every kind, including secondmate, unless the home opts in to

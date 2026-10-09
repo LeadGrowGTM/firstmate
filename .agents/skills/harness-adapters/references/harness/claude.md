@@ -69,7 +69,7 @@ A `--secondmate` launch omits the statement because a secondmate operates under 
 ## Primary integration
 
 [`../../../../../docs/verification/supervision.md`](../../../../../docs/verification/supervision.md#turn-end-guard) records the current primary and Stop auto-arm live evidence.
-This differs from the worker hook, which only touches a task marker through `.claude/settings.local.json`.
+This differs from the busy-state hooks the spawn writes through `.claude/settings.local.json` into a worker's worktree or a secondmate's home, which record semantic busy state and, for a worker only, touch a task marker.
 
 Primary `.claude/settings.json` registers `../../../bin/fm-turnend-guard.sh --claude` and `../../../bin/fm-claude-stop-autoarm.sh` with `asyncRewake: true` and `timeout: 28800`.
 Guard exit 2 plus stderr forces continuation.

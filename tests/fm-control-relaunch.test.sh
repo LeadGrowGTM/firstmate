@@ -936,6 +936,75 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
   pass "fm-control relaunch: a secondmate relaunch re-resolves its durable configured harness pin"
 }
 
+# claude_hook_cmd <settings.json> <hook-event>: the command a Claude hook runs.
+claude_hook_cmd() {
+  jq -r ".hooks[\"$2\"][0].hooks[0].command" "$1"
+}
+
+# A secondmate launched before its kind was armed carries no busy record, so a
+# relaunch is what gives it one: the replacement must come back with a fresh
+# armed generation whose hooks report an exact verdict, and never with the
+# per-turn turn-ended notification a worker's hooks also write.
+test_secondmate_relaunch_arms_the_semantic_busy_record() {
+  local dir home sm out rc gen1 gen2 settings stale_submit verdict
+  dir=$(new_case smbusy sm7)
+  home="$dir/home"
+  sm="$dir/smhome"
+  mkdir -p "$home/data/sm7"
+  printf '# secondmate brief\n' > "$home/data/sm7/brief.md"
+  fm_git_worktree "$dir/proj" "$sm" sm-busy-branch
+  mkdir -p "$sm/state" "$sm/data" "$sm/bin"
+  printf 'sm7\n' > "$sm/.fm-secondmate-home"
+  printf '# agents\n' > "$sm/AGENTS.md"
+  {
+    echo "window=fmses:fm-sm7"
+    echo "endpoint_task_id=sm7"
+    echo "worktree=$sm"
+    echo "project=$sm"
+    echo "harness=claude"
+    echo "kind=secondmate"
+    echo "mode=secondmate"
+    echo "yolo=off"
+    echo "model=default"
+    echo "effort=default"
+    echo "home=$sm"
+  } > "$home/state/sm7.meta"
+  printf '%s\n' "fm-sm7" > "$dir/fake/windows"
+  printf '%s' "$sm" > "$dir/fake/cwd"
+  [ ! -e "$home/state/sm7.busy-gen" ] || fail "the fixture must start with no busy record"
+
+  out=$(run_control "$dir" sm7 relaunch); rc=$?
+  expect_code 0 "$rc" "a claude secondmate should relaunch"$'\n'"$out"
+  [ -f "$home/state/sm7.busy-gen" ] || fail "a relaunched secondmate must come back with an armed busy record"
+  gen1=$(cat "$home/state/sm7.busy-gen")
+  [ "$(meta_field "$dir" sm7 busy_gen)" = "$gen1" ] \
+    || fail "the relaunched secondmate's record must carry its armed generation"
+  settings="$sm/.claude/settings.local.json"
+  [ -f "$settings" ] || fail "a relaunched claude secondmate must have its busy-state hooks"
+  rm -f "$home/state/sm7.turn-ended"
+  sh -c "$(claude_hook_cmd "$settings" Stop)" || fail "the replacement's Stop hook failed"
+  verdict=$(bash -c '. "$1"; fm_busy_classify tmux fmses:fm-sm7 claude sm7 "$2"' _ \
+    "$ROOT/bin/fm-busy-lib.sh" "$home/state")
+  [ "$verdict" = "idle claude-hook" ] \
+    || fail "the relaunched secondmate's Stop must read exactly idle, got '$verdict'"
+  [ ! -e "$home/state/sm7.turn-ended" ] \
+    || fail "a secondmate's Stop must not wake its parent with a turn-ended marker"
+  stale_submit=$(claude_hook_cmd "$settings" UserPromptSubmit)
+
+  printf 'claude' > "$dir/fake/command"
+  out=$(run_control "$dir" sm7 relaunch); rc=$?
+  expect_code 0 "$rc" "a second claude secondmate relaunch should succeed"$'\n'"$out"
+  gen2=$(cat "$home/state/sm7.busy-gen")
+  [ -n "$gen2" ] && [ "$gen2" != "$gen1" ] \
+    || fail "each secondmate relaunch must arm a fresh busy generation"
+  sh -c "$stale_submit" || fail "a superseded hook must still exit 0"
+  verdict=$(bash -c '. "$1"; fm_busy_classify tmux fmses:fm-sm7 claude sm7 "$2"' _ \
+    "$ROOT/bin/fm-busy-lib.sh" "$home/state")
+  [ "$verdict" = "busy fm-spawn" ] \
+    || fail "a superseded incarnation's hook must not change the replacement's record, got '$verdict'"
+  pass "fm-control relaunch: a secondmate relaunch arms a fresh semantic busy record without turn-end wakes"
+}
+
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop() {
   local dir home out rc
   dir=$(new_case invalid-effort sm6)
@@ -2408,6 +2477,7 @@ test_prior_harness_turnend_registry_entry_is_cleared
 test_wiring_removal_failure_refuses_before_replacement_arm
 test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
+test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop
 test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop
 test_explicit_secondmate_harness_ignores_configured_profile_axes
