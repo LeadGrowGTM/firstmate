@@ -19,8 +19,9 @@
 #      ancestor: it beats an inherited CLAUDECODE under omp and is inert when it
 #      leaks into a worker whose ancestry holds no omp.
 #   3. Every omp launch clears foreign markers, carries the tracked posture
-#      overlay, --auto-approve, --cwd, and (for a crewmate) one -e pointing at
-#      state/<id>.omp-ext.ts; a secondmate launch names no -e at all.
+#      overlay, --auto-approve, --cwd, and one -e pointing at
+#      state/<id>.omp-ext.ts; a secondmate launch names nothing else with -e,
+#      and its extension writes no turn-ended notification.
 #   4. A <provider>/<id> model is validated only when `omp models --json` lists
 #      that provider; an unlisted provider passes through with a notice.
 #   5. Busy state: agent_start is busy, agent_end with willContinue stays busy,
@@ -211,9 +212,10 @@ test_spawn_model_validation_scoped_to_listed_providers() {
 test_secondmate_launch_relies_on_discovery() {
   # A seeded secondmate home, launched for real through fm-spawn on omp: the
   # launch must carry the posture overlay and pin --cwd to the home, and must
-  # name NO -e, because omp auto-discovers the home's tracked .omp/extensions
-  # and a file named both ways loads twice.
-  local world home fakebin launchlog out status launch
+  # name only its state/ busy-state extension with -e, because omp
+  # auto-discovers the home's tracked .omp/extensions and a file named both
+  # ways loads twice.
+  local world home fakebin launchlog out status launch ext
   world="$TMP_ROOT/secondmate"
   home="$world/sm"
   mkdir -p "$world/home/state" "$world/home/data" "$world/home/config" "$home/bin" "$home/data"
@@ -238,14 +240,27 @@ test_secondmate_launch_relies_on_discovery() {
   expect_code 0 "$status" "omp secondmate spawn should succeed: $out"
   assert_grep "harness=omp" "$world/home/state/sm.meta" "secondmate meta missing harness=omp"
   launch=$(cat "$launchlog")
-  case "$launch" in
-    *" -e "*) fail "an omp secondmate launch must name no -e: omp auto-discovers .omp/extensions and a file named both ways loads twice: $launch" ;;
+  ext="$world/home/state/sm.omp-ext.ts"
+  assert_contains "$launch" " -e '$ext' " "an omp secondmate launch must load its busy-state extension from state/: $launch"
+  case "${launch#*" -e '$ext' "}" in
+    *" -e "*) fail "an omp secondmate launch must name nothing else with -e: omp auto-discovers .omp/extensions and a file named both ways loads twice: $launch" ;;
+  esac
+  case "${launch%%" -e '$ext' "*}" in
+    *" -e "*) fail "an omp secondmate launch must name nothing else with -e: omp auto-discovers .omp/extensions and a file named both ways loads twice: $launch" ;;
   esac
   assert_contains "$launch" "--config '$ROOT/.omp/fm-worker-overlay.yml' --auto-approve --cwd '$home'" "secondmate launch lost the posture overlay or the pinned home directory: $launch"
   assert_contains "$launch" "FM_OMP_HARNESS=omp OMP_SKIP_SETUP=1 '$fakebin/omp'" "secondmate launch lost the omp marker or executable"
   assert_contains "$launch" "FM_SUPERVISION_MODEL=extension" "an omp secondmate must run the extension supervision model"
-  assert_absent "$world/home/state/sm.omp-ext.ts" "a secondmate must not receive a per-task worker extension"
-  pass "fm-spawn: a real omp secondmate launch relies on auto-discovery while crewmates load one -e"
+  assert_present "$ext" "an omp secondmate did not receive its busy-state extension"
+  assert_present "$world/home/state/sm.busy-gen" "an omp secondmate did not arm the busy-state contract"
+  out=$(drive_omp_ext "$ext" handlers) || fail "omp secondmate extension handler listing failed: $out"
+  [ "$out" = "agent_end agent_start" ] \
+    || fail "an omp secondmate extension must register only its semantic handlers, never turn_end, got '$out'"
+  out=$(drive_omp_ext "$ext" end-final) || fail "agent_end drive failed: $out"
+  out=$(fm_busy_classify tmux fake:w omp sm "$world/home/state")
+  [ "$out" = "idle omp-ext" ] || fail "a finished omp secondmate turn must classify 'idle omp-ext', got '$out'"
+  assert_absent "$world/home/state/sm.turn-ended" "an omp secondmate must never write the turn-ended marker"
+  pass "fm-spawn: a real omp secondmate launch relies on auto-discovery for its primary extensions and loads only its busy-state extension with -e"
 }
 
 test_secondmate_config_pinned_model_is_validated() {

@@ -71,6 +71,7 @@ switch (process.env.MODE) {
     break;
   case "turn-end": await handlers["turn_end"]({}, ctx); break;
   case "progress": await handlers["codex-native:progress"]({ type: "commandExecution", phase: "completed" }); break;
+  case "handlers": console.log(Object.keys(handlers).sort().join(" ")); break;
   default: throw new Error("unknown mode " + process.env.MODE);
 }
 if (["turn-end", "progress"].includes(process.env.MODE)) {
@@ -422,6 +423,153 @@ test_kimi_and_grok_install_no_unverified_wiring() {
   pass "kimi and grok install no unverified semantic wiring and classify through their own gates"
 }
 
+# A seeded secondmate home (validate_firstmate_home_for_spawn needs the seed
+# marker, AGENTS.md, bin/, a charter, and a git checkout to launch).
+make_seeded_secondmate_home() {  # <home> <id>
+  local home=$1 id=$2
+  mkdir -p "$home/bin" "$home/data"
+  printf '# Firstmate\n' > "$home/AGENTS.md"
+  printf '%s\n' "$id" > "$home/.fm-secondmate-home"
+  printf 'charter for %s\n' "$id" > "$home/data/charter.md"
+  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' > "$home/.gitignore"
+  git -C "$home" init -q -b main
+}
+
+# run_secondmate_spawn <home> <secondmate-home> <fakebin> <launchlog> <id> <harness>
+run_secondmate_spawn() {
+  local home=$1 sm=$2 fakebin=$3 launchlog=$4 id=$5 harness=$6
+  : > "$launchlog"
+  GROK_HOME="$home/grok-home" FM_FAKE_LAUNCH_LOG="$launchlog" \
+    fm_test_run_spawn "$home" "$sm" "$fakebin" "$id" "$sm" "$harness" --secondmate
+}
+
+# A secondmate is armed with the same semantic source as a worker, so its
+# parent can read an exact idle or busy verdict, but it never writes the
+# per-turn turn-ended notification into the parent home.
+test_claude_secondmate_arms_semantic_hooks_without_turnend() {
+  local rec id=busy-sm-cl-1 out state settings sm gen
+  rec=$(make_spawn_case claude-secondmate claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  out=$(run_secondmate_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$CASE_DIR/launch.log" "$id" claude)
+  expect_code 0 $? "claude secondmate spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  settings="$sm/.claude/settings.local.json"
+  assert_present "$settings" "claude secondmate spawn did not write busy-state hooks into its home"
+  assert_present "$state/$id.busy-gen" "claude secondmate spawn did not arm the busy-state contract"
+  gen=$(cat "$state/$id.busy-gen")
+  assert_grep "busy_gen=$gen" "$state/$id.meta" "the secondmate record does not carry its armed busy generation"
+  git -C "$sm" status --porcelain | grep -F '.claude/settings.local.json' >/dev/null \
+    && fail "the secondmate hook file dirties its home checkout"
+
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "busy fm-spawn" ] || fail "seed after a secondmate spawn must be 'busy fm-spawn', got '$out'"
+
+  rm -f "$state/$id.turn-ended"
+  run_claude_hook "$settings" Stop || fail "Stop hook command failed"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "idle claude-hook" ] || fail "a secondmate Stop must classify 'idle claude-hook', got '$out'"
+  assert_absent "$state/$id.turn-ended" "a secondmate Stop must not wake its parent with a turn-ended marker"
+
+  # A Stop-hook exit-2 continuation or an asyncRewake wake turn keeps working
+  # with no UserPromptSubmit; its first tool call must re-open the record.
+  run_claude_hook "$settings" PreToolUse || fail "PreToolUse hook command failed"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "busy claude-hook" ] || fail "a tool call after Stop must classify busy, got '$out'"
+  run_claude_hook "$settings" Stop || fail "Stop hook command failed"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "idle claude-hook" ] || fail "the continued turn's Stop must classify idle, got '$out'"
+
+  run_claude_hook "$settings" UserPromptSubmit || fail "UserPromptSubmit hook command failed"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "busy claude-hook" ] || fail "a secondmate UserPromptSubmit must classify busy, got '$out'"
+  run_claude_hook "$settings" SessionEnd || fail "SessionEnd hook command failed"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "idle claude-hook" ] || fail "a secondmate SessionEnd must classify idle, got '$out'"
+  assert_absent "$state/$id.turn-ended" "no secondmate hook may write the turn-ended marker"
+  pass "a claude secondmate reports exact busy and idle verdicts without per-turn parent wakes"
+}
+
+test_claude_secondmate_never_replaces_operator_settings() {
+  local rec id=busy-sm-cl-2 out sm
+  rec=$(make_spawn_case claude-secondmate-operator claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  mkdir -p "$sm/.claude"
+  printf '{"permissions":{"allow":["Bash(ls)"]}}\n' > "$sm/.claude/settings.local.json"
+  cp "$sm/.claude/settings.local.json" "$CASE_DIR/operator-settings"
+  out=$(run_secondmate_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$CASE_DIR/launch.log" "$id" claude) && {
+    fail "a secondmate spawn must refuse to replace an operator-owned settings.local.json: $out"
+  }
+  assert_contains "$out" "was not written by firstmate" \
+    "the refusal must name the operator-owned settings file: $out"
+  cmp -s "$CASE_DIR/operator-settings" "$sm/.claude/settings.local.json" \
+    || fail "the operator's settings.local.json was modified"
+  assert_absent "$HOME_DIR/state/$id.busy-gen" "a refused secondmate spawn must not leave an armed busy record"
+  pass "a claude secondmate spawn never replaces an operator-owned settings.local.json in its home"
+}
+
+test_pi_secondmate_loads_semantic_extension_without_turnend() {
+  local rec id=busy-sm-pi-1 out state ext sm launch
+  rec=$(make_spawn_case pi-secondmate pi "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  out=$(run_secondmate_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$CASE_DIR/launch.log" "$id" pi)
+  expect_code 0 $? "pi secondmate spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  ext="$state/$id.pi-ext.ts"
+  assert_present "$ext" "pi secondmate spawn did not write the per-task busy-state extension"
+  launch=$(cat "$CASE_DIR/launch.log")
+  assert_contains "$launch" "-e '$sm/.pi/extensions/fm-primary-turnend-guard.ts' -e '$sm/.pi/extensions/fm-primary-pi-watch.ts' -e '" \
+    "a pi secondmate must keep its primary extensions and add the busy-state one: $launch"
+  assert_contains "$launch" "/$id.pi-ext.ts'" "a pi secondmate launch does not load its busy-state extension: $launch"
+
+  out=$(classify pi "$id" "$state")
+  [ "$out" = "busy fm-spawn" ] || fail "seed after a pi secondmate spawn must be 'busy fm-spawn', got '$out'"
+  out=$(drive_pi_ext "$ext" handlers) || fail "pi extension handler listing failed: $out"
+  case " $out " in
+    *" agent_settled agent_start "*) ;;
+    *) fail "a pi secondmate extension must register its semantic handlers, got '$out'" ;;
+  esac
+  case " $out " in
+    *" turn_end "*) fail "a pi secondmate extension must not register the turn-ended notification: '$out'" ;;
+  esac
+  out=$(drive_pi_ext "$ext" settle-idle) || fail "agent_settled drive failed: $out"
+  out=$(classify pi "$id" "$state")
+  [ "$out" = "idle pi-ext" ] || fail "a settled pi secondmate must classify 'idle pi-ext', got '$out'"
+  out=$(drive_pi_ext "$ext" agent-start) || fail "agent_start drive failed: $out"
+  out=$(classify pi "$id" "$state")
+  [ "$out" = "busy pi-ext" ] || fail "a pi secondmate agent_start must classify busy, got '$out'"
+  assert_absent "$state/$id.turn-ended" "a pi secondmate must never write the turn-ended marker"
+  pass "a pi secondmate loads its semantic busy extension and writes no turn-ended marker"
+}
+
+test_opencode_secondmate_plugin_without_turnend() {
+  local rec id=busy-sm-oc-1 out state plugin sm
+  rec=$(make_spawn_case oc-secondmate opencode "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  out=$(run_secondmate_spawn "$HOME_DIR" "$sm" "$FAKEBIN_DIR" "$CASE_DIR/launch.log" "$id" opencode)
+  expect_code 0 $? "opencode secondmate spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  plugin="$sm/.opencode/plugins/fm-busy-state.js"
+  assert_present "$plugin" "opencode secondmate spawn did not write the busy-state plugin into its home"
+  out=$(classify opencode "$id" "$state")
+  [ "$out" = "busy fm-spawn" ] || fail "seed after an opencode secondmate spawn must be 'busy fm-spawn', got '$out'"
+  rm -f "$state/$id.turn-ended"
+  out=$(drive_oc_plugin "$plugin" \
+    "$(oc_status ses_main busy)" \
+    "$(oc_idle ses_main)") || fail "session.idle drive failed: $out"
+  out=$(classify opencode "$id" "$state")
+  [ "$out" = "idle opencode-plugin" ] || fail "an idle opencode secondmate must classify idle, got '$out'"
+  assert_absent "$state/$id.turn-ended" "an opencode secondmate session.idle must not wake its parent"
+  pass "an opencode secondmate reports semantic state and writes no turn-ended marker"
+}
+
 test_pi_extension_semantic_lifecycle
 test_pi_extension_serializes_settle_before_next_start
 test_pi_extension_stale_incarnation_rejected
@@ -434,5 +582,9 @@ test_gemini_hooks_stale_incarnation_harmless
 test_raw_gemini_launch_has_no_semantic_wiring
 test_gemini_is_refused_as_a_secondmate
 test_codex_unverified_until_a_semantic_source_exists
+test_claude_secondmate_arms_semantic_hooks_without_turnend
+test_claude_secondmate_never_replaces_operator_settings
+test_pi_secondmate_loads_semantic_extension_without_turnend
+test_opencode_secondmate_plugin_without_turnend
 
 echo "all fm-busy-adapter-wiring tests passed"

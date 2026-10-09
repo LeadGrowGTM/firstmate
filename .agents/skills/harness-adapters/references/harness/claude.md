@@ -6,7 +6,7 @@ Busy hooks verified 2026-07-28 on Claude Code 2.1.220.
 
 | Fact | Value |
 |---|---|
-| Busy | Owned hooks: `UserPromptSubmit` opens while `Stop`, `StopFailure`, and `SessionEnd` close; manual interrupt emits no hook, so control reports delivered keys and live endpoint only, publishes no idle event or cancellation claim, and usually leaves `claude-hook` busy. |
+| Busy | Owned hooks: `UserPromptSubmit` opens, `PreToolUse` re-opens a turn that continues without a prompt (a Stop-hook exit-2 continuation or an `asyncRewake` wake turn), while `Stop`, `StopFailure`, and `SessionEnd` close; manual interrupt emits no hook, so control reports delivered keys and live endpoint only, publishes no idle event or cancellation claim, and usually leaves `claude-hook` busy. |
 | Exit | `/exit`. |
 | Interrupt | Single Escape. |
 | Skill | `/<skill>`, for example `/no-mistakes`. |
@@ -69,7 +69,8 @@ A `--secondmate` launch omits the statement because a secondmate operates under 
 ## Primary integration
 
 [`../../../../../docs/verification/supervision.md`](../../../../../docs/verification/supervision.md#turn-end-guard) records the current primary and Stop auto-arm live evidence.
-This differs from the worker hook, which only touches a task marker through `.claude/settings.local.json`.
+This differs from the busy-state hooks the spawn writes through `.claude/settings.local.json` into a worker's worktree or a secondmate's home, which record semantic busy state and, for a worker only, touch a task marker.
+A secondmate home's `.claude/settings.local.json` that never invokes `../../../bin/fm-busy-event.sh` is the operator's, so a claude secondmate spawn refuses rather than replace it, and `../../../bin/fm-control.sh` refuses such a relaunch before stopping the running mate.
 
 Primary `.claude/settings.json` registers `../../../bin/fm-turnend-guard.sh --claude` and `../../../bin/fm-claude-stop-autoarm.sh` with `asyncRewake: true` and `timeout: 28800`.
 Guard exit 2 plus stderr forces continuation.

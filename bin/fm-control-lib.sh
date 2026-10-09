@@ -366,6 +366,14 @@ fm_control_endpoint_absence_verdict() {  # <backend> <target>
   esac
 }
 
+# A .claude/settings.local.json that never invokes fm-busy-event.sh was not
+# written by firstmate, so it is the operator's and firstmate never removes or
+# replaces it.
+fm_control_claude_settings_operator_owned() {  # <worktree>
+  [ -e "$1/.claude/settings.local.json" ] &&
+    ! grep -qF 'fm-busy-event.sh' "$1/.claude/settings.local.json" 2>/dev/null
+}
+
 # The per-task wiring artifacts a harness leaves behind, so a relaunch that
 # changes harness (or re-arms the same one with a fresh busy generation) can
 # clear the previous incarnation's wiring instead of leaving a stale hook
