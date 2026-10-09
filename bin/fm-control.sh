@@ -5,7 +5,7 @@
 # Usage: fm-control.sh <task-id> interrupt
 #        fm-control.sh <task-id> exit
 #        fm-control.sh <task-id> relaunch [--harness <name>] [--model <name>]
-#                                         [--effort <level>]
+#                                         [--effort <level>] [--only-if-idle]
 #                                         (--note <text> | --note-file <path>)
 #
 # Why this exists, and how it differs from fm-send.sh. bin/fm-send.sh is the
@@ -80,6 +80,11 @@
 #              inherits the local copy but none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
 #              standing charter is never rewritten.
+#              --only-if-idle makes the exit step refuse instead of
+#              interrupting: unless the semantic busy-state verdict reads
+#              exactly idle there, the old agent is left untouched and the
+#              command exits 3, so a scheduled caller can tell a turn that
+#              started after its own idle read from a failure.
 #              Records a durable checkpoint and that note, exits the old agent,
 #              then delegates the launch to its single owner,
 #              bin/fm-spawn.sh --relaunch. A failure before publication keeps
@@ -238,6 +243,7 @@ MODEL_SET=0
 EFFORT_SET=0
 NOTE=
 NOTE_SET=0
+ONLY_IF_IDLE=0
 control_want_value=
 for control_arg in "$@"; do
   if [ -n "$control_want_value" ]; then
@@ -268,6 +274,7 @@ for control_arg in "$@"; do
     --note) control_want_value=note ;;
     --note=*) NOTE=${control_arg#--note=}; NOTE_SET=1 ;;
     --note-file) control_want_value=note_file ;;
+    --only-if-idle) ONLY_IF_IDLE=1 ;;
     --note-file=*)
       [ -f "${control_arg#--note-file=}" ] || die "--note-file '${control_arg#--note-file=}' is not a readable file"
       NOTE=$(cat "${control_arg#--note-file=}")
@@ -283,7 +290,8 @@ fi
 
 if [ "$VERB" != relaunch ]; then
   [ "$HARNESS_SET" = 0 ] && [ "$MODEL_SET" = 0 ] && [ "$EFFORT_SET" = 0 ] && [ "$NOTE_SET" = 0 ] \
-    || die "--harness, --model, --effort, and --note apply to 'relaunch' only"
+    && [ "$ONLY_IF_IDLE" = 0 ] \
+    || die "--harness, --model, --effort, --note, and --only-if-idle apply to 'relaunch' only"
 fi
 [ "$HARNESS_SET" = 0 ] || [ -n "$NEW_HARNESS" ] || die "--harness requires a non-empty value"
 [ "$MODEL_SET" = 0 ] || [ -n "$NEW_MODEL" ] || die "--model requires a non-empty value"
@@ -557,7 +565,7 @@ retire_busy_incarnation() {
 # do_exit: stop the running agent, preserving endpoint and worktree. Prints
 # `already-stopped`, `endpoint-gone`, or `stopped`.
 do_exit() {
-  local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed
+  local state cmd hazard verdict busy composer_state cancel absence interrupt_result=not-needed
   require_state_verified_backend exit
   state=$(agent_state)
   case "$state" in
@@ -603,7 +611,12 @@ do_exit() {
     *) die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint" ;;
   esac
   # A busy agent is interrupted first before the exit command is submitted.
-  case "$(busy_verdict)" in
+  busy=$(busy_verdict)
+  if [ "$ONLY_IF_IDLE" = 1 ] && [ "${busy%% *}" != idle ]; then
+    echo "error: task $ID reads '${busy:-unknown}' rather than idle at the exit point; --only-if-idle refuses to interrupt it, so its agent was left running" >&2
+    exit 3
+  fi
+  case "$busy" in
     busy*)
       cancel=$(deliver_interrupt) || return $?
       state=$(agent_state)

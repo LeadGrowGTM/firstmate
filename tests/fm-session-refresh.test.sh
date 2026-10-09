@@ -10,11 +10,15 @@
 #      window: busy and unknown (including a Codex mate, which has no verified
 #      idle source) wait for the next run, as does a turn that resumes between
 #      the two reads.
-#   3. Ship and scout tasks, remote second mates, and backends that cannot
-#      prove a stop are skipped without being touched.
-#   4. The first failure stops the run, whether the relaunch itself fails or the
-#      replacement never reads idle, and nothing after it is touched.
-#   5. Named task ids narrow the run, and invalid use is refused.
+#   3. Ship and scout tasks, remote second mates, backends that cannot prove a
+#      stop, and Pi-family mates on herdr (whose relaunch resumes the Pi
+#      session) are skipped without being touched.
+#   4. A turn that starts after the idle reads but before the exit is left
+#      running and reported as skipped, not interrupted.
+#   5. The first failure stops the run, whether the relaunch itself fails or the
+#      replacement never reads idle twice across the settle window, and nothing
+#      after it is touched.
+#   6. Named task ids narrow the run, and invalid use is refused.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -99,20 +103,50 @@ exit 0
 SH
   chmod +x "$fb/tmux"
   # A wait elapses at once; when `busy-during-wait` names a mate, that mate's
-  # turn resumes during the first wait and its tool call records busy.
+  # turn resumes during the first wait and its tool call records busy. When
+  # `busy-after-launch` names one, its replacement's turn resumes during the
+  # first settle wait after its launch was delivered.
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 D=$FM_FAKE_DIR
+fire() {
+  "$FM_FAKE_BUSY_EVENT" apply "$FM_FAKE_STATE" "$1" busy \
+    --gen "$(cat "$FM_FAKE_STATE/$1.busy-gen")" --source claude-hook --event PreToolUse >/dev/null
+}
 if [ -f "$D/busy-during-wait" ]; then
   id=$(cat "$D/busy-during-wait")
   rm -f "$D/busy-during-wait"
-  "$FM_FAKE_BUSY_EVENT" apply "$FM_FAKE_STATE" "$id" busy \
-    --gen "$(cat "$FM_FAKE_STATE/$id.busy-gen")" --source claude-hook --event PreToolUse >/dev/null
+  fire "$id"
+fi
+if [ -f "$D/busy-after-launch" ] && [ "${1:-}" = "$FM_SESSION_REFRESH_SETTLE" ] \
+   && grep -q 'Firstmate operational input waiting: read\|encode launch-brief' "$D/literal"; then
+  id=$(cat "$D/busy-after-launch")
+  rm -f "$D/busy-after-launch"
+  fire "$id"
 fi
 /bin/sleep 0.01
 exit 0
 SH
   chmod +x "$fb/sleep"
+  # The control plane's checkpoint reads the worktree status after the refresh's
+  # idle reads and before the exit; when `busy-at-checkpoint` names a mate, its
+  # turn starts right then.
+  cat > "$fb/git" <<SH
+#!/usr/bin/env bash
+D=\$FM_FAKE_DIR
+case " \$* " in
+  *" status --porcelain "*)
+    if [ -f "\$D/busy-at-checkpoint" ]; then
+      id=\$(cat "\$D/busy-at-checkpoint")
+      rm -f "\$D/busy-at-checkpoint"
+      "\$FM_FAKE_BUSY_EVENT" apply "\$FM_FAKE_STATE" "\$id" busy \\
+        --gen "\$(cat "\$FM_FAKE_STATE/\$id.busy-gen")" --source claude-hook --event UserPromptSubmit >/dev/null
+    fi
+    ;;
+esac
+exec $(command -v git) "\$@"
+SH
+  chmod +x "$fb/git"
 }
 
 new_case() {  # <name>
@@ -166,7 +200,7 @@ run_refresh() {  # <case-dir> <args...>
   env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
     FM_FAKE_STATE="$dir/home/state" FM_FAKE_BUSY_EVENT="$EV" \
     FM_SPAWN_NO_GUARD=1 FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 \
-    FM_CONTROL_LAUNCH_WAIT=0.05 FM_SESSION_REFRESH_POLL=0.01 \
+    FM_CONTROL_LAUNCH_WAIT=0.05 FM_SESSION_REFRESH_POLL=0.01 FM_SESSION_REFRESH_SETTLE=30 \
     FM_SESSION_REFRESH_IDLE_WAIT="${FM_TEST_IDLE_WAIT:-1}" \
     "$REFRESH" "$@" 2>&1
 }
@@ -250,6 +284,46 @@ test_unrefreshable_mates_are_skipped() {
   pass "T3 remote mates and unprovable backends are skipped"
 }
 
+# --- T3b: Pi-family mates on herdr are skipped --------------------------------
+test_pi_mates_on_herdr_are_skipped() {
+  local dir out rc
+  dir=$(new_case herdr-pi)
+  add_mate "$dir" sm1 idle pi default default "backend=herdr"
+  add_mate "$dir" sm2 idle pi-signed default default "backend=herdr"
+
+  out=$(run_refresh "$dir"); rc=$?
+
+  expect_code 0 "$rc" "a skip is not a failure"$'\n'"$out"
+  assert_contains "$out" "sm1: skipped (herdr resumes the Pi session, not a fresh one)" \
+    "a Pi mate on herdr would resume its session, so it must be skipped"
+  assert_contains "$out" "sm2: skipped (herdr resumes the Pi session, not a fresh one)" \
+    "a pi-signed mate on herdr would resume its session, so it must be skipped"
+  ! exited "$dir" sm1 || fail "a Pi mate on herdr was stopped"
+  ! exited "$dir" sm2 || fail "a pi-signed mate on herdr was stopped"
+  pass "T3b Pi-family mates on herdr are skipped"
+}
+
+# --- T3c: a turn that starts before the exit is left running ------------------
+test_turn_started_before_the_exit_is_left_running() {
+  local dir out rc
+  dir=$(new_case became-busy)
+  add_mate "$dir" sm1 idle
+  add_mate "$dir" sm2 idle
+  printf 'sm1' > "$dir/fake/busy-at-checkpoint"
+
+  out=$(run_refresh "$dir"); rc=$?
+
+  expect_code 0 "$rc" "a mate that became busy is a wait, not a failure"$'\n'"$out"
+  assert_contains "$out" "sm1: skipped (became busy, next night)" \
+    "a turn that started after the idle reads must be reported as skipped"
+  ! exited "$dir" sm1 || fail "a mate whose turn started before the exit was stopped"
+  assert_equals "busy" "$(bash -c '. "$1/fm-backend.sh"; . "$1/fm-busy-lib.sh"; fm_busy_classify_meta "$2" sm1 "$3"' _ \
+    "$ROOT/bin" "$dir/home/state/sm1.meta" "$dir/home/state" | cut -d' ' -f1)" \
+    "the running turn must not be interrupted"
+  assert_contains "$out" "sm2: relaunched" "the run must continue to the next mate"
+  pass "T3c a turn that starts before the exit is left running"
+}
+
 # --- T4: a failed relaunch stops the run --------------------------------------
 test_failed_relaunch_stops_the_run() {
   local dir out rc
@@ -287,9 +361,27 @@ test_replacement_must_read_idle_before_the_next() {
   pass "T5 each replacement must read idle before the next is touched"
 }
 
+# --- T5b: the replacement's idle must hold across the settle window -----------
+test_replacement_idle_must_hold_across_the_settle_window() {
+  local dir out rc
+  dir=$(new_case not-settled)
+  add_mate "$dir" sm1 idle
+  add_mate "$dir" sm2 idle
+  # The replacement's first turn recorded idle, then its Stop hook continued it.
+  printf 'sm1' > "$dir/fake/busy-after-launch"
+
+  out=$(FM_TEST_IDLE_WAIT=0 run_refresh "$dir"); rc=$?
+
+  expect_code 1 "$rc" "a replacement whose idle did not hold must fail the run"$'\n'"$out"
+  assert_contains "$out" "sm1: FAILED relaunched but never came back idle" \
+    "a single idle read of the replacement must not count as settled"
+  ! exited "$dir" sm2 || fail "the next mate was touched before the replacement settled"
+  pass "T5b the replacement's idle must hold across the settle window"
+}
+
 # --- T6: named ids narrow the run; invalid use is refused ---------------------
 test_named_ids_and_invalid_use() {
-  local dir out rc
+  local dir out rc poll
   dir=$(new_case named)
   add_mate "$dir" sm1 idle
   add_mate "$dir" sm2 idle
@@ -307,6 +399,10 @@ test_named_ids_and_invalid_use() {
   assert_contains "$out" "nosuch: FAILED no task record" "the missing record must be named"
   out=$(env -u FM_HOME "$REFRESH" 2>&1); rc=$?
   expect_code 1 "$rc" "a run without an explicit home must be refused"$'\n'"$out"
+  for poll in 0 0.0; do
+    out=$(env FM_HOME="$dir/home" FM_SESSION_REFRESH_POLL=$poll "$REFRESH" 2>&1); rc=$?
+    expect_code 2 "$rc" "a poll of $poll would never advance the idle wait"$'\n'"$out"
+  done
   pass "T6 named ids narrow the run; invalid use is refused"
 }
 
@@ -314,8 +410,11 @@ test_idle_mate_relaunches_on_its_recorded_profile
 test_unknown_is_never_idle
 test_idle_must_hold_across_the_settle_window
 test_unrefreshable_mates_are_skipped
+test_pi_mates_on_herdr_are_skipped
+test_turn_started_before_the_exit_is_left_running
 test_failed_relaunch_stops_the_run
 test_replacement_must_read_idle_before_the_next
+test_replacement_idle_must_hold_across_the_settle_window
 test_named_ids_and_invalid_use
 
 echo "# all fm-session-refresh tests passed"

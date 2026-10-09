@@ -17,6 +17,9 @@
 #   <id>: relaunched                     replaced and confirmed idle again
 #   <id>: busy, next night               busy right now; left alone
 #   <id>: idle state unknown, next night no positive idle verdict; left alone
+#   <id>: skipped (became busy, next night)
+#                                        a turn started before the exit; left
+#                                        running
 #   <id>: skipped (<reason>)             never refreshed by this command
 #   <id>: FAILED <what>                  the run stops here; the control
 #                                        plane's own report follows, indented
@@ -26,19 +29,24 @@
 # and its relaunch would append a progress note to those instructions every
 # night, so it is skipped as if busy. A remotely placed second mate, and one on a
 # backend that cannot prove an agent stopped, are skipped because the control
-# plane refuses them.
+# plane refuses them. A Pi or pi-signed second mate on herdr is skipped too:
+# its relaunch resumes the Pi session the pane already reports, so it would
+# never reach a fresh session.
 #
 # Idle is the semantic busy-state verdict owned by bin/fm-busy-lib.sh and
 # nothing else: only a positive `idle` relaunches, and unknown is never idle.
 # The verdict must read idle twice, FM_SESSION_REFRESH_SETTLE seconds apart,
-# because a turn can continue after its idle event was recorded (a blocking
-# Stop hook) and reads busy again only at its next tool call.
+# both before the relaunch and for the replacement after it, because a turn can
+# continue after its idle event was recorded (a blocking Stop hook) and reads
+# busy again only at its next tool call.
 # That contract has no verified Codex source yet, so a Codex second mate always
 # reads unknown and is never refreshed here.
 #
 # An idle second mate is relaunched with bin/fm-control.sh <id> relaunch, naming
 # the harness, model, and effort its state/<id>.meta records (an absent model or
 # effort is `default`), so the replacement runs the profile the old agent ran.
+# It passes --only-if-idle, so a turn that starts between the idle reads and the
+# exit is left running instead of interrupted.
 # The control plane owns the checkpoint, the journal, the exit, the launch, and
 # the rollback. The replacement must then read idle again before the next one is
 # touched, so a slow host never has two launches in flight.
@@ -50,7 +58,7 @@
 # Environment knobs:
 #   FM_SESSION_REFRESH_SETTLE     seconds between the two idle reads (30)
 #   FM_SESSION_REFRESH_IDLE_WAIT  seconds a replacement has to read idle (240)
-#   FM_SESSION_REFRESH_POLL       seconds between those reads (5)
+#   FM_SESSION_REFRESH_POLL       seconds between those reads (5; above 0)
 #   FM_CONTROL_LAUNCH_WAIT        passed through to bin/fm-control.sh unchanged
 #
 # Exit status: 0 every direct report was refreshed, left for the next run, or
@@ -59,7 +67,7 @@
 set -u
 
 usage() {
-  sed -n '2,58{s/^# \{0,1\}//;p;}' "$0"
+  sed -n '2,${/^#/!q;p;}' "$0" | sed 's/^# \{0,1\}//'
 }
 
 for arg in "$@"; do
@@ -88,6 +96,8 @@ esac
 case "$POLL" in
   ''|*[!0-9.]*|*.*.*) echo "error: FM_SESSION_REFRESH_POLL must be a number of seconds: $POLL" >&2; exit 2 ;;
 esac
+awk -v p="$POLL" 'BEGIN{exit !(p > 0)}' \
+  || { echo "error: FM_SESSION_REFRESH_POLL must be above 0 seconds: $POLL" >&2; exit 2; }
 case "$SETTLE" in
   ''|*[!0-9.]*|*.*.*) echo "error: FM_SESSION_REFRESH_SETTLE must be a number of seconds: $SETTLE" >&2; exit 2 ;;
 esac
@@ -121,10 +131,20 @@ verdict() {  # <id>
   printf '%s' "${v%% *}"
 }
 
+# settled_verdict <id>: `idle` only when the verdict reads idle twice, SETTLE
+# seconds apart; otherwise the first verdict that was not idle.
+settled_verdict() {
+  local v
+  v=$(verdict "$1")
+  [ "$v" = idle ] || { printf '%s' "$v"; return 0; }
+  sleep "$SETTLE"
+  verdict "$1"
+}
+
 # refresh_one <id>: print the outcome line; return 1 only on a failure that
 # must stop the run.
 refresh_one() {
-  local id=$1 meta="$STATE/$1.meta" kind backend harness model effort out waited
+  local id=$1 meta="$STATE/$1.meta" kind backend harness model effort out rc waited
   if [ ! -f "$meta" ]; then
     echo "$id: FAILED no task record in $STATE"
     return 1
@@ -144,31 +164,39 @@ refresh_one() {
     echo "$id: skipped ($backend backend cannot prove an agent stopped)"
     return 0
   fi
-  case "$(verdict "$id")" in
-    idle) ;;
-    busy) echo "$id: busy, next night"; return 0 ;;
-    *) echo "$id: idle state unknown, next night"; return 0 ;;
-  esac
-  sleep "$SETTLE"
-  case "$(verdict "$id")" in
+  harness=$(fm_meta_get "$meta" harness)
+  if [ "$backend" = herdr ]; then
+    case "$(fm_control_harness_family "$harness")" in
+      pi|pi-signed)
+        echo "$id: skipped (herdr resumes the Pi session, not a fresh one)"
+        return 0
+        ;;
+    esac
+  fi
+  case "$(settled_verdict "$id")" in
     idle) ;;
     busy) echo "$id: busy, next night"; return 0 ;;
     *) echo "$id: idle state unknown, next night"; return 0 ;;
   esac
 
-  harness=$(fm_meta_get "$meta" harness)
   model=$(fm_meta_get "$meta" model)
   effort=$(fm_meta_get "$meta" effort)
-  if ! out=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-control.sh" "$id" relaunch \
-      --harness "$harness" --model "${model:-default}" --effort "${effort:-default}" 2>&1); then
-    echo "$id: FAILED relaunch"
-    printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sed 's/^/  /'
-    return 1
-  fi
+  out=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-control.sh" "$id" relaunch --only-if-idle \
+    --harness "$harness" --model "${model:-default}" --effort "${effort:-default}" 2>&1)
+  rc=$?
+  case "$rc" in
+    0) ;;
+    3) echo "$id: skipped (became busy, next night)"; return 0 ;;
+    *)
+      echo "$id: FAILED relaunch"
+      printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | sed 's/^/  /'
+      return 1
+      ;;
+  esac
 
   waited=0
   while :; do
-    if [ "$(verdict "$id")" = idle ]; then
+    if [ "$(settled_verdict "$id")" = idle ]; then
       echo "$id: relaunched"
       return 0
     fi
