@@ -151,6 +151,8 @@ done
 KNOWN="$SSH_DIR/known_hosts_${ALIAS//-/_}"
 
 info=$("$BOAT_BIN" --no-update info "$ID" --json) || die "boat info failed for $ID"
+printf '%s' "$info" | jq -e '.sandbox | type == "object"' >/dev/null 2>&1 ||
+  die "boat info returned unexpected output for $ID"
 state=$(printf '%s' "$info" | jq -r '.sandbox.state // empty')
 case "$state" in
   ready|idle|running) ;;
@@ -222,7 +224,8 @@ start=$(date +%s)
 hydrated=$(printf '%s' "$info" | jq -r '.sandbox.hydrated')
 while [ "$hydrated" != true ] && [ $(( $(date +%s) - start )) -lt "$wait_max" ]; do
   sleep "$poll"
-  hydrated=$("$BOAT_BIN" --no-update info "$ID" --json | jq -r '.sandbox.hydrated') || hydrated=unknown
+  hydrated=$("$BOAT_BIN" --no-update info "$ID" --json | jq -r '.sandbox.hydrated' 2>/dev/null) || hydrated=
+  [ -n "$hydrated" ] || hydrated=unknown
 done
 waited=$(( $(date +%s) - start ))
 printf 'hydrated=%s waited=%ss\n' "$hydrated" "$waited"

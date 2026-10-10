@@ -38,7 +38,8 @@ TMP_ROOT=$(fm_test_tmproot fm-boat-alias-refresh)
 
 # The fake Boat CLI answers only the two read-only calls the helper may make and
 # records every invocation. `info` serves info.<n>.json for its n-th call when
-# that file exists, so a case can script a restore that finishes later.
+# that file exists, so a case can script a restore that finishes later, and
+# fails its n-th call when info.<n>.fail exists.
 FAKE_BOAT="$TMP_ROOT/fake-boat"
 cat > "$FAKE_BOAT" <<'SH'
 #!/usr/bin/env bash
@@ -52,7 +53,7 @@ case "${1:-}" in
     [ "$*" = "info $FAKE_BOAT_ID --json" ] || { echo "fake boat: unexpected: $*" >&2; exit 97; }
     n=$(($(cat "$D/info.count" 2>/dev/null || echo 0) + 1))
     printf '%s\n' "$n" > "$D/info.count"
-    [ ! -e "$D/info.fail" ] || { echo "fake boat: info failed" >&2; exit 1; }
+    [ ! -e "$D/info.fail" ] && [ ! -e "$D/info.$n.fail" ] || { echo "fake boat: info failed" >&2; exit 1; }
     if [ -f "$D/info.$n.json" ]; then cat "$D/info.$n.json"; else cat "$D/info.json"; fi
     ;;
   exec)
@@ -246,6 +247,13 @@ test_refusals_change_nothing() {
   refresh "$ID" boat-pilot
   expect_refusal 1 "boat info failed" "a failed boat info" "$bare"
   rm -f "$BOAT/info.fail"
+  printf 'service unavailable\n' > "$BOAT/info.json"
+  refresh "$ID" boat-pilot
+  expect_refusal 1 "boat info returned unexpected output" "boat info output that is not JSON" "$bare"
+  printf '[]\n' > "$BOAT/info.json"
+  refresh "$ID" boat-pilot
+  expect_refusal 1 "boat info returned unexpected output" "boat info output with no sandbox object" "$bare"
+  set_info running 203.0.113.7:19034 null true
 
   set_exec 1 ''
   refresh "$ID" boat-pilot
@@ -349,6 +357,23 @@ test_restore_wait() {
   assert_contains "$OUT" "hydrated=false waited=" "the unfinished restore must be reported"
   assert_contains "$ERR" "has not finished restoring its disk" "the unfinished restore must be named"
   assert_alias boat-pilot 203.0.113.7 19034 "$FP1" "an unfinished restore still leaves the refreshed alias"
+
+  new_case restore-poll-fails
+  set_hostkey host1
+  set_info running 203.0.113.7:19034 null false
+  : > "$BOAT/info.2.fail"
+  refresh FM_BOAT_HYDRATE_WAIT=1 "$ID" boat-pilot
+  expect_code 1 "$CODE" "a restore whose only poll failed must fail"$'\n'"$OUT"
+  assert_contains "$OUT" "hydrated=unknown waited=" "a failed poll must be reported as unknown"
+
+  new_case restore-poll-recovers
+  set_hostkey host1
+  set_info running 203.0.113.7:19034 null false
+  : > "$BOAT/info.2.fail"
+  set_info running 203.0.113.7:19034 null true info.3.json
+  refresh "$ID" boat-pilot
+  expect_code 0 "$CODE" "a failed poll must not end the wait"$'\n'"$ERR"
+  assert_contains "$OUT" "hydrated=true waited=" "the restore that finished after a failed poll must be reported"
 
   new_case restore-nowait
   set_hostkey host1
