@@ -1,0 +1,41 @@
+### U1 units load verbatim: systemd's own view
+[verify exit 0]
+Restart=always
+RestartUSec=5s
+TimeoutStartUSec=15min
+ExecStartPre={ path=/usr/local/bin/fm-wait-home-ready ; argv[]=/usr/local/bin/fm-wait-home-ready 840
+
+### U2 start while /home/user is still the lazy-restore mount (findmnt reports fuse)
+MainPID=0 Result=success NRestarts=0 ActiveState=activating SubState=start-pre 
+MainPID=0 Result=success NRestarts=0 ActiveState=activating SubState=start-pre 
+worker processes: 0  herdr processes: 0
+
+### U3 restore finishes (findmnt reports ext4): both services start by themselves
+MainPID=500345 Result=success NRestarts=0 ActiveState=active SubState=running 
+MainPID=500311 Result=success NRestarts=0 ActiveState=active SubState=running 
+worker processes: 3  herdr processes: 0
+herdr stub saw: server --session fm-remote
+--- journal-equivalent manager log lines:
+--- worker state under the unit's HOME:
+~/.firstmate/remote-job
+~/.firstmate/remote-job/.seq-claims-reaped
+~/.firstmate/remote-job/worker.pid
+~/.firstmate/remote-job/worker.ready
+~/.firstmate/remote-job/logs
+~/.firstmate/remote-job/.seq-claims
+~/.firstmate/remote-job/worker.identity
+~/.firstmate/remote-job/worker.lock
+
+### U4 Restart=always: kill both main processes, systemd brings them back
+MainPID=502224 Result=success NRestarts=1 ActiveState=active SubState=running 
+MainPID=502220 Result=success NRestarts=1 ActiveState=active SubState=running 
+old pids 500345 500311 -> new pids 502224 502220
+
+### U5 home never leaves the lazy mount: start fails instead of running on it (limit shortened to 3s via drop-in)
+Job for fm-remote-herdr.service failed because the control process exited with error code.
+See "systemctl --user status fm-remote-herdr.service" and "journalctl --user -xeu fm-remote-herdr.service" for details.
+[start exit 1]
+MainPID=0 Result=exit-code NRestarts=0 ActiveState=failed SubState=failed 
+herdr processes: 0
+
+Note: the herdr stand-in execs `sleep`, so "herdr processes" counts 0 by command line; the argv it recorded ("server --session fm-remote") and the unit MainPID show it ran. findmnt is scripted and herdr is a stub; systemd, the two unit files, fm-wait-home-ready and fm-remote-job-worker.sh are real. A drop-in clears User= because the user namespace maps a single uid.

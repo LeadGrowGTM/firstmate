@@ -1,0 +1,34 @@
+### W1 fm-wait-home-ready: home is fuse for 3 checks, then ext4 (scripted findmnt on PATH)
+home ready after 0s
+[exit 0] wall=0s
+findmnt args: -n -o FSTYPE --target /home/user
+
+### W2 home stays lazy past the limit (limit 2s)
+home is still lazy after 2s
+[exit 1] wall=2s
+
+### W3 real findmnt on this host (no lazy mount)
+home ready after 0s
+[exit 0]
+
+### W4 real findmnt, real mounts in a private user+mount namespace: /home/user on tmpfs (byte-identical copy of the script, since the namespace hides /home)
+tmpfs
+home ready after 0s
+[exit 0]
+
+### P1 PATH block: non-interactive SSH-style bash with a stock Ubuntu ~/.bashrc
+--- block as shipped in docs/remote-secondmates.md:
+# FIRSTMATE PATH START
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+# FIRSTMATE PATH END
+--- block=none:
+/bin/bash: line 1: fm-remote-entrypoint.sh: command not found
+[exit 127]
+--- block=top:
+entrypoint-ran
+[exit 0]
+--- block=bottom:
+/bin/bash: line 1: fm-remote-entrypoint.sh: command not found
+[exit 127]
+--- block=top, sourced a second time does not duplicate the entry:
+~/.local/bin:/usr/bin:/bin

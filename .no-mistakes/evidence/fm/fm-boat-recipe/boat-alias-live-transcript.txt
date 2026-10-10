@@ -1,0 +1,233 @@
+host1 fingerprint: SHA256://xa8wiF1nXXd6Ks1SthTzDAuKJSdChyFHZvvk1aoPI
+host2 fingerprint: SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U
+
+### S1 first run: write the alias, then connect through it with real OpenSSH
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+sandbox=bx_live1 state=running
+endpoint: none -> 127.0.0.1:58081
+hostkey:  none -> SHA256://xa8wiF1nXXd6Ks1SthTzDAuKJSdChyFHZvvk1aoPI
+hydrated=true waited=0s
+[exit 0]
+--- boat calls:
+--no-update info bx_live1 --json
+--no-update exec bx_live1 --json -- cat /etc/ssh/ssh_host_ed25519_key.pub
+--- ~/.ssh/config:
+Host personal
+  HostName example.invalid
+  User me
+# >>> boat-alias fm-boat >>>
+Host fm-boat
+  HostName 127.0.0.1
+  Port 58081
+  User user
+  IdentityFile /tmp/fm-boat-live.vL1MR1/home/.ssh/ascii_box_ed25519
+  IdentitiesOnly yes
+  HostKeyAlias fm-boat
+  UserKnownHostsFile /tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat
+  GlobalKnownHostsFile /dev/null
+  StrictHostKeyChecking yes
+  UpdateHostKeys no
+  ForwardAgent no
+  ConnectTimeout 15
+# <<< boat-alias fm-boat <<<
+--- ~/.ssh listing (sha, mode, name):
+e23f41f1e1ee0a26 600 ascii_box_ed25519
+abde4b7cd9a6ad86 644 ascii_box_ed25519.pub
+2dd27ba850069159 600 config
+2d37a9017632e39b 664 known_hosts
+36c72f999a2c7da2 600 known_hosts_fm_boat
+$ ssh -F /tmp/fm-boat-live.vL1MR1/home/.ssh/config -o BatchMode=yes fm-boat true
+hello from machine-1 user=user cmd=true
+[exit 0]
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+hostname example.invalid
+
+### S2 resume: sandbox moved to a new machine (new host key, new port)
+--- adversarial: an impostor/new machine answers on the OLD endpoint with a different host key
+$ ssh -F /tmp/fm-boat-live.vL1MR1/home/.ssh/config -o BatchMode=yes fm-boat true
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ED25519 key sent by the remote host is
+SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U.
+Please contact your system administrator.
+Add correct host key in /tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat to get rid of this message.
+Offending ED25519 key in /tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat:1
+  remove with:
+  ssh-keygen -f '/tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat' -R 'fm-boat'
+Host key for fm-boat has changed and you have requested strict checking.
+Host key verification failed.
+[exit 255]
+pinned known-hosts file unchanged by the rejected connection (no trust-on-first-use)
+--- stale alias, old endpoint now dead:
+$ ssh -F /tmp/fm-boat-live.vL1MR1/home/.ssh/config -o BatchMode=yes fm-boat true
+ssh: connect to host 127.0.0.1 port 58081: Connection refused
+[exit 255]
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+sandbox=bx_live1 state=running
+endpoint: 127.0.0.1:58081 -> 127.0.0.1:33977
+hostkey:  SHA256://xa8wiF1nXXd6Ks1SthTzDAuKJSdChyFHZvvk1aoPI -> SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U
+hydrated=true waited=0s
+[exit 0]
+$ ssh -F /tmp/fm-boat-live.vL1MR1/home/.ssh/config -o BatchMode=yes fm-boat true
+hello from machine-2 user=user cmd=true
+[exit 0]
+--- config after refresh (one block, operator block intact):
+Host personal
+  HostName example.invalid
+  User me
+# >>> boat-alias fm-boat >>>
+Host fm-boat
+  HostName 127.0.0.1
+  Port 33977
+  User user
+  IdentityFile /tmp/fm-boat-live.vL1MR1/home/.ssh/ascii_box_ed25519
+  IdentitiesOnly yes
+  HostKeyAlias fm-boat
+  UserKnownHostsFile /tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat
+  GlobalKnownHostsFile /dev/null
+  StrictHostKeyChecking yes
+  UpdateHostKeys no
+  ForwardAgent no
+  ConnectTimeout 15
+# <<< boat-alias fm-boat <<<
+boat-alias blocks: 1
+default known_hosts untouched
+
+### S3 adversarial: Boat returns a host key that is NOT the server's (wrong pin must refuse the connection)
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+sandbox=bx_live1 state=running
+endpoint: 127.0.0.1:33977 -> 127.0.0.1:33977
+hostkey:  SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U -> SHA256://xa8wiF1nXXd6Ks1SthTzDAuKJSdChyFHZvvk1aoPI
+hydrated=true waited=0s
+[exit 0]
+$ ssh -F /tmp/fm-boat-live.vL1MR1/home/.ssh/config -o BatchMode=yes fm-boat true
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ED25519 key sent by the remote host is
+SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U.
+Please contact your system administrator.
+Add correct host key in /tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat to get rid of this message.
+Offending ED25519 key in /tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat:1
+  remove with:
+  ssh-keygen -f '/tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat' -R 'fm-boat'
+Host key for fm-boat has changed and you have requested strict checking.
+Host key verification failed.
+[exit 255]
+
+### S4 restore wait: hydrated=false for two polls, then true
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+sandbox=bx_live1 state=running
+endpoint: 127.0.0.1:33977 -> 127.0.0.1:33977
+hostkey:  SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U -> SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U
+hydrated=true waited=2s
+[exit 0]
+boat info calls: 3
+
+### S5 restore never finishes within FM_BOAT_HYDRATE_WAIT=3
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+sandbox=bx_live1 state=running
+endpoint: 127.0.0.1:33977 -> 127.0.0.1:33977
+hostkey:  SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U -> SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U
+hydrated=false waited=4s
+error: the alias is refreshed, but sandbox bx_live1 has not finished restoring its disk after 4s; a Firstmate call can hang until it does, so rerun this command before using the alias
+[exit 1]
+--- alias still refreshed and usable:
+$ ssh -F /tmp/fm-boat-live.vL1MR1/home/.ssh/config -o BatchMode=yes fm-boat true
+hello from machine-2 user=user cmd=true
+[exit 0]
+
+### S5b a poll that fails mid-wait reports hydrated=unknown, not empty
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+sandbox=bx_live1 state=running
+endpoint: 127.0.0.1:33977 -> 127.0.0.1:33977
+hostkey:  SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U -> SHA256:tUqTgfaO5DOTHwHT/i0afWXFB3+0LO0a50DwkgQHT3U
+boat: API error
+boat: API error
+hydrated=unknown waited=2s
+error: the alias is refreshed, but sandbox bx_live1 has not finished restoring its disk after 2s; a Firstmate call can hang until it does, so rerun this command before using the alias
+[exit 1]
+
+### S6 refusals leave ~/.ssh byte-identical
+--- stopped sandbox
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: sandbox bx_live1 is not running (state=stopped); resume it first
+[exit 1]
+=> ~/.ssh unchanged
+--- boat info prints non-JSON
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: boat info returned unexpected output for bx_live1
+[exit 1]
+=> ~/.ssh unchanged
+--- boat info prints a JSON array
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: boat info returned unexpected output for bx_live1
+[exit 1]
+=> ~/.ssh unchanged
+--- boat exec fails on the sandbox
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: could not read the sandbox host key through boat exec
+[exit 1]
+=> ~/.ssh unchanged
+--- boat exec returns a non-key
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: could not read the sandbox host key through boat exec
+[exit 1]
+=> ~/.ssh unchanged
+--- endpoint with shell metacharacters
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: unexpected SSH host: evil;touch /tmp/x
+[exit 1]
+=> ~/.ssh unchanged
+--- alias that could inject config
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 a b
+error: unsafe alias: a b
+usage: fm-boat-alias-refresh.sh <sandbox-id> <alias> | --remove <alias> | --help
+[exit 2]
+=> ~/.ssh unchanged
+--- not a sandbox id
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh myhost fm-boat
+error: not a sandbox id: myhost
+usage: fm-boat-alias-refresh.sh <sandbox-id> <alias> | --remove <alias> | --help
+[exit 2]
+=> ~/.ssh unchanged
+--- no Boat CLI on PATH
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: boat-nope is required but does not resolve
+[exit 1]
+=> ~/.ssh unchanged
+--- unterminated block
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 other
+error: /tmp/fm-boat-live.vL1MR1/home/.ssh/config has a '# >>> boat-alias other >>>' line with no matching end line; repair that block by hand
+[exit 1]
+=> ~/.ssh unchanged
+--- symlinked config
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh bx_live1 fm-boat
+error: /tmp/fm-boat-live.vL1MR1/home/.ssh/config is a symbolic link, and rewriting it would replace the link with a file; make it a regular file first
+[exit 1]
+=> still a symlink, unchanged
+
+### S7 --remove
+$ bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4KHKSP65913772JRZRH43Y9/bin/fm-boat-alias-refresh.sh --remove fm-boat
+removed: alias fm-boat and /tmp/fm-boat-live.vL1MR1/home/.ssh/known_hosts_fm_boat
+[exit 0]
+--- config now:
+Host personal
+  HostName example.invalid
+  User me
+--- listing:
+ascii_box_ed25519
+ascii_box_ed25519.pub
+config
+known_hosts
+boat calls during remove: 0
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+hostname fm-boat
+default known_hosts untouched
