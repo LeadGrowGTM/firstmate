@@ -1,0 +1,8 @@
+### New regression tests against the base implementation (e7ca9137 code, tests from 12395578)
+not ok - --fix held its caller's output open for the lifetime of the herdr server it started
+not ok - server_ensure left a caller descriptor open in the long-lived Herdr server launch: the reader saw no end of file within 10s
+
+### Same tests on the target commit 12395578
+ok - --fix returns to a piped caller at once while the herdr server it started keeps running
+ok - fm_backend_herdr_server_ensure: the long-lived server keeps none of its caller's descriptors, so a piped caller sees end of file at once
+tests/fm-remote-doctor.test.sh rc=0, tests/fm-backend-herdr.test.sh rc=0

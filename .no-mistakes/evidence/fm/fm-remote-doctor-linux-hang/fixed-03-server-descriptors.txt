@@ -1,0 +1,16 @@
+### Descriptors held by the Herdr server that --fix started, and by the shell waiting on it (lab host, target commit)
+-- pid 565413: herdr server --session fm-remote
+   fd 0 -> /dev/null
+   fd 1 -> /dev/null
+   fd 2 -> /dev/null
+   fd 3 -> /home/mitch/.config/herdr/sessions/fm-remote/herdr-server.log
+   fd 4 -> socket:[15200747]
+   fd 6 -> socket:[15223339]
+-- pid 565410: bash /tmp/fm-doctor-live.8yrOWU/fixed/root/bin/fm-remote-doctor.sh --fix
+   fd 0 -> /dev/null
+   fd 1 -> /dev/null
+   fd 2 -> /dev/null
+
+### The server answers after the SSH session that started it has closed
+$ ssh fmbox herdr status --json --session fm-remote | jq .server
+{"status":"running","running":true,"version":"0.7.4","protocol":16,"capabilities":{"live_handoff":true,"detached_server_daemon":false},"compatible":true,"socket":"/home/mitch/.config/herdr/sessions/fm-remote/herdr.sock","session":"fm-remote","restart_needed":false}

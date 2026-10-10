@@ -1,0 +1,32 @@
+### AFTER the fix (target commit 12395578): check mode on a fresh Linux host
+$ FM_HOME=<operator lab home> FM_SSH_BIN=<ssh -F lab config> bin/fm-on.sh box1 fm-remote-doctor.sh    (code root: fixed, bound 30s)
+mode=check
+path=/tmp/fm-doctor-live.8yrOWU/fixed/root/bin:/home/mitch/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+entrypoint=yes
+platform=linux
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required herdr=/home/mitch/.local/bin/herdr
+required tasks-axi=/home/mitch/.local/bin/tasks-axi
+required treehouse=/home/mitch/.local/bin/treehouse
+required harness=claude:/home/mitch/.local/bin/claude
+optional tmux=/usr/bin/tmux
+optional no-mistakes=absent
+optional gh=/usr/bin/gh
+check herdr=ok: /home/mitch/.local/bin/herdr
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=fixable: the Linux remote job worker is not running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=fixable: the remote job worker has not reported a fresh probe
+check launchagent=skip: launch agents apply only on darwin
+check launchagent-scope=skip: launch agents apply only on darwin
+check launchagent-loaded=skip: launch agents apply only on darwin
+check herdr-server=fixable: the herdr server for session fm-remote is not running
+check entrypoint-link=ok: /home/mitch/.local/bin/fm-remote-entrypoint.sh
+action: remote-job-worker: rerun this command with --fix to start it
+action: remote-job-probe: rerun this command with --fix to restart the worker, then rerun through fm-on.sh
+action: herdr-server: rerun this command with --fix to start it
+error: this host is not ready for a remote second mate; unresolved: remote-job-worker remote-job-probe herdr-server
+### exit=1 elapsed=0.7s
+### herdr server processes on the lab host afterwards:
+(none)
