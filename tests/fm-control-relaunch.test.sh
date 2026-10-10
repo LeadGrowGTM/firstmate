@@ -428,6 +428,35 @@ test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven() {
   pass "fm-control relaunch: an unreadable composer fails safe before the exit command is typed"
 }
 
+# --only-if-idle refuses with exit 3 instead of interrupting a turn that is not
+# exactly idle at the exit point, and changes nothing else about relaunch.
+test_only_if_idle_refuses_instead_of_interrupting() {
+  local dir out rc
+  dir=$(new_case only-idle rl45)
+  add_ship_task "$dir" rl45 claude
+  "$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl45 \
+    --state busy --source claude-hook --event UserPromptSubmit >/dev/null
+
+  out=$(run_control "$dir" rl45 relaunch --only-if-idle --note "nightly"); rc=$?
+  expect_code 3 "$rc" "a busy agent must be refused with the distinct status"$'\n'"$out"
+  assert_contains "$out" "--only-if-idle refuses to interrupt it" "the refusal should name the option"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "a refused relaunch must leave the old agent running"
+  assert_no_grep "/exit" "$dir/fake/literal" "no exit command may be typed into a busy agent"
+  assert_equals "" "$(cat "$dir/fake/keys")" "no interrupt may be delivered to a busy agent"
+  assert_not_contains "$(cat "$dir/home/data/rl45/brief.md")" "Progress note" \
+    "a refused relaunch must restore the instructions"
+
+  out=$(run_control "$dir" rl45 exit --only-if-idle); rc=$?
+  expect_code 1 "$rc" "--only-if-idle applies to relaunch only"$'\n'"$out"
+
+  "$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl45 \
+    --state idle --source claude-hook --event Stop >/dev/null
+  out=$(run_control "$dir" rl45 relaunch --only-if-idle --note "nightly"); rc=$?
+  expect_code 0 "$rc" "an idle agent relaunches with --only-if-idle"$'\n'"$out"
+  assert_contains "$out" "relaunched rl45" "the idle relaunch should complete"
+  pass "fm-control relaunch: --only-if-idle refuses a non-idle agent instead of interrupting it"
+}
+
 test_relaunch_from_linked_home_preserves_recorded_worktree() {
   local dir out rc head fetch_head
   dir=$(new_case linked-home rl42)
@@ -634,7 +663,7 @@ test_harness_switch_moves_the_record_and_clears_prior_wiring() {
   add_ship_task "$dir" rl4 claude
   # Wiring the previous claude incarnation left in the worktree.
   mkdir -p "$dir/wt/.claude"
-  printf '{"hooks":{}}\n' > "$dir/wt/.claude/settings.local.json"
+  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"fm-busy-event.sh apply"}]}]}}\n' > "$dir/wt/.claude/settings.local.json"
   printf 'codex' > "$dir/fake/becomes"
   out=$(run_control "$dir" rl4 relaunch --harness codex --note "switching runtime"); rc=$?
   expect_code 0 "$rc" "a harness switch should succeed"$'\n'"$out"
@@ -906,7 +935,7 @@ test_wiring_removal_failure_refuses_before_replacement_arm() {
   add_ship_task "$dir" rl29 claude
   hook="$dir/wt/.claude/settings.local.json"
   mkdir -p "${hook%/*}"
-  printf '{}\n' > "$hook"
+  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"fm-busy-event.sh apply"}]}]}}\n' > "$hook"
   real_rm=$(command -v rm)
   make_rm_failure_stub "$dir"
   out=$(FM_REAL_RM="$real_rm" FM_FAKE_RM_FAIL_PATH="$hook" \
@@ -983,6 +1012,126 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
     || fail "the configured effort token should come with the pin"
   assert_not_contains "$out" "not a verified harness" "codex is a verified harness"
   pass "fm-control relaunch: a secondmate relaunch re-resolves its durable configured harness pin"
+}
+
+# claude_hook_cmd <settings.json> <hook-event>: the command a Claude hook runs.
+claude_hook_cmd() {
+  jq -r ".hooks[\"$2\"][0].hooks[0].command" "$1"
+}
+
+# A secondmate launched before its kind was armed carries no busy record, so a
+# relaunch is what gives it one: the replacement must come back with a fresh
+# armed generation whose hooks report an exact verdict, and never with the
+# per-turn turn-ended notification a worker's hooks also write.
+test_secondmate_relaunch_arms_the_semantic_busy_record() {
+  local dir home sm out rc gen1 gen2 settings stale_submit verdict
+  dir=$(new_case smbusy sm7)
+  home="$dir/home"
+  sm="$dir/smhome"
+  mkdir -p "$home/data/sm7"
+  printf '# secondmate brief\n' > "$home/data/sm7/brief.md"
+  fm_git_worktree "$dir/proj" "$sm" sm-busy-branch
+  mkdir -p "$sm/state" "$sm/data" "$sm/bin"
+  printf 'sm7\n' > "$sm/.fm-secondmate-home"
+  printf '# agents\n' > "$sm/AGENTS.md"
+  {
+    echo "window=fmses:fm-sm7"
+    echo "endpoint_task_id=sm7"
+    echo "worktree=$sm"
+    echo "project=$sm"
+    echo "harness=claude"
+    echo "kind=secondmate"
+    echo "mode=secondmate"
+    echo "yolo=off"
+    echo "model=default"
+    echo "effort=default"
+    echo "home=$sm"
+  } > "$home/state/sm7.meta"
+  printf '%s\n' "fm-sm7" > "$dir/fake/windows"
+  printf '%s' "$sm" > "$dir/fake/cwd"
+  [ ! -e "$home/state/sm7.busy-gen" ] || fail "the fixture must start with no busy record"
+
+  out=$(run_control "$dir" sm7 relaunch); rc=$?
+  expect_code 0 "$rc" "a claude secondmate should relaunch"$'\n'"$out"
+  [ -f "$home/state/sm7.busy-gen" ] || fail "a relaunched secondmate must come back with an armed busy record"
+  gen1=$(cat "$home/state/sm7.busy-gen")
+  [ "$(meta_field "$dir" sm7 busy_gen)" = "$gen1" ] \
+    || fail "the relaunched secondmate's record must carry its armed generation"
+  settings="$sm/.claude/settings.local.json"
+  [ -f "$settings" ] || fail "a relaunched claude secondmate must have its busy-state hooks"
+  rm -f "$home/state/sm7.turn-ended"
+  sh -c "$(claude_hook_cmd "$settings" Stop)" || fail "the replacement's Stop hook failed"
+  verdict=$(bash -c '. "$1"; fm_busy_classify tmux fmses:fm-sm7 claude sm7 "$2"' _ \
+    "$ROOT/bin/fm-busy-lib.sh" "$home/state")
+  [ "$verdict" = "idle claude-hook" ] \
+    || fail "the relaunched secondmate's Stop must read exactly idle, got '$verdict'"
+  [ ! -e "$home/state/sm7.turn-ended" ] \
+    || fail "a secondmate's Stop must not wake its parent with a turn-ended marker"
+  stale_submit=$(claude_hook_cmd "$settings" UserPromptSubmit)
+
+  printf 'claude' > "$dir/fake/command"
+  out=$(run_control "$dir" sm7 relaunch); rc=$?
+  expect_code 0 "$rc" "a second claude secondmate relaunch should succeed"$'\n'"$out"
+  gen2=$(cat "$home/state/sm7.busy-gen")
+  [ -n "$gen2" ] && [ "$gen2" != "$gen1" ] \
+    || fail "each secondmate relaunch must arm a fresh busy generation"
+  sh -c "$stale_submit" || fail "a superseded hook must still exit 0"
+  verdict=$(bash -c '. "$1"; fm_busy_classify tmux fmses:fm-sm7 claude sm7 "$2"' _ \
+    "$ROOT/bin/fm-busy-lib.sh" "$home/state")
+  [ "$verdict" = "busy fm-spawn" ] \
+    || fail "a superseded incarnation's hook must not change the replacement's record, got '$verdict'"
+  pass "fm-control relaunch: a secondmate relaunch arms a fresh semantic busy record without turn-end wakes"
+}
+
+# An operator-owned settings.local.json in a secondmate home survives a relaunch
+# exactly as it survives a spawn: a claude replacement refuses before the old
+# agent is stopped, and a switch away from claude leaves the file in place.
+test_secondmate_relaunch_never_removes_operator_settings() {
+  local dir home sm out rc settings
+  dir=$(new_case smoperator sm8)
+  home="$dir/home"
+  sm="$dir/smhome"
+  mkdir -p "$home/data/sm8"
+  printf '# secondmate brief\n' > "$home/data/sm8/brief.md"
+  fm_git_worktree "$dir/proj" "$sm" sm-operator-branch
+  mkdir -p "$sm/state" "$sm/data" "$sm/bin" "$sm/.claude"
+  printf 'sm8\n' > "$sm/.fm-secondmate-home"
+  printf '# agents\n' > "$sm/AGENTS.md"
+  settings="$sm/.claude/settings.local.json"
+  printf '{"permissions":{"allow":["Bash(ls)"]}}\n' > "$settings"
+  cp "$settings" "$dir/operator-settings"
+  {
+    echo "window=fmses:fm-sm8"
+    echo "endpoint_task_id=sm8"
+    echo "worktree=$sm"
+    echo "project=$sm"
+    echo "harness=claude"
+    echo "kind=secondmate"
+    echo "mode=secondmate"
+    echo "yolo=off"
+    echo "model=default"
+    echo "effort=default"
+    echo "home=$sm"
+  } > "$home/state/sm8.meta"
+  printf '%s\n' "fm-sm8" > "$dir/fake/windows"
+  printf '%s' "$sm" > "$dir/fake/cwd"
+
+  out=$(run_control "$dir" sm8 relaunch); rc=$?
+  [ "$rc" -ne 0 ] || fail "a claude secondmate relaunch must refuse an operator-owned settings.local.json"$'\n'"$out"
+  assert_contains "$out" "was not written by firstmate" \
+    "the refusal must name the operator-owned settings file"
+  cmp -s "$dir/operator-settings" "$settings" \
+    || fail "a refused claude secondmate relaunch removed or replaced the operator's settings.local.json"
+  [ -z "$(cat "$dir/fake/literal")" ] || fail "a refused secondmate relaunch must send the old agent nothing"
+  [ "$(cat "$dir/fake/command")" = claude ] \
+    || fail "the refusal must land before the running agent is stopped"
+
+  printf 'codex' > "$dir/fake/becomes"
+  out=$(run_control "$dir" sm8 relaunch --harness codex); rc=$?
+  expect_code 0 "$rc" "a secondmate switch away from claude should succeed"$'\n'"$out"
+  cmp -s "$dir/operator-settings" "$settings" \
+    || fail "a secondmate switch away from claude removed the operator's settings.local.json"
+  pass "fm-control relaunch: a secondmate's operator-owned settings.local.json is never removed or replaced"
 }
 
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop() {
@@ -2491,6 +2640,7 @@ test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
+test_only_if_idle_refuses_instead_of_interrupting
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_durable_task_metadata
 test_relaunch_serializes_concurrent_durable_metadata_publication
@@ -2513,6 +2663,8 @@ test_prior_harness_turnend_registry_entry_is_cleared
 test_wiring_removal_failure_refuses_before_replacement_arm
 test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
+test_secondmate_relaunch_arms_the_semantic_busy_record
+test_secondmate_relaunch_never_removes_operator_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop
 test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop
 test_explicit_secondmate_harness_ignores_configured_profile_axes

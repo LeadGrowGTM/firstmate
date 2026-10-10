@@ -10,6 +10,8 @@ set -u
 
 # shellcheck source=tests/wake-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
+# shellcheck source=tests/fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
 WATCH="$ROOT/bin/fm-watch.sh"
 DRAIN="$ROOT/bin/fm-wake-drain.sh"
@@ -739,14 +741,11 @@ SH
 # so a mate stuck busy forever still alarms.
 #
 # Scope, so this case is not read as more coverage than it is: the fixture arms
-# the busy contract by hand through fm-busy-event.sh. A real --secondmate spawn
-# never does - bin/fm-spawn.sh arms the contract inside its `[ "$KIND" !=
-# secondmate ]` guard, so both arm calls are skipped for a mate - and with no
-# record fm_busy_classify_meta answers "unknown missing" for a tmux-backed
-# claude, pi, opencode, or omp mate, which is not a busy verdict. Hand-arming is
-# what isolates the launch-aging defect this case pins, and the launch-aging
-# defect is all it pins: on tmux the stall alarm is still reachable through that
-# missing busy record, tracked upstream as issue 4268.
+# the busy contract by hand through fm-busy-event.sh, standing in for the record
+# a real claude, pi, opencode, or omp --secondmate spawn arms
+# (tests/fm-busy-adapter-wiring.test.sh pins that spawn-side wiring). Hand-arming
+# is what isolates the launch-aging defect this case pins, and the launch-aging
+# defect is all it pins.
 test_secondmate_long_lived_mate_mid_turn_is_not_a_stall() {
   local dir state sub fakebin stall_count row_epoch
   dir=$(make_case secondmate-long-lived-active-turn)
@@ -1056,6 +1055,83 @@ test_secondmate_busy_and_unknown_panes_are_not_rung() {
   [ ! -s "$dir/sent-unknown" ] || fail "an unknown pane was rung: $(cat "$dir/sent-unknown")"
   [ ! -e "$state/mate.inbox" ] || fail "an unknown pane received a drain steer"
   pass "busy panes defer without a ring and unknown panes keep the parent alarm"
+}
+
+# The ring gate above reads the record a real secondmate spawn arms, not only a
+# hand-armed one: a claude mate launched through fm-spawn starts busy (its
+# charter is a submitted turn), so a leftover row defers without a ring, and once
+# the mate's own Stop hook records exact idle the parent rings it to drain. The
+# mate's hooks never write the turn-ended marker, so its turns wake no parent.
+test_secondmate_spawned_hooks_gate_the_drain_ring() {
+  local dir state sub fakebin spawnbin out settings verdict
+  dir=$(make_case secondmate-spawned-hooks-ring)
+  state="$dir/state"
+  # A spawn refuses a secondmate home inside the active home, so this one lives
+  # beside it rather than under it like the hand-built fixtures above.
+  sub="$TMP_ROOT/secondmate-spawned-hooks-ring-home"
+  fakebin="$dir/fakebin"
+  mkdir -p "$dir/data" "$dir/projects" "$dir/config" "$sub/bin" "$sub/data" "$sub/state"
+  printf '# Firstmate\n' > "$sub/AGENTS.md"
+  printf 'mate\n' > "$sub/.fm-secondmate-home"
+  printf 'charter for mate\n' > "$sub/data/charter.md"
+  printf '%s\n' 'projects/' 'state/' 'data/' 'config/' '.no-mistakes/' > "$sub/.gitignore"
+  git -C "$sub" init -q -b main
+  spawnbin=$(make_spawn_fakebin "$dir/spawn-fake")
+  out=$(FM_BACKEND=tmux fm_test_run_spawn "$dir" "$sub" "$spawnbin" mate "$sub" claude --secondmate) \
+    || fail "the claude secondmate spawn failed: $out"
+  grep -Fx 'window=firstmate:fm-mate' "$state/mate.meta" >/dev/null \
+    || fail "the spawned secondmate record names an unexpected window: $(cat "$state/mate.meta")"
+  settings="$sub/.claude/settings.local.json"
+  [ -f "$settings" ] || fail "the spawned claude secondmate has no busy-state hooks"
+  printf '100\t7\tcheck\trouted\tcheck: routed row\n' > "$sub/state/.wake-queue"
+  install_secondmate_alive_tmux "$fakebin"
+  install_secondmate_stall_date "$fakebin"
+
+  printf '1000\n' > "$dir/now"
+  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_SENT="$dir/sent-busy" \
+    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    secondmate_stall_watch_leg "$dir" "busy-first" progress mate "$(printf '1000\t100-7')"
+  printf '1002\n' > "$dir/now"
+  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_SENT="$dir/sent-busy" \
+    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    secondmate_stall_watch_leg "$dir" "busy" tick
+  ! grep -F 'secondmate wake-loop stalled' "$dir/watch-busy.out" >/dev/null \
+    || fail "a freshly spawned (busy) mate was escalated as a stalled wake loop: $(cat "$dir/watch-busy.out")"
+  [ ! -s "$dir/sent-busy" ] || fail "a freshly spawned (busy) mate was rung: $(cat "$dir/sent-busy")"
+
+  sh -c "$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")" \
+    || fail "the spawned secondmate's Stop hook failed"
+  verdict=$(bash -c '. "$1"; fm_busy_classify tmux firstmate:fm-mate claude mate "$2"' _ \
+    "$ROOT/bin/fm-busy-lib.sh" "$state")
+  [ "$verdict" = "idle claude-hook" ] || fail "the mate's own Stop hook did not record exact idle: $verdict"
+  [ ! -e "$state/mate.turn-ended" ] || fail "the mate's Stop hook wrote a parent turn-ended marker"
+
+  rm -f "$state/.secondmate-wake-progress-mate" "$state/.secondmate-wake-stall-mate" \
+    "$state/.secondmate-wake-ring-mate"
+  printf '1000\n' > "$dir/now"
+  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_SENT="$dir/sent" \
+    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    secondmate_stall_watch_leg "$dir" "idle-first" progress mate "$(printf '1000\t100-7')"
+  printf '1002\n' > "$dir/now"
+  PATH="$fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_STATE_OVERRIDE="$state" FM_FAKE_TMUX_SENT="$dir/sent" \
+    FM_FAKE_CHILD_WAKE_QUEUE="$sub/state/.wake-queue" \
+    FM_SECONDMATE_WAKE_STALL_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    secondmate_stall_watch_leg "$dir" "ring" drained mate "$sub/state/.wake-queue"
+  ! grep -F 'secondmate wake-loop stalled' "$dir/watch-ring.out" >/dev/null \
+    || fail "an idle spawned mate that drained after the ring still alarmed: $(cat "$dir/watch-ring.out")"
+  grep -F '[ENTER]' "$dir/sent" >/dev/null \
+    || fail "an idle spawned mate was not rung to drain: $(cat "$dir/sent" 2>/dev/null)"
+  [ ! -s "$sub/state/.wake-queue" ] || fail "the ring did not let the spawned mate drain its row"
+  [ ! -e "$state/mate.turn-ended" ] || fail "the drain cycle left a parent turn-ended marker"
+  pass "a spawned claude secondmate's own hooks gate the drain ring: busy defers, exact idle rings"
 }
 
 # After a proven-idle ring, the same leftover row is a genuine stall if the
@@ -3518,6 +3594,7 @@ test_secondmate_long_lived_mate_mid_turn_is_not_a_stall
 test_secondmate_proven_idle_ring_lets_the_child_drain
 test_term_stops_a_watcher_blocked_in_the_drain_ring_idle_capture
 test_secondmate_busy_and_unknown_panes_are_not_rung
+test_secondmate_spawned_hooks_gate_the_drain_ring
 test_secondmate_genuine_stall_after_idle_ring_still_alarms
 test_secondmate_stall_marker_rejects_symlink
 test_acknowledged_stall_publication_survives_pre_marker_crash
