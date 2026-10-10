@@ -1,0 +1,24 @@
+# Opt-in systemd unit for the Herdr `fm-remote` session server on a Boat sandbox
+# that hosts a remote second mate (docs/remote-secondmates.md "Linux hosts and
+# Boat sandboxes"). Install it as /etc/systemd/system/fm-remote-herdr.service;
+# fm-remote-job.service carries the install commands.
+# The server runs through a login shell so `herdr` resolves from the account's
+# own PATH and every pane inherits the account's environment.
+# The pre-start step matters most here: a server started while the home
+# directory is still Boat's lazy-restore mount keeps its socket on that mount,
+# and nothing can reach it once Boat swaps in the real disk.
+[Unit]
+Description=Firstmate Herdr fm-remote session server
+After=network.target
+
+[Service]
+ExecStartPre=/usr/local/bin/fm-wait-home-ready 840
+TimeoutStartSec=900
+User=user
+Environment=HOME=/home/user
+ExecStart=/bin/bash -lc 'exec herdr server --session fm-remote'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
