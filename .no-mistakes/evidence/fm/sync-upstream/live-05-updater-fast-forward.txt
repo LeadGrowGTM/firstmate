@@ -1,0 +1,31 @@
+# Disposable origin + primary clone; primary local main = 31b820bf, running its own bin/fm-update.sh
+
+## 1. origin/main = f7f39ec5 (fork main with #13/#14, PR 12 unmerged) -> reported problem reproduced
+$ bin/fm-update.sh
+firstmate: skipped: diverged from origin/main
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+
+## 2. origin/main = merge commit of fm/sync-upstream@e9aeb68e into f7f39ec5 (a8e460cda84311202679838e6783bf6e632b8e4d)
+$ bin/fm-update.sh
+firstmate: updated 31b820b..a8e460c (instructions changed: bin, .agents/skills)
+no watches registered
+reread-firstmate: yes
+restart-secondmates: none
+nudge-secondmates: none
+$ git log --oneline -3
+a8e460c Merge pull request #12 from LeadGrowGTM/fm/sync-upstream
+e9aeb68 Merge remote-tracking branch 'origin/main' into fm/sync-upstream
+f7f39ec feat(bin): add opt-in nightly session refresh for idle second mates (#14)
+$ ls bin/fm-session-refresh.sh
+bin/fm-session-refresh.sh
+
+## 3. adversarial: origin/main = SQUASH of the same tree onto f7f39ec5 (fbc29df5840f612460642232384c92f6fed4d644)
+$ bin/fm-update.sh
+firstmate: skipped: diverged from origin/main
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+$ git log --oneline -1
+31b820b Merge remote-tracking branch 'upstream/main' into fm/sync-upstream

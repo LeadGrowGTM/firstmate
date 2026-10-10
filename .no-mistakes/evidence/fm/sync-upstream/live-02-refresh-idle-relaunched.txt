@@ -1,0 +1,45 @@
+$ FM_SESSION_REFRESH_SETTLE=3 bin/fm-session-refresh.sh   (second mate idle; before: gen=g1791601909.4010184.29526 seq=5 state=idle event=stop)
+labsm: relaunched
+refresh-exit=0
+
+$ cat state/labsm.busy-state (after)
+v1 gen=g1791601927.4016222.6423 seq=5 state=idle source=claude-hook event=stop ts=1791601938
+
+$ grep gen state/labsm.meta
+busy_gen=g1791601927.4016222.6423
+spawn_gen=s1791601927.4015710.1558
+
+$ cat state/labsm.control-relaunch
+v1
+task=labsm
+phase=complete
+ts=2026-10-10T03:12:08Z
+backend=tmux
+endpoint=primary:fm-labsm
+worktree=/tmp/fm-lab-sm.9PdEDl
+kind=secondmate
+from_harness=claude
+from_model=default
+from_effort=default
+to_harness=claude
+to_model=default
+to_effort=default
+worktree_head=721d3eccd62923523242b8c034f928b063339ba6
+worktree_dirty=no
+children=0
+note=none
+exit_result=stopped
+
+$ tmux capture-pane (replacement second mate pane)
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   /tmp/fm-lab-sm.9PdEDl
+❯ : Firstmate operational input waiting: read '/tmp/fm-lab-sm.9PdEDl/state/operational-inbox/1791601927-2de9bac758e30f5f.msg' and handle its contents as Firstmate operational input.
+  Read 2 files
+● Captain, the second-mate charter is read and startup reconciliation found nothing of mine under way: no work in progress, no backlog, no queued notifications. Per the charter I'm standing by idle,
+  running nothing and spawning nothing until the main firstmate routes a task.
+✻ Brewed for 7s · done 11:12 PM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

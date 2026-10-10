@@ -1,0 +1,20 @@
+$ cat state/labsm.busy-state   (second mate mid-turn, running a long foreground command)
+v1 gen=g1791602000.4035328.10885 seq=9 state=busy source=claude-hook event=pre-tool-use ts=1791602043
+
+$ FM_SESSION_REFRESH_SETTLE=3 bin/fm-session-refresh.sh
+labsm: busy, next night
+refresh-exit=0
+
+busy-gen before=g1791602000.4035328.10885 after=g1791602000.4035328.10885
+
+$ tmux capture-pane (second mate pane, same session still running)
+❯ Explicit message from the main firstmate: use your Bash tool to run exactly this in the foreground now: python3 -c "import time; time.sleep(80)"   Then reply with the one word done.
+  Waiting 80 seconds using Python · 5s
+  ⎿  $ python3 -c "import time; time.sleep(80)" (5s)
+     (ctrl+b ctrl+b (twice) to run in background)
+✶ Inferring… (7s · ↓ 231 tokens)
+  ⎿  Tip: Running multiple Claude sessions? Use /color and /rename to tell them apart at a glance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← for agents

@@ -1,0 +1,19 @@
+$ cat state/labsm.busy-state
+v1 gen=g1791602000.4035328.10885 seq=9 state=busy source=claude-hook event=pre-tool-use ts=1791602043
+
+$ bin/fm-control.sh labsm relaunch --harness claude --model default --effort default --only-if-idle
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.Ks0v6W
+error: task labsm reads 'busy claude-hook' rather than idle at the exit point; --only-if-idle refuses to interrupt it, so its agent was left running
+error: relaunch of labsm failed while stopping the old agent, which is still running; its original instructions were restored
+control-exit=3
+
+busy-gen before=g1791602000.4035328.10885 after=g1791602000.4035328.10885
+
+  ⎿  $ python3 -c "import time; time.sleep(80)" (14s)
+     (ctrl+b ctrl+b (twice) to run in background)
+· Inferring… (17s · ↓ 231 tokens)
+  ⎿  Tip: Running multiple Claude sessions? Use /color and /rename to tell them apart at a glance.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← for agents

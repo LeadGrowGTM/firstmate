@@ -1,0 +1,33 @@
+$ cat spawn.out
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.Ks0v6W
+warning: secondmate labsm sync skipped before launch: primary default-branch commit cannot be resolved
+spawned labsm harness=claude kind=secondmate mode=secondmate yolo=off window=primary:fm-labsm worktree=/tmp/fm-lab-sm.9PdEDl
+spawn-exit=0
+
+$ cat state/labsm.meta
+window=primary:fm-labsm
+endpoint_task_id=labsm
+worktree=/tmp/fm-lab-sm.9PdEDl
+project=/tmp/fm-lab-sm.9PdEDl
+harness=claude
+kind=secondmate
+mode=secondmate
+yolo=off
+tasktmp=/tmp/fm-labsm
+model=default
+effort=default
+busy_gen=g1791601909.4010184.29526
+spawn_gen=s1791601909.4009709.25203
+home=/tmp/fm-lab-sm.9PdEDl
+projects=
+
+$ cat state/labsm.busy-state  (immediately after spawn)
+v1 gen=g1791601909.4010184.29526 seq=5 state=idle source=claude-hook event=stop ts=1791601920
+
+$ ls state/ (no labsm.turn-ended marker for a second mate)
+home-summary.json
+labsm.busy-gen
+labsm.busy-state
+labsm.git-hooks
+labsm.inbox
+labsm.meta
