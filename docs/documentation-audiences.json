@@ -337,6 +337,18 @@
       "audience": "maintainer-architecture"
     },
     {
+      "path": "docs/examples/boat-remote-host/fm-remote-herdr.service",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/boat-remote-host/fm-remote-job.service",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/boat-remote-host/fm-wait-home-ready",
+      "audience": "operator-example"
+    },
+    {
       "path": "docs/examples/crew-dispatch.json",
       "audience": "operator-example"
     },
