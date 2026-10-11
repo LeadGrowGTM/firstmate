@@ -1174,12 +1174,17 @@ A reported finding is a recommendation, not cleanup authority.
 ### What the guard never does
 
 - It never asks treehouse to remove a copy that is unlanded, in use, or leased, and it never prunes by age.
-- It never prunes a pool that belongs to another home, because it prunes only from this home's own project clones.
+- It never prunes a pool that belongs to another home.
+  It prunes from this home's own project clones, and from this home's per-home pool when that pool exists.
 - It never makes a machine-wide treehouse call: the only treehouse command it runs is `treehouse prune --yes` from one project clone.
   The size total is a machine-wide read-only measurement taken with `du`.
 
-Two clones of the same origin under the same directory name share one treehouse pool, even across homes.
-Treehouse leaves a copy that another home's clone created in place, because git refuses to remove a worktree from a clone that does not own it.
+Treehouse still keys its default pool by directory name plus origin, so two clones with the same name and origin are offered one pool.
+Firstmate uses that shared pool only when every copy in it belongs to the spawning clone, which is the layout a single home already has, and those copies stay where they are.
+When the pool already holds another clone's copy, this home leases its worktree from `state/treehouse-clone-anchor/.treehouse/` instead.
+A launch that still cannot get a worktree of its own clone stops before the worker starts.
+Git still refuses to remove a worktree from a clone that does not own it, so a shared pool is not cleared by the other home.
+The daily sweep prunes and sizes that per-home pool the same way it prunes and sizes the shared one.
 
 ### Copies outside the guard
 

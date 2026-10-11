@@ -320,7 +320,41 @@ test_unknown_command_is_refused_before_any_treehouse_call() {
   [ -z "$(calls "$world")" ] || fail "an unknown command reached treehouse"
 }
 
+test_prune_also_prunes_a_present_per_home_pool() {
+  local world home anchor pool name out rc=0
+  world=$(make_world per-home-pool)
+  home=$(make_home "$world" home alpha)
+  anchor="$home/state/treehouse-clone-anchor"
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    bash -c 'set -u; . "$1"; fm_treehouse_default_pool_dir "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home/projects/alpha")
+  name=$(basename -- "$pool")
+  mkdir -p "$anchor/.treehouse/$name"
+  cat > "$world/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+dir=${FAKE_TREEHOUSE_DIR:?}
+printf '%s\t%s\t%s\n' "$(pwd -P)" "$*" "${HOME-}" >> "$dir/log"
+case "$*" in
+  'prune --yes') exit 0 ;;
+  *)
+    echo "unexpected treehouse call: $*" >&2
+    exit 64
+    ;;
+esac
+SH
+  chmod +x "$world/fakebin/treehouse"
+  out=$(guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
+  expect_code 0 "$rc" "prune with a per-home pool"$'\n'"$out"
+  [ -z "$out" ] || fail "a per-home prune that ran should be silent: $out"
+  assert_equals "$(printf '%s\t%s\t%s\n%s\t%s\t%s' \
+    "$home/projects/alpha" 'prune --yes' "$world/user" \
+    "$home/projects/alpha" 'prune --yes' "$anchor")" \
+    "$(calls "$world")" "per-home pool was not pruned with HOME set to the anchor"
+}
+
 test_prune_runs_only_the_safe_prune_from_the_project
+test_prune_also_prunes_a_present_per_home_pool
 test_prune_refuses_a_directory_that_is_not_a_clone_root
 test_prune_failure_warns_and_exits_nonzero
 test_prune_bound_is_reported_as_a_prune_that_did_not_finish

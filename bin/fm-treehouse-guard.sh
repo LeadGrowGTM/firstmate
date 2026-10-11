@@ -32,16 +32,16 @@
 # skipped silently, exit 0.  Any other prune that did not run prints one
 # `warning:` line and exits 1, which a caller is free to ignore.
 #
-# `sweep` does the daily work for this home only.  It prunes the pool of each
-# clone root under this home's projects directory, so a pool reachable only
-# from another home's clones is never pruned from here.  Two homes that clone
-# the same origin under the same directory name share one pool by treehouse's
-# own design; git still refuses to remove a copy backed by the other clone.
-# It then measures the user-level treehouse root ($HOME/.treehouse) with
-# du(1) and reports when it holds more than 5 GB.  The result is one finding
-# line in state/.treehouse-guard.result, also printed.  A prune that did not
-# run and a size that could not be measured are findings too, never read as
-# "nothing to report".  docs/configuration.md owns the max_trees guidance.
+# `sweep` does the daily work for this home only.  It prunes each clone root
+# under this home's projects directory, and that clone's per-home pool under
+# state/treehouse-clone-anchor when its pool directory exists.  Treehouse keys
+# the default pool by directory name plus origin; Firstmate uses that pool
+# only when every copy belongs to this clone, and otherwise leases per home.
+# Git still refuses to remove a copy another clone owns.  The sweep then
+# measures $HOME/.treehouse and, when present, the per-home pool root, and
+# reports when either holds more than 5 GB.  One finding line is written to
+# state/.treehouse-guard.result and printed.  A missed prune or an unmeasured
+# size is a finding too, never read as "nothing to report".  docs/configuration.md owns the max_trees guidance.
 #
 # `check` is the watcher poll.  It prints one line when the last finished
 # sweep has a finding that was not reported yet and prints nothing otherwise,
@@ -148,8 +148,53 @@ prune_project() {  # <project-dir> <caller-holds-lock:0|1>
     fi
     rc=1
   fi
+  # The default prune follows treehouse's own pool. A per-home pool is a
+  # different root, so a failure of the shared prune must not skip it, and a
+  # missing per-home pool must not add a second call.
+  if ! prune_home_pool "$project"; then
+    if [ "$rc" -eq 0 ]; then
+      GUARD_NOTE=$PRUNE_HOME_NOTE
+    else
+      GUARD_NOTE="${GUARD_NOTE}; ${PRUNE_HOME_NOTE}"
+    fi
+    rc=1
+  fi
   [ -z "$lock" ] || fm_lock_release "$lock" || true
   return "$rc"
+}
+
+# Prune this home's private pool for one clone, when that pool directory
+# exists. HOME is set only for the treehouse process. Returns 0 when there is
+# nothing to prune or the prune ran. On failure PRUNE_HOME_NOTE says why.
+prune_home_pool() {  # <project-dir>
+  local project=$1 anchor pool name private out prc=0
+  PRUNE_HOME_NOTE=
+  anchor=$(fm_treehouse_clone_anchor "$FM_HOME") || return 0
+  [ -d "$anchor" ] && [ ! -L "$anchor" ] || return 0
+  anchor=$(CDPATH='' cd -- "$anchor" 2>/dev/null && pwd -P) || {
+    PRUNE_HOME_NOTE="its per-home pool anchor could not be resolved"
+    return 1
+  }
+  pool=$(fm_treehouse_default_pool_dir "$project") || {
+    PRUNE_HOME_NOTE="its per-home pool could not be resolved"
+    return 1
+  }
+  name=$(basename -- "$pool") || {
+    PRUNE_HOME_NOTE="its per-home pool could not be resolved"
+    return 1
+  }
+  private=$anchor/.treehouse/$name
+  [ -d "$private" ] && [ ! -L "$private" ] || return 0
+  out=$(cd "$project" && HOME="$anchor" fm_run_timed "$PRUNE_SECS" treehouse prune --yes 2>&1) || prc=$?
+  if [ "$prc" -ne 0 ]; then
+    if fm_timed_out "$prc"; then
+      PRUNE_HOME_NOTE="per-home treehouse prune did not finish in ${PRUNE_SECS}s"
+    else
+      out=$(printf '%s\n' "$out" | awk 'NF { last = $0 } END { print last }')
+      PRUNE_HOME_NOTE="per-home treehouse prune exited $prc${out:+: $out}"
+    fi
+    return 1
+  fi
 }
 
 run_prune() {  # [--locked] <project-dir>
@@ -188,11 +233,10 @@ sweep_prunes() {
   done
 }
 
-sweep_size() {
-  local root out kib rc=0
-  [ -n "${HOME:-}" ] || return 0
-  root="$HOME/.treehouse"
-  [ -d "$root" ] || return 0
+measure_treehouse_root() {  # <root>
+  local root=$1 out kib rc=0
+  [ -n "$root" ] || return 0
+  [ -d "$root" ] && [ ! -L "$root" ] || return 0
   out=$(fm_run_timed "$PRUNE_SECS" du -sk "$root" 2>/dev/null) || rc=$?
   kib=$(printf '%s\n' "$out" | awk 'NR == 1 { print $1 }')
   case "$kib" in
@@ -203,6 +247,20 @@ sweep_size() {
   esac
   [ "$kib" -gt $((SIZE_LIMIT_GB * 1048576)) ] || return 0
   append_finding "worktree copies use $(awk -v k="$kib" 'BEGIN { printf "%.1f", k / 1048576 }') GB under $root (limit $SIZE_LIMIT_GB GB)"
+}
+
+sweep_size() {
+  local anchor=
+  if [ -n "${HOME:-}" ]; then
+    measure_treehouse_root "$HOME/.treehouse"
+  fi
+  anchor=$(fm_treehouse_clone_anchor "$FM_HOME" 2>/dev/null || true)
+  if [ -n "$anchor" ] && [ -d "$anchor" ] && [ ! -L "$anchor" ]; then
+    anchor=$(CDPATH='' cd -- "$anchor" 2>/dev/null && pwd -P) || anchor=
+  else
+    anchor=
+  fi
+  [ -z "$anchor" ] || measure_treehouse_root "$anchor/.treehouse"
 }
 
 write_atomically() {  # <tmp> <destination>

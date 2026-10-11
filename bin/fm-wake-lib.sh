@@ -1576,6 +1576,386 @@ fm_treehouse_pool_slot() {  # <project-dir> <worktree>
   [ "$project_common" = "$slot_common" ]
 }
 
+# Treehouse names a pool from the clone's directory name plus a 6-hex sha256 of
+# its origin URL (or of `git rev-parse --show-toplevel` when origin is absent).
+# The pool root is $HOME/.treehouse unless treehouse.toml or, when the clone has
+# no treehouse.toml, ~/.config/treehouse/config.toml sets root. An absolute root
+# is shared. A relative root is joined to that clone. This is treehouse v2.1.1's
+# resolution; bin/fm-spawn.sh uses it to notice a pool that already belongs to
+# another clone, and bin/fm-treehouse-guard.sh uses it to find the per-home pool.
+
+fm_treehouse_trim() {  # <string>
+  local value=$1
+  value=${value//$'\r'/}
+  value=${value#"${value%%[![:space:]]*}"}
+  value=${value%"${value##*[![:space:]]}"}
+  printf '%s\n' "$value"
+}
+
+fm_treehouse_short_hash() {  # <string>
+  local hex=
+  if command -v sha256sum >/dev/null 2>&1; then
+    hex=$(printf '%s' "$1" | sha256sum | awk '{ print $1 }') || return 1
+  elif command -v shasum >/dev/null 2>&1; then
+    hex=$(printf '%s' "$1" | shasum -a 256 | awk '{ print $1 }') || return 1
+  else
+    return 1
+  fi
+  [ "${#hex}" -ge 6 ] || return 1
+  printf '%s\n' "${hex:0:6}"
+}
+
+# Go's os.ExpandEnv: $NAME and ${NAME} expand, an unset name becomes empty, and
+# a trailing lone $ stays. Special one-character names expand empty, which is
+# what Getenv returns for them.
+fm_treehouse_env_value() {  # <name>
+  local name=$1
+  case "$name" in
+    [A-Za-z_][A-Za-z0-9_]*) ;;
+    *)
+      printf '\n'
+      return 0
+      ;;
+  esac
+  if [ -n "${!name+x}" ]; then
+    printf '%s\n' "${!name}"
+  else
+    printf '\n'
+  fi
+}
+
+fm_treehouse_expand_env() {  # <string>
+  local rest=$1 out='' name val c
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      *\$*)
+        out=${out}${rest%%\$*}
+        rest=${rest#*\$}
+        if [ -z "$rest" ]; then
+          out=${out}\$
+          break
+        fi
+        c=${rest%"${rest#?}"}
+        if [ "$c" = '{' ]; then
+          rest=${rest#\{}
+          case "$rest" in
+            *\}*)
+              name=${rest%%\}*}
+              rest=${rest#*\}}
+              if [ -n "$name" ]; then
+                val=$(fm_treehouse_env_value "$name") || return 1
+                out=${out}${val}
+              fi
+              ;;
+          esac
+          continue
+        fi
+        case "$c" in
+          '$'|'@'|'!'|'?'|'-'|'*'|'#'|[0-9])
+            rest=${rest#?}
+            continue
+            ;;
+        esac
+        name=
+        while [ -n "$rest" ]; do
+          c=${rest%"${rest#?}"}
+          case "$c" in
+            [A-Za-z0-9_])
+              name=${name}$c
+              rest=${rest#?}
+              ;;
+            *) break ;;
+          esac
+        done
+        if [ -z "$name" ]; then
+          out=${out}\$
+          continue
+        fi
+        val=$(fm_treehouse_env_value "$name") || return 1
+        out=${out}${val}
+        ;;
+      *)
+        out=${out}${rest}
+        break
+        ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+# filepath.Clean without resolving symlinks. A relative result may start with
+# `..`. An empty input cleans to `.`.
+fm_treehouse_clean_path() {  # <path>
+  local path=$1 abs=0 part last n
+  local -a kept=()
+  [ -n "$path" ] || {
+    printf '.\n'
+    return 0
+  }
+  case "$path" in
+    /*) abs=1 ;;
+  esac
+  while [ -n "$path" ]; do
+    part=${path%%/*}
+    case "$path" in
+      */*) path=${path#*/} ;;
+      *) path= ;;
+    esac
+    case "$part" in
+      ''|.) continue ;;
+      ..)
+        n=${#kept[@]}
+        if [ "$n" -gt 0 ]; then
+          last=${kept[$((n - 1))]}
+          if [ "$last" != '..' ]; then
+            unset 'kept[$((n - 1))]'
+            continue
+          fi
+        fi
+        [ "$abs" -eq 1 ] || kept+=('..')
+        ;;
+      *) kept+=("$part") ;;
+    esac
+  done
+  if [ "$abs" -eq 1 ]; then
+    if [ "${#kept[@]}" -eq 0 ]; then
+      printf '/\n'
+    else
+      printf '/%s\n' "$(IFS=/; printf '%s' "${kept[*]}")"
+    fi
+  elif [ "${#kept[@]}" -eq 0 ]; then
+    printf '.\n'
+  else
+    printf '%s\n' "$(IFS=/; printf '%s' "${kept[*]}")"
+  fi
+}
+
+# Print the top-level `root` value. Return 1 when the file has no such key.
+# Keys under a [table] are ignored. Double quotes unescape \\ \" \n \t, and
+# single quotes are literal.
+fm_treehouse_toml_unescape() {  # <inside-double-quotes>
+  local rest=$1 out='' c
+  while [ -n "$rest" ]; do
+    c=${rest%"${rest#?}"}
+    rest=${rest#?}
+    case "$c" in
+      \\)
+        [ -n "$rest" ] || {
+          out=${out}${c}
+          break
+        }
+        c=${rest%"${rest#?}"}
+        rest=${rest#?}
+        case "$c" in
+          n) out=${out}$'\n' ;;
+          t) out=${out}$'\t' ;;
+          *) out=${out}${c} ;;
+        esac
+        ;;
+      *) out=${out}${c} ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+fm_treehouse_toml_value() {  # <text-after-equals>
+  local raw=$1 body='' c
+  raw=${raw#"${raw%%[![:space:]]*}"}
+  case "$raw" in
+    \"*)
+      raw=${raw#\"}
+      while [ -n "$raw" ]; do
+        c=${raw%"${raw#?}"}
+        case "$c" in
+          \\)
+            if [ "${#raw}" -lt 2 ]; then
+              body=${body}${c}
+              break
+            fi
+            body=${body}${raw%"${raw#??}"}
+            raw=${raw#??}
+            continue
+            ;;
+        esac
+        if [ "$c" = '"' ]; then
+          break
+        fi
+        body=${body}${c}
+        raw=${raw#?}
+      done
+      fm_treehouse_toml_unescape "$body"
+      ;;
+    \'*)
+      raw=${raw#\'}
+      printf '%s\n' "${raw%%\'*}"
+      ;;
+    *)
+      raw=${raw%%#*}
+      raw=${raw%"${raw##*[![:space:]]}"}
+      printf '%s\n' "$raw"
+      ;;
+  esac
+}
+
+fm_treehouse_toml_root() {  # <file>
+  local line rest in_table=0
+  [ -f "$1" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line#"${line%%[![:space:]]*}"}
+    case "$line" in
+      ''|'#'*) continue ;;
+      '['*)
+        in_table=1
+        continue
+        ;;
+    esac
+    [ "$in_table" -eq 0 ] || continue
+    case "$line" in
+      root[[:space:]]*=*|root=*) ;;
+      *) continue ;;
+    esac
+    rest=${line#*=}
+    fm_treehouse_toml_value "$rest"
+    return 0
+  done < "$1"
+  return 1
+}
+
+# Print the root treehouse would use for this clone. Empty means $HOME/.treehouse.
+# A clone treehouse.toml replaces user config entirely, even when it sets no root.
+fm_treehouse_configured_root() {  # <repo-toplevel>
+  local repo=$1 file value
+  file=$repo/treehouse.toml
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    [ -f "$file" ] || return 1
+    if value=$(fm_treehouse_toml_root "$file"); then
+      printf '%s\n' "$value"
+    else
+      printf '\n'
+    fi
+    return 0
+  fi
+  if [ -n "${HOME:-}" ]; then
+    file=$HOME/.config/treehouse/config.toml
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      [ -f "$file" ] || return 1
+      if value=$(fm_treehouse_toml_root "$file"); then
+        printf '%s\n' "$value"
+        return 0
+      fi
+    fi
+  fi
+  printf '\n'
+}
+
+fm_treehouse_pool_root() {  # <repo-toplevel> <configured-root>
+  local repo=$1 root=$2 expanded home
+  if [ -z "$root" ]; then
+    [ -n "${HOME:-}" ] || return 1
+    home=$(fm_treehouse_clean_path "$HOME") || return 1
+    fm_treehouse_clean_path "$home/.treehouse"
+    return 0
+  fi
+  expanded=$(fm_treehouse_expand_env "$root") || return 1
+  case "$expanded" in
+    /*) ;;
+    *)
+      [ -n "$repo" ] || return 1
+      if [ -n "$expanded" ]; then
+        expanded=$(fm_treehouse_clean_path "$repo/$expanded") || return 1
+      else
+        expanded=$(fm_treehouse_clean_path "$repo") || return 1
+      fi
+      ;;
+  esac
+  case "$expanded" in
+    /*) expanded=$(fm_treehouse_clean_path "$expanded") || return 1 ;;
+  esac
+  fm_treehouse_clean_path "$expanded/.treehouse"
+}
+
+# Print the default pool directory treehouse would use for this clone right now.
+fm_treehouse_default_pool_dir() {  # <project-dir>
+  local project=$1 top origin hash_input name hash root pool_root
+  top=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null) || return 1
+  top=$(fm_treehouse_trim "$top") || return 1
+  [ -n "$top" ] || return 1
+  origin=$(git -C "$project" remote get-url origin 2>/dev/null || true)
+  origin=$(fm_treehouse_trim "$origin") || return 1
+  if [ -n "$origin" ]; then
+    hash_input=$origin
+  else
+    hash_input=$top
+  fi
+  name=$(basename -- "$top") || return 1
+  hash=$(fm_treehouse_short_hash "$hash_input") || return 1
+  root=$(fm_treehouse_configured_root "$top") || return 1
+  pool_root=$(fm_treehouse_pool_root "$top" "$root") || return 1
+  fm_treehouse_clean_path "$pool_root/$name-$hash"
+}
+
+# True when both directories are checkouts of one clone. Common-dir equality is
+# the whole test: a plain linked worktree has no treehouse state file, and
+# requiring one would refuse every non-pool copy this home already launches.
+fm_treehouse_same_clone() {  # <project-dir> <worktree>
+  local project=$1 worktree=$2 project_common slot_common
+  [ -d "$project" ] && [ -d "$worktree" ] || return 1
+  project_common=$(git -C "$project" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  slot_common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  project_common=$(CDPATH='' cd -- "$project_common" 2>/dev/null && pwd -P) || return 1
+  slot_common=$(CDPATH='' cd -- "$slot_common" 2>/dev/null && pwd -P) || return 1
+  [ "$project_common" = "$slot_common" ]
+}
+
+# True only when the default pool contains at least one git worktree and none
+# of them belong to this clone. An absent pool, an empty pool, a pool that
+# already holds this clone, or a pool that cannot be resolved is not foreign:
+# the launch keeps today's shared `treehouse get` and checks the result.
+fm_treehouse_pool_is_foreign() {  # <project-dir>
+  local project=$1 pool slot repo found=0 ours=0 restore=0
+  pool=$(fm_treehouse_default_pool_dir "$project") || return 1
+  [ -d "$pool" ] || return 1
+  shopt -q nullglob || restore=1
+  shopt -s nullglob
+  for slot in "$pool"/*/; do
+    for repo in "$slot"*/; do
+      if [ -e "${repo}.git" ] || [ -L "${repo}.git" ]; then
+        found=1
+        if fm_treehouse_same_clone "$project" "${repo%/}"; then
+          ours=1
+          break
+        fi
+      fi
+    done
+    [ "$ours" -eq 0 ] || break
+  done
+  [ "$restore" -eq 0 ] || shopt -u nullglob
+  [ "$found" -eq 1 ] && [ "$ours" -eq 0 ]
+}
+
+# Per-home treehouse root. Created only when a launch needs a pool of its own
+# clone. The physical path is what `HOME=` must be, because treehouse joins
+# `.treehouse` onto os.UserHomeDir.
+fm_treehouse_clone_anchor() {  # <fm-home>
+  [ -n "$1" ] || return 1
+  printf '%s/state/treehouse-clone-anchor\n' "$1"
+}
+
+fm_treehouse_clone_anchor_prepare() {  # <fm-home>
+  local anchor anchor_real top top_real
+  anchor=$(fm_treehouse_clone_anchor "$1") || return 1
+  mkdir -p -- "$anchor" || return 1
+  anchor_real=$(CDPATH='' cd -- "$anchor" 2>/dev/null && pwd -P) || return 1
+  top=$(git -C "$anchor_real" rev-parse --show-toplevel 2>/dev/null || true)
+  if [ -n "$top" ]; then
+    top_real=$(CDPATH='' cd -- "$top" 2>/dev/null && pwd -P) || top_real=
+    if [ -n "$top_real" ] && [ "$top_real" != "$anchor_real" ]; then
+      git init -q -b main "$anchor_real" >/dev/null || return 1
+    fi
+  fi
+  printf '%s\n' "$anchor_real"
+}
+
 # Slot-owner claim: which task a Treehouse pool slot currently belongs to.
 #
 # Treehouse can record ownership durably: `treehouse get --lease --lease-holder`
