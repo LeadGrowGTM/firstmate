@@ -13,6 +13,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and [Claude Remote Control](#claude-remote-control-configclaude-remote-control) |
+| Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity) and [worktree pool guard](#worktree-pool-guard-configtreehouse-size-limit) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
 ## FM_HOME
@@ -1132,6 +1133,81 @@ When every place is held, `bin/fm-spawn.sh` launches nothing, creates no record,
 A malformed or unreadable file refuses every fresh ship or scout spawn until it is fixed, rather than guessing the intended limit, and so does a local home's state directory or task record that cannot be read while counting a capped project's holders.
 Firstmate cannot see which part of a worker's life uses the resource, so the number bounds whole workers from launch to handoff, and the tightest resource every worker needs should decide it.
 [`bin/fm-project-capacity-lib.sh`](../bin/fm-project-capacity-lib.sh) owns the file format, what holds a place, and why concurrent spawns cannot both take the last one.
+
+## Worktree pool guard (config/treehouse-size-limit)
+
+Treehouse reuses returned worktree copies, caps each repository's pool with `max_trees`, and prunes only copies that are merged, clean, idle, and unleased.
+It never prunes on its own, never prunes by age, and never warns about total size.
+[`bin/fm-treehouse-guard.sh`](../bin/fm-treehouse-guard.sh) adds only those missing triggers, and leaves every decision about what is safe to remove to treehouse.
+Its header owns the exact treehouse flags, exit codes, record files, and time bounds.
+
+### Prune after cleanup
+
+After a cleanup returns a copy to a pool, Firstmate runs treehouse's safe prune for that task's project pool only.
+A prune that fails, times out, or declines to run prints one warning and never fails the cleanup, which has already finished.
+A pool that another launch or cleanup is using at that moment is skipped silently and reclaimed by the next cleanup or daily sweep.
+Because a returned copy whose work has landed is exactly what treehouse prunes, the next launch on that project usually creates a fresh copy instead of reusing a returned one.
+
+### Daily sweep
+
+A home arms the daily check with `bin/fm-treehouse-guard.sh arm`.
+It writes `state/treehouse-guard.check.sh` and binds it through the same authenticated watcher-check mechanism as the [daily startup growth check](#daily-startup-growth-check), so no extra daemon or scheduler is installed and an armed home keeps needing a watcher after its last task is cleaned up.
+Use `bin/fm-treehouse-guard.sh disarm` to remove the check and its records.
+
+At most once a day the check starts a sweep in the background, and a later poll reports its result as one line.
+The sweep runs the same safe prune for each project clone under this home's `projects/`, then reports when:
+
+- the worktree copies under `~/.treehouse` use more than the size limit;
+- treehouse reports orphaned pools, whose backing repository is missing;
+- a prune did not run, with the reason.
+
+A finding is reported once and stays silent until it changes or clears.
+A reported finding is a recommendation, not cleanup authority.
+
+### What the guard never does
+
+- It never asks treehouse to remove a copy that is unlanded, in use, or leased, and it never prunes by age.
+- It never deletes an orphaned pool; orphans are reported and left in place.
+- It never prunes a pool that belongs to another home, because it prunes only from this home's own project clones.
+  The size total and the orphan report are machine-wide read-only measurements.
+- It never prunes a pool while an idle copy in it still carries a Firstmate task claim, which protects a live task whose window died.
+  The sweep reports that claim instead.
+
+Two clones of the same origin under the same directory name share one treehouse pool, even across homes.
+Treehouse leaves a copy that another home's clone created in place, because git refuses to remove a worktree from a clone that does not own it.
+
+### Size limit
+
+The optional local, gitignored `config/treehouse-size-limit` holds one whole number of gigabytes.
+Without it the limit is 5 GB.
+A value that is not a whole number is reported by the sweep rather than replaced with a guess.
+
+```text
+8
+```
+
+### Per-repository caps (max_trees)
+
+Treehouse reads `max_trees` from the `treehouse.toml` at the root of the clone it runs in, and allows 16 copies when the file or the key is absent.
+
+```toml
+max_trees = 2
+```
+
+| Repository | Recommended `max_trees` |
+| --- | --- |
+| `gtm-orchestrator` | 2 |
+| Client repositories | 1 |
+| Firstmate | 6 |
+
+`treehouse.toml` is a file in each project repository, so setting a cap is that project's own change, delivered the way that project delivers any other change.
+Firstmate writes it into no repository.
+This repository ships no `treehouse.toml` either: it is a shared template, so a committed cap would apply to every user's Firstmate clone, and that pool also holds the leased copies behind local secondmate homes.
+Set the Firstmate value in your own fork instead.
+
+A launch into a pool that is already at its cap fails rather than waiting for a copy.
+[Project capacity](#project-capacity-configproject-capacity) does not prevent that on its own, because a place frees when a PR is ready while the copy stays held until cleanup.
+Choose a cap that covers the workers running at once plus the finished work still waiting to be merged and cleaned up.
 
 ## Crew dispatch profiles (config/crew-dispatch.json)
 
@@ -2568,6 +2644,8 @@ FM_WATCH_TRIAGE_LOG_MAX_BYTES=262144   # size cap for the watcher's absorbed-wak
 FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT=     # optional seconds allowed for bootstrap's best-effort clone refresh; unset/blank defaults to max(20, 5 + 3 * origin-backed-project-count)
 FM_FLEET_PRUNE=1        # set to 0 to skip pruning local branches whose upstream is gone
 FM_STALE_WORKTREE_LOCK_AGE_SECS=30       # min mtime age before fm-teardown.sh treats a leftover worktree git index.lock as provably stale
+FM_TREEHOUSE_GUARD_PRUNE_SECS=600        # seconds bin/fm-treehouse-guard.sh allows one treehouse prune, orphan dry run, or size measurement, 1 to 3600; hitting the bound is reported, never retried in place
+FM_TREEHOUSE_GUARD_PROBE_SECS=60         # seconds that guard allows one treehouse status read before a prune, 1 to 3600; an unreadable pool is not pruned
 FM_TREEHOUSE_RETURN_LOCK_RETRIES=3        # retries after a treehouse return fails on the transient git index.lock signature
 FM_TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS=1 # seconds fm-teardown.sh waits before each retry after that signature
 FM_STALE_WORKTREE_LOCK_RETRY_WAIT_SECS=   # legacy alias for FM_TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS when the new variable is unset

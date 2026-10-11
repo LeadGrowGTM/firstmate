@@ -613,6 +613,53 @@ test_sole_slot_record_still_tears_down() {
   pass "fm-teardown: a task that solely holds its slot still returns it"
 }
 
+# Cleanup reclaims its own project's pool once the copy is back: the guard is
+# asked from the project clone, only with treehouse's safe flags, and a prune
+# that fails never turns a finished cleanup into a failed one.
+test_returned_slot_prunes_only_its_own_project_pool() {
+  local dir id=prune-task variant project
+
+  for variant in ok failing; do
+    dir=$(make_case "slot-prune-$variant")
+    mark_case_as_treehouse_pool "$dir"
+    project=$(CDPATH='' cd -- "$dir/project" && pwd -P)
+    : > "$dir/treehouse.log"
+    cat > "$dir/fakebin/treehouse" <<SH
+#!/usr/bin/env bash
+printf '%s\t%s\n' "\$PWD" "\$*" >> "$dir/treehouse.log"
+case "\$*" in
+  'status --json') printf '[]\n' ;;
+  'prune --yes') [ "$variant" = ok ] || { echo 'simulated prune failure' >&2; exit 3; } ;;
+esac
+exit 0
+SH
+    chmod +x "$dir/fakebin/treehouse"
+    fm_write_meta "$dir/home/state/$id.meta" \
+      "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+      "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+
+    run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" \
+      || fail "cleanup failed when its pool prune was $variant: $(cat "$dir/stderr")"
+    assert_absent "$dir/home/state/$id.meta" "cleanup with a $variant prune left the task record"
+    [ "$(grep -c "	return " "$dir/treehouse.log")" -eq 1 ] \
+      || fail "cleanup with a $variant prune did not return its copy exactly once: $(cat "$dir/treehouse.log")"
+    [ "$(tail -n 1 "$dir/treehouse.log")" = "$project	prune --yes" ] \
+      || fail "cleanup did not end by pruning its own project's pool: $(cat "$dir/treehouse.log")"
+    [ "$(grep -c "	prune" "$dir/treehouse.log")" -eq 1 ] \
+      || fail "cleanup pruned more than once: $(cat "$dir/treehouse.log")"
+    assert_no_grep "--all" "$dir/treehouse.log" "cleanup pruned beyond its own project's pool"
+    assert_no_grep "--prune-orphans" "$dir/treehouse.log" "cleanup asked treehouse to delete orphans"
+    assert_no_grep "--include" "$dir/treehouse.log" "cleanup widened what treehouse may prune"
+    if [ "$variant" = ok ]; then
+      assert_no_grep "treehouse prune did not run" "$dir/stderr" "a prune that ran was reported as not run"
+    else
+      assert_grep "warning: treehouse prune did not run for" "$dir/stderr" \
+        "a failed prune was not reported as a warning"
+    fi
+  done
+  pass "fm-teardown: a returned copy prunes only its own project's pool with safe flags, and a failed prune never fails cleanup"
+}
+
 test_recorded_endpoint_that_changed_directory_still_tears_down() {
   local dir id=moved-task
 
@@ -1439,6 +1486,7 @@ test_bare_relative_origin_shares_project_lock_with_clone
 test_reused_pool_slot_refuses_before_touching_the_other_task
 test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
+test_returned_slot_prunes_only_its_own_project_pool
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
 test_stale_record_on_claimed_slot_retires_then_claimant_tears_down
 test_own_and_absent_slot_claims_still_tear_down

@@ -5,6 +5,8 @@
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
 # clone for PR-based ship tasks.
+# A copy returned to a treehouse pool then has that one project's pool pruned
+# through bin/fm-treehouse-guard.sh, which only warns when it does not run.
 # An endpoint whose close could not do its job REFUSES before any record naming
 # it is removed: those records are the only thing that names what survived, so
 # reporting such a close as a completed cleanup strands the endpoint instead of
@@ -427,6 +429,7 @@ META="$STATE/$ID.meta"
 TREEHOUSE_PROJECT_LOCK=
 TREEHOUSE_PROJECT_LOCK_HELD=0
 TREEHOUSE_SLOT_LOCK_REQUIRED=0
+TREEHOUSE_COPY_RETURNED=0
 if [ -f "$META" ] && [ ! -L "$META" ]; then
   TEARDOWN_LOCK_KIND=$(fm_meta_get "$META" kind)
   [ -n "$TEARDOWN_LOCK_KIND" ] || TEARDOWN_LOCK_KIND=ship
@@ -3617,6 +3620,7 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # unclaimed until its next holder claims it, and leaves the claim in place
   # whenever the return did not actually happen.
   fm_treehouse_slot_owner_release "$WT" "$ID"
+  TREEHOUSE_COPY_RETURNED=1
 fi
 
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
@@ -3843,6 +3847,17 @@ fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
 if [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$MODE" != local-only ]; then
   "$FM_ROOT/bin/fm-fleet-sync.sh" "$PROJ" || true
+fi
+# Treehouse never prunes on its own, so reclaim this project's pool now that
+# the copy is back in it and the clone is refreshed. bin/fm-treehouse-guard.sh
+# owns the flags and what it declines to prune, and prints its own warning; the
+# cleanup has already succeeded, so a prune that did not run never fails it.
+if [ "$TREEHOUSE_COPY_RETURNED" = 1 ]; then
+  if [ "$TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
+    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune --locked "$PROJ" || true
+  else
+    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune "$PROJ" || true
+  fi
 fi
 # A secondmate retirement may remove the home containing an overridden control
 # state directory. Do not let the side-band refresh recreate that retired home.
