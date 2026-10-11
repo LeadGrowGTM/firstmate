@@ -56,7 +56,7 @@ A relaunch registers a new remote session under the same `fm-<id>` name, so an o
 A launch on an account that cannot use Remote Control still reaches the composer and works; a Remote Control failure notice in that pane is a sign-in fact to report, not a failed launch.
 `/remote-control <name>` typed into a running session connects it in place without a restart.
 Until its one-time confirmation has been accepted on that machine, `/remote-control` first opens a dialog, which is a person's consent: never answer it with a key, for the same reason as the dialogs above.
-Whether the launch flag can stop at that same confirmation on a signed-in machine that has never enabled Remote Control is unverified; if a first launch does park there, report it for a person to answer once in that pane.
+The one launch with the flag observed on a signed-in machine that had never used Remote Control [showed no such confirmation](../../../../../docs/verification/runtime-backends.md#remote-control-on-a-signed-in-host); if a first launch does park there, report it for a person to answer once in that pane.
 
 ## Composer ghost
 
