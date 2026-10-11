@@ -1,0 +1,82 @@
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh disarm
+disarmed: state/treehouse-guard.check.sh
+[exit 0]
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+## poll 1 (day 0): nothing printed, a sweep is started in the background
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000000000 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+-- state/.treehouse-guard:
+schema	fm-treehouse-guard-v1
+launched	2000000000
+-- state/.treehouse-guard.result:
+schema	fm-treehouse-guard-v1
+swept	2000000000
+finding	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+-- the background sweep pruned the returned copy:
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+## poll 2 (5 minutes later): the finished sweep's finding is reported once
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000000300 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+treehouse-guard: worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+[exit 0]
+-- state/.treehouse-guard:
+schema	fm-treehouse-guard-v1
+launched	2000000000
+reported	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+-- state/.treehouse-guard.result:
+schema	fm-treehouse-guard-v1
+swept	2000000000
+finding	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+## poll 3 (10 minutes later) and poll 4 (23h59m59s later): silent, and no new sweep
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000000600 PATH=<SBX>/spybin:$PATH /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000086399 PATH=<SBX>/spybin:$PATH /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+-- treehouse calls made by polls 3 and 4: 0
+-- state/.treehouse-guard:
+schema	fm-treehouse-guard-v1
+launched	2000000000
+reported	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+-- state/.treehouse-guard.result:
+schema	fm-treehouse-guard-v1
+swept	2000000000
+finding	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+## poll 5 (exactly 24h after poll 1): a new sweep starts; every treehouse call it makes is logged
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000086400 PATH=<SBX>/spybin:$PATH /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+-- state/.treehouse-guard:
+schema	fm-treehouse-guard-v1
+launched	2000086400
+reported	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+-- state/.treehouse-guard.result:
+schema	fm-treehouse-guard-v1
+swept	2000086400
+finding	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+-- every treehouse call the daily sweep made (cwd<TAB>args):
+<SBX>/lab/projects/demo	prune --yes
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+## poll 6: same finding as already reported -> silent
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000086700 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+## size drops back under 5 GB; next day's sweep clears the finding, and a later regrowth is reported again
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000172800 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000173100 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+-- state/.treehouse-guard:
+schema	fm-treehouse-guard-v1
+launched	2000172800
+-- state/.treehouse-guard.result:
+schema	fm-treehouse-guard-v1
+swept	2000172800
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000259200 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+$ env FM_HOME=<SBX>/lab FM_TREEHOUSE_GUARD_NOW=2000259500 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+treehouse-guard: worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+[exit 0]

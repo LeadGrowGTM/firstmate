@@ -1,0 +1,59 @@
+## before: this home's project pool (demo), another home's project pool (other), and the home's own pool each hold one prunable copy
+-- pool of <SBX>/lab/projects/demo
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+-- pool of <SBX>/lab2/projects/other
+1     available    ~/.treehouse/other-9efb4a/1/other
+-- pool of <SBX>/lab
+1     available    ~/.treehouse/lab-0ec6d4/1/lab
+## sweep for home LAB, pool root well under 5 GB
+$ du -sh <SBX>/home/.treehouse
+116K	<SBX>/home/.treehouse
+[exit 0]
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh sweep
+[exit 0]
+$ cat <SBX>/lab/state/.treehouse-guard.result
+schema	fm-treehouse-guard-v1
+swept	1791732195
+[exit 0]
+## after: only this home's project pool was pruned; plain-dir under projects/ was skipped silently
+-- pool of <SBX>/lab/projects/demo
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+-- pool of <SBX>/lab2/projects/other
+1     available    ~/.treehouse/other-9efb4a/1/other
+-- pool of <SBX>/lab
+1     available    ~/.treehouse/lab-0ec6d4/1/lab
+## size boundary: 4.9 GB of real allocated blocks inside a leased copy -> still nothing to report
+$ du -sk <SBX>/home/.treehouse
+5120104	<SBX>/home/.treehouse
+[exit 0]
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh sweep
+[exit 0]
+$ cat <SBX>/lab/state/.treehouse-guard.result
+schema	fm-treehouse-guard-v1
+swept	1791732195
+[exit 0]
+## push it past 5 GB -> one finding line, printed and recorded
+$ du -sk <SBX>/home/.treehouse
+5529704	<SBX>/home/.treehouse
+[exit 0]
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh sweep
+treehouse-guard: worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+[exit 0]
+$ cat <SBX>/lab/state/.treehouse-guard.result
+schema	fm-treehouse-guard-v1
+swept	1791732195
+finding	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+[exit 0]
+## the oversized leased copy was reported, not deleted
+$ ls -la <SBX>/home/.treehouse/demo-e6da16/2/demo
+total 5529620
+drwxrwxr-x 2 mitch mitch       4096 Oct 11 11:23 .
+drwxr-xr-x 3 mitch mitch       4096 Oct 11 11:22 ..
+-rw-rw-r-- 1 mitch mitch         66 Oct 11 11:22 .git
+-rw-rw-r-- 1 mitch mitch          3 Oct 11 11:22 README
+-rw-rw-r-- 1 mitch mitch  419430400 Oct 11 11:23 build-output-2.bin
+-rw-rw-r-- 1 mitch mitch 5242880000 Oct 11 11:23 build-output.bin
+[exit 0]

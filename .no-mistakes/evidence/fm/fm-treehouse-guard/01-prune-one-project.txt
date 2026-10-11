@@ -1,0 +1,47 @@
+## setup: copy 1 returned (merged, clean, idle); 2 stays leased; 3 returned then dirtied; 4 returned then given an unmerged commit; 5 returned with a live process inside
+$ treehouse status
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+1     available    ~/.treehouse/demo-e6da16/1/demo
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+5     in-use       ~/.treehouse/demo-e6da16/5/demo
+                   sleep (186671)
+[exit 0]
+## treehouse's own dry run (what it considers stale)
+$ treehouse prune
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Dry run: would prune 1 stale worktree and reclaim 8.1 KiB.
+1     8.1 KiB  ~/.treehouse/demo-e6da16/1/demo
+🌳 Skipped 2 unsafe idle worktrees:
+  uncommitted changes:
+  3     ~/.treehouse/demo-e6da16/3/demo
+  unmerged:
+  4     HEAD not merged into refs/remotes/origin/main  ~/.treehouse/demo-e6da16/4/demo
+🌳 Re-run with --yes to delete these worktrees.
+[exit 0]
+## the guard
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/demo
+[exit 0]
+$ treehouse status
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+5     in-use       ~/.treehouse/demo-e6da16/5/demo
+                   sleep (186671)
+[exit 0]
+$ ls <SBX>/home/.treehouse/demo-e6da16
+2
+3
+4
+5
+treehouse-state.json
+treehouse-state.lock
+[exit 0]

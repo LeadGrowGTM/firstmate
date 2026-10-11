@@ -1,0 +1,55 @@
+## scratch clone carrying this change's committed treehouse.toml, read by the installed treehouse
+$ cat treehouse.toml
+max_trees = 10
+[exit 0]
+lease 1: rc=0 .treehouse/firstmate-2d2cc3/1/firstmate
+lease 2: rc=0 .treehouse/firstmate-2d2cc3/2/firstmate
+lease 3: rc=0 .treehouse/firstmate-2d2cc3/3/firstmate
+lease 4: rc=0 .treehouse/firstmate-2d2cc3/4/firstmate
+lease 5: rc=0 .treehouse/firstmate-2d2cc3/5/firstmate
+lease 6: rc=0 .treehouse/firstmate-2d2cc3/6/firstmate
+lease 7: rc=0 .treehouse/firstmate-2d2cc3/7/firstmate
+lease 8: rc=0 .treehouse/firstmate-2d2cc3/8/firstmate
+lease 9: rc=0 .treehouse/firstmate-2d2cc3/9/firstmate
+lease 10: rc=0 .treehouse/firstmate-2d2cc3/10/firstmate
+## 11th concurrent copy
+$ treehouse get --lease
+
+🌳 Setting up worktree...
+all 10 worktrees are in use or dirty (max_trees = 10). Run 'treehouse status' to see details, or increase max_trees in treehouse.toml
+[exit 1]
+$ treehouse status
+
+1     leased       ~/.treehouse/firstmate-2d2cc3/1/firstmate
+2     leased       ~/.treehouse/firstmate-2d2cc3/2/firstmate
+3     leased       ~/.treehouse/firstmate-2d2cc3/3/firstmate
+4     leased       ~/.treehouse/firstmate-2d2cc3/4/firstmate
+5     leased       ~/.treehouse/firstmate-2d2cc3/5/firstmate
+6     leased       ~/.treehouse/firstmate-2d2cc3/6/firstmate
+7     leased       ~/.treehouse/firstmate-2d2cc3/7/firstmate
+8     leased       ~/.treehouse/firstmate-2d2cc3/8/firstmate
+9     leased       ~/.treehouse/firstmate-2d2cc3/9/firstmate
+10    leased       ~/.treehouse/firstmate-2d2cc3/10/firstmate
+[exit 0]
+## one copy comes back and the guard prunes it -> a launch fits again
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/caps/firstmate
+[exit 0]
+$ treehouse get --lease
+
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/firstmate-2d2cc3/11/firstmate. Run 'treehouse return ~/.treehouse/firstmate-2d2cc3/11/firstmate' to release it.
+<SBX>/home/.treehouse/firstmate-2d2cc3/11/firstmate
+[exit 0]
+
+## control: identical clone without treehouse.toml (no user-level config in this sandbox HOME) is not capped at 10
+lease 1: rc=0 .treehouse/control-ad0f62/1/control
+lease 2: rc=0 .treehouse/control-ad0f62/2/control
+lease 3: rc=0 .treehouse/control-ad0f62/3/control
+lease 4: rc=0 .treehouse/control-ad0f62/4/control
+lease 5: rc=0 .treehouse/control-ad0f62/5/control
+lease 6: rc=0 .treehouse/control-ad0f62/6/control
+lease 7: rc=0 .treehouse/control-ad0f62/7/control
+lease 8: rc=0 .treehouse/control-ad0f62/8/control
+lease 9: rc=0 .treehouse/control-ad0f62/9/control
+lease 10: rc=0 .treehouse/control-ad0f62/10/control
+lease 11: rc=0 .treehouse/control-ad0f62/11/control

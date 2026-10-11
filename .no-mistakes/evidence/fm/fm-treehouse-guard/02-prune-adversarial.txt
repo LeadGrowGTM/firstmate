@@ -1,0 +1,115 @@
+## enclosing home pool has one returned, merged, clean, idle copy (prunable by treehouse's rule)
+$ treehouse status
+
+1     available    ~/.treehouse/lab-0ec6d4/1/lab
+[exit 0]
+## adversarial 1: prune aimed at a plain directory inside the home (not its own clone root)
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/plain-dir
+warning: treehouse prune did not run for <SBX>/lab/projects/plain-dir: it is not the root of its own git clone
+[exit 1]
+## adversarial 2: prune aimed at a subdirectory of a real project clone
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/demo/sub
+warning: treehouse prune did not run for <SBX>/lab/projects/demo/sub: it is not the root of its own git clone
+[exit 1]
+## adversarial 3: missing directory, and caller-supplied widening flags
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/nope
+warning: treehouse prune did not run for <SBX>/lab/projects/nope: it is not the root of its own git clone
+[exit 1]
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune --all
+warning: treehouse prune did not run for --all: it is not the root of its own git clone
+[exit 1]
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/demo --prune-orphans
+fm-treehouse-guard.sh - keep treehouse worktree pools from sprawling.
+
+Usage:
+  fm-treehouse-guard.sh prune [--locked] <project-dir>
+  fm-treehouse-guard.sh sweep
+  fm-treehouse-guard.sh [check]
+  fm-treehouse-guard.sh arm
+  fm-treehouse-guard.sh disarm
+  fm-treehouse-guard.sh --help
+
+Treehouse already reuses returned copies, caps a pool (max_trees in that
+repository's treehouse.toml), and has a safe prune.  It does not run that
+prune on its own and does not warn on total size.  This script adds exactly
+those two things and nothing else: it never decides what is stale.  Only
+treehouse does, through `treehouse prune --yes`, which removes a copy only
+when it is merged, clean, idle, and unleased.
+
+The flags are fixed.  A copy is removed only by `treehouse prune --yes` run
+from one project clone, which scopes it to that project's pool.  This script
+never passes --all, --prune-orphans, --include-unlanded, --include-in-use,
+or --include-leased, and never runs any other treehouse command.
+
+`prune <project-dir>` runs that safe prune for one project's pool.
+bin/fm-teardown.sh calls it after a successful cleanup.  It refuses a
+directory that is not the root of its own git clone, because treehouse
+resolves the pool from the working directory and would otherwise act on the
+enclosing repository.  It runs under the shared Treehouse project lock
+(fm_treehouse_project_lock_path), so it never overlaps a launch or cleanup
+allocating or returning a copy in the same pool; `--locked` says the caller
+already holds that lock.  A pool another launch or cleanup is using is
+skipped silently, exit 0.  Any other prune that did not run prints one
+`warning:` line and exits 1, which a caller is free to ignore.
+
+`sweep` does the daily work for this home only.  It prunes the pool of each
+clone root under this home's projects directory, so a pool reachable only
+from another home's clones is never pruned from here.  Two homes that clone
+the same origin under the same directory name share one pool by treehouse's
+own design; git still refuses to remove a copy backed by the other clone.
+It then measures the user-level treehouse root ($HOME/.treehouse) with
+du(1) and reports when it holds more than 5 GB.  The result is one finding
+line in state/.treehouse-guard.result, also printed.  A prune that did not
+run and a size that could not be measured are findings too, never read as
+"nothing to report".  docs/configuration.md owns the max_trees guidance.
+
+`check` is the watcher poll.  It prints one line when the last finished
+sweep has a finding that was not reported yet and prints nothing otherwise,
+and it starts a sweep at most once every 86400 seconds.  The sweep runs
+detached in its own process group, because the watcher bounds a check to
+FM_CHECK_TIMEOUT and kills the check's whole group afterwards, and a prune
+cut off part way through is exactly what this guard must not cause.  A
+finding is therefore reported on the poll after its sweep finishes.
+
+`arm` writes state/treehouse-guard.check.sh and binds its bytes with
+fm-check-register.sh so the existing watcher slow-check cadence runs the
+daily gate.  `disarm` removes the shim, its trust binding, and both records.
+
+A prune and the size measurement are each bounded to 600 seconds, so a hung
+binary cannot hold the project lock or a sweep forever.
+[exit 2]
+## the enclosing home pool copy is untouched
+$ treehouse status
+
+1     available    ~/.treehouse/lab-0ec6d4/1/lab
+[exit 0]
+## adversarial 4: the project's pool lock is held by a launch/cleanup -> skipped silently, nothing pruned
+$ treehouse status
+
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+5     available    ~/.treehouse/demo-e6da16/5/demo
+[exit 0]
+lock held at: <SBX>/lab/state/.treehouse-project-2adb3a7a56f8864d873d9de4828c3f509df3fe78.lock
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/demo
+[exit 0]
+$ treehouse status
+
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+5     available    ~/.treehouse/demo-e6da16/5/demo
+[exit 0]
+## lock released -> same call now prunes
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/demo
+[exit 0]
+$ treehouse status
+
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+[exit 0]
+## adversarial 5: treehouse not on PATH
+$ env FM_HOME=<SBX>/lab PATH=/usr/bin:/bin /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh prune <SBX>/lab/projects/demo
+warning: treehouse prune did not run for <SBX>/lab/projects/demo: treehouse is not installed
+[exit 1]

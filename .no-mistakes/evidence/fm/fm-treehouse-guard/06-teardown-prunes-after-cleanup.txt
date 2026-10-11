@@ -1,0 +1,119 @@
+$ bin/fm-spawn.sh td-scout-2 <SBX>/lab2/projects/other --scout --harness cat -u
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <SBX>/lab2
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+spawned td-scout-2 harness=cat kind=scout window=primary:fm-td-scout-2 worktree=<SBX>/home/.treehouse/other-9efb4a/2/other
+[exit 0]
+$ bin/fm-spawn.sh td-scout-3 <SBX>/lab2/projects/other --scout --harness cat -u
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <SBX>/lab2
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+spawned td-scout-3 harness=cat kind=scout window=primary:fm-td-scout-3 worktree=<SBX>/home/.treehouse/other-9efb4a/3/other
+[exit 0]
+## three real scout tasks spawned by bin/fm-spawn.sh, each in its own treehouse copy
+1     in-use       ~/.treehouse/other-9efb4a/1/other
+                   bash (357004), cat (361711)
+2     in-use       ~/.treehouse/other-9efb4a/2/other
+                   bash (406750), cat (410144)
+3     in-use       ~/.treehouse/other-9efb4a/3/other
+                   bash (410941), cat (414062)
+$ tmux list-windows -a -F #{session_name}:#{window_name}
+primary:bash
+primary:fm-td-scout
+primary:fm-td-scout-2
+primary:fm-td-scout-3
+[exit 0]
+
+## 1. real cleanup of td-scout (treehouse calls logged through a pass-through wrapper)
+$ env PATH=<SBX>/spybin2:$PATH bin/fm-teardown.sh td-scout --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <SBX>/lab2
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for td-scout: 357004 361711
+teardown: force-killing leaked worktree process(es) for td-scout: 357004
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+teardown td-scout complete (window primary:fm-td-scout, worktree <SBX>/home/.treehouse/other-9efb4a/1/other)
+Backlog: td-scout just finished (this home keeps no markdown backlog at <SBX>/lab2/data/backlog.md). Update <SBX>/lab2/data/backlog.md - move td-scout to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+-- every treehouse call that cleanup made (cwd<TAB>args):
+<SBX>/lab2/projects/other	return --force <SBX>/home/.treehouse/other-9efb4a/1/other
+<SBX>/lab2/projects/other	prune --yes
+-- pool afterwards: the returned copy is gone, the two copies still in use are untouched
+2     in-use       ~/.treehouse/other-9efb4a/2/other
+                   bash (406750), cat (410144)
+3     in-use       ~/.treehouse/other-9efb4a/3/other
+                   bash (410941), cat (414062)
+$ ls <SBX>/home/.treehouse/other-9efb4a
+2
+3
+treehouse-state.json
+treehouse-state.lock
+[exit 0]
+$ ls <SBX>/lab2/state
+home-summary.json
+td-scout-2.git-hooks
+td-scout-2.meta
+td-scout-3.git-hooks
+td-scout-3.meta
+terminal-outcomes
+[exit 0]
+
+## 2. adversarial: the prune fails during cleanup of td-scout-2 (injected exit 3 on 'prune --yes' only)
+$ env PATH=<SBX>/spybin2:$PATH SPY_FAIL_PRUNE=1 bin/fm-teardown.sh td-scout-2 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <SBX>/lab2
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for td-scout-2: 406750 410144
+teardown: force-killing leaked worktree process(es) for td-scout-2: 406750
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+warning: treehouse prune did not run for <SBX>/lab2/projects/other: treehouse prune exited 3: injected prune failure
+teardown td-scout-2 complete (window primary:fm-td-scout-2, worktree <SBX>/home/.treehouse/other-9efb4a/2/other)
+Backlog: td-scout-2 just finished (this home keeps no markdown backlog at <SBX>/lab2/data/backlog.md). Update <SBX>/lab2/data/backlog.md - move td-scout-2 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+-- treehouse calls:
+<SBX>/lab2/projects/other	return --force <SBX>/home/.treehouse/other-9efb4a/2/other
+<SBX>/lab2/projects/other	prune --yes
+-- cleanup still completed (record gone); the returned copy simply stays in the pool for the next prune
+$ ls <SBX>/lab2/state
+home-summary.json
+td-scout-3.git-hooks
+td-scout-3.meta
+terminal-outcomes
+[exit 0]
+2     available    ~/.treehouse/other-9efb4a/2/other
+3     in-use       ~/.treehouse/other-9efb4a/3/other
+                   bash (410941), cat (414062)
+
+## 3. the next cleanup (td-scout-3) reclaims both idle copies
+$ env PATH=<SBX>/spybin2:$PATH bin/fm-teardown.sh td-scout-3 --force
+fm-gate-refuse: gate agent lifecycle permitted only against lab home <SBX>/lab2
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for td-scout-3: 410941 414062
+teardown: force-killing leaked worktree process(es) for td-scout-3: 410941
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+teardown td-scout-3 complete (window primary:fm-td-scout-3, worktree <SBX>/home/.treehouse/other-9efb4a/3/other)
+Backlog: td-scout-3 just finished (this home keeps no markdown backlog at <SBX>/lab2/data/backlog.md). Update <SBX>/lab2/data/backlog.md - move td-scout-3 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+-- treehouse calls:
+<SBX>/lab2/projects/other	return --force <SBX>/home/.treehouse/other-9efb4a/3/other
+<SBX>/lab2/projects/other	prune --yes
+(pool listing above is empty when no copies remain)
+$ ls <SBX>/home/.treehouse/other-9efb4a
+treehouse-state.json
+treehouse-state.lock
+[exit 0]
+$ tmux list-windows -a -F #{session_name}:#{window_name}
+primary:bash
+[exit 0]
+S6C-DONE

@@ -1,0 +1,55 @@
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+4     available    ~/.treehouse/demo-e6da16/4/demo
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh disarm
+disarmed: state/treehouse-guard.check.sh
+[exit 0]
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh arm
+armed: state/treehouse-guard.check.sh
+[exit 0]
+$ cat <SBX>/lab/state/treehouse-guard.check.sh
+#!/usr/bin/env bash
+export FM_HOME=<SBX>/lab
+exec /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+[exit 0]
+$ ls -la <SBX>/lab/state
+total 16
+drwxrwxr-x 2 mitch mitch 4096 Oct 11 11:24 .
+drwxrwxr-x 7 mitch mitch 4096 Oct 11 11:22 ..
+-rw------- 1 mitch mitch   84 Oct 11 11:24 treehouse-guard.check-trust
+-rwx------ 1 mitch mitch  170 Oct 11 11:24 treehouse-guard.check.sh
+[exit 0]
+## the real watcher, on this lab home only, polling registered checks every 2s
+$ env FM_HOME=<SBX>/lab FM_CHECK_INTERVAL=2 timeout 90 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-watch.sh
+check: <SBX>/lab/state/treehouse-guard.check.sh: treehouse-guard: worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+[exit 0]
+-- records after the watcher woke:
+schema	fm-treehouse-guard-v1
+launched	1791732244
+reported	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+schema	fm-treehouse-guard-v1
+swept	1791732244
+finding	worktree copies use 5.3 GB under <SBX>/home/.treehouse (limit 5 GB)
+2     leased       ~/.treehouse/demo-e6da16/2/demo
+3     dirty        ~/.treehouse/demo-e6da16/3/demo
+## disarm removes the shim, its trust binding and both records
+$ env FM_HOME=<SBX>/lab /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh disarm
+disarmed: state/treehouse-guard.check.sh
+[exit 0]
+$ ls -la <SBX>/lab/state
+total 40
+drwxrwxr-x 3 mitch mitch 4096 Oct 11 11:24 .
+drwxrwxr-x 7 mitch mitch 4096 Oct 11 11:22 ..
+-rw-rw-r-- 1 mitch mitch    2 Oct 11 11:24 .heartbeat-streak
+-rw------- 1 mitch mitch   25 Oct 11 11:24 .inactive-outcome-reconcile
+-rw-rw-r-- 1 mitch mitch    0 Oct 11 11:24 .last-check
+-rw-rw-r-- 1 mitch mitch    0 Oct 11 11:24 .last-heartbeat
+-rw-rw-r-- 1 mitch mitch    0 Oct 11 11:24 .last-watcher-beat
+-rw-rw-r-- 1 mitch mitch    0 Oct 11 11:24 .secondmate-liveness-tick
+-rw-rw-r-- 1 mitch mitch  233 Oct 11 11:24 .wake-queue
+-rw-rw-r-- 1 mitch mitch    2 Oct 11 11:24 .wake-queue.seq
+-rw-rw-r-- 1 mitch mitch  397 Oct 11 11:24 .watch-deliveries.log
+-rw------- 1 mitch mitch   42 Oct 11 11:24 .watcher-down
+-rw------- 1 mitch mitch 1017 Oct 11 11:24 home-summary.json
+drwxrwxr-x 2 mitch mitch 4096 Oct 11 11:24 terminal-outcomes
+[exit 0]
