@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# git as treehouse runs it for a per-home pool (bin/fm-wake-lib.sh's
+# fm_treehouse_home_pool_run). That call points HOME at the pool folder so
+# treehouse places its pool there; git and the credential helpers it starts
+# must still read the operator's own HOME.
+HOME=${FM_TREEHOUSE_GIT_HOME:?} exec "${FM_TREEHOUSE_GIT:?}" "$@"

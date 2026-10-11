@@ -33,10 +33,11 @@
 # `warning:` line and exits 1, which a caller is free to ignore.
 #
 # `sweep` does the daily work for this home only.  It prunes each clone root
-# under this home's projects directory, and that clone's per-home pool under
-# state/treehouse-clone-anchor when its pool directory exists.  Treehouse keys
-# the default pool by directory name plus origin; Firstmate uses that pool
-# only when every copy belongs to this clone, and otherwise leases per home.
+# under this home's projects directory, and that clone's pool in this home's
+# own pool folder (bin/fm-wake-lib.sh's fm_treehouse_home_pool, under the user
+# state directory) when one exists there.  Treehouse keys the default pool by
+# directory name plus origin; a launch that is handed another clone's copy
+# from it leases from this home's own pool instead.
 # Git still refuses to remove a copy another clone owns.  The sweep then
 # measures $HOME/.treehouse and, when present, the per-home pool root, and
 # reports when either holds more than 5 GB.  One finding line is written to
@@ -163,29 +164,24 @@ prune_project() {  # <project-dir> <caller-holds-lock:0|1>
   return "$rc"
 }
 
-# Prune this home's private pool for one clone, when that pool directory
-# exists. HOME is set only for the treehouse process. Returns 0 when there is
-# nothing to prune or the prune ran. On failure PRUNE_HOME_NOTE says why.
+# Prune this home's own pool for one clone, when a pool directory for it
+# exists there. Treehouse names a pool after the clone's directory plus six
+# hex digits, so the directories already present say whether there is one.
+# Returns 0 when there is nothing to prune or the prune ran. On failure
+# PRUNE_HOME_NOTE says why.
 prune_home_pool() {  # <project-dir>
-  local project=$1 anchor pool name private out prc=0
+  local project=$1 root name pool found=0 out prc=0
   PRUNE_HOME_NOTE=
-  anchor=$(fm_treehouse_clone_anchor "$FM_HOME") || return 0
-  [ -d "$anchor" ] && [ ! -L "$anchor" ] || return 0
-  anchor=$(CDPATH='' cd -- "$anchor" 2>/dev/null && pwd -P) || {
-    PRUNE_HOME_NOTE="its per-home pool anchor could not be resolved"
-    return 1
-  }
-  pool=$(fm_treehouse_default_pool_dir "$project") || {
-    PRUNE_HOME_NOTE="its per-home pool could not be resolved"
-    return 1
-  }
-  name=$(basename -- "$pool") || {
-    PRUNE_HOME_NOTE="its per-home pool could not be resolved"
-    return 1
-  }
-  private=$anchor/.treehouse/$name
-  [ -d "$private" ] && [ ! -L "$private" ] || return 0
-  out=$(cd "$project" && HOME="$anchor" fm_run_timed "$PRUNE_SECS" treehouse prune --yes 2>&1) || prc=$?
+  root=$(fm_treehouse_home_pool "$FM_HOME") || return 0
+  name=$(CDPATH='' cd -- "$project" 2>/dev/null && pwd -P) || return 0
+  name=${name##*/}
+  for pool in "$root/.treehouse/$name"-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]; do
+    if [ -d "$pool" ] && [ ! -L "$pool" ]; then
+      found=1
+    fi
+  done
+  [ "$found" -eq 1 ] || return 0
+  out=$(cd "$project" && fm_treehouse_home_pool_run "$FM_HOME" "$PRUNE_SECS" prune --yes 2>&1) || prc=$?
   if [ "$prc" -ne 0 ]; then
     if fm_timed_out "$prc"; then
       PRUNE_HOME_NOTE="per-home treehouse prune did not finish in ${PRUNE_SECS}s"
@@ -250,17 +246,12 @@ measure_treehouse_root() {  # <root>
 }
 
 sweep_size() {
-  local anchor=
+  local root=
   if [ -n "${HOME:-}" ]; then
     measure_treehouse_root "$HOME/.treehouse"
   fi
-  anchor=$(fm_treehouse_clone_anchor "$FM_HOME" 2>/dev/null || true)
-  if [ -n "$anchor" ] && [ -d "$anchor" ] && [ ! -L "$anchor" ]; then
-    anchor=$(CDPATH='' cd -- "$anchor" 2>/dev/null && pwd -P) || anchor=
-  else
-    anchor=
-  fi
-  [ -z "$anchor" ] || measure_treehouse_root "$anchor/.treehouse"
+  root=$(fm_treehouse_home_pool "$FM_HOME" 2>/dev/null || true)
+  [ -z "$root" ] || measure_treehouse_root "$root/.treehouse"
 }
 
 write_atomically() {  # <tmp> <destination>

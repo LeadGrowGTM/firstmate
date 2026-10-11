@@ -277,12 +277,12 @@
 #   naming the last path seen and why it was rejected.
 #   A worktree registered to another clone is not this project's copy, even when
 #   treehouse offers it from a pool keyed only by directory name and origin.
-#   When that default pool already holds another clone's copy and none of this
-#   clone's, the launch leases from this home's state/treehouse-clone-anchor
-#   instead of taking the shared one. A result that is still another clone is
-#   returned and the launch stops. Relaunch refuses a recorded worktree of
-#   another clone rather than taking a new slot. Orca and secondmate launches
-#   do not use this pool.
+#   When `treehouse get` hands the pane another clone's copy, the launch leaves
+#   that subshell, which returns the copy, and leases from this home's own pool
+#   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, outside every home and
+#   project). A lease that is still another clone is returned and the launch
+#   stops. Relaunch refuses a recorded worktree of another clone rather than
+#   taking a new slot. Orca and secondmate launches do not use this pool.
 #   That placement is proven only at launch. Every ship or scout pane therefore
 #   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
 #   the same channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
@@ -1325,7 +1325,6 @@ SPAWN_TASK_SET_LOCK_HELD=0
 SPAWN_TREEHOUSE_PROJECT_LOCK=
 SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
 SPAWN_SLOT_CLAIMED=0
-SPAWN_PRIVATE_LEASE=0
 SPAWN_PRIVATE_LEASE_PATH=
 RELAUNCH_REPLACEMENT_PENDING=0
 RELAUNCH_REPLACEMENT_BUSY_GEN=
@@ -1483,14 +1482,14 @@ spawn_abort_cleanup() {
   # exit. Drop it here when this spawn never published its record; teardown
   # returns a lease whose record survived. The path is the one this spawn
   # leased, never the spawning project.
-  if [ "$SPAWN_PRIVATE_LEASE" = 1 ] && [ -n "$SPAWN_PRIVATE_LEASE_PATH" ] &&
+  if [ -n "$SPAWN_PRIVATE_LEASE_PATH" ] &&
     [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
-    SPAWN_PRIVATE_LEASE=0
     if [ "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" != "$PROJ_ABS_REAL" ]; then
       if ! treehouse return --force "$SPAWN_PRIVATE_LEASE_PATH" >/dev/null 2>&1; then
         echo "warning: could not return the per-home treehouse lease at $SPAWN_PRIVATE_LEASE_PATH" >&2
       fi
     fi
+    SPAWN_PRIVATE_LEASE_PATH=
   fi
   if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
     SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
@@ -4532,40 +4531,23 @@ spawn_wait_left_path() {  # <path>
   return 1
 }
 
-# Return a lease this spawn took. Never returns the spawning project itself.
-spawn_return_leased_worktree() {  # <path>
-  local path=$1
-  [ -n "$path" ] || return 0
-  if [ "$(real_path_or_raw "$path")" = "$PROJ_ABS_REAL" ]; then
-    echo "warning: refusing to return $path because it is the spawning project" >&2
-    return 1
-  fi
-  if ! treehouse return --force "$path" >/dev/null 2>&1; then
-    echo "warning: could not return treehouse worktree $path" >&2
-    return 1
-  fi
-}
-
-spawn_refuse_other_clone() {  # <leased-worktree>
-  local worktree=$1
-  [ -z "$worktree" ] || spawn_return_leased_worktree "$worktree" || true
-  echo "error: worktree '${worktree:-none}' is not a worktree of spawning project '$PROJ_ABS'; refusing to launch a worker in another clone" >&2
-  exit 1
-}
-
-# Lease from this home's own pool. HOME applies only to treehouse, so the
-# worker shell keeps the operator's home. Sets SPAWN_LEASED_WT.
+# Lease from this home's own pool. Sets SPAWN_PRIVATE_LEASE_PATH the moment the
+# lease is known, so every later exit returns it through spawn_abort_cleanup
+# until the task record is published.
 spawn_lease_clone_worktree() {
-  local anchor errfile leased rc=0
-  SPAWN_LEASED_WT=
-  anchor=$(fm_treehouse_clone_anchor_prepare "$FM_HOME") || return 1
+  local errfile leased rc=0 bound=${FM_SPAWN_TREEHOUSE_LEASE_SECS:-600}
+  case "$bound" in ''|*[!0-9]*|0*) bound=600 ;; esac
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
     cd "$PROJ_ABS" || exit 1
-    env HOME="$anchor" treehouse get --lease --lease-holder "$ID"
+    fm_treehouse_home_pool_run "$FM_HOME" "$bound" get --lease --lease-holder "$ID"
   ) 2>"$errfile" || rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$leased" ]; then
-    echo "error: could not lease a worktree of '$PROJ_ABS' from this home's own pool (treehouse exit $rc)" >&2
+    if fm_timed_out "$rc"; then
+      echo "error: leasing a worktree of '$PROJ_ABS' from this home's own pool did not finish in ${bound}s" >&2
+    else
+      echo "error: could not lease a worktree of '$PROJ_ABS' from this home's own pool (treehouse exit $rc)" >&2
+    fi
     if [ -s "$errfile" ]; then
       sed 's/^/treehouse: /' "$errfile" >&2
     fi
@@ -4578,7 +4560,7 @@ spawn_lease_clone_worktree() {
     echo "error: the per-home treehouse lease for '$PROJ_ABS' did not report a worktree directory" >&2
     return 1
   fi
-  SPAWN_LEASED_WT=$leased
+  SPAWN_PRIVATE_LEASE_PATH=$leased
 }
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
@@ -4621,61 +4603,41 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  # The shared pool is safe when it is absent, empty, or already holds this
-  # clone. It is not safe when every copy in it belongs to another clone:
-  # treehouse reuses an idle slot instead of linking the caller. A pool that
-  # cannot be resolved stays on the shared command, and the check below still
-  # refuses a result that is not this clone.
-  spawn_private=0
-  if fm_treehouse_pool_is_foreign "$PROJ_ABS"; then
-    spawn_private=1
+  spawn_send_text_line "$WT_TARGET" 'treehouse get'
+  if ! spawn_wait_isolated_worktree; then
+    echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2
+    exit 1
   fi
-  if [ "$spawn_private" -eq 0 ]; then
-    spawn_send_text_line "$WT_TARGET" 'treehouse get'
-    if ! spawn_wait_isolated_worktree; then
-      echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2
+  validate_spawn_worktree "treehouse get" "$T"
+  if ! fm_treehouse_same_clone "$PROJ_ABS" "$WT"; then
+    # Treehouse reused an idle copy another clone created. Leave the
+    # interactive subshell so its own exit returns that copy; this clone does
+    # not own it, so it is never `treehouse return --force`d from here.
+    spawn_send_text_line "$WT_TARGET" 'exit'
+    if ! spawn_wait_left_path "$WT"; then
+      echo "error: could not leave the other clone's worktree '$WT' (spawning project '$PROJ_ABS'); refusing to launch" >&2
       exit 1
     fi
-    validate_spawn_worktree "treehouse get" "$T"
-    if ! fm_treehouse_same_clone "$PROJ_ABS" "$WT"; then
-      # Leave the interactive subshell so its own exit returns that slot.
-      # Do not `treehouse return --force` a copy this clone does not own.
-      spawn_send_text_line "$WT_TARGET" 'exit'
-      if ! spawn_wait_left_path "$WT"; then
-        echo "error: could not leave the other clone's worktree '$WT' (spawning project '$PROJ_ABS'); refusing to launch" >&2
-        exit 1
-      fi
-      spawn_private=1
-    fi
-  fi
-  if [ "$spawn_private" -eq 1 ]; then
     if ! spawn_lease_clone_worktree; then
       exit 1
     fi
-    if ! fm_treehouse_same_clone "$PROJ_ABS" "$SPAWN_LEASED_WT"; then
-      spawn_refuse_other_clone "$SPAWN_LEASED_WT"
+    if ! fm_treehouse_same_clone "$PROJ_ABS" "$SPAWN_PRIVATE_LEASE_PATH"; then
+      echo "error: worktree '$SPAWN_PRIVATE_LEASE_PATH' is not a worktree of spawning project '$PROJ_ABS'; refusing to launch a worker in another clone" >&2
+      exit 1
     fi
-    spawn_send_text_line "$WT_TARGET" "cd -- $(shell_quote "$SPAWN_LEASED_WT")" || {
-      spawn_return_leased_worktree "$SPAWN_LEASED_WT" || true
-      echo "error: could not move the pane into the leased worktree '$SPAWN_LEASED_WT' of '$PROJ_ABS'; refusing to launch" >&2
+    spawn_send_text_line "$WT_TARGET" "cd -- $(shell_quote "$SPAWN_PRIVATE_LEASE_PATH")" || {
+      echo "error: could not move the pane into the leased worktree '$SPAWN_PRIVATE_LEASE_PATH' of '$PROJ_ABS'; refusing to launch" >&2
       exit 1
     }
     if ! spawn_wait_isolated_worktree; then
-      spawn_return_leased_worktree "$SPAWN_LEASED_WT" || true
-      echo "error: the per-home worktree '$SPAWN_LEASED_WT' did not become the pane's directory within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); refusing to launch" >&2
+      echo "error: the per-home worktree '$SPAWN_PRIVATE_LEASE_PATH' did not become the pane's directory within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); refusing to launch" >&2
       exit 1
     fi
-    if [ "$(real_path_or_raw "$WT")" != "$(real_path_or_raw "$SPAWN_LEASED_WT")" ]; then
-      spawn_return_leased_worktree "$SPAWN_LEASED_WT" || true
-      echo "error: pane settled in '$WT' instead of the leased worktree '$SPAWN_LEASED_WT' of '$PROJ_ABS'; refusing to launch" >&2
+    if [ "$(real_path_or_raw "$WT")" != "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" ]; then
+      echo "error: pane settled in '$WT' instead of the leased worktree '$SPAWN_PRIVATE_LEASE_PATH' of '$PROJ_ABS'; refusing to launch" >&2
       exit 1
     fi
     validate_spawn_worktree "per-home treehouse lease" "$T"
-    if ! fm_treehouse_same_clone "$PROJ_ABS" "$WT"; then
-      spawn_refuse_other_clone "$SPAWN_LEASED_WT"
-    fi
-    SPAWN_PRIVATE_LEASE=1
-    SPAWN_PRIVATE_LEASE_PATH=$SPAWN_LEASED_WT
   fi
 
   # Claim the pool slot for this task. The interactive `treehouse get` records

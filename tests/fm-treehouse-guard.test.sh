@@ -321,16 +321,18 @@ test_unknown_command_is_refused_before_any_treehouse_call() {
 }
 
 test_prune_also_prunes_a_present_per_home_pool() {
-  local world home anchor pool name out rc=0
+  local world home pool out rc=0
   world=$(make_world per-home-pool)
   home=$(make_home "$world" home alpha)
-  anchor="$home/state/treehouse-clone-anchor"
   # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
   pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
-    bash -c 'set -u; . "$1"; fm_treehouse_default_pool_dir "$2"' \
-    _ "$ROOT/bin/fm-wake-lib.sh" "$home/projects/alpha")
-  name=$(basename -- "$pool")
-  mkdir -p "$anchor/.treehouse/$name"
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  case "$pool/" in
+    "$home"/*) fail "the home's own pool is inside the home: $pool" ;;
+  esac
+  mkdir -p "$pool/.treehouse/alpha-0a1b2c"
   cat > "$world/fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
 dir=${FAKE_TREEHOUSE_DIR:?}
@@ -344,13 +346,21 @@ case "$*" in
 esac
 SH
   chmod +x "$world/fakebin/treehouse"
-  out=$(guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
   expect_code 0 "$rc" "prune with a per-home pool"$'\n'"$out"
   [ -z "$out" ] || fail "a per-home prune that ran should be silent: $out"
   assert_equals "$(printf '%s\t%s\t%s\n%s\t%s\t%s' \
     "$home/projects/alpha" 'prune --yes' "$world/user" \
-    "$home/projects/alpha" 'prune --yes' "$anchor")" \
-    "$(calls "$world")" "per-home pool was not pruned with HOME set to the anchor"
+    "$home/projects/alpha" 'prune --yes' "$pool")" \
+    "$(calls "$world")" "the home's own pool was not pruned with treehouse pointed at it"
+
+  : > "$world/fake/log"
+  rm -rf "$pool/.treehouse/alpha-0a1b2c"
+  mkdir -p "$pool/.treehouse/other-0a1b2c"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
+  expect_code 0 "$rc" "prune without a pool of this clone"$'\n'"$out"
+  assert_equals "$(printf '%s\t%s\t%s' "$home/projects/alpha" 'prune --yes' "$world/user")" \
+    "$(calls "$world")" "a home pool holding no pool of this clone was still pruned"
 }
 
 test_prune_runs_only_the_safe_prune_from_the_project
