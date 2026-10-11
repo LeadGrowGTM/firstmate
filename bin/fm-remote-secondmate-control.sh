@@ -37,6 +37,9 @@
 # state/*.meta remains reserved for workers the secondmate supervises.
 # Retirement closes only this secondmate's panes or workspace and never
 # stops fm-remote or removes a sibling secondmate's workspace or panes.
+# It converges: a home that is already gone, or whose path holds only empty
+# directories, answers `already-retired` and leaves the path absent, so a
+# parent whose earlier attempt lost the result can rerun it and finish.
 #
 # Relaunch is not a second lifecycle implementation: it runs the ORDINARY local
 # control plane here, because from this host the mate is a plain local
@@ -74,9 +77,26 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac; }
 
+# True when the home path holds directories and nothing else, after removing
+# them. The libraries sourced above create $TARGET_HOME/state on load, so every
+# command aimed at a retired home, this one included, leaves that bare tree at
+# the retired path. It carries no home to protect, and rmdir cannot delete
+# content, so a tree that turns out to hold anything is left for the refusal.
+clear_empty_home_leftover() {
+  local content
+  [ -d "$TARGET_HOME" ] && [ ! -L "$TARGET_HOME" ] || return 1
+  content=$(find "$TARGET_HOME" ! -type d -print -quit 2>/dev/null) || return 1
+  [ -z "$content" ] || return 1
+  find "$TARGET_HOME" -depth -type d -exec rmdir -- {} \; 2>/dev/null || return 1
+  [ ! -e "$TARGET_HOME" ] && [ ! -L "$TARGET_HOME" ]
+}
+
 validate_home() { # <id> [allow-absent]
   local id=$1 allow_absent=${2:-no} marker
-  if [ ! -e "$TARGET_HOME" ] && [ ! -L "$TARGET_HOME" ] && [ "$allow_absent" = yes ]; then return 2; fi
+  if [ "$allow_absent" = yes ]; then
+    if [ ! -e "$TARGET_HOME" ] && [ ! -L "$TARGET_HOME" ]; then return 2; fi
+    if clear_empty_home_leftover; then return 2; fi
+  fi
   [ -d "$TARGET_HOME" ] && [ ! -L "$TARGET_HOME" ] || die "remote secondmate home is unavailable or unsafe"
   [ -f "$TARGET_HOME/.fm-secondmate-home" ] && [ ! -L "$TARGET_HOME/.fm-secondmate-home" ] \
     || die "remote home is not a seeded secondmate home"

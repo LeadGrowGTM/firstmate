@@ -790,6 +790,7 @@ It refuses while any of these holds:
 It closes only the retiring secondmate's panes or `2ndmate-<id>` workspace in `fm-remote`.
 It never stops the shared session or removes a sibling secondmate's workspace or panes.
 SSH exit 255 preserves both the route and local records because completion is unknown.
+Rerun the same command after a failed or unknown retirement: a host whose home is already gone, or whose home path holds only empty directories, reports it as already retired, and the rerun finishes the primary's own cleanup.
 `--force` remains the explicit discard path and requires the same captain authority as local secondmate discard.
 
 No generic remote delete or write surface exists:
