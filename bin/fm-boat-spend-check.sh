@@ -110,11 +110,12 @@ CONFIG_PROBLEM=
 CONFIG_NORMALIZED=
 config_normalized() {
   local out bin
-  out=$(jq -c '
+  out=$(jq -sc '
     def numpos: type == "number" and . > 0;
     def strs: type == "array" and all(.[]; type == "string" and length > 0);
-    if type != "object" then error("must be a JSON object")
+    if length != 1 or (.[0] | type) != "object" then error("must be one JSON object")
     else
+      .[0] |
       (keys - ["ceiling_usd", "expected_running", "allowed_sizes", "always_on", "boat_bin"]) as $extra |
       if ($extra | length) > 0 then error("unknown key " + ($extra[0] | tojson))
       elif has("ceiling_usd") and (.ceiling_usd | numpos | not) then error("ceiling_usd must be a number above 0")
@@ -190,7 +191,7 @@ findings() {
       ([$n[0], $n[1], 1, 0, 0, 0, 0, 0] | mktime);
     def strs: type == "array" and all(.[]; type == "string");
     def has_state: type == "object" and (.state | type) == "string";
-    ($limits.activeStates // ["provisioned", "cloning", "ready", "idle", "running"]) as $states |
+    $limits.activeStates as $states |
     (if $states | strs then $states else [] end) as $active |
     ($list.sandboxes | if type == "array" then . else [] end) as $boxes |
     [$boxes[] | select(has_state) | select(.state as $s | $active | index($s))] as $live |

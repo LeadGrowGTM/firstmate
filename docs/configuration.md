@@ -1557,7 +1557,7 @@ This section is the single owner of the schema.
 ```
 
 - Every field is optional; the values above, with an empty `always_on` and no `boat_bin`, are the defaults.
-- An unknown key or a value of the wrong type is refused, and the check reports the file as invalid rather than falling back to defaults.
+- An unknown key, a value of the wrong type, or a file that is not exactly one JSON object (an empty file included) is refused, and the check reports the file as invalid rather than falling back to defaults.
 - `boat_bin` exists because the watcher runs the check with its own environment, where `boat` is usually not on `PATH` and no `FM_BOAT_BIN` persists, so the file is the one durable place to name the CLI.
   It must be an absolute path to an existing executable file; anything else makes the file invalid, and an invalid file runs nothing.
 - `FM_BOAT_BIN` wins over `boat_bin`, and `boat` on `PATH` is the last resort.

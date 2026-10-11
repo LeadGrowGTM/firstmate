@@ -196,6 +196,10 @@ test_unreadable_fields_are_reported() {
     'boat-spend: read failed: unreadable spend'
   unreadable_case no-usage limits 'del(.last24hUsageSeconds)' \
     'boat-spend: read failed: unreadable last-24-hour usage'
+  unreadable_case no-states limits 'del(.activeStates) | .creditUsedSeconds = 3500000' \
+    'boat-spend: spend $35 is over the $30 ceiling; read failed: unreadable active states'
+  unreadable_case null-states limits '.activeStates = null' \
+    'boat-spend: read failed: unreadable active states'
   unreadable_case bad-states limits '.activeStates = "running"' \
     'boat-spend: read failed: unreadable active states'
   unreadable_case offset-plan-end limits '.subscriptionCurrentPeriodEnd = "2026-10-12T10:00:00+00:00"' \
@@ -348,6 +352,35 @@ test_invalid_config_is_reported() {
   assert_contains "$out" 'allowed_sizes must be a list of size names' "type error line"
 }
 
+# not_one_object_case <name> <config bytes>
+not_one_object_case() {
+  local home out
+  home=$(make_world "$1" "$2")
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: config/boat-spend.json is invalid: must be one JSON object' "$out" "$1 should be an invalid config"
+  assert_equals 0 "$(calls "$home" | wc -l | tr -d ' ')" "$1 must not reach Boat"
+  out=$(env FM_HOME="$home" "$CHECK" arm 2>&1) && fail "arm should refuse $1"
+  assert_contains "$out" 'must be one JSON object' "arm refusal text for $1"
+  assert_absent "$home/state/boat-spend.check.sh" "a refused arm for $1 left a shim"
+}
+
+test_config_must_be_exactly_one_json_object() {
+  not_one_object_case cfg-empty ''
+  not_one_object_case cfg-blank '   '
+  not_one_object_case cfg-two '{} {"ceiling_usd": 1}'
+  not_one_object_case cfg-list '[]'
+}
+
+test_missing_active_states_is_not_guessed() {
+  local home out
+  home=$(make_world guessed-states)
+  set_json "$home" limits 'del(.activeStates)'
+  set_json "$home" list '.sandboxes += [{"id":"bx_big","state":"running","type":"xlarge","archiveAfter":null}]'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: read failed: unreadable active states' "$out" \
+    "with no activeStates the count, size and no-stop conditions should not be evaluated on a guessed list"
+}
+
 test_absent_config_is_off() {
   local home out
   home=$(make_world nocfg none)
@@ -432,6 +465,8 @@ test_boat_bin_config_must_be_an_absolute_executable_file
 test_malformed_json_is_reported
 test_timed_out_call_is_reported
 test_invalid_config_is_reported
+test_config_must_be_exactly_one_json_object
+test_missing_active_states_is_not_guessed
 test_absent_config_is_off
 test_only_the_three_read_commands_are_passed
 test_daily_gate_and_persistent_condition
