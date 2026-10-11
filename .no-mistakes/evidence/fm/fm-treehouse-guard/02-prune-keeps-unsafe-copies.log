@@ -1,0 +1,31 @@
+== pool holds one leased copy (3). Acquire three more, return them, then make two unsafe to remove
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+D=/tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/4/alpha  (unleased, HEAD not merged into main)
+E=/tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/5/alpha  (unleased, uncommitted file)
+F=/tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/6/alpha  (unleased, merged, clean, idle)
+== status before
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+4     available    ~/.treehouse/alpha-e4d009/4/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+6     available    ~/.treehouse/alpha-e4d009/6/alpha
+== guard prune
+guard exit=0
+== status after
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+4     available    ~/.treehouse/alpha-e4d009/4/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+EXISTS  /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/4/alpha
+EXISTS  /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/5/alpha
+REMOVED /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/6/alpha
+D wip.txt still there: work; E uncommitted.txt: scratch

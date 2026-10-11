@@ -1,0 +1,42 @@
+== task record
+window=firstmate:fm-live-task
+endpoint_task_id=live-task
+worktree=/tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/6/alpha
+project=/tmp/fm-lab.tZbJ8w/projects/alpha
+kind=scout
+== tmux windows on the lab socket
+firstmate:fm-live-task /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/6/alpha
+== alpha pool before cleanup (task copy: alpha-e4d009/6/alpha, leftover: alpha-e4d009/7/alpha)
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+6     leased       ~/.treehouse/alpha-e4d009/6/alpha  (held by live-task)
+                   bash (3820237)
+7     available    ~/.treehouse/alpha-e4d009/7/alpha
+== beta pool before cleanup
+1     available    ~/.treehouse/beta-57f0d1/1/beta
+== bin/fm-teardown.sh live-task --force
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+teardown: reaping leaked worktree process(es) for live-task: 3820237
+teardown: force-killing leaked worktree process(es) for live-task: 3820237
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+teardown live-task complete (window firstmate:fm-live-task, worktree /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/6/alpha)
+Backlog: live-task just finished (this home keeps no markdown backlog at /tmp/fm-lab.tZbJ8w/data/backlog.md). Update /tmp/fm-lab.tZbJ8w/data/backlog.md - move live-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+teardown exit=0
+== alpha pool after cleanup
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+== beta pool after cleanup (untouched)
+1     available    ~/.treehouse/beta-57f0d1/1/beta
+REMOVED task copy /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/6/alpha
+REMOVED leftover copy /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/7/alpha
+task record removed
+tmux after: no server running on /tmp/fm-lab.tZbJ8w/tmux/tmux-1000/default

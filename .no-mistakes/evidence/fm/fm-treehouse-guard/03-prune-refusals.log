@@ -1,0 +1,14 @@
+== prune on a plain directory under projects/ (not its own clone root)
+warning: treehouse prune did not run for /tmp/fm-lab.tZbJ8w/projects/plain-dir: it is not the root of its own git clone
+exit=1
+== prune on a subdirectory of a clone
+warning: treehouse prune did not run for /tmp/fm-lab.tZbJ8w/projects/alpha/sub: it is not the root of its own git clone
+exit=1
+== prune with no project
+exit=2
+== attempt to smuggle --all through the guard
+exit=2
+== pool unchanged
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+4     available    ~/.treehouse/alpha-e4d009/4/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha

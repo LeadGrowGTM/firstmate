@@ -1,0 +1,22 @@
+== treehouse version: v2.1.1
+== acquire three leased copies
+A=/tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/1/alpha
+B=/tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/2/alpha
+C=/tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/3/alpha
+== return A (merged, clean) and B (unlanded commit); keep C leased
+🌳 Worktree returned to pool.
+🌳 Worktree returned to pool.
+== status before guard prune
+1     available    ~/.treehouse/alpha-e4d009/1/alpha
+2     available    ~/.treehouse/alpha-e4d009/2/alpha
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+== guard: fm-treehouse-guard.sh prune <project>
+guard exit=0
+== status after guard prune
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+REMOVED /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/1/alpha
+REMOVED /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/2/alpha
+EXISTS  /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/3/alpha

@@ -1,0 +1,35 @@
+== before sweep
+-- pool of /tmp/fm-lab.tZbJ8w/projects/alpha
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+4     available    ~/.treehouse/alpha-e4d009/4/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+-- pool of /tmp/fm-lab.tZbJ8w/projects/beta
+1     available    ~/.treehouse/beta-57f0d1/1/beta
+-- pool of /tmp/fm-lab.tZbJ8w/otherhome/projects/gamma
+1     available    ~/.treehouse/gamma-e1f926/1/gamma
+== fm-treehouse-guard.sh sweep (FM_HOME=lab, under 5 GB)
+du: 116K	/tmp/fm-lab.tZbJ8w/userhome/.treehouse
+sweep exit=0 (no output above means no finding)
+== state/.treehouse-guard.result
+schema^Ifm-treehouse-guard-v1$
+swept^I1791731619$
+== after sweep
+-- pool of /tmp/fm-lab.tZbJ8w/projects/alpha
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+-- pool of /tmp/fm-lab.tZbJ8w/projects/beta
+🌳 No worktrees in pool.
+-- pool of /tmp/fm-lab.tZbJ8w/otherhome/projects/gamma
+1     available    ~/.treehouse/gamma-e1f926/1/gamma
+
+== pool in use: hold alpha's project lock as a launch would, then prune
+lock held: .treehouse-project-456db13a46b2b4a0395e6f957b230f826d9c5fbc.lock
+prune while locked exit=0 (silent skip)
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+6     available    ~/.treehouse/alpha-e4d009/6/alpha
+sweep while locked exit=0
+lock released
+prune after release exit=0
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha

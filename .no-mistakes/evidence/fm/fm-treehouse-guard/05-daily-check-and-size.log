@@ -1,0 +1,50 @@
+== arm the daily check in the lab home
+armed: state/treehouse-guard.check.sh
+arm exit=0
+-rw------- treehouse-guard.check-trust
+-rwx------ treehouse-guard.check.sh
+-- shim:
+#!/usr/bin/env bash
+export FM_HOME=/tmp/fm-lab.tZbJ8w
+exec /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NQHEENX63Y6MZMAAPV7BAC/bin/fm-treehouse-guard.sh check
+
+== 4.9 GB under ~/.treehouse (below limit)
+du: 4.8G	/tmp/fm-lab.tZbJ8w/userhome/.treehouse
+-- poll 1 (runs the armed shim, as the watcher does):
+exit=0 output-above=none-expected
+detached sweep finished
+schema fm-treehouse-guard-v1
+swept 1791731637
+-- poll 2:
+exit=0 (silent: nothing to report)
+
+== grow to 5.4 GB (past limit); same day, so no new sweep is started
+du: 5.3G	/tmp/fm-lab.tZbJ8w/userhome/.treehouse
+-- poll 3 (same day):
+swept stamp unchanged: yes
+
+== next day (clock advanced 86400s through the script's clock seam)
+-- poll 4 (starts the daily sweep):
+exit=0
+detached sweep finished
+schema fm-treehouse-guard-v1
+swept 1791818040
+finding worktree copies use 5.3 GB under /tmp/fm-lab.tZbJ8w/userhome/.treehouse (limit 5 GB)
+-- poll 5 (reports the finding once):
+treehouse-guard: worktree copies use 5.3 GB under /tmp/fm-lab.tZbJ8w/userhome/.treehouse (limit 5 GB)
+exit=0
+-- poll 6 (already reported, silent):
+exit=0
+
+== direct sweep prints the same finding
+treehouse-guard: worktree copies use 5.3 GB under /tmp/fm-lab.tZbJ8w/userhome/.treehouse (limit 5 GB)
+exit=0
+
+== leased copy holding the 4.9 GB file is still there (size check only reports, never deletes)
+3     leased       ~/.treehouse/alpha-e4d009/3/alpha
+5     dirty        ~/.treehouse/alpha-e4d009/5/alpha
+5138022400 /tmp/fm-lab.tZbJ8w/userhome/.treehouse/alpha-e4d009/3/alpha/big.bin
+
+== disarm
+disarmed: state/treehouse-guard.check.sh
+0

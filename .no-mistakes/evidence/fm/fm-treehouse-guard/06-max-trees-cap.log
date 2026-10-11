@@ -1,0 +1,21 @@
+== treehouse.toml as shipped in this change:
+max_trees = 10
+== lease copies until treehouse refuses
+get #1 ok: firstmate-f433d3/1/firstmate
+get #2 ok: firstmate-f433d3/2/firstmate
+get #3 ok: firstmate-f433d3/3/firstmate
+get #4 ok: firstmate-f433d3/4/firstmate
+get #5 ok: firstmate-f433d3/5/firstmate
+get #6 ok: firstmate-f433d3/6/firstmate
+get #7 ok: firstmate-f433d3/7/firstmate
+get #8 ok: firstmate-f433d3/8/firstmate
+get #9 ok: firstmate-f433d3/9/firstmate
+get #10 ok: firstmate-f433d3/10/firstmate
+get #11 REFUSED (exit 1): 🌳 Setting up worktree...
+all 10 worktrees are in use or dirty (max_trees = 10). Run 'treehouse status' to see details, or increase max_trees in treehouse.toml
+copies held: 10
+== return one copy; the next get succeeds again
+🌳 Worktree returned to pool.
+get after return (exit 0): 🌳 Setting up worktree...
+firstmate-f433d3/1/firstmate' to release it.
+firstmate-f433d3/1/firstmate

@@ -1,0 +1,5 @@
+== sweep when treehouse is not on PATH (a prune that cannot run is a finding, not silence)
+treehouse-guard: treehouse is not installed, so no pool was pruned
+exit=0
+warning: treehouse prune did not run for /tmp/fm-lab.tZbJ8w/projects/alpha: treehouse is not installed
+prune exit=1
