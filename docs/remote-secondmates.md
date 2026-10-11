@@ -332,8 +332,10 @@ What it does need is something that brings the remote job worker and the Herdr `
 
 [`examples/boat-remote-host/`](examples/boat-remote-host/) holds that as two opt-in systemd units and the wait script they call.
 They are written for a [Boat](https://docs.boat.dev/) sandbox, a Linux VM that can be stopped and resumed and that comes back on a different machine at every resume.
-On a Boat sandbox this recipe has been exercised as far as a readiness check that passes and passes again without a repair after a stop and resume.
-Seeding a home, launching a second mate, and a routed request there are still owed as the [real-host smoke test](#real-host-smoke-test).
+On a Boat sandbox this recipe has been exercised through its setup, a readiness check, seeding a home, launching a Claude second mate, and one marked request with its correlated reply.
+A stop, resume, and refresh there was followed by a readiness check that passed without a repair, a sign-in that was still in place, and a relaunch that answered a second request.
+That first launch stopped at Claude Code's [one-time Bypass Permissions confirmation](#first-launch-on-a-fresh-host) until it was accepted by hand, and the [retire](#retire-a-remote-second-mate) failed.
+The launch's refusal of that confirmation and the retire as they behave now have not been run on a Boat sandbox, and both are still owed as part of the [real-host smoke test](#real-host-smoke-test).
 
 On any other systemd host, the same units apply once their account and paths are replaced and the two Boat-specific lines, `ExecStartPre` and `TimeoutStartSec`, are removed; that variant has not been exercised.
 
@@ -451,7 +453,8 @@ Its header owns what it reads, writes, and refuses, its environment knobs, and h
 On the sandbox, a resume keeps the home directory, `/etc`, and `/usr/local/bin`, so the clone, the installed tools, the `PATH` block, and the units all survive.
 Every process, `/tmp`, `~/.cache`, and every Unix socket are gone.
 The units restart the worker and the server by themselves.
-The second mate's own agent is gone with every other process, so it returns only through the ordinary [liveness recovery](#liveness-recovery), which has not been exercised on a Boat sandbox.
+The second mate's own agent is gone with every other process, so it returns only through a relaunch.
+Running the [launch command](#launch-or-recover) again brought one back on a Boat sandbox after a resume; the automatic [liveness recovery](#liveness-recovery), which runs that same command, has not been exercised there.
 
 ### The restore window
 
