@@ -44,6 +44,7 @@ cleanup() {
   if [ -f "$TMP_ROOT/remote-jobs/worker.pid" ]; then
     kill "$(cat "$TMP_ROOT/remote-jobs/worker.pid")" 2>/dev/null || true
   fi
+  kill "${AGENT_PID:-}" "${PANE_TOOL_PID:-}" "${PANE_SHELL_PID:-}" 2>/dev/null || true
   # A claude secondmate spawn leaves a read-only hooks directory in the home.
   chmod -R u+w "$TMP_ROOT" 2>/dev/null || true
   rm -rf -- "$TMP_ROOT"
@@ -197,6 +198,25 @@ session_record() { # <pid> <cwd> <started-ms> <bridge>
 ( : ) &
 EXITED_PID=$!
 wait "$EXITED_PID"
+# The process tree under the second mate's endpoint pane: the pane's shell, the
+# Claude Code agent it runs, and one other process the pane also holds.
+SLEEP_BIN=$(command -v sleep) || fail "sleep not found"
+(
+  ( exec -a claude "$SLEEP_BIN" 600 ) &
+  printf '%s\n' "$!" > "$TMP_ROOT/agent.pid"
+  "$SLEEP_BIN" 600 &
+  printf '%s\n' "$!" > "$TMP_ROOT/pane-tool.pid"
+  wait
+) &
+PANE_SHELL_PID=$!
+for _ in $(seq 1 100); do
+  [ ! -s "$TMP_ROOT/pane-tool.pid" ] || break
+  sleep 0.05
+done
+AGENT_PID=$(cat "$TMP_ROOT/agent.pid" 2>/dev/null)
+PANE_TOOL_PID=$(cat "$TMP_ROOT/pane-tool.pid" 2>/dev/null)
+[ -n "$AGENT_PID" ] && [ -n "$PANE_TOOL_PID" ] || fail "the fixture pane's process tree did not start"
+printf '%s\n' "$PANE_SHELL_PID" > "$HERDR_STATE.shell-pid"
 
 FM_SECONDMATE_CHARTER='Own iOS delivery on the fresh box.' \
   FM_SECONDMATE_SCOPE='iOS implementation and Xcode validation' \
@@ -239,7 +259,7 @@ pass "rerun while parked: the same refusal, and nothing is typed or keyed into t
 # exited, a session in another directory, and one whose id is not a session id.
 rm -f "$SCREEN"
 agent_starts_charter_turn || fail "the fixture could not record the agent's first turn"
-session_record "$$" "$REMOTE_HOME" 2000 session_01LiveAgent
+session_record "$AGENT_PID" "$REMOTE_HOME" 2000 session_01LiveAgent
 session_record "$EXITED_PID" "$REMOTE_HOME" 9000 session_01EarlierLaunch
 session_record "$PPID" "$TMP_ROOT" 9500 session_01OtherDirectory
 session_record 1 "$REMOTE_HOME" 9900 'session_01 remote_host=elsewhere'
@@ -262,10 +282,14 @@ pass "after acceptance: rerunning the launch adopts the running agent, reports s
 # --- an ordinary launch on a host that already accepted ----------------------
 # This agent's session never registers for Remote Control, which is also what a
 # home with Remote Control off looks like from here: the launch stands, and no
-# link is reported or recorded.
+# link is reported or recorded. The records an earlier launch left in this home
+# do not answer for it, although a stop and resume has handed their pids to
+# live processes: one unrelated to the pane, one the pane holds beside the agent.
 rm -f "$PARENT/state/ios.meta" "$SCREEN"
 rm -f "$SESSIONS"/*.json
-session_record "$$" "$REMOTE_HOME" 2000 ''
+session_record "$AGENT_PID" "$REMOTE_HOME" 2000 ''
+session_record "$$" "$REMOTE_HOME" 1000 session_01BeforeResume
+session_record "$PANE_TOOL_PID" "$REMOTE_HOME" 1500 session_01BeforeResumeToo
 reset_remote_herdr_fixture "$HERDR_STATE"
 : > "$HERDR_LOG"
 (
@@ -285,12 +309,12 @@ assert_present "$PARENT/state/ios.meta" "an ordinary launch must publish the par
 assert_not_contains "$out" 'remote control:' "a launch with no registered session must report no Remote Control link"
 assert_no_grep 'remote_control_url=' "$PARENT/state/ios.meta" \
   "a launch with no registered session must record no Remote Control link"
-pass "ordinary launch: an agent that starts its charter turn is reported as launched, with no link when its session has none"
+pass "ordinary launch: an agent that starts its charter turn is reported as launched, with no link when its session has none and only leftover records carry one"
 
 # --- no recognized dialog and no turn yet: the launch is not refused ---------
 rm -f "$PARENT/state/ios.meta"
 reset_remote_herdr_fixture "$HERDR_STATE"
-session_record "$$" "$REMOTE_HOME" 2000 session_01BeforeRelaunch
+session_record "$AGENT_PID" "$REMOTE_HOME" 2000 session_01BeforeRelaunch
 out=$(CONFIRM_POLLS=2 remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate 2>&1) \
   || fail "a launch with no recognized dialog on screen was refused: $out"
 assert_present "$PARENT/state/ios.meta" "a launch with no recognized dialog must still publish the parent's endpoint record"
@@ -324,7 +348,7 @@ jq '.typed = {} | .working = {}' "$HERDR_STATE" > "$HERDR_STATE.exited" \
   && mv "$HERDR_STATE.exited" "$HERDR_STATE"
 rm -f "$SCREEN"
 session_record "$EXITED_PID" "$REMOTE_HOME" 2000 session_01BeforeRelaunch
-session_record "$$" "$REMOTE_HOME" 3000 session_01AfterRelaunch
+session_record "$AGENT_PID" "$REMOTE_HOME" 3000 session_01AfterRelaunch
 : > "$HERDR_LOG"
 (
   for _ in $(seq 1 200); do

@@ -170,13 +170,17 @@ state_value() { # <id>; prints recovery-grade state
 # once the session has registered for Remote Control; the link is that id under
 # https://claude.ai/code/. The record is the source because the pane wraps the
 # link across lines and the app's own title is not readable from the host.
-# The newest record of a running process started in this home wins, so a
-# record left behind by an earlier launch never answers for the current one.
+# Only a record whose pid is an agent process running in this second mate's
+# own endpoint pane counts, and the newest of those wins. A record an earlier
+# launch left behind therefore never answers for the current one, even when a
+# stop and resume has handed its pid to some other live process.
 # Read-only, and silent about everything it cannot read: another harness,
-# Remote Control off, a session not registered yet, a missing jq, or a record
-# shape this does not recognize all print nothing, and the launch stands.
-remote_control_url() { # <harness>
+# Remote Control off, a session not registered yet, a missing jq, a pane whose
+# processes cannot be read, or a record shape this does not recognize all print
+# nothing, and the launch stands.
+remote_control_url() { # <harness>; needs the endpoint loaded
   local harness=$1 account root home_real file fields pid started bridge best='' best_started=-1
+  local agent_pids
   case "$harness" in claude) ;; *) return 0 ;; esac
   command -v jq >/dev/null 2>&1 || return 0
   account=$(fm_worker_account_resolve claude "$TARGET_HOME/config" 2>/dev/null) || return 0
@@ -189,6 +193,10 @@ remote_control_url() { # <harness>
   fi
   [ -d "$root/sessions" ] || return 0
   home_real=$(cd "$TARGET_HOME" 2>/dev/null && pwd -P) || return 0
+  fm_backend_source "$REMOTE_ENDPOINT_BACKEND" || return 0
+  fm_backend_herdr_parse_target "$REMOTE_ENDPOINT_TARGET" || return 0
+  agent_pids=$(fm_backend_herdr_pane_agent_pids "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") || return 0
+  [ -n "$agent_pids" ] || return 0
   for file in "$root/sessions"/*.json; do
     [ -f "$file" ] && [ ! -L "$file" ] || continue
     fields=$(jq -r --arg home "$TARGET_HOME" --arg real "$home_real" '
@@ -203,7 +211,7 @@ EOF
     case "$started" in ''|*[!0-9]*) continue ;; esac
     case "$bridge" in session_*) ;; *) continue ;; esac
     case "${bridge#session_}" in ''|*[!A-Za-z0-9]*) continue ;; esac
-    kill -0 "$pid" 2>/dev/null || continue
+    printf '%s\n' "$agent_pids" | grep -qxF -- "$pid" || continue
     [ "$started" -gt "$best_started" ] || continue
     best=$bridge
     best_started=$started
@@ -225,6 +233,7 @@ remote_control_await() { # needs the endpoint loaded
   [ "$LAUNCH_TURN_SEEN" = 1 ] || return 0
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
   [ "$harness" = claude ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
   [ "$(tr -d '[:space:]' < "$TARGET_HOME/config/claude-remote-control" 2>/dev/null || true)" != off ] || return 0
   while [ "$i" -lt "$polls" ]; do
     [ -z "$(remote_control_url "$harness")" ] || return 0

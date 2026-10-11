@@ -542,7 +542,7 @@ Claude Code keeps one record per running session at `sessions/<pid>.json` under 
 For each of the two sessions launched there, that record's `bridgeSessionId` was the `session_...` id at the end of the link the pane printed, which is why [`bin/fm-remote-secondmate-control.sh`](../../bin/fm-remote-secondmate-control.sh) reads the link from that record.
 The record also holds `pid`, `cwd`, and `startedAt`, and a session that has ended leaves its record behind.
 
-`tests/fm-remote-secondmate-launch-dialog.test.sh` pins the read against records of that shape: the newest record of a running process in the second mate's home answers, and a leftover record, another directory's session, and a malformed id do not.
+`tests/fm-remote-secondmate-launch-dialog.test.sh` pins the read against records of that shape: the newest record of an agent process running in the second mate's own endpoint pane answers, and a leftover record whose pid has exited or now names an unrelated live process, a record held by a non-agent process in the pane, another directory's session, and a malformed id do not.
 No live guard refreshes this, because the record only gains a `bridgeSessionId` on a real claude.ai sign-in; the read stays silent when the field or the record is absent.
 
 ### Remote Control facts not verified
