@@ -25,6 +25,13 @@
 # reported explicitly and skipped rather than silently passing over it; a run
 # that checked nothing fails.
 #
+# Claude gets a second arm for its once-per-machine Bypass Permissions
+# confirmation, which an onboarded operator config has already accepted and so
+# never renders. That arm alone launches under a scratch CLAUDE_CONFIG_DIR
+# holding only an onboarded flag and workspace trust for its own scratch
+# worktree, the state of a freshly provisioned host whose account has never
+# accepted the confirmation, and it never touches the operator's own store.
+#
 # Precondition: this machine's default `claude` config must already be past
 # first-run onboarding (a subscription or API key already selected, and a
 # theme already chosen) - the guard targets a brand-new SCRATCH WORKTREE under
@@ -94,6 +101,8 @@ watcher_gate_not_busy() {  # <lab> <state> <target> <harness> <tail>
 # render, capture the pane the production way, arm a scratch busy-state
 # record, and require the launch-prompt backstop to classify it unknown
 # launch-prompt. Never answers the dialog: Escape only, never Enter.
+# A caller that must write something keyed to the lab before the launch names
+# a function in LAB_PREP, which is called with the lab directory.
 #
 # Writes the captured tail to <tail-out> rather than returning it on stdout:
 # a caller that needs the tail (the Pi case, which reuses it for pi-signed and
@@ -113,6 +122,8 @@ check_harness() {  # <harness> <session> <extra-path> <extra-content> <expect-re
     mkdir -p "$lab/wt/$(dirname "$extra_path")"
     printf '%s' "$extra_content" > "$lab/wt/$extra_path"
   fi
+
+  [ -z "${LAB_PREP:-}" ] || "$LAB_PREP" "$lab" || fail "$harness: could not prepare the isolated lab"
 
   "$REAL_TMUX" -L "$SOCKET" new-session -d -s "$session" -n w -c "$lab/wt" -- "$@" \
     || fail "$harness: could not launch the real binary"
@@ -151,6 +162,25 @@ if [ -x "${CLAUDE_BIN:-}" ]; then
     'Is this a project you created or one you trust' '' \
     "$CLAUDE_BIN" --dangerously-skip-permissions hello
   pass "claude: a real launch parked on its own rendered trust dialog surfaces through the watcher gate"
+
+  command -v jq >/dev/null 2>&1 || fail "claude: jq is required to write the scratch config for the Bypass Permissions arm"
+  CLAUDE_BYPASS_CFG=$(mktemp -d "${TMPDIR:-/tmp}/fm-launch-prompt-claude-cfg.XXXXXX") || fail "claude: could not create the scratch config directory"
+  LABS+=("$CLAUDE_BYPASS_CFG")
+  CLAUDE_BYPASS_TAIL=$(mktemp "${TMPDIR:-/tmp}/fm-launch-prompt-claude-tail.XXXXXX") || fail "claude: could not create the tail capture file"
+  LABS+=("$CLAUDE_BYPASS_TAIL")
+  claude_bypass_prep() {  # <lab>
+    jq -n --arg wt "$(cd "$1/wt" && pwd -P)" \
+      '{hasCompletedOnboarding: true, projects: {($wt): {hasTrustDialogAccepted: true}}}' \
+      > "$CLAUDE_BYPASS_CFG/.claude.json"
+  }
+  LAB_PREP=claude_bypass_prep
+  check_harness claude fm-lp-claude-bypass-$$ '' '' \
+    'Claude Code running in Bypass Permissions mode' "$CLAUDE_BYPASS_TAIL" \
+    env CLAUDE_CONFIG_DIR="$CLAUDE_BYPASS_CFG" "$CLAUDE_BIN" --dangerously-skip-permissions hello
+  LAB_PREP=
+  fm_busy_launch_prompt_name claude < "$CLAUDE_BYPASS_TAIL" | grep -q 'Bypass Permissions' \
+    || fail "claude: the real Bypass Permissions dialog was not named for the person who has to answer it"
+  pass "claude: a real launch parked on its own rendered Bypass Permissions dialog surfaces through the watcher gate and is named"
 else
   note "claude not installed - launch-prompt signature not checked"
 fi

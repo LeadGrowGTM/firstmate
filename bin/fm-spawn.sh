@@ -1161,6 +1161,8 @@ spawn_remote_secondmate() {
     [ -z "$out" ] || printf '%s\n' "$out" >&2
     if [ "$rc" -eq 255 ]; then
       echo "error: remote secondmate $id is unavailable or launch completion is unknown; preserved route $host:$home" >&2
+    else
+      echo "error: remote secondmate $id did not launch on host $host; the remote host's own report is above" >&2
     fi
     return "$rc"
   fi

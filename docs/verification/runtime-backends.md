@@ -573,6 +573,36 @@ Claude, launched `--dangerously-skip-permissions` into a brand-new worktree unde
  Enter to confirm · Esc to cancel
 ```
 
+Claude's once-per-machine Bypass Permissions confirmation was verified 2026-10-10 on Claude Code 2.1.296 by the same guard.
+That run refreshed only the Claude results: pi was not installed, and gemini 0.59.0, older than the version verified above, rendered none of its expected prompts within the guard's window, so the 2026-09-22 Pi and Gemini results stand unrefreshed.
+
+```
+# live claude version: 2.1.296 (Claude Code)
+ok - claude: a real launch parked on its own rendered trust dialog surfaces through the watcher gate
+ok - claude: a real launch parked on its own rendered Bypass Permissions dialog surfaces through the watcher gate and is named
+# pi not installed - launch-prompt signature not checked
+# live gemini version: 0.59.0
+not ok - gemini: the real launch never rendered its expected prompt ('How would you like to authenticate for this project|Do you trust the files in this folder|Enter Gemini API Key') within 15s - captured tail:
+```
+
+Claude, launched `--dangerously-skip-permissions` under a scratch `CLAUDE_CONFIG_DIR` that is onboarded and trusts the worktree but has never accepted bypass mode (the shape a first launch on a fresh host produces):
+
+```
+  WARNING: Claude Code running in Bypass Permissions mode
+
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.
+
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+
+  https://code.claude.com/docs/en/security
+
+  ❯ No, exit
+    Yes, I accept
+
+  Enter to confirm · Esc to cancel
+```
+
 Pi, launched into a fresh worktree carrying a project-local `.pi/extensions/` file (the trust-requiring resource that actually gates the dialog) under an isolated `HOME`:
 
 ```

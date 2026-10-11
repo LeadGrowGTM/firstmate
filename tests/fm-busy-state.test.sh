@@ -313,6 +313,40 @@ This project'"'"'s CLAUDE.md imports files outside the current working directory
   pass "a Claude launch parked on its trust or external-imports dialog classifies unknown launch-prompt"
 }
 
+test_launch_prompt_claude_bypass_dialog() {
+  local state out
+  state=$(new_state_dir launch-prompt-claude-bypass)
+  "$EV" arm "$state" t1 >/dev/null
+  out=$(fm_busy_classify herdr fm-remote:w1:p2 claude t1 "$state" '  WARNING: Claude Code running in Bypass Permissions mode
+
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.
+
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+
+  https://code.claude.com/docs/en/security
+
+  > No, exit
+    Yes, I accept
+
+  Enter to confirm . Esc to cancel')
+  [ "$out" = "unknown launch-prompt" ] \
+    || fail "a launch pinned at fm-spawn parked on Claude's Bypass Permissions dialog must classify unknown launch-prompt, got '$out'"
+  fm_busy_launch_prompt_name claude <<'TAIL' | grep -q 'Bypass Permissions' \
+    || fail "the parked Bypass Permissions dialog must be named for the person who has to answer it"
+  WARNING: Claude Code running in Bypass Permissions mode
+  > No, exit
+    Yes, I accept
+TAIL
+  # The heading alone is prose a worker reading this repository could render;
+  # only the heading together with one of the dialog's own option or footer
+  # lines is the dialog.
+  out=$(fm_busy_classify tmux w1 claude t1 "$state" 'The docs say: WARNING: Claude Code running in Bypass Permissions mode is shown once per machine.')
+  [ "$out" = "busy fm-spawn" ] \
+    || fail "prose quoting the Bypass Permissions heading must not classify as a parked launch, got '$out'"
+  pass "a Claude launch parked on its Bypass Permissions dialog classifies unknown launch-prompt and is named"
+}
+
 test_launch_prompt_pi_trust_dialog() {
   local state out h
   for h in pi pi-signed omp; do
@@ -610,6 +644,7 @@ test_record_without_sidecar_unknown
 test_source_mismatch_cross_adapter
 test_converted_adapters_ignore_footer_text
 test_launch_prompt_claude_trust_dialog
+test_launch_prompt_claude_bypass_dialog
 test_launch_prompt_pi_trust_dialog
 test_launch_prompt_pi_requires_both_markers
 test_launch_prompt_gemini_dialogs

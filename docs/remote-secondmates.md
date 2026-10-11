@@ -312,6 +312,7 @@ These steps are never automated and are always reported rather than silently att
 - FileVault, which holds a reboot at pre-boot authentication before any login session exists.
 - Installing any missing required tool that no safe wrapper can resolve.
 - Each worker runtime's own `/login`, and any keychain password prompt that login needs.
+- Claude Code's one-time Bypass Permissions confirmation, which a fresh host shows the first time a second mate launches on Claude there; [the launch refuses and names it](#first-launch-on-a-fresh-host) rather than answering it.
 
 Firstmate never writes an auto-login password, never changes FileVault, and never stores an account password.
 A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own symlink is reported for the operator to inspect and is never overwritten.
@@ -544,6 +545,24 @@ The primary then takes these steps:
 4. It asks the remote host to launch on Herdr in `fm-remote`.
 
 All remote secondmates on one host share `fm-remote` and retain separate `2ndmate-<id>` workspaces inside it.
+
+### First launch on a fresh host
+
+A launch succeeds only once the new agent has started reading its charter, or has shown no recognized prompt for about 30 seconds.
+A host whose account has never run Claude Code in Bypass Permissions mode stops the first Claude launch at a one-time dialog headed `WARNING: Claude Code running in Bypass Permissions mode`, which opens on `No, exit`.
+The launch then fails instead of reporting a second mate that is not working, and its error names the dialog, the waiting pane, and the host.
+
+Firstmate never answers that dialog and sends it no keys, because accepting it is a person's consent for that machine.
+Clear it once per host:
+
+1. On the host, open the dedicated session with `herdr --session fm-remote`.
+2. In the waiting `2ndmate-<id>` pane, choose `Yes, I accept`.
+3. On the primary, run the same `bin/fm-spawn.sh <id> --secondmate` again.
+
+The waiting agent is left in place, so it continues into its charter as soon as the dialog is answered and the rerun adopts it rather than starting a second one.
+A rerun before the dialog is answered fails the same way.
+A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog.
+The same refusal covers any other launch prompt the shared classifier in [`bin/fm-busy-lib.sh`](../bin/fm-busy-lib.sh) recognizes for the selected harness.
 
 ### Refused and unsupported launches
 
@@ -834,6 +853,7 @@ bin/fm-test-run.sh tests/fm-secondmate-sync.test.sh
 bin/fm-test-run.sh tests/fm-remote-reply.test.sh
 bin/fm-test-run.sh tests/fm-remote-backlog-handoff.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-lifecycle-e2e.test.sh
+bin/fm-test-run.sh tests/fm-remote-secondmate-launch-dialog.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-trace-context.test.sh
 ```
 
