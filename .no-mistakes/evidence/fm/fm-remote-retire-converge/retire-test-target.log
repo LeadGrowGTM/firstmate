@@ -1,0 +1,5 @@
+ok - a remote secondmate retirement completes in one run and clears the parent's records
+ok - retiring the same remote home twice converges and leaves the path absent
+ok - a rerun after a partial failure converges over an empty leftover home and clears the parent's records
+ok - retirement still refuses an unseeded directory that holds anything but empty directories
+ALL TESTS PASSED

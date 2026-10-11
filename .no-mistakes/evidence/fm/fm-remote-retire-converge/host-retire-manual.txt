@@ -1,0 +1,62 @@
+## 1. home path absent
+$ FM_HOME=<tmp>/gone bin/fm-remote-secondmate-control.sh retire mate1
+already-retired: mate1
+exit=0
+path after: ls: cannot access '<tmp>/gone': No such file or directory 
+
+$ FM_HOME=<tmp>/gone bin/fm-remote-secondmate-control.sh retire mate1
+already-retired: mate1
+exit=0
+path after: ls: cannot access '<tmp>/gone': No such file or directory 
+
+## 2. empty leftover tree (state/parent-route + data/.parent-route)
+$ FM_HOME=<tmp>/left bin/fm-remote-secondmate-control.sh retire mate1
+already-retired: mate1
+exit=0
+path after: ls: cannot access '<tmp>/left': No such file or directory 
+
+$ FM_HOME=<tmp>/left bin/fm-remote-secondmate-control.sh retire mate1
+already-retired: mate1
+exit=0
+path after: ls: cannot access '<tmp>/left': No such file or directory 
+
+## 3. unseeded dir holding a file
+$ FM_HOME=<tmp>/file bin/fm-remote-secondmate-control.sh retire mate1
+error: remote home is not a seeded secondmate home
+exit=1
+path after: state 
+  <tmp>/file
+  <tmp>/file/state
+  <tmp>/file/state/keep
+
+keep content: precious
+## 4. unseeded dir holding only a symlink
+$ FM_HOME=<tmp>/link bin/fm-remote-secondmate-control.sh retire mate1
+error: remote home is not a seeded secondmate home
+exit=1
+path after: state 
+  <tmp>/link
+  <tmp>/link/state
+  <tmp>/link/state/l
+
+## 5. home path is itself a symlink to an empty dir
+$ FM_HOME=<tmp>/sym bin/fm-remote-secondmate-control.sh retire mate1
+error: remote secondmate home is unavailable or unsafe
+exit=1
+path after: state 
+  <tmp>/sym
+
+drwxrwxr-x 3 mitch mitch 4096 Oct 10 23:42 <tmp>/real
+lrwxrwxrwx 1 mitch mitch   33 Oct 10 23:42 <tmp>/sym -> <tmp>/real
+## 6. empty file deep in tree
+$ FM_HOME=<tmp>/deep bin/fm-remote-secondmate-control.sh retire mate1
+error: remote home is not a seeded secondmate home
+exit=1
+path after: a state 
+  <tmp>/deep
+  <tmp>/deep/state
+  <tmp>/deep/a
+  <tmp>/deep/a/b
+  <tmp>/deep/a/b/c
+  <tmp>/deep/a/b/c/empty
+

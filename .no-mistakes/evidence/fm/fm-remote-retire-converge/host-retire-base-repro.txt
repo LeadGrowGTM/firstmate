@@ -1,0 +1,11 @@
+## base 3ce49bcd: retire against an absent home, twice
+$ FM_HOME=<tmp>/gone bin/fm-remote-secondmate-control.sh retire mate1   (run 1)
+error: remote home is not a seeded secondmate home
+exit=1
+  <tmp>/gone
+  <tmp>/gone/state
+$ FM_HOME=<tmp>/gone bin/fm-remote-secondmate-control.sh retire mate1   (run 2)
+error: remote home is not a seeded secondmate home
+exit=1
+  <tmp>/gone
+  <tmp>/gone/state
