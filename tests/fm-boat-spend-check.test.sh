@@ -13,12 +13,16 @@
 #      over it, too many active sandboxes, a size off the allow list, a
 #      sandbox with no auto-stop deadline off the always-on list, auto-refill
 #      enabled, and a trial or plan end within 3 days.
-#   3. A missing CLI, a timed-out call, malformed JSON, an unreadable
-#      auto-refill field, and an invalid config are reported, not swallowed.
+#   3. A missing CLI, a call the bound reports as timed out, malformed JSON, a
+#      missing or unreadable field, an incomplete sandbox list, and an invalid
+#      config are reported, not swallowed, as one read-failure part of the line.
 #   4. Only the three fixed read commands are ever passed, each with
 #      --no-update, and no mutating verb is ever seen.
 #   5. A home with no config is not checked and never calls Boat.
-#   6. The daily gate holds, and arm and disarm bind and remove the shim.
+#   6. The daily gate holds, a failed read does not use it up and is reported
+#      once a day, and arm and disarm bind and remove the shim.
+#   7. "boat_bin" selects the CLI only as an absolute path to an executable
+#      file, and FM_BOAT_BIN wins over it.
 # shellcheck disable=SC2016  # literal dollar amounts in expected report lines
 set -u
 
@@ -33,12 +37,14 @@ NOW=1791727200 # 2026-10-11T14:00:00Z
 
 # A Boat stand-in that answers the three read shapes from fixture files and
 # logs one line per call. A first argument it does not know exits 97, so a
-# stray mutating command is both recorded and visibly refused.
+# stray mutating command is both recorded and visibly refused. With a
+# fixtures/timeout file it exits 124, the status the bounded runner reports
+# when its bound is hit, so the timeout path runs without waiting out the bound.
 FAKE_BOAT="$TMP_ROOT/boat"
 cat > "$FAKE_BOAT" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FIXTURES/calls.log"
-[ ! -e "$FIXTURES/sleep" ] || sleep 5
+[ ! -e "$FIXTURES/timeout" ] || exit 124
 case "$*" in
   "--no-update limits --json") f=limits ;;
   "--no-update list --all --json") f=list ;;
@@ -73,12 +79,13 @@ set_json() {
   jq -c "$3" "$f" > "$f.new" && mv "$f.new" "$f"
 }
 
-# run_check <home> [env...]: prints the check's stdout; stderr is merged.
+# run_check <home> [env...]: prints the check's stdout; stderr is merged. A
+# later FM_BOAT_SPEND_NOW moves the clock for a second run in the same home.
 run_check() {
   local home=$1
   shift
   env FM_HOME="$home" FM_BOAT_BIN="$FAKE_BOAT" FIXTURES="$home/fixtures" \
-    FM_BOAT_SPEND_NOW="$NOW" FM_BOAT_SPEND_INTERVAL=0 "$@" "$CHECK" check 2>&1
+    FM_BOAT_SPEND_NOW="$NOW" "$@" "$CHECK" check 2>&1
 }
 
 calls() { [ -f "$1/fixtures/calls.log" ] && cat "$1/fixtures/calls.log" || true; }
@@ -153,15 +160,12 @@ test_no_auto_stop_unless_always_on() {
   [ -z "$out" ] || fail "an always-on sandbox with no deadline should be silent: $out"
 }
 
-test_auto_refill_enabled_and_unreadable() {
+test_auto_refill_enabled() {
   local home out
   home=$(make_world refill)
   set_json "$home" billing '.prepaid.enabled = true'
   out=$(run_check "$home")
   assert_equals 'boat-spend: auto-refill is enabled' "$out" "auto-refill line"
-  set_json "$home" billing 'del(.prepaid.enabled)'
-  out=$(run_check "$home")
-  assert_equals 'boat-spend: auto-refill state unreadable' "$out" "unreadable auto-refill line"
 }
 
 test_trial_or_plan_end_within_three_days() {
@@ -170,9 +174,95 @@ test_trial_or_plan_end_within_three_days() {
   set_json "$home" limits '.subscriptionTrialEndsAt = "2026-10-13T21:38:16.000Z" | .subscriptionCurrentPeriodEnd = "2026-10-13T21:38:16.000Z"'
   out=$(run_check "$home")
   assert_equals 'boat-spend: trial or plan ends 2026-10-13 UTC, within 3 days' "$out" "period line"
+  home=$(make_world period-far)
   set_json "$home" limits '.subscriptionTrialEndsAt = "2026-10-15T21:38:16.000Z" | .subscriptionCurrentPeriodEnd = "2026-10-15T21:38:16.000Z"'
   out=$(run_check "$home")
   [ -z "$out" ] || fail "an end more than 3 days away should be silent: $out"
+}
+
+# unreadable_case <name> <fixture> <jq-filter> <expected line>
+unreadable_case() {
+  local home out
+  home=$(make_world "$1")
+  set_json "$home" "$2" "$3"
+  out=$(run_check "$home")
+  assert_equals "$4" "$out" "$1 should be reported as unreadable"
+}
+
+test_unreadable_fields_are_reported() {
+  unreadable_case no-refill billing 'del(.prepaid.enabled)' \
+    'boat-spend: read failed: unreadable auto-refill state'
+  unreadable_case no-spend limits 'del(.creditUsedSeconds)' \
+    'boat-spend: read failed: unreadable spend'
+  unreadable_case no-usage limits 'del(.last24hUsageSeconds)' \
+    'boat-spend: read failed: unreadable last-24-hour usage'
+  unreadable_case bad-states limits '.activeStates = "running"' \
+    'boat-spend: read failed: unreadable active states'
+  unreadable_case offset-plan-end limits '.subscriptionCurrentPeriodEnd = "2026-10-12T10:00:00+00:00"' \
+    'boat-spend: read failed: unreadable plan end'
+  unreadable_case epoch-trial-end limits '.subscriptionTrialEndsAt = 1791800000' \
+    'boat-spend: read failed: unreadable trial end'
+  unreadable_case no-sandboxes list '{pageInfo, boxes: [{"id":"bx_big","state":"running","type":"xlarge","archiveAfter":null}]}' \
+    'boat-spend: read failed: unreadable sandbox list'
+  unreadable_case no-state list '.sandboxes += [{"id":"bx_big","type":"xlarge","archiveAfter":null}]' \
+    'boat-spend: read failed: unreadable a sandbox state'
+  unreadable_case no-paging list 'del(.pageInfo)' \
+    'boat-spend: read failed: unreadable sandbox list paging'
+  unreadable_case more-pages list '.pageInfo.hasMore = true' \
+    'boat-spend: read failed: unreadable sandbox list past its first page'
+}
+
+test_read_problems_are_consolidated_beside_real_findings() {
+  local home out
+  home=$(make_world consolidated)
+  set_json "$home" limits 'del(.last24hUsageSeconds) | .creditUsedSeconds = 3500000'
+  set_json "$home" list 'del(.pageInfo)'
+  set_json "$home" billing 'del(.prepaid)'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: spend $35 is over the $30 ceiling; read failed: unreadable last-24-hour usage, sandbox list paging, auto-refill state' \
+    "$out" "several read problems should be one part of the one line"
+}
+
+test_transient_read_failure_does_not_use_up_the_day() {
+  local home out
+  home=$(make_world transient)
+  set_json "$home" billing '.prepaid.enabled = true'
+  : > "$home/fixtures/timeout"
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: read failed: boat limits timed out' "$out" "the failed read"
+  rm -f "$home/fixtures/timeout"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 300)))
+  assert_equals 'boat-spend: auto-refill is enabled' "$out" "the next poll after a failed read should evaluate and report normally"
+  assert_absent "$home/state/.boat-spend-check-failed" "a successful read should clear the failure record"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 600)))
+  [ -z "$out" ] || fail "a poll after the day's successful evaluation should be silent: $out"
+  assert_equals 4 "$(calls "$home" | wc -l | tr -d ' ')" "one failed call, three successful reads, then a gated poll"
+}
+
+test_persistent_read_failure_reports_once_a_day() {
+  local home out
+  home=$(make_world persistent)
+  printf 'not json{' > "$home/fixtures/limits.json"
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: read failed: boat limits did not return readable JSON' "$out" "the first failed read"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 300)))
+  [ -z "$out" ] || fail "a repeated failure inside the day should be silent: $out"
+  assert_equals 2 "$(calls "$home" | wc -l | tr -d ' ')" "a failed read should be retried at the next poll"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals 'boat-spend: read failed: boat limits did not return readable JSON' "$out" "a failure that lasts is reported again a day later"
+}
+
+test_persistent_unreadable_field_reports_once_a_day() {
+  local home out
+  home=$(make_world persistent-field)
+  set_json "$home" billing 'del(.prepaid.enabled)'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: read failed: unreadable auto-refill state' "$out" "the first unreadable evaluation"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 300)))
+  [ -z "$out" ] || fail "a repeated unreadable field inside the day should be silent: $out"
+  set_json "$home" billing '.prepaid.enabled = true'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 600)))
+  assert_equals 'boat-spend: auto-refill is enabled' "$out" "the field becoming readable should be evaluated the same day"
 }
 
 test_findings_are_joined_on_one_line() {
@@ -189,9 +279,42 @@ test_findings_are_joined_on_one_line() {
 test_missing_cli_is_reported() {
   local home out
   home=$(make_world missing)
-  out=$(env FM_HOME="$home" FM_BOAT_BIN="$TMP_ROOT/no-such-boat" FM_BOAT_SPEND_NOW="$NOW" \
-    FM_BOAT_SPEND_INTERVAL=0 "$CHECK" check 2>&1)
+  out=$(run_check "$home" FM_BOAT_BIN="$TMP_ROOT/no-such-boat")
   assert_equals 'boat-spend: read failed: the Boat CLI is missing' "$out" "missing CLI line"
+}
+
+test_boat_bin_config_selects_the_cli() {
+  local home out
+  home=$(make_world bin-key "{\"boat_bin\": \"$FAKE_BOAT\"}")
+  set_json "$home" billing '.prepaid.enabled = true'
+  out=$(run_check "$home" FM_BOAT_BIN=)
+  assert_equals 'boat-spend: auto-refill is enabled' "$out" "boat_bin should select the CLI when FM_BOAT_BIN is unset"
+  assert_equals 3 "$(calls "$home" | wc -l | tr -d ' ')" "boat_bin should make the three reads"
+  home=$(make_world bin-env-wins "{\"boat_bin\": \"$FAKE_BOAT\"}")
+  out=$(run_check "$home" FM_BOAT_BIN="$TMP_ROOT/no-such-boat")
+  assert_equals 'boat-spend: read failed: the Boat CLI is missing' "$out" "FM_BOAT_BIN should win over boat_bin"
+}
+
+# bad_boat_bin_case <name> <boat_bin value> <expected problem>
+bad_boat_bin_case() {
+  local home out
+  home=$(make_world "$1" "{\"boat_bin\": \"$2\"}")
+  out=$(run_check "$home" FM_BOAT_BIN=)
+  assert_equals "boat-spend: config/boat-spend.json is invalid: $3" "$out" "$1 should be one invalid-config line"
+  assert_equals 0 "$(calls "$home" | wc -l | tr -d ' ')" "$1 must execute nothing"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals "boat-spend: config/boat-spend.json is invalid: $3" "$out" "$1 should be refused even with FM_BOAT_BIN set"
+  assert_equals 0 "$(calls "$home" | wc -l | tr -d ' ')" "$1 must execute nothing with FM_BOAT_BIN set"
+}
+
+test_boat_bin_config_must_be_an_absolute_executable_file() {
+  local plain="$TMP_ROOT/not-executable-boat"
+  cp "$FAKE_BOAT" "$plain"
+  chmod 0644 "$plain"
+  bad_boat_bin_case bin-relative 'boat' 'boat_bin must be an absolute path'
+  bad_boat_bin_case bin-missing "$TMP_ROOT/no-such-boat" 'boat_bin must be an existing executable file'
+  bad_boat_bin_case bin-not-executable "$plain" 'boat_bin must be an existing executable file'
+  bad_boat_bin_case bin-directory "$TMP_ROOT" 'boat_bin must be an existing executable file'
 }
 
 test_malformed_json_is_reported() {
@@ -209,8 +332,8 @@ test_malformed_json_is_reported() {
 test_timed_out_call_is_reported() {
   local home out
   home=$(make_world timeout)
-  : > "$home/fixtures/sleep"
-  out=$(run_check "$home" FM_BOAT_SPEND_PROBE_SECS=1)
+  : > "$home/fixtures/timeout"
+  out=$(run_check "$home")
   assert_equals 'boat-spend: read failed: boat limits timed out' "$out" "timeout line"
 }
 
@@ -255,12 +378,12 @@ test_daily_gate_and_persistent_condition() {
   local home out
   home=$(make_world gate)
   set_json "$home" billing '.prepaid.enabled = true'
-  out=$(env FM_HOME="$home" FM_BOAT_BIN="$FAKE_BOAT" FIXTURES="$home/fixtures" FM_BOAT_SPEND_NOW="$NOW" "$CHECK" check 2>&1)
+  out=$(run_check "$home")
   assert_equals 'boat-spend: auto-refill is enabled' "$out" "first due evaluation"
-  out=$(env FM_HOME="$home" FM_BOAT_BIN="$FAKE_BOAT" FIXTURES="$home/fixtures" FM_BOAT_SPEND_NOW=$((NOW + 600)) "$CHECK" check 2>&1)
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 600)))
   [ -z "$out" ] || fail "a poll inside the daily gate should be silent: $out"
   assert_equals 3 "$(calls "$home" | wc -l | tr -d ' ')" "a gated poll must not call Boat"
-  out=$(env FM_HOME="$home" FM_BOAT_BIN="$FAKE_BOAT" FIXTURES="$home/fixtures" FM_BOAT_SPEND_NOW=$((NOW + 86400)) "$CHECK" check 2>&1)
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
   assert_equals 'boat-spend: auto-refill is enabled' "$out" "a persisting condition is reported again at the next due evaluation"
 }
 
@@ -279,6 +402,12 @@ test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
   assert_absent "$home/state/boat-spend.check.sh" "disarm left the shim"
   assert_absent "$home/state/boat-spend.check-trust" "disarm left the trust binding"
   assert_absent "$home/state/.boat-spend-check" "disarm left the record"
+  home=$(make_world disarm-failed)
+  : > "$home/fixtures/timeout"
+  run_check "$home" >/dev/null
+  assert_present "$home/state/.boat-spend-check-failed" "a reported failed read should leave its record"
+  env FM_HOME="$home" "$CHECK" disarm >/dev/null
+  assert_absent "$home/state/.boat-spend-check-failed" "disarm left the failure record"
 }
 
 test_healthy_account_is_silent_and_only_reads
@@ -289,10 +418,17 @@ test_configured_ceiling_is_used
 test_more_active_than_expected
 test_size_off_allow_list
 test_no_auto_stop_unless_always_on
-test_auto_refill_enabled_and_unreadable
+test_auto_refill_enabled
 test_trial_or_plan_end_within_three_days
+test_unreadable_fields_are_reported
+test_read_problems_are_consolidated_beside_real_findings
+test_transient_read_failure_does_not_use_up_the_day
+test_persistent_read_failure_reports_once_a_day
+test_persistent_unreadable_field_reports_once_a_day
 test_findings_are_joined_on_one_line
 test_missing_cli_is_reported
+test_boat_bin_config_selects_the_cli
+test_boat_bin_config_must_be_an_absolute_executable_file
 test_malformed_json_is_reported
 test_timed_out_call_is_reported
 test_invalid_config_is_reported

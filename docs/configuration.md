@@ -1552,13 +1552,15 @@ This section is the single owner of the schema.
   "expected_running": 1,
   "allowed_sizes": ["small", "default"],
   "always_on": ["<sandbox id that is meant to run with no auto-stop>"],
-  "boat_bin": "<optional path to the Boat CLI>"
+  "boat_bin": "<optional absolute path to the Boat CLI>"
 }
 ```
 
-- Every field is optional; the values above, with an empty `always_on`, are the defaults.
+- Every field is optional; the values above, with an empty `always_on` and no `boat_bin`, are the defaults.
 - An unknown key or a value of the wrong type is refused, and the check reports the file as invalid rather than falling back to defaults.
-- `FM_BOAT_BIN` wins over `boat_bin`, and `boat` on `PATH` is the last resort, the same knob [`bin/fm-boat-alias-refresh.sh`](../bin/fm-boat-alias-refresh.sh) uses.
+- `boat_bin` exists because the watcher runs the check with its own environment, where `boat` is usually not on `PATH` and no `FM_BOAT_BIN` persists, so the file is the one durable place to name the CLI.
+  It must be an absolute path to an existing executable file; anything else makes the file invalid, and an invalid file runs nothing.
+- `FM_BOAT_BIN` wins over `boat_bin`, and `boat` on `PATH` is the last resort.
 - The file is not inherited by secondmate homes.
 
 **What is reported**
@@ -1570,10 +1572,11 @@ The check prints one `boat-spend:` line, joining every condition that is outside
 - More sandboxes are in an active state than `expected_running`.
 - An active sandbox is a size not in `allowed_sizes`.
 - An active sandbox has no auto-stop deadline and is not in `always_on`.
-- Auto-refill is enabled, or its state could not be read.
+- Auto-refill is enabled.
 - The trial or plan end is within 3 days, which also gives a renewal reminder each month.
-- Boat could not be read: a missing CLI, a timed-out call, malformed JSON, or an unexpected shape.
-  A check that cannot see is reported rather than treated as quiet.
+- The check could not see everything, because a check that cannot see is reported rather than treated as quiet.
+  That covers a missing `jq` or Boat CLI, a timed-out call, malformed JSON, an invalid `config/boat-spend.json`, a sandbox list with more pages than were read, and a field that is missing or not readable: spend, last-24-hour usage, active states, a plan or trial end, the sandbox list, a sandbox's state, or the auto-refill state.
+  Every such cause in one run is consolidated into a single `read failed:` part of the line (an invalid file is named as such instead), not one part per cause.
 
 Stopped sandboxes are never reported, because Boat bills only while a sandbox runs.
 
@@ -1582,9 +1585,11 @@ Stopped sandboxes are never reported, because Boat bills only while a sandbox ru
 Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
 
 - That writes `state/boat-spend.check.sh` and binds its bytes with `bin/fm-check-register.sh`, so the existing watcher polls it and turns its one line into a `check:` wake; no separate schedule is involved.
-- It evaluates at most once per `FM_BOAT_SPEND_INTERVAL` seconds (default 86400, `0` evaluates every run), and a condition that persists is reported again at each due evaluation.
-- `FM_BOAT_SPEND_PROBE_SECS` (default 9, at most 9) bounds each Boat call so the three together fit inside `FM_CHECK_TIMEOUT`.
-- Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and the record.
+- An evaluation that read everything is recorded, and the next one is due 24 hours later; a condition that persists is reported again at each due evaluation.
+- An evaluation that could not see everything is not recorded, so the next watcher poll tries again and a passing failure does not cost the day's check.
+  Its line is printed at most once per 24 hours while the failure lasts, and that limit is lifted as soon as a read succeeds.
+- Each Boat call is bounded to 9 seconds so the three together fit inside `FM_CHECK_TIMEOUT`.
+- Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and both records.
 
 ## Mail plane (.env)
 

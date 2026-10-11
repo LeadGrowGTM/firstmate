@@ -482,7 +482,7 @@ boat new --type default --ttl 7200       # a timed host (seconds); the timer res
 
 A trial account cannot turn auto-stop off and caps the timer at 2 hours; `--no-auto-stop` needs a paid plan.
 
-| Size | Per hour | Per day | One always-on box, 30 days |
+| Size | Per hour | Per day | One always-on box, average month (730 hours) |
 | - | - | - | - |
 | `small` | $0.018 | $0.43 | $13.14 |
 | `default` | $0.036 | $0.86 | $26.28 |
