@@ -1,0 +1,2 @@
+base classify=busy fm-spawn name=
+target classify=unknown launch-prompt name=Claude Code's once-per-machine Bypass Permissions dialog ("WARNING: Claude Code running in Bypass Permissions mode"), which opens on "No, exit" and needs a person to choose "Yes, I accept"

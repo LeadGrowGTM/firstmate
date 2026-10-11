@@ -1,0 +1,7 @@
+ok - no settings: the step creates the file with only the top-level key and the check then passes
+ok - existing settings: the step corrects the one key and leaves every other key alone
+ok - rerun: a file that already holds the value is not rewritten
+ok - check: a missing file, a missing key, and another value all fail it and nothing is written
+ok - unreadable settings: a file that is not a JSON object is refused and left untouched
+ok - CLAUDE_CONFIG_DIR selects the settings directory, and invalid use is refused
+# all fm-boat-claude-auto-compact tests passed

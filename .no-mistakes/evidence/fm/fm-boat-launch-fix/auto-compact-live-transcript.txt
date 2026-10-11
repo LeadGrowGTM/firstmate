@@ -1,0 +1,60 @@
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact --check
+missing: autoCompactWindow=300000 is not set in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=1
+rc=1
+++ ls -la /tmp/fm-ac.r7Tqmq
+total 348
+drwx------    2 mitch mitch   4096 Oct 11 11:35 .
+drwxrwxrwt 3035 root  root  348160 Oct 11 11:35 ..
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact
+ok: autoCompactWindow=300000 in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=0
+rc=0
+++ cat /tmp/fm-ac.r7Tqmq/c/settings.json
+{
+  "autoCompactWindow": 300000
+}
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact --check
+ok: autoCompactWindow=300000 in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=0
+rc=0
+++ printf '{"model":"claude-opus-5-5","permissions":{"allow":["Bash(ls:*)"]},"autoCompactWindow":150000,"env":{"A":"b"}}'
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact --check
+missing: autoCompactWindow=300000 is not set in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=1
+rc=1
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact
+ok: autoCompactWindow=300000 in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=0
+rc=0
+++ jq -c . /tmp/fm-ac.r7Tqmq/c/settings.json
+{"model":"claude-opus-5-5","permissions":{"allow":["Bash(ls:*)"]},"autoCompactWindow":300000,"env":{"A":"b"}}
+++ printf '[1,2]'
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact
+/tmp/fm-ac.r7Tqmq/c/settings.json is not a JSON object; left untouched
+++ echo rc=1
+rc=1
+++ cat /tmp/fm-ac.r7Tqmq/c/settings.json
+[1,2]++ echo
+
+++ printf '{"autoCompactWindow":"300000"}'
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact --check
+missing: autoCompactWindow=300000 is not set in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=1
+rc=1
+++ printf '{"modelOverrides":{"claude-opus-5-5":{"autoCompactWindow":300000}}}'
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact --check
+missing: autoCompactWindow=300000 is not set in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=1
+rc=1
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact
+ok: autoCompactWindow=300000 in /tmp/fm-ac.r7Tqmq/c/settings.json
+++ echo rc=0
+rc=0
+++ jq -c . /tmp/fm-ac.r7Tqmq/c/settings.json
+{"modelOverrides":{"claude-opus-5-5":{"autoCompactWindow":300000}},"autoCompactWindow":300000}
+++ sh docs/examples/boat-remote-host/fm-claude-auto-compact --bogus
+usage: fm-claude-auto-compact [--check]
+++ echo rc=2
+rc=2
+++ set +x
