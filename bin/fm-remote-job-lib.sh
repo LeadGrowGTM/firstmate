@@ -814,7 +814,7 @@ fm_remote_job_stage_owner_alive() { # <stage-dir>
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$stage/.owner-start" 256 2>/dev/null) || return 1
   actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
-  [ "$recorded_start" = "$actual_start" ]
+  fm_remote_job_process_start_still_names "$recorded_start" "$actual_start"
 }
 
 fm_remote_job_reap_stale() { # <account-home>
@@ -968,9 +968,91 @@ fm_remote_job_worker_ready_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.r
 fm_remote_job_worker_identity_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.identity"; }
 fm_remote_job_worker_lock_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.lock"; }
 
+# ps(1) for the wall-clock fallback. FM_REMOTE_JOB_PS_BIN is a test seam so a
+# suite can hand back a different lstart on every read. Command and pgid reads
+# stay on the system ps, because that seam only simulates the start-time string.
+fm_remote_job_process_start_ps_bin() {
+  if [ -n "${FM_REMOTE_JOB_PS_BIN:-}" ] && [ -x "${FM_REMOTE_JOB_PS_BIN}" ]; then
+    printf '%s\n' "$FM_REMOTE_JOB_PS_BIN"
+    return 0
+  fi
+  if [ -x /bin/ps ]; then printf '%s\n' /bin/ps; return 0; fi
+  if [ -x /usr/bin/ps ]; then printf '%s\n' /usr/bin/ps; return 0; fi
+  return 1
+}
+
+# Linux /proc stat field 22: clock ticks since boot. The same field
+# fm_pid_identity prefers. It does not move when the wall clock steps.
+fm_remote_job_process_start_tick() { # <pid>
+  local pid=$1 proc_root stat_line starttime
+  local -a stat_fields
+  proc_root=${FM_REMOTE_JOB_PROC_ROOT:-/proc}
+  [ -r "$proc_root/$pid/stat" ] || return 1
+  stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
+  # After the final comm delimiter, array index 19 is proc stat field 22.
+  read -r -a stat_fields <<< "${stat_line##*)}"
+  [ "${#stat_fields[@]}" -ge 20 ] || return 1
+  starttime=${stat_fields[19]}
+  case "$starttime" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$starttime"
+}
+
+fm_remote_job_process_start_is_monotonic() { # <value>
+  local rest
+  case "$1" in
+    starttime=*) rest=${1#starttime=} ;;
+    *) return 1 ;;
+  esac
+  case "$rest" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+# The historical identity is ps -o lstart= in the C locale, for example
+# "Sun Oct 11 16:26:44 2026", including the padding some ps builds leave.
+# A string that is not that shape stays a mismatch, so a stale marker is not
+# adopted just because it is not the new form.
+fm_remote_job_process_start_is_legacy_lstart() { # <value>
+  [[ "$1" =~ ^[[:space:]]*(Sun|Mon|Tue|Wed|Thu|Fri|Sat)[[:space:]]+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]]+[0-9]{4}[[:space:]]*$ ]]
+}
+
+# 0 when <recorded> and <actual> are the same identity.
+# 2 when <recorded> is a legacy wall-clock lstart and <actual> is the monotonic
+# start tick of a live process. That format change is not a different process:
+# callers must not signal or reap on it.
+# 1 when the values disagree for any other reason.
+fm_remote_job_process_start_relation() { # <recorded> <actual>
+  [ "$1" = "$2" ] && return 0
+  if fm_remote_job_process_start_is_monotonic "$2" && fm_remote_job_process_start_is_legacy_lstart "$1"; then
+    return 2
+  fi
+  return 1
+}
+
+# Accept an exact start match or a legacy lstart recorded before the monotonic
+# tick existed. Anything else, including a stale non-date marker, does not name
+# this process.
+fm_remote_job_process_start_still_names() { # <recorded> <actual>
+  local relation=0
+  fm_remote_job_process_start_relation "$1" "$2" || relation=$?
+  [ "$relation" -eq 0 ] || [ "$relation" -eq 2 ]
+}
+
 fm_remote_job_process_start() {
-  local pid=$1 ps_bin value
-  if [ -x /bin/ps ]; then ps_bin=/bin/ps; elif [ -x /usr/bin/ps ]; then ps_bin=/usr/bin/ps; else return 1; fi
+  local pid=$1 ps_bin value tick proc_root
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  proc_root=${FM_REMOTE_JOB_PROC_ROOT:-/proc}
+  # A readable stat file is authoritative. A parse failure must not fall
+  # through to the wall clock, or a malformed tick would look like a new
+  # process. Only the absence of the file uses the portable fallback.
+  if [ -r "$proc_root/$pid/stat" ]; then
+    tick=$(fm_remote_job_process_start_tick "$pid") || return 1
+    printf 'starttime=%s\n' "$tick"
+    return 0
+  fi
+  # Platforms without a readable stat file (macOS) keep the historical ps
+  # lstart bytes, so an identity recorded before this change still compares
+  # equal. The string is not trimmed and the locale is not pinned, because
+  # either change would itself look like a different process.
+  ps_bin=$(fm_remote_job_process_start_ps_bin) || return 1
   value=$("$ps_bin" -p "$pid" -o lstart= 2>/dev/null) || return 1
   [ -n "$value" ] || return 1
   case "$value" in *$'\n'*|*$'\r'*) return 1 ;; esac
@@ -1077,7 +1159,7 @@ fm_remote_job_recorded_owner_alive() { # <dir>
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$dir/start" 256 2>/dev/null) || return 1
   actual_start=$(fm_remote_job_process_start "$pid") || return 1
-  [ "$recorded_start" = "$actual_start" ] || return 1
+  fm_remote_job_process_start_still_names "$recorded_start" "$actual_start" || return 1
   recorded_command=$(fm_remote_job_read_single_line "$dir/command" 8192 2>/dev/null) || return 1
   actual_command=$(fm_remote_job_process_command "$pid") || return 1
   [ "$recorded_command" = "$actual_command" ] || return 1
