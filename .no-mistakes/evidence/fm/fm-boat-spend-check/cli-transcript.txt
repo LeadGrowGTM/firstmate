@@ -1,0 +1,155 @@
+===== 1. healthy account (one running default box with auto-stop, one stopped xlarge with none)
+### healthy
+  exit=0 calls=3
+  stdout: <silent>
+  boat argv: --no-update limits --json
+  boat argv: --no-update list --all --json
+  boat argv: --no-update billing status --json
+===== 2. each agreed condition
+### spend over ceiling ($31 used)
+  exit=0 calls=3
+  stdout: boat-spend: spend $31 is over the $30 ceiling
+### spend projected over ($20 used, $1/day, 19 days left)
+  exit=0 calls=3
+  stdout: boat-spend: spend $20 projects to $39.32 by period end, over the $30 ceiling
+### spend projected under ($10 used, $1/day) - must be silent
+  exit=0 calls=3
+  stdout: <silent>
+### two active, expected 1
+  exit=0 calls=3
+  stdout: boat-spend: 2 sandboxes active, expected 1 (bx_one,bx_two)
+### two active, expected_running=2 - must be silent
+  exit=0 calls=3
+  stdout: <silent>
+### active xlarge box
+  exit=0 calls=3
+  stdout: boat-spend: sandbox bx_one is size xlarge, not on the allow list (small,default)
+### active box with no auto-stop
+  exit=0 calls=3
+  stdout: boat-spend: sandbox bx_one has no auto-stop deadline and is not on the always-on list
+### no auto-stop but on always_on - must be silent
+  exit=0 calls=3
+  stdout: <silent>
+### auto-refill enabled
+  exit=0 calls=3
+  stdout: boat-spend: auto-refill is enabled
+### trial ends in 2 days
+  exit=0 calls=3
+  stdout: boat-spend: trial or plan ends 2026-10-13 UTC, within 3 days
+### plan ends just inside 3 days
+  exit=0 calls=3
+  stdout: boat-spend: trial or plan ends 2026-10-14 UTC, within 3 days
+### trial ends in 4 days - must be silent
+  exit=0 calls=3
+  stdout: <silent>
+### everything wrong at once - one line
+  exit=0 calls=3
+  stdout: boat-spend: spend $31 is over the $30 ceiling; 2 sandboxes active, expected 1 (bx_one,bx_two); sandbox bx_one is size xlarge, not on the allow list (small,default); sandbox bx_one has no auto-stop deadline and is not on the always-on list; auto-refill is enabled; trial or plan ends 2026-10-12 UTC, within 3 days
+===== 3. daily gate
+### first evaluation
+  exit=0 calls=3
+  stdout: boat-spend: auto-refill is enabled
+### 5 minutes later (no new Boat calls expected)
+  exit=0 calls=3
+  stdout: <silent>
+### 23h59m later
+  exit=0 calls=3
+  stdout: <silent>
+### 24h later, condition persists
+  exit=0 calls=6
+  stdout: boat-spend: auto-refill is enabled
+===== 4. no config: not checked
+### check with no config
+  exit=0 calls=0
+  stdout: <silent>
+  arm: exit=1 fm-boat-spend-check: no Boat spend config at /tmp/fm-boat-drive.8PJsIC/nocfg/config/boat-spend.json
+===== 5. cannot read is not quiet
+### CLI missing
+  exit=0 calls=0
+  stdout: boat-spend: read failed: the Boat CLI is missing
+### CLI prints non-JSON
+  exit=0 calls=1
+  stdout: boat-spend: read failed: boat limits did not return readable JSON
+### CLI hangs (real 9 s bound)
+  exit=0 calls=1
+  stdout: boat-spend: read failed: boat limits timed out
+  elapsed: 9 s
+### activeStates missing, with an xlarge no-stop box (no guessed list)
+  exit=0 calls=3
+  stdout: boat-spend: read failed: unreadable active states
+### sandbox list has more pages
+  exit=0 calls=3
+  stdout: boat-spend: read failed: unreadable sandbox list past its first page
+### refill and spend fields missing - one consolidated part
+  exit=0 calls=3
+  stdout: boat-spend: read failed: unreadable spend, auto-refill state
+### transient: failed read
+  exit=0 calls=1
+  stdout: boat-spend: read failed: boat limits did not return readable JSON
+### transient: still failing 5 min later (retries Boat, no second line)
+  exit=0 calls=2
+  stdout: <silent>
+### transient: recovered 10 min later, same day
+  exit=0 calls=5
+  stdout: boat-spend: auto-refill is enabled
+### persistent: day 1
+  exit=0 calls=1
+  stdout: boat-spend: read failed: boat limits did not return readable JSON
+### persistent: +12h
+  exit=0 calls=2
+  stdout: <silent>
+### persistent: +24h
+  exit=0 calls=3
+  stdout: boat-spend: read failed: boat limits did not return readable JSON
+===== 6. invalid config runs nothing
+### config: <empty file>
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: must be one JSON object
+  arm: exit=1 fm-boat-spend-check: must be one JSON object (<tmp>/bad1/config/boat-spend.json)
+### config: {} {"ceiling_usd":1}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: must be one JSON object
+  arm: exit=1 fm-boat-spend-check: must be one JSON object (<tmp>/bad2/config/boat-spend.json)
+### config: []
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: must be one JSON object
+  arm: exit=1 fm-boat-spend-check: must be one JSON object (<tmp>/bad3/config/boat-spend.json)
+### config: {"cieling_usd":30}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: unknown key "cieling_usd"
+  arm: exit=1 fm-boat-spend-check: unknown key "cieling_usd" (<tmp>/bad4/config/boat-spend.json)
+### config: {"ceiling_usd":0}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: ceiling_usd must be a number above 0
+  arm: exit=1 fm-boat-spend-check: ceiling_usd must be a number above 0 (<tmp>/bad5/config/boat-spend.json)
+### config: {"ceiling_usd":"30"}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: ceiling_usd must be a number above 0
+  arm: exit=1 fm-boat-spend-check: ceiling_usd must be a number above 0 (<tmp>/bad6/config/boat-spend.json)
+### config: {"expected_running":1.5}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: expected_running must be a whole number, 0 or more
+  arm: exit=1 fm-boat-spend-check: expected_running must be a whole number, 0 or more (<tmp>/bad7/config/boat-spend.json)
+### config: {"boat_bin":"bin/boat"}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: boat_bin must be an absolute path
+  arm: exit=1 fm-boat-spend-check: boat_bin must be an absolute path (<tmp>/bad8/config/boat-spend.json)
+### config: {"boat_bin":"/nonexistent/boat"}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: boat_bin must be an existing executable file
+  arm: exit=1 fm-boat-spend-check: boat_bin must be an existing executable file (<tmp>/bad9/config/boat-spend.json)
+### config: {"boat_bin":"/etc/hostname"}
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: boat_bin must be an existing executable file
+  arm: exit=1 fm-boat-spend-check: boat_bin must be an existing executable file (<tmp>/bad10/config/boat-spend.json)
+### config: {not json
+  exit=0 calls=0
+  stdout: boat-spend: config/boat-spend.json is invalid: jq: parse error: Invalid numeric literal at line 1, column 5
+  arm: exit=1 fm-boat-spend-check: jq: parse error: Invalid numeric literal at line 1, column 5 (<tmp>/bad11/config/boat-spend.json)
+===== 7. boat_bin key, no boat on PATH, no FM_BOAT_BIN
+  exit=0 stdout: boat-spend: auto-refill is enabled
+  without the key: exit=0 stdout: boat-spend: read failed: the Boat CLI is missing
+===== 8. read-only: every argv the CLI received across all runs above
+       21 --no-update billing status --json
+       28 --no-update limits --json
+       21 --no-update list --all --json

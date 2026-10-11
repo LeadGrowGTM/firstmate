@@ -1,0 +1,27 @@
+===== A. armed home, auto-refill on: the watcher surfaces the line as a check: wake
+armed: state/boat-spend.check.sh
+  arm exit=0
+  state: boat-spend.check-trust
+  state: boat-spend.check.sh
+  shim: #!/usr/bin/env bash
+  shim: export FM_HOME=<tmp>/drift
+  shim: exec <worktree>/bin/fm-boat-spend-check.sh check
+  watcher: check: <tmp>/drift/state/boat-spend.check.sh: boat-spend: auto-refill is enabled
+  watcher exit=0 (124 = still blocking quietly when the bound hit)
+  boat argv: --no-update limits --json
+  boat argv: --no-update list --all --json
+  boat argv: --no-update billing status --json
+===== B. same home, watcher re-armed minutes later: already evaluated today, no Boat calls (rearm-resurface is the watcher re-offering the undelivered wake from A, not a new check run)
+  watcher: check: rearm-resurface
+  watcher exit=0 (124 = still blocking quietly when the bound hit)
+  boat calls total: 3
+===== C. disarm removes shim, trust binding and records
+disarmed: state/boat-spend.check.sh
+  disarm exit=0
+  state now: <end>
+===== D. armed healthy home: watcher stays quiet
+armed: state/boat-spend.check.sh
+  watcher exit=124 (124 = still blocking quietly when the bound hit)
+  boat argv: --no-update limits --json
+  boat argv: --no-update list --all --json
+  boat argv: --no-update billing status --json
