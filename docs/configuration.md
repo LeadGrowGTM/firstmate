@@ -1164,7 +1164,7 @@ Use `bin/fm-treehouse-guard.sh disarm` to remove the check and its records.
 At most once a day the check starts a sweep in the background, and a later poll reports its result as one line.
 The sweep runs the same safe prune for each project clone under this home's `projects/`, then reports when:
 
-- the worktree copies under `~/.treehouse` use more than 5 GB;
+- the worktree copies under `~/.treehouse`, or under this home's own pool, use more than 5 GB;
 - that size could not be measured;
 - a prune did not run, with the reason.
 

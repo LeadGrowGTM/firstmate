@@ -21,8 +21,10 @@
 # never passes --all, --prune-orphans, --include-unlanded, --include-in-use,
 # or --include-leased, and never runs any other treehouse command.
 #
-# `prune <project-dir>` runs that safe prune for one project's pool.
-# bin/fm-teardown.sh calls it after a successful cleanup.  It refuses a
+# `prune <project-dir>` runs that safe prune for one project's pool, and for
+# that clone's pool in this home's own pool folder (bin/fm-wake-lib.sh's
+# fm_treehouse_home_pool, under the user state directory) when one exists
+# there.  bin/fm-teardown.sh calls it after a successful cleanup.  It refuses a
 # directory that is not the root of its own git clone, because treehouse
 # resolves the pool from the working directory and would otherwise act on the
 # enclosing repository.  It runs under the shared Treehouse project lock
@@ -32,10 +34,8 @@
 # skipped silently, exit 0.  Any other prune that did not run prints one
 # `warning:` line and exits 1, which a caller is free to ignore.
 #
-# `sweep` does the daily work for this home only.  It prunes each clone root
-# under this home's projects directory, and that clone's pool in this home's
-# own pool folder (bin/fm-wake-lib.sh's fm_treehouse_home_pool, under the user
-# state directory) when one exists there.  Treehouse keys the default pool by
+# `sweep` does the daily work for this home only.  It runs that prune for each
+# clone root under this home's projects directory.  Treehouse keys the default pool by
 # directory name plus origin; a launch that is handed another clone's copy
 # from it leases from this home's own pool instead.
 # Git still refuses to remove a copy another clone owns.  The sweep then
