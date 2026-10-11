@@ -1,0 +1,21 @@
+#!/bin/sh
+# Block until /home/user is no longer Boat's lazy-restore FUSE mount.
+#
+# Usage: fm-wait-home-ready [<limit-seconds>]   (default 840)
+#
+# Pre-start step for fm-remote-job.service and fm-remote-herdr.service
+# (docs/remote-secondmates.md "Linux hosts and Boat sandboxes"); install it as
+# /usr/local/bin/fm-wait-home-ready with mode 0755.
+# A Unix socket or working directory taken while the home directory is still
+# the FUSE mount is orphaned when Boat swaps the mount for the real disk at the
+# end of a resume.
+# Exits 0 once the home directory is ready and 1 when it is still lazy after
+# the limit, so systemd fails the start and retries it.
+limit=${1:-840}
+i=0
+while [ "$(findmnt -n -o FSTYPE --target /home/user 2>/dev/null)" = fuse ]; do
+  [ "$i" -lt "$limit" ] || { echo "home is still lazy after ${limit}s" >&2; exit 1; }
+  sleep 1
+  i=$((i + 1))
+done
+echo "home ready after ${i}s"

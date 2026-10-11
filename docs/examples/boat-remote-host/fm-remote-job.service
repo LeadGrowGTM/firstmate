@@ -1,0 +1,27 @@
+# Opt-in systemd unit for the remote job worker on a Boat sandbox that hosts a
+# remote second mate (docs/remote-secondmates.md "Linux hosts and Boat sandboxes").
+# Install it as /etc/systemd/system/fm-remote-job.service together with
+# fm-remote-herdr.service and /usr/local/bin/fm-wait-home-ready, then run:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fm-remote-job fm-remote-herdr
+# `user` and /home/user are the Boat sandbox account; /home/user/firstmate is
+# the remote Firstmate code root, so change it here when the clone lives
+# elsewhere.
+# The pre-start step holds the worker until Boat has finished restoring the
+# home directory after a resume, and TimeoutStartSec leaves room for that wait.
+[Unit]
+Description=Firstmate remote job worker
+After=network.target
+
+[Service]
+ExecStartPre=/usr/local/bin/fm-wait-home-ready 840
+TimeoutStartSec=900
+User=user
+Environment=HOME=/home/user
+Environment=FM_ROOT_OVERRIDE=/home/user/firstmate
+ExecStart=/home/user/firstmate/bin/fm-remote-job-worker.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

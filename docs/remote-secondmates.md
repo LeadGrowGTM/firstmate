@@ -13,6 +13,7 @@ Firstmate does not support placing an individual worker remotely or failing a re
 | --- | --- |
 | Prepare the primary and the remote host | [Prerequisites](#prerequisites) and [non-interactive tool contract](#non-interactive-tool-contract) |
 | Check whether a host is ready, or repair it | [Readiness, repair, and the human steps](#readiness-repair-and-the-human-steps) |
+| Run the remote host on Linux or on a Boat sandbox | [Linux hosts and Boat sandboxes](#linux-hosts-and-boat-sandboxes) |
 | Create the route and the remote home | [Provision a route](#provision-a-route) |
 | Launch, recover, message, and read a remote second mate | [Normal operation](#normal-operation) |
 | Move queued work to the remote home | [Backlog handoff](#backlog-handoff) |
@@ -26,7 +27,7 @@ Every path that provisions or launches one refuses a host that is not ready for 
 
 - `fm-remote` is reserved for remote fleet work and must not be used for personal work.
 - The user's interactive Herdr session remains `default` and is not a remote-secondmate prerequisite.
-- Herdr's remote-session server belongs to the host's own GUI login session rather than to the SSH connection.
+- Herdr's remote-session server belongs to the remote account rather than to the SSH connection: to its GUI login session on macOS, and to an account process or service on Linux.
   As a result, the agent's endpoint survives every disconnection the primary's supervision depends on.
 - Local second mates are unaffected and keep their ordinary backend and session selection.
   So do the workers a remote second mate supervises inside its own home.
@@ -322,6 +323,120 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 | Always required | `git`, `jq`, `herdr`, compatible `tasks-axi`, and `treehouse` |
 | At least one of | `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, or `kimi` |
 | Additionally required on macOS | `lsof`, so the doctor and guard can prove which process owns the session socket |
+
+## Linux hosts and Boat sandboxes
+
+A Linux host needs no GUI login session, so none of the macOS login steps apply to it.
+What it does need is something that brings the remote job worker and the Herdr `fm-remote` server back after the machine restarts, because `--fix` starts both as plain account processes that end with the machine.
+
+[`examples/boat-remote-host/`](examples/boat-remote-host/) holds that as two opt-in systemd units and the wait script they call.
+They are written for a [Boat](https://docs.boat.dev/) sandbox, a Linux VM that can be stopped and resumed and that comes back on a different machine at every resume.
+On a Boat sandbox this recipe has been exercised as far as a readiness check that passes and passes again without a repair after a stop and resume.
+Seeding a home, launching a second mate, and a routed request there are still owed as the [real-host smoke test](#real-host-smoke-test).
+
+On any other systemd host, the same units apply once their account and paths are replaced and the two Boat-specific lines, `ExecStartPre` and `TimeoutStartSec`, are removed; that variant has not been exercised.
+
+### Set up the sandbox
+
+Run these steps on the sandbox, as its `user` account.
+
+1. Clone Firstmate, install the required tools the sandbox lacks, and link the entrypoint:
+
+   ```sh
+   git clone <firstmate-origin-url> ~/firstmate
+   ~/firstmate/bin/fm-install-herdr.sh ~/.local/bin
+   ~/firstmate/bin/fm-install-treehouse.sh ~/.local/bin
+   npm install -g tasks-axi
+   ln -s ~/firstmate/bin/fm-remote-entrypoint.sh ~/.local/bin/fm-remote-entrypoint.sh
+   ```
+
+   The readiness check names any [required tool](#required-remote-tools) that is still missing.
+
+2. Put `~/.local/bin` on the non-interactive SSH `PATH` by adding this block at the very top of `~/.bashrc`:
+
+   ```sh
+   # FIRSTMATE PATH START
+   case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+   # FIRSTMATE PATH END
+   ```
+
+   It must come first because a non-interactive SSH command reads `~/.bashrc` only as far as the line that stops non-interactive shells.
+   Without it the primary's first call fails with `fm-remote-entrypoint.sh: command not found`.
+
+3. Install and enable the units:
+
+   ```sh
+   cd ~/firstmate/docs/examples/boat-remote-host
+   sudo install -m 0755 fm-wait-home-ready /usr/local/bin/fm-wait-home-ready
+   sudo install -m 0644 fm-remote-job.service fm-remote-herdr.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now fm-remote-job fm-remote-herdr
+   ```
+
+   The job unit's header names the path to change when the clone is not at `/home/user/firstmate`.
+
+4. Log one worker runtime in with its own login command.
+   This is a [step only a person can take](#steps-only-a-person-can-take), and whether that login survives a resume has not been verified.
+
+Then, on the primary:
+
+1. Make sure the Boat CLI has created its SSH key and authorized it on the sandbox, which the first `boat ssh <sandbox-id>` does.
+2. Write the SSH alias with [`bin/fm-boat-alias-refresh.sh`](../bin/fm-boat-alias-refresh.sh):
+
+   ```sh
+   bin/fm-boat-alias-refresh.sh <sandbox-id> <ssh-alias>
+   ```
+
+3. [Provision the route](#provision-a-route) with that alias.
+
+Enable the units before provisioning.
+The seed's readiness gate then finds the worker and the server already running, so `--fix` has nothing to start.
+
+### After every resume
+
+A resume moves the sandbox to a new machine, so its SSH host key changes every time, and its endpoint address and port can change with it.
+Until the alias is refreshed, a call to the host fails as an unreachable or refused SSH connection, which Firstmate treats like any other [unavailable transport](#ssh-exit-255-and-unavailable-homes): the remote home is unknown, and nothing is replaced locally.
+A stopped sandbox reads the same way.
+
+Run the helper on the primary after every `boat resume` and before any other Firstmate call to that host:
+
+```sh
+boat resume <sandbox-id>
+bin/fm-boat-alias-refresh.sh <sandbox-id> <ssh-alias>
+```
+
+It reads the new endpoint and host key through the authenticated Boat CLI rather than accepting a key on first sight over the network, and rewrites only that alias's block in `~/.ssh/config` and its dedicated known-hosts file.
+Its header owns what it reads, writes, and refuses, its environment knobs, and how an earlier matching `Host` block in `~/.ssh/config` can override the alias.
+
+On the sandbox, a resume keeps the home directory, `/etc`, and `/usr/local/bin`, so the clone, the installed tools, the `PATH` block, and the units all survive.
+Every process, `/tmp`, `~/.cache`, and every Unix socket are gone.
+The units restart the worker and the server by themselves.
+The second mate's own agent is gone with every other process, so it returns only through the ordinary [liveness recovery](#liveness-recovery), which has not been exercised on a Boat sandbox.
+
+### The restore window
+
+For a short time after a resume, Boat restores the home directory lazily.
+Until Boat reports the restore finished, a file read on the sandbox can block with no timeout.
+A Firstmate call made inside that window hangs instead of failing, and the stalled remote process cannot be ended until its read completes.
+The window is normally a few seconds, and it has lasted several minutes when Boat's snapshot store returned errors.
+
+Both halves of the recipe wait it out:
+
+- The helper waits for Boat to report the restore finished and exits non-zero when it does not arrive in time, leaving the refreshed alias in place.
+  Rerun it until it succeeds before making any other call to the host.
+- Each unit's pre-start step waits until the home directory is no longer Boat's lazy-restore mount.
+  A Herdr server started earlier keeps its socket on that mount and becomes unreachable once Boat swaps in the real disk, while systemd still reports the unit active.
+
+### Known limits
+
+- The readiness check does not know the units exist, and its repair starts the worker and the server as plain processes outside systemd.
+  When the Herdr unit is active but its server is unreachable, restart the unit with `sudo systemctl restart fm-remote-herdr` instead of repairing with `--fix`.
+- If a `--fix` call over SSH prints its final verdict and then does not return, the repair has still been applied: end the call and rerun the read-only check.
+  Enabling the units first avoids that start entirely.
+- A sandbox with an auto-stop timer stops by itself, and the timer restarts at every resume.
+  A stopped sandbox stays unreachable until someone resumes it and reruns the helper.
+  Keeping one running continuously is a Boat plan and sandbox setting; see Boat's [long-running tasks](https://docs.boat.dev/long-running-tasks) guide.
+- A worker that is mid-task when the sandbox stops loses its process, and how its work resumes on a Boat sandbox has not been exercised.
 
 ## Provision a route
 
@@ -712,6 +827,7 @@ bin/fm-test-run.sh tests/fm-remote-job-claim-retention.test.sh
 bin/fm-test-run.sh tests/fm-remote-job-launchagent.test.sh
 bin/fm-test-run.sh tests/fm-remote-transport-lanes.test.sh
 bin/fm-test-run.sh tests/fm-remote-doctor.test.sh
+bin/fm-test-run.sh tests/fm-boat-alias-refresh.test.sh
 bin/fm-test-run.sh tests/fm-remote-herdr-guard.test.sh
 bin/fm-test-run.sh tests/fm-project-origin.test.sh
 bin/fm-test-run.sh tests/fm-secondmate-sync.test.sh
