@@ -379,11 +379,8 @@ worker_supervisor_identity_status() { # <job-dir> <pid>
     worker_process_or_group_alive process "$pid" && return 2
     return 1
   }
-  # 2 is the legacy lstart to monotonic-tick format change: the process is not
-  # proven different, so the caller must not signal it and must not treat it
-  # as dead.
-  fm_remote_job_process_start_relation "$recorded_start" "$actual_start" || return $?
-  return 0
+  [ "$recorded_start" = "$actual_start" ] && return 0
+  return 1
 }
 
 # A leaderless live group still belongs to the recorded execution: its PGID
@@ -400,10 +397,8 @@ worker_group_identity_status() { # <job-dir> <pid>
     worker_process_or_group_alive group "$pid" && return 0
     return 1
   }
-  # Same format-change rule as the supervisor: status 2 neither signals nor
-  # declares the recorded group dead.
-  fm_remote_job_process_start_relation "$recorded_start" "$actual_start" || return $?
-  return 0
+  [ "$recorded_start" = "$actual_start" ] && return 0
+  return 1
 }
 
 worker_recorded_execution_alive() { # <job-dir> process|group <pid>
@@ -490,9 +485,6 @@ worker_stop_recorded_execution() { # <job-dir>
 # recorded supervisor and group are verified stopped; a job interrupted here
 # stays running-with-a-dead-owner for the replacement worker's orphan recovery,
 # exactly as a crashed single-process worker's job did.
-# Exact match only. A true result is authority to signal this pid, and a legacy
-# wall-clock record is not that authority. Ownership checks that must not reap
-# on a format change use fm_remote_job_process_start_still_names instead.
 worker_lane_identity_matches() { # <pid> <start>
   local pid=$1 start=$2 actual_start
   [ -n "$start" ] || return 1
@@ -623,7 +615,7 @@ worker_claim_owner_alive() { # <job-dir>
   if [ -e "$claim/owner_start" ] || [ -L "$claim/owner_start" ]; then
     recorded_start=$(fm_remote_job_read_single_line "$claim/owner_start" 256 2>/dev/null) || return 1
     actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
-    fm_remote_job_process_start_still_names "$recorded_start" "$actual_start"
+    [ "$recorded_start" = "$actual_start" ]
     return
   fi
   kill -0 "$pid" 2>/dev/null

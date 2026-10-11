@@ -58,36 +58,27 @@ fallback_b=$(FM_REMOTE_JOB_PROC_ROOT="$TMP_ROOT/no-proc" fm_remote_job_process_s
 [ "$fallback_b" = "Sun Oct 11 00:00:01 2026" ] || fail "unexpected second fallback '$fallback_b'"
 pass "without a start tick the same process reports the changing lstart"
 
-relation=0
-fm_remote_job_process_start_relation "Sun Oct 11 16:26:44 2026" "$first" || relation=$?
-[ "$relation" -eq 2 ] || fail "a legacy lstart against the monotonic tick was relation $relation, expected 2"
-fm_remote_job_process_start_still_names "Sun Oct 11 16:26:44 2026" "$first" \
-  || fail "a legacy lstart was treated as a different process"
-fm_remote_job_process_start_still_names " Sun Oct 11 16:26:44 2026 " "$first" \
-  || fail "a padded legacy lstart was treated as a different process"
-fm_remote_job_process_start_still_names "stale owner identity" "$first" \
-  && fail "a stale non-date marker was accepted as this process"
-fm_remote_job_process_start_still_names "starttime=1" "$first" \
-  && fail "a different monotonic tick was accepted as this process"
-fm_remote_job_process_start_still_names "$first" "$first" \
-  || fail "an exact monotonic identity did not match"
-pass "a legacy lstart still names the process and a stale marker does not"
+LEGACY_START="Sun Oct 11 16:26:44 2026"
+[ "$first" != "$LEGACY_START" ] || fail "the monotonic identity equals an lstart record"
 
 command=$(fm_remote_job_process_command "$LIVE_PID") || fail "could not read the live command"
 owner="$TMP_ROOT/owner"
 mkdir -p "$owner"
 printf '%s\n' "$LIVE_PID" > "$owner/pid"
-printf '%s\n' "Sun Oct 11 16:26:44 2026" > "$owner/start"
 printf '%s\n' "$command" > "$owner/command"
+printf '%s\n' "$LEGACY_START" > "$owner/start"
 fm_remote_job_recorded_owner_alive "$owner" \
-  || fail "a live owner recorded with a legacy lstart was treated as gone"
+  && fail "an lstart record was accepted as the live process"
 printf '%s\n' "stale owner identity" > "$owner/start"
 fm_remote_job_recorded_owner_alive "$owner" \
   && fail "a stale owner marker was treated as the live process"
+printf '%s\n' "starttime=$((TICK + 1))" > "$owner/start"
+fm_remote_job_recorded_owner_alive "$owner" \
+  && fail "a different monotonic tick was accepted as the live process"
 printf '%s\n' "$first" > "$owner/start"
 fm_remote_job_recorded_owner_alive "$owner" \
   || fail "an exact monotonic owner identity was rejected"
-pass "lock ownership survives a legacy lstart and still rejects a stale marker"
+pass "lock ownership needs the exact monotonic identity and rejects an lstart record"
 
 unset FM_REMOTE_JOB_PS_BIN
 fm_remote_job_process_start 2147483647 >/dev/null 2>&1 \

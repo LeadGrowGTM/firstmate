@@ -814,7 +814,7 @@ fm_remote_job_stage_owner_alive() { # <stage-dir>
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$stage/.owner-start" 256 2>/dev/null) || return 1
   actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
-  fm_remote_job_process_start_still_names "$recorded_start" "$actual_start"
+  [ "$recorded_start" = "$actual_start" ]
 }
 
 fm_remote_job_reap_stale() { # <account-home>
@@ -997,45 +997,6 @@ fm_remote_job_process_start_tick() { # <pid>
   printf '%s\n' "$starttime"
 }
 
-fm_remote_job_process_start_is_monotonic() { # <value>
-  local rest
-  case "$1" in
-    starttime=*) rest=${1#starttime=} ;;
-    *) return 1 ;;
-  esac
-  case "$rest" in ''|*[!0-9]*) return 1 ;; esac
-}
-
-# The historical identity is ps -o lstart= in the C locale, for example
-# "Sun Oct 11 16:26:44 2026", including the padding some ps builds leave.
-# A string that is not that shape stays a mismatch, so a stale marker is not
-# adopted just because it is not the new form.
-fm_remote_job_process_start_is_legacy_lstart() { # <value>
-  [[ "$1" =~ ^[[:space:]]*(Sun|Mon|Tue|Wed|Thu|Fri|Sat)[[:space:]]+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}[[:space:]]+[0-9]{4}[[:space:]]*$ ]]
-}
-
-# 0 when <recorded> and <actual> are the same identity.
-# 2 when <recorded> is a legacy wall-clock lstart and <actual> is the monotonic
-# start tick of a live process. That format change is not a different process:
-# callers must not signal or reap on it.
-# 1 when the values disagree for any other reason.
-fm_remote_job_process_start_relation() { # <recorded> <actual>
-  [ "$1" = "$2" ] && return 0
-  if fm_remote_job_process_start_is_monotonic "$2" && fm_remote_job_process_start_is_legacy_lstart "$1"; then
-    return 2
-  fi
-  return 1
-}
-
-# Accept an exact start match or a legacy lstart recorded before the monotonic
-# tick existed. Anything else, including a stale non-date marker, does not name
-# this process.
-fm_remote_job_process_start_still_names() { # <recorded> <actual>
-  local relation=0
-  fm_remote_job_process_start_relation "$1" "$2" || relation=$?
-  [ "$relation" -eq 0 ] || [ "$relation" -eq 2 ]
-}
-
 fm_remote_job_process_start() {
   local pid=$1 ps_bin value tick proc_root
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -1159,7 +1120,7 @@ fm_remote_job_recorded_owner_alive() { # <dir>
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$dir/start" 256 2>/dev/null) || return 1
   actual_start=$(fm_remote_job_process_start "$pid") || return 1
-  fm_remote_job_process_start_still_names "$recorded_start" "$actual_start" || return 1
+  [ "$recorded_start" = "$actual_start" ] || return 1
   recorded_command=$(fm_remote_job_read_single_line "$dir/command" 8192 2>/dev/null) || return 1
   actual_command=$(fm_remote_job_process_command "$pid") || return 1
   [ "$recorded_command" = "$actual_command" ] || return 1
