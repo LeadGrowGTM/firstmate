@@ -1,0 +1,15 @@
+❯ Quick one, keep it short: which script in bin mints a disposable lab home, and which doc under docs covers
+  the Herdr backend? I want to read both, just the names is fine.
+  Listed 1 directory
+● Captain, here are the two to read:
+  - Script that mints a disposable lab home:
+    /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NR5046714QAA5FD2SXTZAT/bin/fm-lab-home.sh
+  - Herdr backend doc:
+    /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NR5046714QAA5FD2SXTZAT/docs/herdr-backend.md
+  I matched both by filename and did not open them. Two neighbours sit beside the lab script, fm-live-lab.sh
+  and fm-herdr-lab.sh, in case the first is not the one you meant.
+✻ Sautéed for 6s · done 11:10 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ summarize what fm-lab-home.sh does
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
