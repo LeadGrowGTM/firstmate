@@ -382,7 +382,7 @@ Run these steps on the sandbox, as its `user` account.
 4. Log one worker runtime in with its own login command.
    This is a [step only a person can take](#steps-only-a-person-can-take), and [Sign-in on the sandbox](#sign-in-on-the-sandbox) owns which login to use and how long it stays.
 
-5. For Claude Code, accept its Bypass Permissions confirmation once, right after the sign-in and in the same terminal:
+5. For Claude Code, accept its Bypass Permissions confirmation once after the sign-in, for which a new terminal on the sandbox is enough:
 
    ```sh
    claude --dangerously-skip-permissions
@@ -393,6 +393,7 @@ Run these steps on the sandbox, as its `user` account.
    This is a [step only a person can take](#steps-only-a-person-can-take): accepting it is that person's consent for the machine, and Firstmate never gives it.
    Claude Code stores the acceptance in the account's user settings the moment it is given, and a stop and resume keeps them, so every later launch and relaunch starts without the dialog.
    Without this step the first launch is [refused at that dialog](#first-launch-on-a-fresh-host) until someone accepts it in the waiting pane.
+   Run the command before the first launch, because it does not dismiss a dialog that is already open: a second mate already waiting on that dialog stays there until that pane is answered, and the next launch still refuses while that pane is open.
 
 6. For Claude Code, set the auto-compact window in the account's user settings, which a new sandbox does not have:
 
@@ -421,6 +422,8 @@ Then, on the primary:
    ```sh
    bin/fm-boat-alias-refresh.sh <sandbox-id> <ssh-alias>
    ```
+
+   When the Boat CLI is not on `PATH`, set `FM_BOAT_BIN` to that binary before running the helper; the helper's header owns that knob.
 
 3. [Provision the route](#provision-a-route) with that alias.
 
