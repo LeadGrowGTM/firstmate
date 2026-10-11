@@ -85,8 +85,9 @@ It never runs in the SSH process or a Herdr pane.
 Linux uses the same queue and worker protocol without the Aqua-session requirement.
 The [`fm-remote-job-worker.sh` header](../bin/fm-remote-job-worker.sh) owns dispatch cadence and the quiet-scan latency for work arriving after its post-activity burst.
 Active-command and result waits use a separate sampling interval; the [`fm-remote-job-lib.sh` header](../bin/fm-remote-job-lib.sh) owns its defaults, overrides, and completion, cancellation, and timeout latency contract.
-Let running remote jobs finish before updating.
-A start record written by the previous wall-clock identity does not match, so the replacement treats that in-flight job as unowned and publishes it stopped without signalling the live process.
+On a remote host with a readable `/proc/<pid>/stat` (Linux), let running remote jobs finish before updating across the change that moved the worker's process identity from the wall-clock start time to the monotonic start tick.
+A start record written by the previous wall-clock identity does not match there, so the replacement treats that in-flight job as unowned and publishes it stopped without signalling the live process.
+A host without that file (macOS) keeps the wall-clock identity, so its records still match.
 
 On macOS, worker repair serializes the replacement decision and LaunchAgent reload with other callers, including its bounded startup wait.
 A live process tracked by launchd gets time to publish readiness even if the caller that started it disconnected before publication.
