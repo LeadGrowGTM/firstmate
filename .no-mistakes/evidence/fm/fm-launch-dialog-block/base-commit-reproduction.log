@@ -1,0 +1,3 @@
+# base commit 3ce49bcd (before the fix) + this change's test and Herdr fixture only
+not ok - a remote launch parked on the Bypass Permissions dialog reported success: spawned ios harness=claude kind=secondmate mode=secondmate yolo=off window=remote:ios worktree=/tmp/fm-remote-launch-dialog.KuZ8Nh/remote-home remote=fresh-box backend=herdr
+exit=1

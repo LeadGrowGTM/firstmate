@@ -1,0 +1,87 @@
+===== real Claude Code 2.1.296 (Claude Code) pane, captured live =====
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions mode
+
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous
+  commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be
+  restored if damaged.
+
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+
+  https://code.claude.com/docs/en/security
+
+  ❯ No, exit
+    Yes, I accept
+
+  Enter to confirm · Esc to cancel
+=====
+ok - first launch: a remote second mate parked on the Bypass Permissions dialog fails with the one-time step named
+----- product output -----
+error: remote secondmate ios was launched but is not reading its charter: its pane fm-remote:w1:p3 is waiting at Claude Code's once-per-machine Bypass Permissions dialog ("WARNING: Claude Code running in Bypass Permissions mode"), which opens on "No, exit" and needs a person to choose "Yes, I accept". Firstmate never answers that prompt. On this second mate's host, open Herdr session fm-remote (herdr --session fm-remote), answer the prompt in that pane once, then run the same command again from the primary; the waiting agent continues into its charter as soon as it is answered
+error: remote secondmate ios did not launch on host fresh-box; the remote host's own report is above
+--------------------------
+ok - rerun while parked: the same refusal, and nothing is typed or keyed into the dialog
+----- product output -----
+error: remote secondmate ios was launched but is not reading its charter: its pane fm-remote:w1:p3 is waiting at Claude Code's once-per-machine Bypass Permissions dialog ("WARNING: Claude Code running in Bypass Permissions mode"), which opens on "No, exit" and needs a person to choose "Yes, I accept". Firstmate never answers that prompt. On this second mate's host, open Herdr session fm-remote (herdr --session fm-remote), answer the prompt in that pane once, then run the same command again from the primary; the waiting agent continues into its charter as soon as it is answered
+error: remote secondmate ios did not launch on host fresh-box; the remote host's own report is above
+--------------------------
+ok - after acceptance: rerunning the launch adopts the running agent and reports success
+----- product output -----
+spawned ios harness=claude kind=secondmate mode=secondmate yolo=off window=remote:ios worktree=/tmp/fm-remote-launch-dialog.U9Moqd/remote-home remote=fresh-box backend=herdr
+--------------------------
+ok - ordinary launch: an agent that starts its charter turn is reported as launched
+----- product output -----
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 process-event source(s) registered, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+spawned ios harness=claude kind=secondmate mode=secondmate yolo=off window=remote:ios worktree=/tmp/fm-remote-launch-dialog.U9Moqd/remote-home remote=fresh-box backend=herdr
+--------------------------
+ok - no recognized dialog: a launch whose first turn has not started within the window is still reported
+----- product output -----
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+spawned ios harness=claude kind=secondmate mode=secondmate yolo=off window=remote:ios worktree=/tmp/fm-remote-launch-dialog.U9Moqd/remote-home remote=fresh-box backend=herdr
+--------------------------
+===== real Claude Code 2.1.296 (Claude Code) pane, captured live =====
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions mode
+
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous
+  commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be
+  restored if damaged.
+
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+
+  https://code.claude.com/docs/en/security
+
+  ❯ No, exit
+    Yes, I accept
+
+  Enter to confirm · Esc to cancel
+=====
+ok - relaunch: a replacement agent parked on the Bypass Permissions dialog fails with the one-time step named
+----- product output -----
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+relaunched ios harness=claude from=claude model=default effort=default backend=herdr endpoint=fm-remote:w1:p3 worktree=/tmp/fm-remote-launch-dialog.U9Moqd/remote-home
+error: remote secondmate ios was launched but is not reading its charter: its pane fm-remote:w1:p3 is waiting at Claude Code's once-per-machine Bypass Permissions dialog ("WARNING: Claude Code running in Bypass Permissions mode"), which opens on "No, exit" and needs a person to choose "Yes, I accept". Firstmate never answers that prompt. On this second mate's host, open Herdr session fm-remote (herdr --session fm-remote), answer the prompt in that pane once, then run the same command again from the primary; the waiting agent continues into its charter as soon as it is answered
+--------------------------
+ok - ordinary relaunch: a replacement agent that starts its charter turn is reported as relaunched
+----- product output -----
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+relaunched ios harness=claude from=claude model=default effort=default backend=herdr endpoint=fm-remote:w1:p3 worktree=/tmp/fm-remote-launch-dialog.U9Moqd/remote-home
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w1:p3
+herdr_session=fm-remote
+harness=claude
+model=default
+effort=default
+--------------------------
+ALL TESTS PASSED

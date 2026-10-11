@@ -1,0 +1,8 @@
+ok - first launch: a remote second mate parked on the Bypass Permissions dialog fails with the one-time step named
+ok - rerun while parked: the same refusal, and nothing is typed or keyed into the dialog
+ok - after acceptance: rerunning the launch adopts the running agent and reports success
+ok - ordinary launch: an agent that starts its charter turn is reported as launched
+ok - no recognized dialog: a launch whose first turn has not started within the window is still reported
+ok - relaunch: a replacement agent parked on the Bypass Permissions dialog fails with the one-time step named
+ok - ordinary relaunch: a replacement agent that starts its charter turn is reported as relaunched
+ALL TESTS PASSED
