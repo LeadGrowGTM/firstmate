@@ -563,6 +563,7 @@ The waiting agent is left in place, so it continues into its charter as soon as 
 A rerun before the dialog is answered fails the same way.
 A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog.
 The same refusal covers any other launch prompt the shared classifier in [`bin/fm-busy-lib.sh`](../bin/fm-busy-lib.sh) recognizes for the selected harness.
+A relaunch refuses on the same prompts, and [Relaunch a live remote second mate](#relaunch-a-live-remote-second-mate) owns what differs there.
 
 ### Refused and unsupported launches
 
@@ -780,6 +781,10 @@ It passes them explicitly because `config/secondmate-harness` is not inherited i
 Letting the far side re-resolve it would silently move the mate onto another runtime.
 SSH exit 255 leaves completion unknown and the route preserved, exactly as every other verb here.
 Move a live remote second mate onto a newly pinned harness, model, or effort with [`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh) rather than calling `relaunch` through `fm-on.sh` directly: the host-local relaunch it drives can only rewrite the host's own endpoint record, so this wrapper reads the confirmed identity back from that record afterward and republishes the primary's own route metadata to match, the same way launch already records a fresh route.
+
+A relaunch refuses on a parked launch prompt the way [a first launch does](#first-launch-on-a-fresh-host), which a host meets when the relaunch is its first move onto Claude.
+The host-local relaunch has already committed by then, so the host's endpoint record names the new runtime while the primary's route record still names the old one until a relaunch succeeds.
+After a person answers the prompt, run the same relaunch again: it restarts the agent once more rather than adopting the waiting one, and then republishes the primary's record.
 
 ### Firstmate code convergence
 
