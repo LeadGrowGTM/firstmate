@@ -70,6 +70,7 @@ Reinstall the CLI and rerun; [`verification/runtime-backends.md`](verification/r
 ## Active limits
 
 - Orca is macOS-only and explicit-only.
+- On Windows, Orca can still show a tmux-backed fleet from one of its terminals; [`tmux-backend.md`](tmux-backend.md#watching-the-crew) owns that attach step.
 - The app must be running and report ready.
 - Secondmate spawns are unsupported.
 - Escape is unsupported.

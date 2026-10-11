@@ -12,7 +12,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
-| Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) |
+| Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and [Claude Remote Control](#claude-remote-control-configclaude-remote-control) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
 ## FM_HOME
@@ -868,6 +868,56 @@ The diagnostic names the accepted values; Firstmate never falls back to a permis
 The file is a captain-wide safety preference, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract; a secondmate's own Claude crewmates then launch on the same posture.
 
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md) records the permission-mode observations and the distinct startup dialogs.
+
+
+## Claude Remote Control (config/claude-remote-control)
+
+Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control) lets a session be seen and steered from the Claude mobile app or claude.ai while it keeps running on its own machine.
+Firstmate turns it on for the sessions a captain talks to: the primary session and every Claude secondmate, on this machine or on a [remote host](remote-secondmates.md).
+A ship or scout task worker never carries it, so tasks do not add entries to the captain's session list.
+
+### Secondmates
+
+Every Claude secondmate launch and relaunch carries `--remote-control 'fm-<id>'`, so the session is listed as `fm-<id>`, the same stable label Firstmate uses for that secondmate on every backend.
+The optional local, gitignored `config/claude-remote-control` is the switch.
+
+| Token | Claude secondmate launch |
+| --- | --- |
+| `on` | carries `--remote-control 'fm-<id>'` |
+| `off` | carries no Remote Control flag |
+
+An absent file means `on`, and the token is the file's whitespace-trimmed content.
+Any other value or an unreadable file refuses every spawn from that home before any endpoint, worktree, or task record exists.
+The file is read on every spawn and relaunch, so a change reaches a secondmate at its next launch and never touches a running session.
+It is inherited by secondmate homes, which is where a remote host's own launch reads it.
+Secondmates on other harnesses are unaffected.
+
+### The primary session
+
+Firstmate does not launch the primary session, so the launch line carries the flag instead:
+
+```sh
+claude --remote-control firstmate
+```
+
+Always give the flag a name.
+Its name is optional, so a bare `--remote-control` followed by a prompt would take the prompt as the name.
+
+### A session that is already running
+
+Typing `/remote-control <name>` into a running Claude Code session connects it in place and keeps the conversation.
+Until Remote Control's one-time confirmation has been accepted on that machine, the command first opens a dialog that a person answers.
+
+### Requirements and limits
+
+- The account must be signed in through claude.ai on a Pro, Max, Team, or Enterprise plan, with the full login from `claude auth login` or `/login`; on Team and Enterprise an Owner must also enable Remote Control for the organization.
+- An API key, a long-lived token from `claude setup-token`, Amazon Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, and a custom `ANTHROPIC_BASE_URL` cannot use it.
+- A launch that cannot use Remote Control still starts and works normally without it, so the default needs no change on such an account.
+- The session makes outbound HTTPS requests only and opens no inbound port.
+- While a session is connected, its transcript is stored on Anthropic's servers; choose `off` for secondmates whose conversations must stay on their own machine.
+- A relaunched session registers again under the same name, and its earlier entry shows as offline.
+
+[`verification/runtime-backends.md`](verification/runtime-backends.md#claude-remote-control-launch-flag) records what was observed for the launch flag and what is still unverified.
 
 ## Worker tool exclusions (config/crew-exclude-tools)
 

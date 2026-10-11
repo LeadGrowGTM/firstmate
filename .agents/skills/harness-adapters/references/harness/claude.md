@@ -13,6 +13,7 @@ Busy hooks verified 2026-07-28 on Claude Code 2.1.220.
 | Model | `--model <model>`; discover through the interactive `/model` picker, with alias or full-name shape documented by `claude --help`. |
 | Effort | `--effort <low\|medium\|high\|xhigh\|max>`, verified on 2.1.196. |
 | Permissions | `--dangerously-skip-permissions` by default, or `--permission-mode auto` when `config/claude-permission-mode` is `auto`; the `auto` shape verified on 2.1.269. See [`Claude permission mode`](../../../../../docs/configuration.md#claude-permission-mode-configclaude-permission-mode) for the launch grant and configuration. |
+| Remote Control | A secondmate launch or relaunch carries `--remote-control 'fm-<id>'` unless `config/claude-remote-control` is `off`; a ship or scout launch never does. See [Remote Control](#remote-control). |
 
 ## Workspace trust
 
@@ -46,6 +47,16 @@ A remote second-mate launch or relaunch reports it for you: `../../../bin/fm-rem
 A local launch has no such refusal, so there the shared classifier in `../../../bin/fm-busy-lib.sh` only stops the parked pane from reading as a working turn.
 A launch under `config/claude-permission-mode=auto` never meets the bypass confirmation, because it does not request bypass mode: on 2.1.269 `claude --permission-mode auto` reached the composer directly with the footer `⏵⏵ auto mode on (shift+tab to cycle)`, so a captain who refuses the bypass dialog selects `auto` there instead of accepting it.
 The workspace-trust dialog is unaffected by the permission mode and still needs the pre-registration above.
+
+## Remote Control
+
+[`Claude Remote Control`](../../../../../docs/configuration.md#claude-remote-control-configclaude-remote-control) owns the switch, the requirements, and the primary session's launch line.
+The flag changes nothing about how a secondmate is supervised: its busy hooks, exit, interrupt, and steering are the same with or without it.
+A relaunch registers a new remote session under the same `fm-<id>` name, so an offline entry with that name on the phone is the previous process rather than a fault.
+A launch on an account that cannot use Remote Control still reaches the composer and works; a Remote Control failure notice in that pane is a sign-in fact to report, not a failed launch.
+`/remote-control <name>` typed into a running session connects it in place without a restart.
+Until its one-time confirmation has been accepted on that machine, `/remote-control` first opens a dialog, which is a person's consent: never answer it with a key, for the same reason as the dialogs above.
+Whether the launch flag can stop at that same confirmation on a signed-in machine that has never enabled Remote Control is unverified; if a first launch does park there, report it for a person to answer once in that pane.
 
 ## Composer ghost
 

@@ -377,7 +377,7 @@ Run these steps on the sandbox, as its `user` account.
    The job unit's header names the path to change when the clone is not at `/home/user/firstmate`.
 
 4. Log one worker runtime in with its own login command.
-   This is a [step only a person can take](#steps-only-a-person-can-take), and whether that login survives a resume has not been verified.
+   This is a [step only a person can take](#steps-only-a-person-can-take), and [Sign-in on the sandbox](#sign-in-on-the-sandbox) owns which login to use and how long it stays.
 
 Then, on the primary:
 
@@ -392,6 +392,45 @@ Then, on the primary:
 
 Enable the units before provisioning.
 The seed's readiness gate then finds the worker and the server already running, so `--fix` has nothing to start.
+
+### Sign-in on the sandbox
+
+For Claude Code, sign in on the sandbox with the full claude.ai login, `claude auth login` or `/login` inside a session, and finish it in a browser on another device.
+Do not use a long-lived token from `claude setup-token` or `CLAUDE_CODE_OAUTH_TOKEN` there: such a token can only make model requests, so the second mate would run but could not be [reached from a phone](#reach-the-second-mate-from-a-phone).
+
+On a sandbox that is kept, the sign-in stays on the box.
+It lives in the home directory, which a stop and resume keeps, and a Claude Code sign-in made on a Boat sandbox was still in place after a stop and resume onto a new machine.
+Do not log out when stopping a sandbox, and do not revoke that sign-in from the claude.ai account, or the second mate comes back from the next resume signed out.
+
+Log out only when the sandbox itself is about to be deleted, as the last step before the delete:
+
+1. [Retire the second mate](#retire-a-remote-second-mate), so no agent is running on the box.
+2. On the sandbox, run `claude auth logout`, then confirm `claude auth status` reports `loggedIn` as `false`.
+3. Delete the sandbox with Boat.
+
+### Reach the second mate from a phone
+
+A Claude second mate on the sandbox launches with [Remote Control](configuration.md#claude-remote-control-configclaude-remote-control) on, exactly as a local one does, because the host launches it through the same `bin/fm-spawn.sh`.
+It appears in the Claude mobile app and at claude.ai under its `fm-<id>` name, and can be read and steered there while the sandbox is running.
+Remote Control makes outbound HTTPS requests only, so it needs no SSH alias, no open port, and nothing from the units above.
+
+After the launch, check both halves on the sandbox and on the phone:
+
+```sh
+claude auth status
+```
+
+It must report `authMethod` as `claude.ai`, and the session must then be listed under its `fm-<id>` name.
+Any other sign-in method leaves the second mate working and unreachable from the phone.
+
+A stopped sandbox shows the session as offline.
+After a resume the agent is gone with every other process, and the relaunch that brings it back registers a new session under the same name, so the earlier entry stays offline.
+To keep a remote second mate off the phone, set `config/claude-remote-control` to `off` in the primary home before launching it; that file is inherited into the remote home, where the host's launch reads it.
+
+Launching with Remote Control on, and finding the session on a phone, have not been exercised on a Boat sandbox and are owed as part of the [real-host smoke test](#real-host-smoke-test).
+
+To watch the same second mate from a desktop terminal instead, including one inside Orca, open an SSH session to the alias and open its dedicated session with `herdr --session fm-remote`.
+Prefer that over registering the sandbox as a saved SSH host in a desktop app, because its address and host key change at every resume and only the alias is kept current.
 
 ### After every resume
 
@@ -916,8 +955,9 @@ For a real-host smoke test:
 3. Launch the second mate.
 4. Send one marked request.
 5. Verify its correlated reply and structured fleet projection.
-6. Simulate an unreachable host to confirm unknown-without-failover behavior.
-7. Retire only after the remote queue is empty.
+6. For a Claude second mate with Remote Control on, confirm `claude auth status` on the host reports `authMethod` as `claude.ai` and that the session is listed under its `fm-<id>` name in the Claude mobile app.
+7. Simulate an unreachable host to confirm unknown-without-failover behavior.
+8. Retire only after the remote queue is empty.
 
 The deterministic suite is automated.
 Real-host validation is still an operator-run smoke test and is not claimed by the repository tests.
