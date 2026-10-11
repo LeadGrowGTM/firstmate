@@ -281,8 +281,8 @@
 #   that subshell, which returns the copy, and leases from this home's own pool
 #   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, outside every home and
 #   project). A lease that is still another clone is returned and the launch
-#   stops. Relaunch refuses a recorded worktree of another clone rather than
-#   taking a new slot. Orca and secondmate launches do not use this pool.
+#   stops. Relaunch resumes in the recorded worktree whichever clone it belongs
+#   to. Orca and secondmate launches do not use this pool.
 #   That placement is proven only at launch. Every ship or scout pane therefore
 #   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
 #   the same channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
@@ -4596,10 +4596,6 @@ elif [ "$RELAUNCH" -eq 1 ]; then
       echo "error: task $ID's endpoint is in '${relaunch_seen:-unknown}' and did not return to its recorded worktree '$WT' when told to; refusing to relaunch an agent outside the copy holding its work" >&2
       exit 1
     fi
-  fi
-  if [ "$KIND" != secondmate ] && ! fm_treehouse_same_clone "$PROJ_ABS" "$WT"; then
-    echo "error: task $ID's recorded worktree '$WT' is not a worktree of spawning project '$PROJ_ABS'; refusing to relaunch a worker in another clone" >&2
-    exit 1
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
