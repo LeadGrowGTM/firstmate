@@ -183,6 +183,25 @@ expect_code 0 "$rc" "a third retirement should converge the same way"$'\n'"$out"
 assert_absent "$REMOTE_HOME" "a third retirement left a directory at the retired home path"
 pass "retiring the same remote home twice converges and leaves the path absent"
 
+# --- the parent's own rerun of a finished retirement says so ----------------
+out=$(remote_env "$ROOT/bin/fm-teardown.sh" "$SM" 2>&1) && rc=0 || rc=$?
+expect_code 0 "$rc" "the parent's rerun of a finished retirement should converge"$'\n'"$out"
+assert_contains "$out" "teardown $SM: already retired" "the parent's rerun did not report the secondmate as already retired"
+assert_not_contains "$out" 'refused' "the parent's rerun of a finished retirement still reads as a refusal"
+assert_parent_records_cleared "parent rerun"
+# The answer rests on the recorded retirement, so an id this home never retired
+# and a retired id whose record path is no longer simply absent are refused.
+out=$(remote_env "$ROOT/bin/fm-teardown.sh" never-launched 2>&1) && rc=0 || rc=$?
+[ "$rc" -ne 0 ] || fail "tearing down an id this home never held was reported as already retired: $out"
+assert_contains "$out" 'teardown refused: task record is not a regular file' \
+  "an id this home never held must keep the missing-record refusal"
+ln -s "$TMP_ROOT/no-such-record" "$PARENT/state/$SM.meta"
+out=$(remote_env "$ROOT/bin/fm-teardown.sh" "$SM" 2>&1) && rc=0 || rc=$?
+rm -f "$PARENT/state/$SM.meta"
+[ "$rc" -ne 0 ] || fail "a retired id whose record path holds a dangling link was reported as already retired: $out"
+assert_not_contains "$out" 'already retired' "a broken record must keep its refusal"
+pass "the parent's rerun of a finished retirement reports already retired, and a missing or broken record is still refused"
+
 # --- a rerun after a partial failure finishes the parent's own cleanup ------
 launch_mate
 out=$(FM_FAKE_SSH_MODE=retire-reports-failure remote_env "$ROOT/bin/fm-teardown.sh" "$SM" 2>&1) && rc=0 || rc=$?

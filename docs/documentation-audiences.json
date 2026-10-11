@@ -337,6 +337,10 @@
       "audience": "maintainer-architecture"
     },
     {
+      "path": "docs/examples/boat-remote-host/fm-claude-auto-compact",
+      "audience": "operator-example"
+    },
+    {
       "path": "docs/examples/boat-remote-host/fm-remote-herdr.service",
       "audience": "operator-example"
     },

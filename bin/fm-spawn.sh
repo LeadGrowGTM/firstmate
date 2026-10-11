@@ -1000,7 +1000,7 @@ fi
 spawn_remote_secondmate() {
   local id=$1 remote host root home harness positional model effort backend out rc meta tmp
   local remote_backend remote_target remote_harness remote_herdr_session registry_lock remote_lock remote_generation
-  local remote_traceparent remote_recorded_traceparent sm_primary_head sync_out sync_rc
+  local remote_traceparent remote_recorded_traceparent remote_control_url sm_primary_head sync_out sync_rc
   local -a launch_args
   id=${POS[0]:-}
   fm_task_id_creation_valid "$id" || {
@@ -1235,6 +1235,11 @@ spawn_remote_secondmate() {
   # reports it here so the parent does not deny the agent's actual identity.
   remote_recorded_traceparent=$(printf '%s\n' "$out" | sed -n 's/^traceparent=//p' | tail -1)
   fm_trace_context_valid "$remote_recorded_traceparent" || remote_recorded_traceparent=
+  # The link of the Remote Control session the agent holds now, when the host
+  # reported one (bin/fm-remote-secondmate-control.sh owns the read). Anything
+  # but that exact shape is dropped rather than recorded.
+  remote_control_url=$(printf '%s\n' "$out" | sed -n 's/^remote_control_url=//p' | tail -1)
+  fm_remote_control_url_valid "$remote_control_url" || remote_control_url=
   tmp="$meta.tmp.$$"
   {
     echo "window=remote:$id"
@@ -1255,6 +1260,7 @@ spawn_remote_secondmate() {
     echo "remote_backend=$remote_backend"
     echo "remote_herdr_session=$remote_herdr_session"
     echo "remote_target=$remote_target"
+    [ -z "$remote_control_url" ] || echo "remote_control_url=$remote_control_url"
     [ -z "$remote_recorded_traceparent" ] || echo "traceparent=$remote_recorded_traceparent"
   } >"$tmp"
   if ! fm_backlog_atomic_transition publish "$tmp" "$meta" "task record" "$STATE"; then
@@ -1282,6 +1288,7 @@ spawn_remote_secondmate() {
   fi
   [ ! -e "$CONFIG/fleet-ledger" ] || FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-fleet-ledger.sh" dispatched "$id" secondmate "" "$harness" "${model#-}" || true
   echo "spawned $id harness=$harness kind=secondmate mode=secondmate yolo=off window=remote:$id worktree=$home remote=$host backend=$remote_backend"
+  [ -z "$remote_control_url" ] || echo "remote control: $remote_control_url"
   return 0
 }
 

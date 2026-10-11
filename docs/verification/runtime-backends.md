@@ -532,11 +532,23 @@ Typing `/remote-control` into that session printed the eligibility refusal for a
 `claude --help` on that version declares the flag as `--remote-control [name]`, an optional value, which is why the launch always names the session and never leaves the flag standing last before the prompt.
 `tests/fm-secondmate-harness.test.sh` pins the launch shape against a recording stub and `tests/fm-spawn-dispatch-profile.test.sh` pins that a ship or scout launch never carries the flag; both run against a fake claude and assert the argument list and nothing more.
 
+### Remote Control on a signed-in host
+
+Observed 2026-10-11 on Claude Code 2.1.296, on a Boat sandbox signed in through claude.ai that had never used Remote Control.
+A remote Claude second mate launched there with `--remote-control fm-<id>` showed no Remote Control confirmation, and its pane read `/remote-control is active` with the session's link.
+The session was listed in the Claude app and answered a message sent from a phone.
+
+Claude Code keeps one record per running session at `sessions/<pid>.json` under its configuration directory.
+For each of the two sessions launched there, that record's `bridgeSessionId` was the `session_...` id at the end of the link the pane printed, which is why [`bin/fm-remote-secondmate-control.sh`](../../bin/fm-remote-secondmate-control.sh) reads the link from that record.
+The record also holds `pid`, `cwd`, and `startedAt`, and a session that has ended leaves its record behind.
+
+`tests/fm-remote-secondmate-launch-dialog.test.sh` pins the read against records of that shape: the newest record of an agent process running in the second mate's own endpoint pane answers, and a leftover record whose pid has exited or now names an unrelated live process, a record held by a non-agent process in the pane, another directory's session, and a malformed id do not.
+No live guard refreshes this, because the record only gains a `bridgeSessionId` on a real claude.ai sign-in; the read stays silent when the field or the record is absent.
+
 ### Remote Control facts not verified
 
-- A launch with the flag on an eligible claude.ai sign-in, including that the session then appears on the phone, was not run here, because it cannot be isolated from a real account.
-- Whether that launch can stop at Remote Control's one-time confirmation on a signed-in machine that has never accepted it is unknown.
-  Claude Code documents the confirmation for `claude remote-control` and `/remote-control` only.
+- The exact name the Claude app lists a secondmate's session under was not confirmed.
+- The link reported by a launch has not been compared against a live session since the read was added.
 
 ## Pi seeded-secondmate project trust
 
@@ -632,6 +644,43 @@ Claude, launched `--dangerously-skip-permissions` under a scratch `CLAUDE_CONFIG
 
   Enter to confirm · Esc to cancel
 ```
+
+Both Claude dialogs wrapped by a narrow pane were verified 2026-10-11 on Claude Code 2.1.296 by the same guard, which launches each a second time in a 54-column pane, the width a Boat sandbox gives a remote second mate's agent.
+Claude Code breaks its dialog text at the pane's width, so no signature sentence is left whole on one line, and the classifier joins the captured lines before matching.
+That run also refreshed Gemini on 0.63.0; pi was not installed, so the 2026-09-22 Pi result stands unrefreshed.
+
+```
+# live claude version: 2.1.296 (Claude Code)
+ok - claude: a real launch parked on its own rendered trust dialog surfaces through the watcher gate
+ok - claude: a real launch parked on its own rendered Bypass Permissions dialog surfaces through the watcher gate and is named
+ok - claude: both dialogs wrapped across lines in a 54-column pane still surface through the watcher gate
+# pi not installed - launch-prompt signature not checked
+# live gemini version: 0.63.0
+ok - gemini: a real launch parked on its own rendered auth or trust dialog surfaces through the watcher gate
+# checked 5 launch-prompt signature(s) against real installed binaries
+```
+
+The Bypass Permissions confirmation as a 54-column Herdr pane on a Boat sandbox held it, with the heading broken after `Permissions`:
+
+```
+  WARNING: Claude Code running in Bypass Permissions
+  mode
+  In Bypass Permissions mode, Claude Code will not
+  ask for your approval before running potentially
+  dangerous commands.
+  This mode should only be used in a sandboxed
+  container/VM that has restricted internet access
+  and can easily be restored if damaged.
+  By proceeding, you accept all responsibility for
+  actions taken while running in Bypass Permissions
+  mode.
+  https://code.claude.com/docs/en/security
+  ❯ No, exit
+    Yes, I accept
+  Enter to confirm · Esc to cancel
+```
+
+`test_launch_prompt_claude_dialogs_wrapped_in_a_narrow_pane` in `tests/fm-busy-state.test.sh` carries that capture and a 54-column trust dialog, with the negatives that keep a wrapped heading alone, or a heading missing a word, from matching.
 
 Pi, launched into a fresh worktree carrying a project-local `.pi/extensions/` file (the trust-requiring resource that actually gates the dialog) under an isolated `HOME`:
 

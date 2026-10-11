@@ -915,6 +915,23 @@ fm_busy_agy_tail_busy() {
 # signature out, so absence never proves the pane is NOT parked, only that
 # this check cannot confirm it.
 
+# fm_busy_tail_unwrap: the captured tail on stdin as one line, every line break
+# and tab turned into a space and every run of spaces collapsed to one. A pane
+# narrower than a dialog's own text makes the harness break that text across
+# rendered lines at a word boundary, each continuation re-indented, so a
+# signature matched line by line never sees it: a remote host's agent pane is 54
+# columns wide with no client attached, where Claude Code renders "WARNING:
+# Claude Code running in Bypass Permissions" and "mode" on separate lines
+# (docs/verification/runtime-backends.md "Launch-prompt backstop signatures").
+# Unwrapping changes where the words may sit, never which words must be there:
+# every signature below still needs its whole text, in order, and its paired
+# option or footer line. Only the unbordered Claude dialogs use it; a bordered
+# box (Pi, Gemini) puts its border between wrapped words, which this does not
+# remove.
+fm_busy_tail_unwrap() {
+  tr '\r\n\t' '   ' | tr -s ' '
+}
+
 # fm_busy_claude_launch_prompt_tail: Claude's workspace-trust dialog
 # ("Quick safety check: Is this a project you created or one you trust?",
 # re-verified live on Claude Code 2.1.278, docs/verification/runtime-backends.md
@@ -930,9 +947,11 @@ fm_busy_agy_tail_busy() {
 # plausible self-referential prose a firstmate-repo worker could easily render
 # on its own (fm-claude-trust.sh's header literally quotes both questions),
 # but the option/footer pairing only ever renders inside the real dialog.
+# Both dialogs are matched on the unwrapped tail (fm_busy_tail_unwrap), so an
+# override regex is matched against that one line too.
 fm_busy_claude_launch_prompt_tail() {
   local buf
-  buf=$(cat)
+  buf=$(fm_busy_tail_unwrap)
   if printf '%s' "$buf" | grep -qiE "${FM_BUSY_CLAUDE_TRUST_PROMPT_REGEX:-Quick safety check: Is this a project you created or one you trust\\?}" \
     && printf '%s' "$buf" | grep -qiE 'No, exit|Enter to confirm'; then
     return 0
@@ -956,10 +975,11 @@ fm_busy_claude_launch_prompt_tail() {
 # signatures"). The heading is paired with one of the dialog's own option or
 # footer lines for the same reason as the two dialogs above: this file and the
 # harness reference both quote the heading, so the heading alone is prose a
-# firstmate-repo worker could render.
+# firstmate-repo worker could render. Matched on the unwrapped tail
+# (fm_busy_tail_unwrap), like the two dialogs above.
 fm_busy_claude_bypass_prompt_tail() {
   local buf
-  buf=$(cat)
+  buf=$(fm_busy_tail_unwrap)
   printf '%s' "$buf" | grep -qiE "${FM_BUSY_CLAUDE_BYPASS_PROMPT_REGEX:-Claude Code running in Bypass Permissions mode}" \
     && printf '%s' "$buf" | grep -qiE 'Yes, I accept|No, exit|Enter to confirm'
 }

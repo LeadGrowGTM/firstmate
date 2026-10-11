@@ -312,7 +312,7 @@ These steps are never automated and are always reported rather than silently att
 - FileVault, which holds a reboot at pre-boot authentication before any login session exists.
 - Installing any missing required tool that no safe wrapper can resolve.
 - Each worker runtime's own `/login`, and any keychain password prompt that login needs.
-- Claude Code's one-time Bypass Permissions confirmation, which a fresh host shows the first time a second mate launches on Claude there; [the launch refuses and names it](#first-launch-on-a-fresh-host) rather than answering it.
+- Claude Code's one-time Bypass Permissions confirmation, which a fresh host shows the first time a second mate launches on Claude there; [the launch refuses and names it](#first-launch-on-a-fresh-host) rather than answering it, and the [Boat setup](#set-up-the-sandbox) has a person accept it before the first launch.
 
 Firstmate never writes an auto-login password, never changes FileVault, and never stores an account password.
 A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own symlink is reported for the operator to inspect and is never overwritten.
@@ -330,12 +330,13 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 A Linux host needs no GUI login session, so none of the macOS login steps apply to it.
 What it does need is something that brings the remote job worker and the Herdr `fm-remote` server back after the machine restarts, because `--fix` starts both as plain account processes that end with the machine.
 
-[`examples/boat-remote-host/`](examples/boat-remote-host/) holds that as two opt-in systemd units and the wait script they call.
+[`examples/boat-remote-host/`](examples/boat-remote-host/) holds that as two opt-in systemd units and the wait script they call, next to the setup step for Claude Code's auto-compact window.
 They are written for a [Boat](https://docs.boat.dev/) sandbox, a Linux VM that can be stopped and resumed and that comes back on a different machine at every resume.
-On a Boat sandbox this recipe has been exercised through its setup, a readiness check, seeding a home, launching a Claude second mate, and one marked request with its correlated reply.
+On a Boat sandbox this recipe has been exercised through steps 1 to 4 of its setup, a readiness check, seeding a home, launching a Claude second mate, one marked request with its correlated reply, and a [retire](#retire-a-remote-second-mate) that completed in one run.
 A stop, resume, and refresh there was followed by a readiness check that passed without a repair, a sign-in that was still in place, and a relaunch that answered a second request.
-That first launch stopped at Claude Code's [one-time Bypass Permissions confirmation](#first-launch-on-a-fresh-host) until it was accepted by hand, and the [retire](#retire-a-remote-second-mate) failed.
-The launch's refusal of that confirmation and the retire as they behave now have not been run on a Boat sandbox, and both are still owed as part of the [real-host smoke test](#real-host-smoke-test).
+The first launch there stopped at Claude Code's [one-time Bypass Permissions confirmation](#first-launch-on-a-fresh-host) and was reported as launched, because the sandbox's 54-column agent pane wrapped the dialog's heading across two lines.
+The launch now recognizes the wrapped dialog and refuses, which is verified against Claude Code in a 54-column pane and not yet on a Boat sandbox.
+That refusal, setup steps 5 and 6, the [reported Remote Control link](#the-remote-control-link), and the primary's rerun of a finished retire are still owed there as part of the [real-host smoke test](#real-host-smoke-test).
 
 On any other systemd host, the same units apply once their account and paths are replaced and the two Boat-specific lines, `ExecStartPre` and `TimeoutStartSec`, are removed; that variant has not been exercised.
 
@@ -380,6 +381,37 @@ Run these steps on the sandbox, as its `user` account.
 
 4. Log one worker runtime in with its own login command.
    This is a [step only a person can take](#steps-only-a-person-can-take), and [Sign-in on the sandbox](#sign-in-on-the-sandbox) owns which login to use and how long it stays.
+
+5. For Claude Code, accept its Bypass Permissions confirmation once, right after the sign-in and in the same terminal:
+
+   ```sh
+   claude --dangerously-skip-permissions
+   ```
+
+   Claude Code may first ask whether to trust the folder it was started in, which is a separate question about that folder alone.
+   At the dialog headed `WARNING: Claude Code running in Bypass Permissions mode`, choose `Yes, I accept`, then leave the session with `/exit`.
+   This is a [step only a person can take](#steps-only-a-person-can-take): accepting it is that person's consent for the machine, and Firstmate never gives it.
+   Claude Code stores the acceptance in the account's user settings the moment it is given, and a stop and resume keeps them, so every later launch and relaunch starts without the dialog.
+   Without this step the first launch is [refused at that dialog](#first-launch-on-a-fresh-host) until someone accepts it in the waiting pane.
+
+6. For Claude Code, set the auto-compact window in the account's user settings, which a new sandbox does not have:
+
+   ```sh
+   ~/firstmate/docs/examples/boat-remote-host/fm-claude-auto-compact
+   ```
+
+   It merges one top-level key, `autoCompactWindow` set to `300000`, into `~/.claude/settings.json`, and that one key covers every model.
+   It creates the file when it is absent and leaves every other key alone, because Claude Code keeps its own keys in the same file.
+   Nothing is copied from another machine.
+   Without it, every Claude session on the sandbox keeps its model's full context window.
+   Check it at any time, without changing anything:
+
+   ```sh
+   ~/firstmate/docs/examples/boat-remote-host/fm-claude-auto-compact --check
+   ```
+
+   It prints `ok: autoCompactWindow=300000 in /home/user/.claude/settings.json` and exits 0, or names the missing key and exits 1.
+   The script's header owns which file it reads when the account pins another Claude Code configuration directory.
 
 Then, on the primary:
 
@@ -426,10 +458,13 @@ It must report `authMethod` as `claude.ai`, and the session must then be listed 
 Any other sign-in method leaves the second mate working and unreachable from the phone.
 
 A stopped sandbox shows the session as offline.
-After a resume the agent is gone with every other process, and the relaunch that brings it back registers a new session under the same name, so the earlier entry stays offline.
+After a resume the agent is gone with every other process, and the relaunch that brings it back registers a new session under the same name.
+So after every resume the previous entry in the app is dead: it can still be listed, and a message sent to it reaches nothing.
+The entry to use is the one behind [the link the relaunch reports](#the-remote-control-link).
 To keep a remote second mate off the phone, set `config/claude-remote-control` to `off` in the primary home before launching it; that file is inherited into the remote home, where the host's launch reads it.
 
-Launching with Remote Control on, and finding the session on a phone, have not been exercised on a Boat sandbox and are owed as part of the [real-host smoke test](#real-host-smoke-test).
+A Claude second mate launched on a Boat sandbox was listed in the Claude app and answered a message sent from a phone, while the entry from before a stop and resume was still listed and could not be messaged.
+The exact name the app lists the session under was not confirmed there.
 
 To watch the same second mate from a desktop terminal instead, including one inside Orca, open an SSH session to the alias and open its dedicated session with `herdr --session fm-remote`.
 Prefer that over registering the sandbox as a saved SSH host in a desktop app, because its address and host key change at every resume and only the alias is kept current.
@@ -455,6 +490,7 @@ Every process, `/tmp`, `~/.cache`, and every Unix socket are gone.
 The units restart the worker and the server by themselves.
 The second mate's own agent is gone with every other process, so it returns only through a relaunch.
 Running the [launch command](#launch-or-recover) again brought one back on a Boat sandbox after a resume; the automatic [liveness recovery](#liveness-recovery), which runs that same command, has not been exercised there.
+That relaunch is a new Remote Control session, so the [entry the app listed before the resume is dead](#reach-the-second-mate-from-a-phone).
 
 ### The restore window
 
@@ -502,6 +538,7 @@ The check reads Boat and reports; it never stops a sandbox.
 ### Known limits
 
 - The readiness check does not know the units exist, and its repair starts the worker and the server as plain processes outside systemd.
+  It does not read Claude Code's settings either, so the auto-compact window is checked only by its own `--check` in step 6 of the setup.
   When the Herdr unit is active but its server is unreachable, restart the unit with `sudo systemctl restart fm-remote-herdr` instead of repairing with `--fix`.
 - If a `--fix` call over SSH prints its final verdict and then does not return, the repair has still been applied: end the call and rerun the read-only check.
   Enabling the units first avoids that start entirely.
@@ -617,11 +654,28 @@ The primary then takes these steps:
 
 All remote secondmates on one host share `fm-remote` and retain separate `2ndmate-<id>` workspaces inside it.
 
+### The Remote Control link
+
+A launch of a Claude second mate with [Remote Control](configuration.md#claude-remote-control-configclaude-remote-control) on ends with one more line naming the session the agent holds now:
+
+```
+remote control: https://claude.ai/code/session_<id>
+```
+
+The primary records the same link as `remote_control_url` in its own record of that second mate.
+[`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh) reports and records it the same way.
+Every launch and relaunch registers a new session, so the link changes each time and the one before it is dead.
+
+The host reads the link from Claude Code's own record of the running session and changes nothing there.
+A launch that finds none still succeeds and reports no link, which is what another harness, Remote Control turned off, and a sign-in that cannot use Remote Control all look like.
+[`bin/fm-remote-secondmate-control.sh`](../bin/fm-remote-secondmate-control.sh) owns where the link is read and how long a launch waits for it.
+
 ### First launch on a fresh host
 
 A launch succeeds only once the new agent has started reading its charter, or has shown no recognized prompt for about 30 seconds.
 A host whose account has never run Claude Code in Bypass Permissions mode stops the first Claude launch at a one-time dialog headed `WARNING: Claude Code running in Bypass Permissions mode`, which opens on `No, exit`.
 The launch then fails instead of reporting a second mate that is not working, and its error names the dialog, the waiting pane, and the host.
+The dialog is recognized however the pane lays it out: a narrow pane, such as the 54-column one a Boat sandbox gives the agent, breaks that heading across two lines, and the launch still refuses.
 
 Firstmate never answers that dialog and sends it no keys, because accepting it is a person's consent for that machine.
 Clear it once per host:
@@ -632,6 +686,7 @@ Clear it once per host:
 
 The waiting agent is left in place, so it continues into its charter as soon as the dialog is answered and the rerun adopts it rather than starting a second one.
 A rerun before the dialog is answered fails the same way.
+A host set up with the [Boat recipe](#set-up-the-sandbox) accepts the dialog once during setup instead, so its first launch never meets it.
 A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog.
 The same refusal covers any other launch prompt the shared classifier in [`bin/fm-busy-lib.sh`](../bin/fm-busy-lib.sh) recognizes for the selected harness.
 A relaunch refuses on the same prompts, and [Relaunch a live remote second mate](#relaunch-a-live-remote-second-mate) owns what differs there.
@@ -856,6 +911,7 @@ Move a live remote second mate onto a newly pinned harness, model, or effort wit
 A relaunch refuses on a parked launch prompt the way [a first launch does](#first-launch-on-a-fresh-host), which a host meets when the relaunch is its first move onto Claude.
 The host-local relaunch has already committed by then, so the host's endpoint record names the new runtime while the primary's route record still names the old one until a relaunch succeeds.
 After a person answers the prompt, run the same relaunch again: it restarts the agent once more rather than adopting the waiting one, and then republishes the primary's record.
+A relaunch that succeeds replaces the recorded [Remote Control link](#the-remote-control-link) with the new session's, or drops it when the host reports none.
 
 ### Firstmate code convergence
 
@@ -886,6 +942,8 @@ It closes only the retiring secondmate's panes or `2ndmate-<id>` workspace in `f
 It never stops the shared session or removes a sibling secondmate's workspace or panes.
 SSH exit 255 preserves both the route and local records because completion is unknown.
 Rerun the same command after a failed or unknown retirement: a host whose home is already gone, or whose home path holds only empty directories, reports it as already retired, and the rerun finishes the primary's own cleanup.
+Once a retirement has completed, the same command reports `already retired`, changes nothing, and exits 0.
+That answer needs the primary's own record of the completed retirement, so an id it never retired, and a retired id whose record path holds anything again, keep the refusal.
 `--force` remains the explicit discard path and requires the same captain authority as local secondmate discard.
 
 No generic remote delete or write surface exists:
@@ -924,6 +982,7 @@ bin/fm-test-run.sh tests/fm-remote-job-launchagent.test.sh
 bin/fm-test-run.sh tests/fm-remote-transport-lanes.test.sh
 bin/fm-test-run.sh tests/fm-remote-doctor.test.sh
 bin/fm-test-run.sh tests/fm-boat-alias-refresh.test.sh
+bin/fm-test-run.sh tests/fm-boat-claude-auto-compact.test.sh
 bin/fm-test-run.sh tests/fm-remote-herdr-guard.test.sh
 bin/fm-test-run.sh tests/fm-project-origin.test.sh
 bin/fm-test-run.sh tests/fm-secondmate-sync.test.sh
@@ -931,6 +990,7 @@ bin/fm-test-run.sh tests/fm-remote-reply.test.sh
 bin/fm-test-run.sh tests/fm-remote-backlog-handoff.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-lifecycle-e2e.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-launch-dialog.test.sh
+bin/fm-test-run.sh tests/fm-remote-secondmate-retire.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-trace-context.test.sh
 ```
 
@@ -987,9 +1047,9 @@ For a real-host smoke test:
 3. Launch the second mate.
 4. Send one marked request.
 5. Verify its correlated reply and structured fleet projection.
-6. For a Claude second mate with Remote Control on, confirm `claude auth status` on the host reports `authMethod` as `claude.ai` and that the session is listed under its `fm-<id>` name in the Claude mobile app.
+6. For a Claude second mate with Remote Control on, confirm `claude auth status` on the host reports `authMethod` as `claude.ai`, that the session is listed under its `fm-<id>` name in the Claude mobile app, and that the link the launch reported opens that session.
 7. Simulate an unreachable host to confirm unknown-without-failover behavior.
-8. Retire only after the remote queue is empty.
+8. Retire only after the remote queue is empty, then run the same command again and confirm it reports `already retired`.
 
 The deterministic suite is automated.
 Real-host validation is still an operator-run smoke test and is not claimed by the repository tests.

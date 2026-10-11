@@ -18,6 +18,11 @@
 # already uses when it first records a remote route - and republishes this
 # home's own metadata to match. A failed or refused relaunch leaves this
 # parent's record untouched.
+#
+# A relaunch starts a new Claude Remote Control session, so the link this
+# record held is dead from that moment. It is replaced by the link the host
+# reports for the new session, or dropped when the host reports none, and the
+# new link is printed last as `remote control: <link>`.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,6 +71,8 @@ NEW_HARNESS=$(printf '%s\n' "$RELAUNCH_OUT" | sed -n 's/^harness=//p' | tail -1)
 NEW_MODEL=$(printf '%s\n' "$RELAUNCH_OUT" | sed -n 's/^model=//p' | tail -1)
 NEW_EFFORT=$(printf '%s\n' "$RELAUNCH_OUT" | sed -n 's/^effort=//p' | tail -1)
 [ -n "$NEW_HARNESS" ] || die "the host's route confirmation carried no harness to record"
+NEW_REMOTE_CONTROL=$(printf '%s\n' "$RELAUNCH_OUT" | sed -n 's/^remote_control_url=//p' | tail -1)
+fm_remote_control_url_valid "$NEW_REMOTE_CONTROL" || NEW_REMOTE_CONTROL=
 
 META_LOCK=$(fm_meta_lock_path "$META") || die "metadata lock path is invalid for $ID"
 fm_lock_acquire_wait "$META_LOCK"
@@ -77,19 +84,21 @@ META_TMP=$(mktemp "$STATE/.fm-remote-relaunch-meta.XXXXXX") || {
   printf 'harness=%s\n' "$NEW_HARNESS"
   printf 'model=%s\n' "$NEW_MODEL"
   printf 'effort=%s\n' "$NEW_EFFORT"
+  [ -z "$NEW_REMOTE_CONTROL" ] || printf 'remote_control_url=%s\n' "$NEW_REMOTE_CONTROL"
 } >> "$META_TMP"
 # Every other line is preserved in its original relative order after the
-# refreshed harness/model/effort. A pr= line's own identity block (pr_head=
+# refreshed fields. A pr= line's own identity block (pr_head=
 # and the x_* fields fm_pr_metadata_identity_parse allows after it) must stay
 # LAST in the record: that parser rejects any other key following pr=, so
 # writing harness/model/effort after it would break PR movement monitoring on
 # a task that already had one armed.
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
-    harness=*|model=*|effort=*) ;;
+    harness=*|model=*|effort=*|remote_control_url=*) ;;
     *) printf '%s\n' "$line" >> "$META_TMP" ;;
   esac
 done < "$META"
 chmod 0600 "$META_TMP"
 mv -f -- "$META_TMP" "$META"
 fm_lock_release "$META_LOCK"
+[ -z "$NEW_REMOTE_CONTROL" ] || printf 'remote control: %s\n' "$NEW_REMOTE_CONTROL"

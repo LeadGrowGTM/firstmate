@@ -347,6 +347,89 @@ TAIL
   pass "a Claude launch parked on its Bypass Permissions dialog classifies unknown launch-prompt and is named"
 }
 
+# A pane narrower than a dialog's own text breaks that text across rendered
+# lines. The trust and Bypass Permissions screens are what Claude Code 2.1.296
+# renders in a 54-column pane (the width a remote host's agent pane has with no
+# client attached; the Bypass Permissions one is that host's own capture). The
+# external-imports question fits in 54 columns, so its screen is broken by hand
+# at 30 to pin the same rule for that signature.
+test_launch_prompt_claude_dialogs_wrapped_in_a_narrow_pane() {
+  local state out bypass
+  state=$(new_state_dir launch-prompt-claude-narrow)
+  "$EV" arm "$state" t1 >/dev/null
+  out=$(fm_busy_classify herdr fm-remote:w1:p2 claude t1 "$state" '──────────────────────────────────────────────────────
+ Accessing workspace:
+
+ /tmp/wt-a
+
+ Quick safety check: Is this a project you created or
+ one you trust? (Like your own code, a well-known
+ open source project, or work from your team). If
+ not, take a moment to review what'"'"'s in this folder
+ first.
+
+ Claude Code'"'"'ll be able to read, edit, and execute
+ files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel')
+  [ "$out" = "unknown launch-prompt" ] \
+    || fail "Claude's trust dialog wrapped at 54 columns must classify unknown launch-prompt, got '$out'"
+  out=$(fm_busy_classify herdr fm-remote:w1:p2 claude t1 "$state" ' Allow external CLAUDE.md
+ file imports?
+
+ This project'"'"'s CLAUDE.md
+ imports files outside the
+ current working directory.
+
+ ❯ No, disable external
+   imports
+   Yes, allow external imports')
+  [ "$out" = "unknown launch-prompt" ] \
+    || fail "Claude's external-imports dialog wrapped at 30 columns must classify unknown launch-prompt, got '$out'"
+  bypass='──────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions
+  mode
+  In Bypass Permissions mode, Claude Code will not
+  ask for your approval before running potentially
+  dangerous commands.
+  This mode should only be used in a sandboxed
+  container/VM that has restricted internet access
+  and can easily be restored if damaged.
+  By proceeding, you accept all responsibility for
+  actions taken while running in Bypass Permissions
+  mode.
+  https://code.claude.com/docs/en/security
+  ❯ No, exit
+    Yes, I accept
+  Enter to confirm · Esc to cancel'
+  ! printf '%s' "$bypass" | grep -q 'Claude Code running in Bypass Permissions mode' \
+    || fail "the 54-column fixture holds the Bypass Permissions heading on one line, so it pins nothing"
+  out=$(fm_busy_classify herdr fm-remote:w1:p2 claude t1 "$state" "$bypass")
+  [ "$out" = "unknown launch-prompt" ] \
+    || fail "Claude's Bypass Permissions dialog wrapped at 54 columns must classify unknown launch-prompt, got '$out'"
+  printf '%s' "$bypass" | fm_busy_launch_prompt_name claude | grep -q 'Yes, I accept' \
+    || fail "the wrapped Bypass Permissions dialog must be named with the option a person has to choose"
+  # Unwrapping moves where the words may sit, never which words are needed:
+  # the wrapped heading alone, and a heading missing a word beside a real
+  # option line, are still not the dialog.
+  out=$(fm_busy_classify tmux w1 claude t1 "$state" 'The docs say: WARNING: Claude Code running in Bypass Permissions
+mode is shown once per machine.')
+  [ "$out" = "busy fm-spawn" ] \
+    || fail "prose quoting the wrapped Bypass Permissions heading must not classify as a parked launch, got '$out'"
+  out=$(fm_busy_classify tmux w1 claude t1 "$state" '  WARNING: Claude Code running in Bypass
+  mode
+  ❯ No, exit
+    Yes, I accept')
+  [ "$out" = "busy fm-spawn" ] \
+    || fail "a heading missing one of its words must not classify as a parked launch, got '$out'"
+  pass "Claude's launch dialogs still classify unknown launch-prompt when a narrow pane wraps them"
+}
+
 test_launch_prompt_pi_trust_dialog() {
   local state out h
   for h in pi pi-signed omp; do
@@ -645,6 +728,7 @@ test_source_mismatch_cross_adapter
 test_converted_adapters_ignore_footer_text
 test_launch_prompt_claude_trust_dialog
 test_launch_prompt_claude_bypass_dialog
+test_launch_prompt_claude_dialogs_wrapped_in_a_narrow_pane
 test_launch_prompt_pi_trust_dialog
 test_launch_prompt_pi_requires_both_markers
 test_launch_prompt_gemini_dialogs

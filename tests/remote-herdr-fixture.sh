@@ -28,6 +28,8 @@
 # fail, which is how a test simulates an endpoint that cannot be reached.
 # A pane read prints <state-file>.screen when a test wrote one, which is how a
 # test puts a rendered screen such as a launch dialog on the remote pane.
+# A pane reports the pid in <state-file>.shell-pid as its shell when a test
+# wrote one, which is how a test puts a real process tree under the remote pane.
 
 install_remote_herdr_fixture() { # <remote-root> <state> <log> <send-fail> <socket>
   local remote_root=$1 state=$2 log=$3 send_fail=$4 socket=$5 script="$1/bin/herdr"
@@ -105,7 +107,7 @@ case "${1:-} ${2:-}" in
   "pane read") if [ -f "$STATE.screen" ]; then cat "$STATE.screen"; else printf '\n'; fi ;;
   "pane process-info")
     printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":%s,"foreground_process_group_id":%s,"foreground_processes":[{"pid":%s,"name":"codex","argv0":"codex","argv":["codex"],"cmdline":"codex"}]}}}\n' \
-      "$pane" "$$" "$$" "$$" ;;
+      "$pane" "$(cat "$STATE.shell-pid" 2>/dev/null || printf '%s' "$$")" "$$" "$$" ;;
   "agent get")
     pane=${3:-}
     if [ "$(jq_state -r --arg p "$pane" '.working[$p] // false')" = true ]; then
