@@ -1536,6 +1536,56 @@ Arm the check once per home with `bin/fm-tool-update-check.sh arm`.
 - So a budget larger than that timeout allows is cut down to what fits instead of being refused, and the cut is reported in the report line.
 - A budget that is not a whole number from 1 to 120 is still refused outright.
 
+## Boat spend check (config/boat-spend.json)
+
+`config/boat-spend.json` is an optional local, gitignored file that turns on the daily Boat spend check.
+With no file the check is off: [`bin/fm-boat-spend-check.sh`](../bin/fm-boat-spend-check.sh) prints nothing and never calls Boat, and `arm` refuses.
+The check only reads Boat: `boat --no-update limits --json`, `boat --no-update list --all --json`, and `boat --no-update billing status --json`, which is the only place Boat shows whether auto-refill is on.
+It never runs any other Boat command, so it cannot create, resume, stop, or delete a sandbox or change billing.
+
+This section is the single owner of the schema.
+`bin/fm-boat-spend-check.sh` owns the conditions, cadence, and report line.
+
+```json
+{
+  "ceiling_usd": 30,
+  "expected_running": 1,
+  "allowed_sizes": ["small", "default"],
+  "always_on": ["<sandbox id that is meant to run with no auto-stop>"],
+  "boat_bin": "<optional path to the Boat CLI>"
+}
+```
+
+- Every field is optional; the values above, with an empty `always_on`, are the defaults.
+- An unknown key or a value of the wrong type is refused, and the check reports the file as invalid rather than falling back to defaults.
+- `FM_BOAT_BIN` wins over `boat_bin`, and `boat` on `PATH` is the last resort, the same knob [`bin/fm-boat-alias-refresh.sh`](../bin/fm-boat-alias-refresh.sh) uses.
+- The file is not inherited by secondmate homes.
+
+**What is reported**
+
+The check prints one `boat-spend:` line, joining every condition that is outside what the file says, and prints nothing otherwise.
+
+- Spend this billing period is over `ceiling_usd`, or projects over it by the period's end at the last-24-hour rate.
+  Spend is `creditUsedSeconds` over `creditSecondsPerDollar`, so it trusts Boat's own counter; whether that counter resets at each renewal is confirmed at the first renewal, not assumed.
+- More sandboxes are in an active state than `expected_running`.
+- An active sandbox is a size not in `allowed_sizes`.
+- An active sandbox has no auto-stop deadline and is not in `always_on`.
+- Auto-refill is enabled, or its state could not be read.
+- The trial or plan end is within 3 days, which also gives a renewal reminder each month.
+- Boat could not be read: a missing CLI, a timed-out call, malformed JSON, or an unexpected shape.
+  A check that cannot see is reported rather than treated as quiet.
+
+Stopped sandboxes are never reported, because Boat bills only while a sandbox runs.
+
+**Arm, cadence, and disarm**
+
+Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
+
+- That writes `state/boat-spend.check.sh` and binds its bytes with `bin/fm-check-register.sh`, so the existing watcher polls it and turns its one line into a `check:` wake; no separate schedule is involved.
+- It evaluates at most once per `FM_BOAT_SPEND_INTERVAL` seconds (default 86400, `0` evaluates every run), and a condition that persists is reported again at each due evaluation.
+- `FM_BOAT_SPEND_PROBE_SECS` (default 9, at most 9) bounds each Boat call so the three together fit inside `FM_CHECK_TIMEOUT`.
+- Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and the record.
+
 ## Mail plane (.env)
 
 The mail plane (bin/fm-mail.sh) reads unseen IMAP messages and sends one SMTP message.

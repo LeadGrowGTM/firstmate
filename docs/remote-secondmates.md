@@ -470,6 +470,35 @@ Both halves of the recipe wait it out:
 - Each unit's pre-start step waits until the home directory is no longer Boat's lazy-restore mount.
   A Herdr server started earlier keeps its socket on that mount and becomes unreachable once Boat swaps in the real disk, while systemd still reports the unit active.
 
+### Keeping a sandbox running
+
+Boat bills per second, only while a sandbox runs, and it has no budget alerts.
+A sandbox that is meant to stay up is therefore created with its size and timer stated explicitly:
+
+```sh
+boat new --type default --no-auto-stop   # an always-on second-mate host
+boat new --type default --ttl 7200       # a timed host (seconds); the timer restarts at every resume
+```
+
+A trial account cannot turn auto-stop off and caps the timer at 2 hours; `--no-auto-stop` needs a paid plan.
+
+| Size | Per hour | Per day | One always-on box, 30 days |
+| - | - | - | - |
+| `small` | $0.018 | $0.43 | $13.14 |
+| `default` | $0.036 | $0.86 | $26.28 |
+| `large` | $0.072 | $1.73 | $52.56 |
+
+Auto-refill stays off.
+With it off, Boat emails at a zero balance and stops every running sandbox about a day later, so the most a month can cost is what was prepaid; with it on, nothing stops the spend.
+Extra time is bought by hand as a credit pack, and a plan or card change is the owner's own action, never a Firstmate one.
+
+Arm the spend check so a drift is reported instead of discovered on a bill:
+
+1. Write `config/boat-spend.json` with the ceiling, expected count, allowed sizes, and the ids of sandboxes that are meant to run with no timer; [Boat spend check](configuration.md#boat-spend-check-configboat-spendjson) owns the schema.
+2. Run `bin/fm-boat-spend-check.sh arm` in the live home.
+
+The check reads Boat and reports; it never stops a sandbox.
+
 ### Known limits
 
 - The readiness check does not know the units exist, and its repair starts the worker and the server as plain processes outside systemd.
