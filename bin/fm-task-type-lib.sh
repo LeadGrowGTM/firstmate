@@ -9,7 +9,7 @@
 # fm_task_type_list <config-dir>
 #   Prints "<name>: <use>" in file order.
 #   An absent config/task-types.json prints nothing and returns 0.
-#   An unreadable, symlink, or malformed file prints one error line and returns 1.
+#   An unreadable or malformed file prints one error line and returns 1.
 # fm_task_type_render <config-dir> <name> <project>
 #   On success sets FM_TASK_TYPE_SECTION and FM_TASK_TYPE_PROFILE (empty when
 #   the type names neither model nor effort) and returns 0.
@@ -65,7 +65,7 @@ def take_model(where):
 def take_effort(where):
   .effort as $effort
   | if $effort == null then {ok: true, value: null}
-    elif (["low", "medium", "high", "xhigh", "max", "ultra"] | index($effort)) != null then {ok: true, value: $effort}
+    elif ($effort | type) == "string" and (["low", "medium", "high", "xhigh", "max", "ultra"] | index($effort)) != null then {ok: true, value: $effort}
     else field_err(where; "effort"; "must be low, medium, high, xhigh, max, or ultra")
     end;
 
@@ -175,9 +175,7 @@ def lines:
   + (if (.skills | length) > 0 then ["Skills: \(.skills | join(", "))"] else [] end)
   + (if (.agents | length) > 0 then ["Agents: \(.agents | join(", "))"] else [] end)
   + (if .check != "" then ["Check: \(.check)"] else [] end)
-  + ["Hand back: \(.hand_back)", "May touch: \(.touch)"]
-  + (if .model != null then ["Model: \(.model)"] else [] end)
-  + (if .effort != null then ["Effort: \(.effort)"] else [] end);
+  + ["Hand back: \(.hand_back)", "May touch: \(.touch)"];
 
 .types as $all
 | [$all[] | select(.name == $name)] as $hits
@@ -207,7 +205,7 @@ fm_task_type_read() { # <config-dir>
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then
     return 2
   fi
-  if [ -L "$file" ] || [ ! -f "$file" ] || [ ! -r "$file" ]; then
+  if [ ! -f "$file" ] || [ ! -r "$file" ]; then
     echo "error: $file must be a readable regular file" >&2
     return 1
   fi

@@ -1372,7 +1372,7 @@ The scaffold never picks a different type.
 | `projects` | Optional registered project names. Omit it and the type applies to every project. A brief for any other project is refused. |
 
 Unknown fields are refused, so a typo cannot be skipped.
-`model` and `effort` are printed on one `type-profile:` line when the entry sets them, and the same values are written into the brief section.
+`model` and `effort` are printed on one `type-profile:` line when the entry sets them, and are not written into the brief section.
 Pass that line's `model` and `effort` to `fm-spawn.sh` as `--model` and `--effort`.
 Leave a flag off when the captain's instruction for this task already names that axis.
 The type does not select a harness or a dispatch rule; `AGENTS.md` section 4 still resolves those.
@@ -1380,7 +1380,8 @@ The type does not select a harness or a dispatch rule; `AGENTS.md` section 4 sti
 
 The file is local to each home, like [`config/brief-include.md`](#home-brief-include-configbrief-includemd).
 It is not on the inherited-local-material allowlist owned by [`bin/fm-config-inherit-lib.sh`](../bin/fm-config-inherit-lib.sh), and this adds no sync.
-A secondmate home and a Boat-hosted home each read the catalog in their own config directory, so the same file works there without a copy from the primary.
+A secondmate home and a Boat-hosted home each read only the catalog in their own config directory, so the file must be placed in each home that uses it.
+The format and behavior are the same there, and a home without the file lists nothing and refuses `--type`.
 `FM_CONFIG_OVERRIDE` selects the config directory, as it does for the other files `bin/fm-brief.sh` reads.
 
 Regression coverage is in [`tests/fm-brief.test.sh`](../tests/fm-brief.test.sh).

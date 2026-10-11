@@ -1561,8 +1561,8 @@ test_task_type_renders_and_surfaces_model_and_effort() {
   assert_grep 'Check: npm test' "$brief" "the brief omitted the check command"
   assert_grep 'Hand back: List path and row count.' "$brief" "the brief omitted the hand-back line"
   assert_grep 'May touch: The list file the brief names.' "$brief" "the brief omitted the touch boundary"
-  assert_grep 'Model: claude-sonnet-5' "$brief" "the brief omitted the model"
-  assert_grep 'Effort: low' "$brief" "the brief omitted the effort"
+  assert_no_grep 'Model:' "$brief" "the brief restated the model beside the type-profile line"
+  assert_no_grep 'Effort:' "$brief" "the brief restated the effort beside the type-profile line"
   intent=$(fm_brief_task_heading_body "$brief" "## Captain's intent")
   spec=$(fm_brief_task_heading_body "$brief" "## Firstmate spec")
   assert_equals '{TASK}' "$intent" "the task type section was pulled into Captain's intent"
@@ -1574,8 +1574,7 @@ test_task_type_renders_and_surfaces_model_and_effort() {
   assert_equals "$(printf '%s\n%s' "scaffolded: $brief (scout; replace {TASK} and {FIRSTMATE_SPEC})" "type-profile: effort=medium")" "$out" \
     "an effort-only type did not surface effort alone"
   assert_grep 'Name: copy-draft' "$brief" "the scout brief omitted the type"
-  assert_grep 'Effort: medium' "$brief" "the scout brief omitted the effort"
-  assert_no_grep 'Model:' "$brief" "an effort-only type wrote a model line"
+  assert_no_grep 'Effort:' "$brief" "the scout brief restated the effort beside the type-profile line"
   assert_grep 'Agents: copywriter' "$brief" "the scout brief omitted the agent pointer"
   pass "fm-brief: a valid type is rendered and its model and effort are surfaced"
 }
@@ -1613,13 +1612,14 @@ EOF
     "the effort refusal did not name the allowed classes"
   assert_absent "$home/data/type-effort" "a bad effort left a scaffold behind"
 
-  write_task_type_catalog "$config"
-  rm -f "$config/task-types.json"
-  ln -s "$ROOT/docs/examples/task-types.json" "$config/task-types.json"
-  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-link gtm-orchestrator --mode direct-PR --type list-build 2>&1); rc=$?
-  expect_code 1 "$rc" "a symlink catalog must be refused"
-  assert_contains "$out" "must be a readable regular file" "the symlink refusal did not name the file"
-  assert_absent "$home/data/type-link" "a symlink catalog left a scaffold behind"
+  cat > "$config/task-types.json" <<'EOF'
+{"types":[{"name":"copy-draft","use":"Draft.","hand_back":"Path.","touch":"file","effort":["low"]}]}
+EOF
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-effort-list some-proj --scout --type copy-draft 2>&1); rc=$?
+  expect_code 1 "$rc" "an effort that is not a string must be refused as a malformed catalog"
+  assert_contains "$out" "malformed config/task-types.json - type 'copy-draft' effort must be low, medium, high, xhigh, max, or ultra" \
+    "the non-string effort refusal did not name the allowed classes"
+  assert_absent "$home/data/type-effort-list" "a non-string effort left a scaffold behind"
 
   rm -f "$config/task-types.json"
   mkdir "$config/task-types.json"
