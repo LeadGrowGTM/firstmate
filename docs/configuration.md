@@ -1173,6 +1173,14 @@ A reported finding is a recommendation, not cleanup authority.
 Two clones of the same origin under the same directory name share one treehouse pool, even across homes.
 Treehouse leaves a copy that another home's clone created in place, because git refuses to remove a worktree from a clone that does not own it.
 
+### Copies outside the guard
+
+Secondmate home copies and a retired secondmate's child copies are outside this guard.
+Retiring a secondmate returns its home copy, and the copies of its child tasks, to their pools without pruning those pools, and the daily sweep does not reach the pool behind secondmate homes.
+Such a copy counts against that pool's cap until treehouse's safe prune is run for that pool by hand.
+Run `treehouse prune --yes` from the root of the clone that owns that pool, which is the Firstmate repository root for secondmate home copies.
+`treehouse prune` without `--yes` shows what would be removed first.
+
 ### Per-repository caps (max_trees)
 
 Treehouse reads `max_trees` from the `treehouse.toml` at the root of the clone it runs in.
@@ -1185,16 +1193,16 @@ max_trees = 2
 
 | Repository | `max_trees` | Where it is set |
 | --- | --- | --- |
-| Firstmate | 6 | The [`treehouse.toml`](../treehouse.toml) committed at the root of this repository |
+| Firstmate | 10 | The [`treehouse.toml`](../treehouse.toml) committed at the root of this repository |
 | `gtm-orchestrator` | 2 | Recommended; set in that repository |
 | Client repositories | 1 | Recommended; set in each client repository |
 
 `treehouse.toml` is a file in each project repository, so setting a cap is that project's own change, delivered the way that project delivers any other change.
 Firstmate writes it into no other repository.
 
-This repository's `treehouse.toml` holds only `max_trees = 6`, and changing the cap is a one-line change to that file.
+This repository's `treehouse.toml` holds only `max_trees = 10`, and changing the cap is a one-line change to that file.
 The Firstmate pool also holds the leased copies behind local secondmate homes, and each of them counts against the cap.
-The peak number of simultaneous Firstmate copies on the owner's machine was 8, so a cap of 6 refuses the 7th concurrent worker.
+The cap is 10 because the peak number of simultaneous Firstmate copies on the owner's machine was 8.
 Once a repository has its own `treehouse.toml`, treehouse takes `max_trees` and `root` for that repository from it and no longer from `~/.config/treehouse/config.toml`.
 A user who set a user-level `root` must therefore expect this repository's pool to use the default root.
 User-level hooks still apply.
