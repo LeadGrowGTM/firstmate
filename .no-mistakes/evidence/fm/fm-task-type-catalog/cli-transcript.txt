@@ -1,0 +1,286 @@
+===== S1 list types: no catalog, then the shipped example =====
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+[exit 0]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+list-build: Build or enrich a company or people list.
+bison-launch: Upload a list and run the post-launch check.
+copy-draft: Draft or rewrite campaign copy.
+[exit 0]
+
+===== S2 ship brief with --type list-build (no model/effort pinned) =====
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh s2-list gtm-orchestrator --mode no-mistakes --type list-build
+scaffolded: <fm-lab.9OtA1r>/data/s2-list/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})
+[exit 0]
+--- # Task block of the written brief ---
+# Task
+## Captain's intent
+{TASK}
+
+## Firstmate spec
+{FIRSTMATE_SPEC}
+
+## Task type
+Name: list-build
+Use: Build or enrich a company or people list.
+Agents: company-builder, people-builder, enrichment
+Check: npm test
+Hand back: List path and row count.
+May touch: The list file the brief names.
+
+
+===== S3 scout brief with --type bison-launch (effort pinned) =====
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh s3-bison gtm-orchestrator --scout --type=bison-launch
+scaffolded: <fm-lab.9OtA1r>/data/s3-bison/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+type-profile: effort=low
+[exit 0]
+--- ## Task type section ---
+## Task type
+Name: bison-launch
+Use: Upload a list and run the post-launch check.
+Agents: uploader, post-launch
+Check: npm test
+Hand back: Upload id and the post-launch result.
+May touch: The campaign the brief names.
+
+--- Model:/Effort: lines in brief section (decision: none) ---
+0
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh s3-copy any-other-project --scout --type copy-draft
+scaffolded: <fm-lab.9OtA1r>/data/s3-copy/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+type-profile: effort=medium
+[exit 0]
+--- ## Task type section ---
+## Task type
+Name: copy-draft
+Use: Draft or rewrite campaign copy.
+Skills: .agents/skills/campaign-copywriting/SKILL.md
+Agents: copywriter
+Hand back: Draft path and what the copy says.
+May touch: The draft file the brief names.
+
+
+===== S4 untyped brief is unchanged by a present catalog =====
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh s4-plain gtm-orchestrator --mode direct-PR
+scaffolded: <fm-lab.9OtA1r>/data/s4-plain/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})
+[exit 0]
+
+$ FM_HOME=<fm-lab.6XLb1o> bin/fm-brief.sh s4-plain gtm-orchestrator --mode direct-PR
+scaffolded: <fm-lab.6XLb1o>/data/s4-plain/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})
+[exit 0]
+[untyped brief with catalog == untyped brief without catalog: IDENTICAL]
+[typed vs untyped diff, home paths normalised:]
+10,17d9
+< ## Task type
+< Name: list-build
+< Use: Build or enrich a company or people list.
+< Agents: company-builder, people-builder, enrichment
+< Check: npm test
+< Hand back: List path and row count.
+< May touch: The list file the brief names.
+< 
+
+===== S5 downstream reader: ## Firstmate spec body stops before ## Task type =====
+spec body => [Output to lists/q4.csv.]
+intent body => [Build the Q4 SaaS list.]
+
+===== S6 refusals write nothing =====
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-unknown gtm-orchestrator --mode local-only --type list-biuld
+error: unknown task type 'list-biuld'
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-project some-other-repo --scout --type list-build
+error: task type 'list-build' does not apply to project 'some-other-repo'
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-empty gtm-orchestrator --scout --type ''
+error: --type requires a non-empty name
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-mate --secondmate --no-projects --type list-build
+error: --type applies only to ship and scout briefs
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types --scout
+error: --list-types lists this home's task types and takes no other arguments
+[exit 1]
+
+$ FM_HOME=<fm-lab.6XLb1o> bin/fm-brief.sh r-nocat gtm-orchestrator --scout --type list-build
+error: no task-type catalog: <fm-lab.6XLb1o>/config/task-types.json
+[exit 1]
+
+--- catalog: truncated JSON ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - malformed JSON
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - malformed JSON
+[exit 1]
+
+--- catalog: zero bytes ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - malformed JSON
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - malformed JSON
+[exit 1]
+
+--- catalog: two documents ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - malformed JSON
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - malformed JSON
+[exit 1]
+
+--- catalog: top-level array ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - the catalog must be a JSON object
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - the catalog must be a JSON object
+[exit 1]
+
+--- catalog: unknown field (typo hand_bak) ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' has unknown field 'hand_bak'
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' has unknown field 'hand_bak'
+[exit 1]
+
+--- catalog: missing hand_back ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' hand_back must be one line
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' hand_back must be one line
+[exit 1]
+
+--- catalog: effort as array ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' effort must be low, medium, high, xhigh, max, or ultra
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' effort must be low, medium, high, xhigh, max, or ultra
+[exit 1]
+
+--- catalog: effort not in class ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' effort must be low, medium, high, xhigh, max, or ultra
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' effort must be low, medium, high, xhigh, max, or ultra
+[exit 1]
+
+--- catalog: model with space ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' model must be one token
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' model must be one token
+[exit 1]
+
+--- catalog: absolute skill path ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' skills must be names or repo-relative paths
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' skills must be names or repo-relative paths
+[exit 1]
+
+--- catalog: multi-line use injecting a heading ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' use must be one line
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' use must be one line
+[exit 1]
+
+--- catalog: duplicate names ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - duplicate type name 't'
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - duplicate type name 't'
+[exit 1]
+
+--- catalog: uppercase name ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - types[0] name must be a lowercase slug
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - types[0] name must be a lowercase slug
+[exit 1]
+
+--- catalog: empty projects list ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh r-bad gtm-orchestrator --scout --type t
+error: malformed config/task-types.json - type 't' projects must list at least one project or be omitted
+[exit 1]
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: malformed config/task-types.json - type 't' projects must list at least one project or be omitted
+[exit 1]
+
+--- catalog: a directory ---
+
+$ FM_HOME=<fm-lab.9OtA1r> bin/fm-brief.sh --list-types
+error: <fm-lab.9OtA1r>/config/task-types.json must be a readable regular file
+[exit 1]
+
+[data dir unchanged across every refusal: no brief or directory written]
+
+===== S7 same file in a second home (secondmate / Boat-hosted): same result; home without it lists nothing =====
+[home B catalog is a symlink to a regular file: <B>/shared/domain-types.json]
+
+$ FM_HOME=<fm-lab.nZ5LGx> bin/fm-brief.sh --list-types
+list-build: Build or enrich a company or people list.
+bison-launch: Upload a list and run the post-launch check.
+copy-draft: Draft or rewrite campaign copy.
+[exit 0]
+
+$ FM_HOME=<fm-lab.nZ5LGx> bin/fm-brief.sh s7-bison gtm-orchestrator --scout --type bison-launch
+scaffolded: <fm-lab.nZ5LGx>/data/s7-bison/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})
+type-profile: effort=low
+[exit 0]
+[## Task type section in home A == home B: IDENTICAL]
+
+$ FM_HOME=<fm-lab.6XLb1o> bin/fm-brief.sh --list-types
+[exit 0]
+[FM_CONFIG_OVERRIDE pointing home C at home A's config dir:]
+list-build: Build or enrich a company or people list.
+bison-launch: Upload a list and run the post-launch check.
+copy-draft: Draft or rewrite campaign copy.
+[exit 0]

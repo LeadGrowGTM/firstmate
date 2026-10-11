@@ -1,0 +1,50 @@
+
+  Stopping now; no monitoring is running for this scout.
+
+✻ Brewed for 29s · done 4:56 PM
+
+❯ Captain: the lab-bison scout is done and I have its report. Tear lab-bison down now with the normal teardown script so its isolated copy and window are removed, tell me the
+  command and output, then stop.
+
+  Ran 3 shell commands
+
+● Captain, the lab-bison cleanup completed: its window is closed, its isolated copy is returned and gone from disk, and its runtime records are cleared.
+
+  Command run (from /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PAY8QZ1WMX4W98V504QEMV):
+
+  FM_HOME=/tmp/fm-lab.mLWqlO bin/fm-teardown.sh lab-bison
+
+  Output (the script exited 0):
+
+  fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.mLWqlO
+  ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ●  WATCHER DOWN - SUPERVISION IS OFF
+  ●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+  ●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+  ●  This is a supervision warning only; the guarded operation WILL still run.
+  ●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+  ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  teardown: reaping leaked worktree process(es) for lab-bison: 259758 268516 269411
+  teardown: force-killing leaked worktree process(es) for lab-bison: 259758
+  A new version of treehouse is available: v2.1.1 → v3.1.2
+  Run "treehouse update" to update
+
+  🌳 Worktree returned to pool.
+  teardown lab-bison complete (window primary:fm-lab-bison, worktree /home/mitch/.treehouse/gtm-orchestrator-ddcf0e/1/gtm-orchestrator)
+  Backlog: lab-bison just finished (this home keeps no markdown backlog at /tmp/fm-lab.mLWqlO/data/backlog.md). Update /tmp/fm-lab.mLWqlO/data/backlog.md - move lab-bison to Done,
+  keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+
+  - Monitoring warning: expected, since you told me not to supervise after the launch; I did not start or repair monitoring.
+  - Leftover processes: cleanup found three processes still running in the scout's copy and stopped them, one of them forcibly.
+  - Backlog follow-up not done: this lab home has no backlog file, and I did not create one.
+  - Still on disk: the scout's report at /tmp/fm-lab.mLWqlO/data/lab-bison/report.md and its instructions, plus the unspawned lab-readme instructions at
+    /tmp/fm-lab.mLWqlO/data/lab-readme/brief.md.
+
+  Stopping here.
+
+✻ Baked for 25s · done 4:58 PM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ now spawn lab-readme
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

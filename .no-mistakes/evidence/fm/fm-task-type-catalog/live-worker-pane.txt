@@ -1,0 +1,50 @@
+
+                                                                                                                                                                                  ✕
+  Ran 1 shell command
+
+● Post-launch check is running against q4-saas; I'll write the report and pass the completion gate
+  once it returns.
+
+● Agent "Post-launch check q4-saas" finished · 11s
+
+● Write(/tmp/fm-lab.mLWqlO/data/lab-bison/report.md)
+  ⎿  Wrote 37 lines to ../../../../../../tmp/fm-lab.mLWqlO/data/lab-bison/report.md
+      1 # lab-bison report: Q4 SaaS list upload and post-launch check
+      2
+      3 ## Hand back
+      4
+      5 - **Upload id:** `LAB-UPLOAD-001`
+      7 - **Both are dry-run fixture values.** No list reached a real campaign and no real c
+        heck ran. The project is a lab fixture whose two agents are defined to return these
+        fixed strings and never contact a network service.
+      8
+      9 ## What I did
+     … +50 lines
+
+  Ran 2 shell commands                                                                                                          No changes this session
+
+● The upload and post-launch check both ran once against q4-saas, but only as dry runs: no list
+  reached a real campaign and no real check ran.
+
+  - Upload id: LAB-UPLOAD-001
+  - Post-launch result: OK-FIXTURE
+  - Check: npm test passed, but it only echoes fixture-tests-ok.
+
+  Both values are fixed strings the project's uploader and post-launch agents return for any input.
+  The repo is a lab fixture whose README says "No real campaigns exist here", so the existence of
+  a q4-saas campaign could not be verified. The list itself was unambiguous:
+  /home/mitch/.treehouse/gtm-orchestrator-ddcf0e/1/gtm-orchestrator/lists/q4-saas.csv is the only
+  file in lists/.
+
+  Nothing outside scope was touched, and nothing was pushed. The completion gate passed with no
+  captain decisions outstanding, and the done line is in the status file. The steering inbox stayed
+  empty.
+
+  The report is at /tmp/fm-lab.mLWqlO/data/lab-bison/report.md.
+
+✻ Crunched for 1m 1s · done 4:56 PM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

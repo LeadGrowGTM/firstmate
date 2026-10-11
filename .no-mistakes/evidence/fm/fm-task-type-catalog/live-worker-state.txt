@@ -1,0 +1,17 @@
+# state/lab-bison.meta
+window=primary:fm-lab-bison
+endpoint_task_id=lab-bison
+worktree=/home/mitch/.treehouse/gtm-orchestrator-ddcf0e/1/gtm-orchestrator
+project=/tmp/fm-lab.mLWqlO/projects/gtm-orchestrator
+harness=claude
+kind=scout
+tasktmp=/tmp/fm-lab-bison
+model=default
+effort=low
+busy_gen=g1791752155.264519.6990
+spawn_gen=s1791752155.258672.7328
+decisions_reviewed=1
+decision_keys=
+
+# state/lab-bison.status
+done [at=1791752215]: dry-run only - upload id LAB-UPLOAD-001, post-launch OK-FIXTURE for q4-saas; fixture values, no real upload; report at /tmp/fm-lab.mLWqlO/data/lab-bison/report.md
