@@ -1367,7 +1367,7 @@ The scaffold never picks a different type.
 | `check` | Optional one-line command, omitted when the type has no check. |
 | `hand_back` | Required one line describing what the worker hands back. |
 | `touch` | Required one-line boundary, recorded in the brief and not enforced. |
-| `model` | Optional token with no spaces, surfaced for `fm-spawn.sh --model`. |
+| `model` | Optional token with no whitespace or `=`, surfaced for `fm-spawn.sh --model`. |
 | `effort` | Optional `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`, the difficulty class `fm-spawn.sh --effort` already accepts. |
 | `projects` | Optional registered project names. Omit it and the type applies to every project. A brief for any other project is refused. |
 
