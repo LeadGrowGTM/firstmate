@@ -199,7 +199,7 @@ Serialize only for a true semantic dependency, shared mutable external state, in
 Write the task-specific brief under section 11 before spawning.
 Fill the task subsections according to section 11.
 When `config/task-types.json` is present, list types with `bin/fm-brief.sh --list-types` and, when a type fits the task, pass `--type <name>` on the brief so the catalog supplies the type's fields; a task that matches no type keeps an untyped brief.
-Pass a printed `type-profile:` model or effort through to `fm-spawn.sh` unless the captain already named that axis for this task (`docs/configuration.md` owns the catalog).
+A printed `type-profile:` model or effort only fills an axis that section 4's routing precedence left unresolved; never mix it into a profile a captain override, matched rule or resolver profile, or configured default already resolved (`docs/configuration.md` owns the catalog).
 
 ### Dispatch and supervision handoff
 

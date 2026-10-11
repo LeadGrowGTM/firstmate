@@ -136,9 +136,10 @@
 # readable regular file, or a type whose projects list omits this project
 # refuses before anything is written. When the entry names model or effort, the
 # scaffold also prints one type-profile: line for the existing fm-spawn.sh
-# --model and --effort flags. Leave a flag off when the captain already named
-# that axis for this task. The flag does not select a harness or a dispatch
-# rule. docs/configuration.md "Task types" owns the file format, and
+# --model and --effort flags. It fills only an axis that the AGENTS.md
+# section 4 routing precedence left unresolved, and is never mixed into a
+# profile that precedence resolved. The flag does not select a harness or a
+# dispatch rule. docs/configuration.md "Task types" owns the file format, and
 # bin/fm-task-type-lib.sh owns the checks and the rendered lines.
 # Refused on a secondmate charter.
 # Refuses to overwrite an existing brief.

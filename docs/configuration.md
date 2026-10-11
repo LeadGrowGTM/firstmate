@@ -1373,9 +1373,11 @@ The scaffold never picks a different type.
 
 Unknown fields are refused, so a typo cannot be skipped.
 `model` and `effort` are printed on one `type-profile:` line when the entry sets them, and are not written into the brief section.
-Pass that line's `model` and `effort` to `fm-spawn.sh` as `--model` and `--effort`.
-Leave a flag off when the captain's instruction for this task already names that axis.
-The type does not select a harness or a dispatch rule; `AGENTS.md` section 4 still resolves those.
+The routing precedence in `AGENTS.md` section 4 stays the single owner of the launch profile: an explicit captain instruction for the task, then the matched dispatch rule or resolver profile, then the configured default.
+That line's `model` and `effort` only fill an axis none of those resolved, passed to `fm-spawn.sh` as `--model` and `--effort`.
+They are never mixed into a profile a rule already resolved, so a rule's harness never runs with a type's model.
+The type does not select a harness or a dispatch rule.
+The example therefore pins only `effort`, since a model token belongs to one harness.
 [`bin/fm-dispatch-resolve.sh`](../bin/fm-dispatch-resolve.sh) does not read the task-type section.
 
 The file is local to each home, like [`config/brief-include.md`](#home-brief-include-configbrief-includemd).

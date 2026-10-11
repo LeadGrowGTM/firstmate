@@ -15,7 +15,6 @@
       "agents": ["uploader", "post-launch"],
       "check": "npm test",
       "hand_back": "Upload id and the post-launch result.",
-      "model": "claude-sonnet-5",
       "effort": "low",
       "touch": "The campaign the brief names.",
       "projects": ["gtm-orchestrator"]

@@ -1603,6 +1603,17 @@ test_task_type_refuses_unknown_malformed_and_wrong_project() {
   assert_contains "$out" "malformed config/task-types.json - malformed JSON" "the malformed-catalog refusal was not plain"
   assert_absent "$home/data/type-bad" "a malformed catalog left a scaffold behind"
 
+  : > "$config/task-types.json"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-empty some-proj --mode no-mistakes --type list-build 2>&1); rc=$?
+  expect_code 1 "$rc" "an empty catalog must be refused"
+  assert_equals "error: malformed config/task-types.json - malformed JSON" "$out" "the empty-catalog refusal was not plain"
+  assert_absent "$home/data/type-empty" "an empty catalog left a scaffold behind"
+
+  printf '%s\n%s\n' '{"types":[]}' '{"types":[]}' > "$config/task-types.json"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" --list-types 2>&1); rc=$?
+  expect_code 1 "$rc" "a catalog holding two JSON documents must be refused"
+  assert_equals "error: malformed config/task-types.json - malformed JSON" "$out" "the two-document refusal was not plain"
+
   cat > "$config/task-types.json" <<'EOF'
 {"types":[{"name":"copy-draft","use":"Draft.","hand_back":"Path.","touch":"file","effort":"huge"}]}
 EOF
@@ -1677,8 +1688,9 @@ test_task_type_list_and_example() {
 
   out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-bison gtm-orchestrator --scout --type bison-launch 2>&1) \
     || fail "the example bison-launch type did not scaffold: $out"
-  assert_contains "$out" "type-profile: model=claude-sonnet-5 effort=low" \
-    "the example did not surface its model and effort"
+  assert_contains "$out" "type-profile: effort=low" \
+    "the example did not surface its effort"
+  assert_not_contains "$out" "model=" "the example pinned a model, which belongs to one harness"
   assert_grep 'Agents: uploader, post-launch' "$home/data/type-bison/brief.md" \
     "the example did not point at the Bison specialists by name"
 

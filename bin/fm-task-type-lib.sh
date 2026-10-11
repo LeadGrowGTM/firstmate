@@ -213,7 +213,7 @@ fm_task_type_read() { # <config-dir>
     echo "error: $file needs jq" >&2
     return 1
   fi
-  if ! parsed=$(jq -c "$FM_TASK_TYPE_LOAD_FILTER" "$file" 2>/dev/null); then
+  if ! parsed=$(jq -c "$FM_TASK_TYPE_LOAD_FILTER" "$file" 2>/dev/null) || [ -z "$parsed" ] || [[ "$parsed" == *$'\n'* ]]; then
     echo "error: malformed config/task-types.json - malformed JSON" >&2
     return 1
   fi
