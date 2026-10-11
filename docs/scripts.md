@@ -139,6 +139,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-tool-update-check.sh` | Report watched tooling with an update available, and updates installed but left inert by PATH order |
 | `fm-startup-growth-check.sh` | Daily metadata-only growth check for startup memory and tracked startup/instruction surfaces |
 | `fm-boat-spend-check.sh` | Optional: daily read-only Boat spend check that reports only when spend, running sandboxes, or billing settings are outside `config/boat-spend.json` ([configuration.md](configuration.md#boat-spend-check-configboat-spendjson)) |
+| `fm-treehouse-guard.sh` | Run treehouse's safe prune after cleanup and daily for this home's own pools, and report pool size |
 | `fm-pr-lib.sh`           | Own canonical task and PR validation plus private atomic PR-poll publication, merge-notification identity, and retirement |
 | `fm-pr-poll.sh`          | Provide the byte-static watcher program for validated pull-request, merge-request, and Gerrit-change poll sidecars |
 | `fm-contributions.sh`    | Observe owned publications, retain exact-head judgments, measure required actors, and wake on maintainer signals |
