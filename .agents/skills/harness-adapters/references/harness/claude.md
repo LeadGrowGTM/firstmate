@@ -42,6 +42,8 @@ The once-per-machine bypass-permissions confirmation is a third, separate dialog
 Never send Enter to that one either: it was observed rendering in the same shape as the trust dialog, with the selection on `No, exit` and the footer `Enter to confirm . Esc to cancel`, so Enter ends the session rather than accepting.
 Firstmate cannot move a selection with Enter, Escape, and C-c alone, so it cannot accept this dialog at all, and an operator accepts it once per machine instead.
 Inspect the pane to identify which dialog is on screen, and report it rather than answering it.
+A remote second-mate launch or relaunch reports it for you: `../../../bin/fm-remote-secondmate-control.sh` refuses while the new agent is parked there, naming this dialog and the Herdr session a person opens on that host to accept it, and leaves the waiting agent in place so the same command succeeds once it is accepted.
+A local launch has no such refusal, so there the shared classifier in `../../../bin/fm-busy-lib.sh` only stops the parked pane from reading as a working turn.
 A launch under `config/claude-permission-mode=auto` never meets the bypass confirmation, because it does not request bypass mode: on 2.1.269 `claude --permission-mode auto` reached the composer directly with the footer `⏵⏵ auto mode on (shift+tab to cycle)`, so a captain who refuses the bypass dialog selects `auto` there instead of accepting it.
 The workspace-trust dialog is unaffected by the permission mode and still needs the pre-registration above.
 

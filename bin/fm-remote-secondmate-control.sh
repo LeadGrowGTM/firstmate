@@ -18,6 +18,9 @@
 # Herdr backend in the dedicated fm-remote session, so launch refuses any other
 # selection rather than reading this home's config/backend. The interactive
 # default session remains for the user's work.
+# launch and relaunch also refuse, without answering it, while the launched
+# agent is parked on a launch prompt only a person can answer;
+# launch_refuse_parked_prompt owns that check and its two timing knobs.
 # fm-spawn/fm-send/fm-teardown keep owning the local endpoint mechanics.
 # The home's own workers keep their ordinary backend selection.
 # bin/fm-remote-doctor.sh owns that host's readiness for Herdr.
@@ -66,6 +69,8 @@ REMOTE_HERDR_SESSION=fm-remote
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-busy-lib.sh
+. "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-ff-lib.sh
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
@@ -74,7 +79,7 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac; }
 
 # True when the home path holds directories and nothing else, after removing
@@ -179,6 +184,48 @@ cmd_route() {
   print_route "$id"
 }
 
+# A launched agent that never starts its charter turn is not a launch. The
+# host-local spawn returns as soon as the launch command is typed, while the
+# harness can still park on an interactive prompt only a person may answer, and
+# a fresh host always meets one: Claude Code's once-per-machine Bypass
+# Permissions confirmation. bin/fm-busy-lib.sh owns both facts read here. A
+# record still pinned at the spawn seed means no turn has started yet, and its
+# launch-prompt table recognizes the parked screen and names it. So this polls
+# until a turn has started (launched), a recognized prompt is on screen
+# (refused, naming the prompt and the step), or the window closes with neither.
+# That last case stays a launch: a slow start showing no recognized prompt is
+# not proof of a block, and the parent's ordinary supervision still owns it.
+#
+# Nothing is typed or keyed into the pane. These prompts open on their
+# declining option, and answering one is a person's consent for that machine
+# (.agents/skills/harness-adapters/references/harness/claude.md "Workspace
+# trust"). The endpoint is left exactly as it is, so the agent continues into
+# its charter the moment a person answers, and the same launch then adopts it.
+#
+# FM_REMOTE_LAUNCH_CONFIRM_POLLS (default 60) and
+# FM_REMOTE_LAUNCH_CONFIRM_INTERVAL (default 0.5 seconds) bound the window.
+launch_refuse_parked_prompt() { # <id>; needs the endpoint loaded
+  local id=$1 polls=${FM_REMOTE_LAUNCH_CONFIRM_POLLS:-60} interval=${FM_REMOTE_LAUNCH_CONFIRM_INTERVAL:-0.5}
+  local harness i=0 screen verdict prompt
+  case "$polls" in ''|*[!0-9]*) polls=60 ;; esac
+  harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
+  while :; do
+    screen=$(fm_backend_capture "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 40 "fm-$id" 2>/dev/null || true)
+    verdict=$(fm_busy_classify "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$harness" "$id" "$CONTROL_STATE" "$screen")
+    case "$verdict" in
+      'unknown launch-prompt')
+        prompt=$(printf '%s' "$screen" | fm_busy_launch_prompt_name "$harness")
+        die "remote secondmate $id was launched but is not reading its charter: its pane $REMOTE_ENDPOINT_TARGET is waiting at $prompt. Firstmate never answers that prompt. On this second mate's host, open Herdr session $REMOTE_HERDR_SESSION (herdr --session $REMOTE_HERDR_SESSION), answer the prompt in that pane once, then run the same command again from the primary; the waiting agent continues into its charter as soon as it is answered"
+        ;;
+      'busy fm-spawn') ;;
+      *) return 0 ;;
+    esac
+    i=$((i + 1))
+    [ "$i" -lt "$polls" ] || return 0
+    sleep "$interval"
+  done
+}
+
 cmd_launch() {
   local id=$1 harness=$2 model=$3 effort=$4 selected_backend=$5 traceparent=${6:-}
   local current meta out herdr_session
@@ -204,6 +251,9 @@ cmd_launch() {
     current=$(fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unreadable\n')
     case "$current" in
       alive)
+        # A live endpoint is not proof its agent ever started: a launch refused
+        # for a parked prompt leaves exactly this endpoint behind.
+        launch_refuse_parked_prompt "$id"
         print_route "$id"
         return 0
         ;;
@@ -235,6 +285,8 @@ cmd_launch() {
   herdr_session=$(fm_meta_get "$meta" herdr_session)
   [ "$herdr_session" = "$REMOTE_HERDR_SESSION" ] \
     || die "remote launch recorded Herdr session '${herdr_session:-missing}', expected '$REMOTE_HERDR_SESSION'"
+  remote_endpoint_require "$id"
+  launch_refuse_parked_prompt "$id"
   print_route "$id"
 }
 
@@ -285,6 +337,8 @@ cmd_relaunch() {
   # endpoint's own republished metadata - rather than trusting these argv
   # values - is what makes that record correct even when relaunch resolved
   # "default" against a configured pin this call never saw.
+  remote_endpoint_require "$id"
+  launch_refuse_parked_prompt "$id"
   print_route "$id"
 }
 

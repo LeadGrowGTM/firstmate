@@ -312,6 +312,7 @@ These steps are never automated and are always reported rather than silently att
 - FileVault, which holds a reboot at pre-boot authentication before any login session exists.
 - Installing any missing required tool that no safe wrapper can resolve.
 - Each worker runtime's own `/login`, and any keychain password prompt that login needs.
+- Claude Code's one-time Bypass Permissions confirmation, which a fresh host shows the first time a second mate launches on Claude there; [the launch refuses and names it](#first-launch-on-a-fresh-host) rather than answering it.
 
 Firstmate never writes an auto-login password, never changes FileVault, and never stores an account password.
 A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own symlink is reported for the operator to inspect and is never overwritten.
@@ -545,6 +546,25 @@ The primary then takes these steps:
 
 All remote secondmates on one host share `fm-remote` and retain separate `2ndmate-<id>` workspaces inside it.
 
+### First launch on a fresh host
+
+A launch succeeds only once the new agent has started reading its charter, or has shown no recognized prompt for about 30 seconds.
+A host whose account has never run Claude Code in Bypass Permissions mode stops the first Claude launch at a one-time dialog headed `WARNING: Claude Code running in Bypass Permissions mode`, which opens on `No, exit`.
+The launch then fails instead of reporting a second mate that is not working, and its error names the dialog, the waiting pane, and the host.
+
+Firstmate never answers that dialog and sends it no keys, because accepting it is a person's consent for that machine.
+Clear it once per host:
+
+1. On the host, open the dedicated session with `herdr --session fm-remote`.
+2. In the waiting `2ndmate-<id>` pane, choose `Yes, I accept`.
+3. On the primary, run the same `bin/fm-spawn.sh <id> --secondmate` again.
+
+The waiting agent is left in place, so it continues into its charter as soon as the dialog is answered and the rerun adopts it rather than starting a second one.
+A rerun before the dialog is answered fails the same way.
+A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog.
+The same refusal covers any other launch prompt the shared classifier in [`bin/fm-busy-lib.sh`](../bin/fm-busy-lib.sh) recognizes for the selected harness.
+A relaunch refuses on the same prompts, and [Relaunch a live remote second mate](#relaunch-a-live-remote-second-mate) owns what differs there.
+
 ### Refused and unsupported launches
 
 - An explicit request for any other backend is refused rather than honored, and the remote host refuses one too.
@@ -762,6 +782,10 @@ Letting the far side re-resolve it would silently move the mate onto another run
 SSH exit 255 leaves completion unknown and the route preserved, exactly as every other verb here.
 Move a live remote second mate onto a newly pinned harness, model, or effort with [`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh) rather than calling `relaunch` through `fm-on.sh` directly: the host-local relaunch it drives can only rewrite the host's own endpoint record, so this wrapper reads the confirmed identity back from that record afterward and republishes the primary's own route metadata to match, the same way launch already records a fresh route.
 
+A relaunch refuses on a parked launch prompt the way [a first launch does](#first-launch-on-a-fresh-host), which a host meets when the relaunch is its first move onto Claude.
+The host-local relaunch has already committed by then, so the host's endpoint record names the new runtime while the primary's route record still names the old one until a relaunch succeeds.
+After a person answers the prompt, run the same relaunch again: it restarts the agent once more rather than adopting the waiting one, and then republishes the primary's record.
+
 ### Firstmate code convergence
 
 Session start and every remote launch converge the persistent remote home on the primary's own default-branch commit rather than on the Firstmate copy that host keeps.
@@ -835,6 +859,7 @@ bin/fm-test-run.sh tests/fm-secondmate-sync.test.sh
 bin/fm-test-run.sh tests/fm-remote-reply.test.sh
 bin/fm-test-run.sh tests/fm-remote-backlog-handoff.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-lifecycle-e2e.test.sh
+bin/fm-test-run.sh tests/fm-remote-secondmate-launch-dialog.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-trace-context.test.sh
 ```
 

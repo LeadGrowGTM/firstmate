@@ -923,6 +923,8 @@ fm_busy_agy_tail_busy() {
 # disassembly, .agents/skills/harness-adapters/references/harness/claude.md
 # "Hook trust" sibling section). fm-claude-trust.sh pre-registers both before
 # launch; this is the backstop for when that registration did not take effect.
+# The once-per-machine Bypass Permissions confirmation has no pre-registration
+# at all and is matched last, through fm_busy_claude_bypass_prompt_tail below.
 # Each dialog's own question text is paired with one of its own rendered
 # option/footer lines, both required together: the question text alone is
 # plausible self-referential prose a firstmate-repo worker could easily render
@@ -935,8 +937,31 @@ fm_busy_claude_launch_prompt_tail() {
     && printf '%s' "$buf" | grep -qiE 'No, exit|Enter to confirm'; then
     return 0
   fi
-  printf '%s' "$buf" | grep -qiE "${FM_BUSY_CLAUDE_IMPORTS_PROMPT_REGEX:-Allow external CLAUDE\\.md file imports\\?}" \
-    && printf '%s' "$buf" | grep -qiE 'No, disable external imports|Yes, allow external imports'
+  if printf '%s' "$buf" | grep -qiE "${FM_BUSY_CLAUDE_IMPORTS_PROMPT_REGEX:-Allow external CLAUDE\\.md file imports\\?}" \
+    && printf '%s' "$buf" | grep -qiE 'No, disable external imports|Yes, allow external imports'; then
+    return 0
+  fi
+  printf '%s' "$buf" | fm_busy_claude_bypass_prompt_tail
+}
+
+# fm_busy_claude_bypass_prompt_tail: Claude's once-per-machine Bypass
+# Permissions confirmation ("WARNING: Claude Code running in Bypass
+# Permissions mode"), which every --dangerously-skip-permissions launch meets
+# on a machine whose account has never accepted it - a freshly provisioned
+# remote host above all. Nothing pre-registers it: accepting is a person's
+# consent for that machine (.agents/skills/harness-adapters/references/harness/
+# claude.md "Workspace trust"), so this signature is the only thing between
+# that screen and a launch that reads as working. Live-verified on Claude Code
+# 2.1.296 (docs/verification/runtime-backends.md "Launch-prompt backstop
+# signatures"). The heading is paired with one of the dialog's own option or
+# footer lines for the same reason as the two dialogs above: this file and the
+# harness reference both quote the heading, so the heading alone is prose a
+# firstmate-repo worker could render.
+fm_busy_claude_bypass_prompt_tail() {
+  local buf
+  buf=$(cat)
+  printf '%s' "$buf" | grep -qiE "${FM_BUSY_CLAUDE_BYPASS_PROMPT_REGEX:-Claude Code running in Bypass Permissions mode}" \
+    && printf '%s' "$buf" | grep -qiE 'Yes, I accept|No, exit|Enter to confirm'
 }
 
 # fm_busy_pi_launch_prompt_tail: Pi's project-trust dialog. Live-verified on
@@ -1006,6 +1031,27 @@ fm_busy_launch_prompt_parked() {  # <harness>
     gemini) fm_busy_gemini_launch_prompt_tail ;;
     *) return 1 ;;
   esac
+}
+
+# fm_busy_launch_prompt_name: what a person has to answer, for a caller that
+# must report a parked launch rather than only classify it. Consumes the tail
+# on stdin and prints one phrase naming the prompt and the answer it needs;
+# fails when the tail is not a recognized launch prompt for <harness>. A prompt
+# with no entry of its own here is still named, generically, so a caller never
+# has to restate the signature table to say something actionable.
+fm_busy_launch_prompt_name() {  # <harness>
+  local buf
+  buf=$(cat)
+  case "${1:-}" in
+    claude*)
+      if printf '%s' "$buf" | fm_busy_claude_bypass_prompt_tail; then
+        printf '%s' "Claude Code's once-per-machine Bypass Permissions dialog (\"WARNING: Claude Code running in Bypass Permissions mode\"), which opens on \"No, exit\" and needs a person to choose \"Yes, I accept\""
+        return 0
+      fi
+      ;;
+  esac
+  printf '%s' "$buf" | fm_busy_launch_prompt_parked "${1:-}" || return 1
+  printf '%s' "an interactive launch prompt that only a person can answer"
 }
 
 # fm_busy_classify: semantic classification for a task whose endpoint the
