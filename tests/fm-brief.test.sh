@@ -1465,6 +1465,229 @@ test_crewmate_scaffolds_forbid_pool_administration() {
   pass "fm-brief.sh: every crewmate scaffold forbids administering the shared worktree pool"
 }
 
+# config/task-types.json is optional. With no file, or with a file that this
+# scaffold does not ask to read, the brief and the scaffold line stay as they
+# were. A present catalog without --type is the same.
+test_task_type_absent_leaves_scaffold_unchanged() {
+  local home_a home_b brief_a brief_b out norm_a norm_b
+  home_a="$TMP_ROOT/type-absent-a"
+  home_b="$TMP_ROOT/type-absent-b"
+  mkdir -p "$home_a/data" "$home_b/config" "$home_b/data"
+  cat > "$home_b/config/task-types.json" <<'EOF'
+{"types":[{"name":"list-build","use":"Build a list.","hand_back":"Path.","touch":"lists/"}]}
+EOF
+  out=$(FM_HOME="$home_a" "$ROOT/bin/fm-brief.sh" type-off some-proj --mode no-mistakes 2>&1) \
+    || fail "scaffold without a catalog exited non-zero: $out"
+  brief_a="$home_a/data/type-off/brief.md"
+  assert_equals "scaffolded: $brief_a (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})" "$out" \
+    "a scaffold without a catalog printed more than the scaffold line"
+  assert_no_grep '## Task type' "$brief_a" "a scaffold without a catalog rendered a task type"
+  assert_no_grep 'type-profile:' "$brief_a" "a scaffold without a catalog wrote a type profile into the brief"
+
+  out=$(FM_HOME="$home_b" "$ROOT/bin/fm-brief.sh" type-idle some-proj --mode no-mistakes 2>&1) \
+    || fail "scaffold with an unread catalog exited non-zero: $out"
+  brief_b="$home_b/data/type-idle/brief.md"
+  assert_equals "scaffolded: $brief_b (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})" "$out" \
+    "an unread catalog changed the scaffold line"
+  assert_no_grep '## Task type' "$brief_b" "an unread catalog rendered a task type"
+
+  # A malformed catalog is not read unless a flag asks for it.
+  printf '%s\n' '{' > "$home_b/config/task-types.json"
+  out=$(FM_HOME="$home_b" "$ROOT/bin/fm-brief.sh" type-malformed-idle some-proj --scout 2>&1) \
+    || fail "an unread malformed catalog stopped the scaffold: $out"
+  assert_no_grep '## Task type' "$home_b/data/type-malformed-idle/brief.md" \
+    "an unread malformed catalog rendered a task type"
+
+  norm_a="$TMP_ROOT/type-norm-a"
+  norm_b="$TMP_ROOT/type-norm-b"
+  sed -e "s|$home_a|HOME|g" -e 's|type-off|TASKID|g' "$brief_a" > "$norm_a"
+  sed -e "s|$home_b|HOME|g" -e 's|type-idle|TASKID|g' "$brief_b" > "$norm_b"
+  if ! diff -u "$norm_a" "$norm_b" > "$TMP_ROOT/type-norm.diff"; then
+    fail "a present catalog changed the brief without --type: $(cat "$TMP_ROOT/type-norm.diff")"
+  fi
+  pass "fm-brief: no catalog, and an unread catalog, leave the scaffold unchanged"
+}
+
+write_task_type_catalog() {
+  local config=$1
+  mkdir -p "$config"
+  cat > "$config/task-types.json" <<'EOF'
+{
+  "types": [
+    {
+      "name": "list-build",
+      "use": "Build or enrich a company or people list.",
+      "skills": [".agents/skills/example/SKILL.md"],
+      "agents": ["company-builder", "people-builder", "enrichment"],
+      "check": "npm test",
+      "hand_back": "List path and row count.",
+      "model": "claude-sonnet-5",
+      "effort": "low",
+      "touch": "The list file the brief names.",
+      "projects": ["gtm-orchestrator"]
+    },
+    {
+      "name": "copy-draft",
+      "use": "Draft or rewrite campaign copy.",
+      "agents": ["copywriter"],
+      "hand_back": "Draft path and what the copy says.",
+      "effort": "medium",
+      "touch": "The draft file the brief names."
+    }
+  ]
+}
+EOF
+}
+
+test_task_type_renders_and_surfaces_model_and_effort() {
+  local home config out brief intent spec
+  # shellcheck source=bin/fm-brief-heading-lib.sh
+  . "$ROOT/bin/fm-brief-heading-lib.sh"
+  home="$TMP_ROOT/type-render"
+  config="$home/config"
+  write_task_type_catalog "$config"
+  mkdir -p "$home/data"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-ship gtm-orchestrator --mode direct-PR --type list-build 2>&1) \
+    || fail "a valid type did not scaffold: $out"
+  brief="$home/data/type-ship/brief.md"
+  assert_equals "$(printf '%s\n%s' "scaffolded: $brief (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})" "type-profile: model=claude-sonnet-5 effort=low")" "$out" \
+    "model and effort were not surfaced on the scaffold line"
+  assert_grep '## Task type' "$brief" "the brief has no task type section"
+  assert_grep 'Name: list-build' "$brief" "the brief omitted the type name"
+  assert_grep 'Use: Build or enrich a company or people list.' "$brief" "the brief omitted the type use"
+  assert_grep 'Skills: .agents/skills/example/SKILL.md' "$brief" "the brief omitted the skill pointer"
+  assert_grep 'Agents: company-builder, people-builder, enrichment' "$brief" "the brief omitted the agent pointers"
+  assert_grep 'Check: npm test' "$brief" "the brief omitted the check command"
+  assert_grep 'Hand back: List path and row count.' "$brief" "the brief omitted the hand-back line"
+  assert_grep 'May touch: The list file the brief names.' "$brief" "the brief omitted the touch boundary"
+  assert_grep 'Model: claude-sonnet-5' "$brief" "the brief omitted the model"
+  assert_grep 'Effort: low' "$brief" "the brief omitted the effort"
+  intent=$(fm_brief_task_heading_body "$brief" "## Captain's intent")
+  spec=$(fm_brief_task_heading_body "$brief" "## Firstmate spec")
+  assert_equals '{TASK}' "$intent" "the task type section was pulled into Captain's intent"
+  assert_equals '{FIRSTMATE_SPEC}' "$spec" "the task type section was pulled into Firstmate spec"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-scout other-proj --scout --type copy-draft 2>&1) \
+    || fail "an unrestricted type did not scaffold a scout: $out"
+  brief="$home/data/type-scout/brief.md"
+  assert_equals "$(printf '%s\n%s' "scaffolded: $brief (scout; replace {TASK} and {FIRSTMATE_SPEC})" "type-profile: effort=medium")" "$out" \
+    "an effort-only type did not surface effort alone"
+  assert_grep 'Name: copy-draft' "$brief" "the scout brief omitted the type"
+  assert_grep 'Effort: medium' "$brief" "the scout brief omitted the effort"
+  assert_no_grep 'Model:' "$brief" "an effort-only type wrote a model line"
+  assert_grep 'Agents: copywriter' "$brief" "the scout brief omitted the agent pointer"
+  pass "fm-brief: a valid type is rendered and its model and effort are surfaced"
+}
+
+test_task_type_refuses_unknown_malformed_and_wrong_project() {
+  local home config out rc jq_free
+  home="$TMP_ROOT/type-refuse"
+  config="$home/config"
+  write_task_type_catalog "$config"
+  mkdir -p "$home/data"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-unknown some-proj --mode local-only --type missing-type 2>&1); rc=$?
+  expect_code 1 "$rc" "an unknown type must be refused"
+  assert_contains "$out" "unknown task type 'missing-type'" "the unknown-type refusal did not name the type"
+  assert_absent "$home/data/type-unknown" "an unknown type left a scaffold behind"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-other other-proj --scout --type list-build 2>&1); rc=$?
+  expect_code 1 "$rc" "a project-restricted type must be refused on another project"
+  assert_contains "$out" "task type 'list-build' does not apply to project 'other-proj'" \
+    "the project refusal did not name the type and project"
+  assert_absent "$home/data/type-other" "a project refusal left a scaffold behind"
+
+  printf '%s\n' '{' > "$config/task-types.json"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-bad some-proj --mode no-mistakes --type list-build 2>&1); rc=$?
+  expect_code 1 "$rc" "a malformed catalog must be refused"
+  assert_contains "$out" "malformed config/task-types.json - malformed JSON" "the malformed-catalog refusal was not plain"
+  assert_absent "$home/data/type-bad" "a malformed catalog left a scaffold behind"
+
+  cat > "$config/task-types.json" <<'EOF'
+{"types":[{"name":"copy-draft","use":"Draft.","hand_back":"Path.","touch":"file","effort":"huge"}]}
+EOF
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-effort some-proj --scout --type copy-draft 2>&1); rc=$?
+  expect_code 1 "$rc" "an unknown effort must be refused as a malformed catalog"
+  assert_contains "$out" "malformed config/task-types.json - type 'copy-draft' effort must be low, medium, high, xhigh, max, or ultra" \
+    "the effort refusal did not name the allowed classes"
+  assert_absent "$home/data/type-effort" "a bad effort left a scaffold behind"
+
+  write_task_type_catalog "$config"
+  rm -f "$config/task-types.json"
+  ln -s "$ROOT/docs/examples/task-types.json" "$config/task-types.json"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-link gtm-orchestrator --mode direct-PR --type list-build 2>&1); rc=$?
+  expect_code 1 "$rc" "a symlink catalog must be refused"
+  assert_contains "$out" "must be a readable regular file" "the symlink refusal did not name the file"
+  assert_absent "$home/data/type-link" "a symlink catalog left a scaffold behind"
+
+  rm -f "$config/task-types.json"
+  mkdir "$config/task-types.json"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" --list-types 2>&1); rc=$?
+  expect_code 1 "$rc" "a directory catalog must be refused by --list-types"
+  assert_contains "$out" "must be a readable regular file" "the directory refusal did not name the file"
+
+  rm -rf "$config/task-types.json"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-none some-proj --mode no-mistakes --type list-build 2>&1); rc=$?
+  expect_code 1 "$rc" "a missing catalog must be refused when --type is set"
+  assert_contains "$out" "no task-type catalog:" "the missing-catalog refusal was not plain"
+  assert_absent "$home/data/type-none" "a missing catalog left a scaffold behind"
+
+  out=$(FM_HOME="$home" FM_SECONDMATE_CHARTER='Stay idle.' \
+    "$ROOT/bin/fm-brief.sh" type-mate --secondmate --no-projects --type list-build 2>&1); rc=$?
+  expect_code 1 "$rc" "--type on a secondmate charter must be refused"
+  assert_contains "$out" "--type applies only to ship and scout briefs" "the charter refusal was not plain"
+  assert_absent "$home/data/type-mate" "a refused charter left a scaffold behind"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" --list-types --scout 2>&1); rc=$?
+  expect_code 1 "$rc" "--list-types with other arguments must be refused"
+  assert_contains "$out" "takes no other arguments" "the list-types argument refusal was not plain"
+
+  write_task_type_catalog "$config"
+  jq_free=$(fm_test_base_path_sans "$PATH" jq)
+  out=$(FM_HOME="$home" PATH="$jq_free" "$ROOT/bin/fm-brief.sh" --list-types 2>&1); rc=$?
+  expect_code 1 "$rc" "a catalog read without jq must be refused"
+  assert_contains "$out" "needs jq" "the missing-jq refusal was not plain"
+  pass "fm-brief: unknown, malformed, project-restricted, and unreadable catalogs are refused"
+}
+
+test_task_type_list_and_example() {
+  local home out brief
+  home="$TMP_ROOT/type-list"
+  mkdir -p "$home/config" "$home/data"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" --list-types 2>&1) || fail "--list-types with no catalog exited non-zero: $out"
+  assert_equals "" "$out" "--list-types with no catalog printed something"
+
+  cp "$ROOT/docs/examples/task-types.json" "$home/config/task-types.json"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" --list-types 2>&1) || fail "--list-types on the example exited non-zero: $out"
+  assert_equals "$(printf '%s\n%s\n%s' \
+    'list-build: Build or enrich a company or people list.' \
+    'bison-launch: Upload a list and run the post-launch check.' \
+    'copy-draft: Draft or rewrite campaign copy.')" "$out" \
+    "the example catalog did not list its types"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-example gtm-orchestrator --mode no-mistakes --type list-build 2>&1) \
+    || fail "the example list-build type did not scaffold: $out"
+  brief="$home/data/type-example/brief.md"
+  assert_grep 'Agents: company-builder, people-builder, enrichment' "$brief" \
+    "the example did not point at the gtm-orchestrator specialists by name"
+  printf '%s\n' "$out" > "$TMP_ROOT/type-example-out"
+  assert_no_grep 'type-profile:' "$TMP_ROOT/type-example-out" \
+    "list-build in the example surfaced a profile it does not name"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-bison gtm-orchestrator --scout --type bison-launch 2>&1) \
+    || fail "the example bison-launch type did not scaffold: $out"
+  assert_contains "$out" "type-profile: model=claude-sonnet-5 effort=low" \
+    "the example did not surface its model and effort"
+  assert_grep 'Agents: uploader, post-launch' "$home/data/type-bison/brief.md" \
+    "the example did not point at the Bison specialists by name"
+
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-elsewhere other-proj --mode local-only --type list-build 2>&1); local rc=$?
+  expect_code 1 "$rc" "the example's project-restricted type must be refused elsewhere"
+  assert_contains "$out" "does not apply to project 'other-proj'" "the example project refusal was not plain"
+  pass "fm-brief: --list-types lists the home types, including the tracked example"
+}
+
 test_script_parses
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
@@ -1502,3 +1725,7 @@ test_branch_prefix_is_refused_where_it_does_not_apply
 test_branch_prefix_value_is_validated
 test_branch_prefix_command_is_shell_safe
 test_crewmate_scaffolds_forbid_pool_administration
+test_task_type_absent_leaves_scaffold_unchanged
+test_task_type_renders_and_surfaces_model_and_effort
+test_task_type_refuses_unknown_malformed_and_wrong_project
+test_task_type_list_and_example

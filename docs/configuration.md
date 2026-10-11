@@ -14,6 +14,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and [Claude Remote Control](#claude-remote-control-configclaude-remote-control) |
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity) and [worktree pool guard](#worktree-pool-guard) |
+| Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
 ## FM_HOME
@@ -1322,6 +1323,67 @@ See [`docs/examples/crew-dispatch.json`](examples/crew-dispatch.json) for a star
 **Inheritance**
 
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
+
+## Task types (config/task-types.json)
+
+The optional local, gitignored `config/task-types.json` lists the recurring specialist types for this home.
+One home is one domain.
+An absent file changes nothing: briefs scaffold as they do today, and `bin/fm-brief.sh --list-types` prints nothing.
+[`docs/examples/task-types.json`](examples/task-types.json) is a copyable example and is never loaded.
+`bin/fm-brief.sh` owns the `--type` and `--list-types` flags, and [`bin/fm-task-type-lib.sh`](../bin/fm-task-type-lib.sh) owns the checks and the lines they print.
+This section owns the file format.
+
+A type is a handful of pointers.
+The supervisor passes `--type <name>` when scaffolding a ship or scout brief, and writes only the task itself.
+The scaffold checks the name and renders one fixed `## Task type` section from the entry.
+An unknown name, a malformed file, a file that is not a readable regular file, or a type whose `projects` list omits the brief's project refuses with a plain reason and writes nothing.
+The scaffold never picks a different type.
+`--list-types` prints `<name>: <use>` for each entry, in file order, and takes no other arguments.
+
+```json
+{
+  "types": [
+    {
+      "name": "<slug>",
+      "use": "<one line>",
+      "skills": ["<skill name or repo-relative path>"],
+      "agents": ["<agent name or repo-relative path>"],
+      "check": "<command>",
+      "hand_back": "<one line>",
+      "model": "<optional model token>",
+      "effort": "<optional low|medium|high|xhigh|max|ultra>",
+      "touch": "<paths or one boundary line>",
+      "projects": ["<optional registered project name>"]
+    }
+  ]
+}
+```
+
+| Field | Requirement |
+| --- | --- |
+| `name` | Required lowercase slug (`^[a-z0-9]+(-[a-z0-9]+)*$`). |
+| `use` | Required one line saying when to pick this type. |
+| `skills`, `agents` | Optional arrays of names or repo-relative paths the worker resolves in the project, never absolute paths and never copied text. |
+| `check` | Optional one-line command, omitted when the type has no check. |
+| `hand_back` | Required one line describing what the worker hands back. |
+| `touch` | Required one-line boundary, recorded in the brief and not enforced. |
+| `model` | Optional token with no spaces, surfaced for `fm-spawn.sh --model`. |
+| `effort` | Optional `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`, the difficulty class `fm-spawn.sh --effort` already accepts. |
+| `projects` | Optional registered project names. Omit it and the type applies to every project. A brief for any other project is refused. |
+
+Unknown fields are refused, so a typo cannot be skipped.
+`model` and `effort` are printed on one `type-profile:` line when the entry sets them, and the same values are written into the brief section.
+Pass that line's `model` and `effort` to `fm-spawn.sh` as `--model` and `--effort`.
+Leave a flag off when the captain's instruction for this task already names that axis.
+The type does not select a harness or a dispatch rule; `AGENTS.md` section 4 still resolves those.
+[`bin/fm-dispatch-resolve.sh`](../bin/fm-dispatch-resolve.sh) does not read the task-type section.
+
+The file is local to each home, like [`config/brief-include.md`](#home-brief-include-configbrief-includemd).
+It is not on the inherited-local-material allowlist owned by [`bin/fm-config-inherit-lib.sh`](../bin/fm-config-inherit-lib.sh), and this adds no sync.
+A secondmate home and a Boat-hosted home each read the catalog in their own config directory, so the same file works there without a copy from the primary.
+`FM_CONFIG_OVERRIDE` selects the config directory, as it does for the other files `bin/fm-brief.sh` reads.
+
+Regression coverage is in [`tests/fm-brief.test.sh`](../tests/fm-brief.test.sh).
 
 ## Typed dispatch resolution (.env TYPESAFE_API_KEY)
 

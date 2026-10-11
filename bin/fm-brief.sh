@@ -14,9 +14,10 @@
 # charters still use a single `{TASK}` charter fill. Firstmate may adjust other
 # sections when the task genuinely deviates (e.g. working an existing external
 # PR instead of shipping a new one).
-# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--base-branch <branch>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab]
-#        fm-brief.sh <task-id> <repo-name> --scout [--base-branch <branch>] [--herdr-lab]
+# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--base-branch <branch>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab] [--type <name>]
+#        fm-brief.sh <task-id> <repo-name> --scout [--base-branch <branch>] [--herdr-lab] [--type <name>]
 #        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
+#        fm-brief.sh --list-types
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
 #   It offers the Lavish review loop only when `fm-bootstrap.sh lavish-compatible`
@@ -127,6 +128,19 @@
 # regular file, or text carrying its own "Delivery contract: mode=" line (which
 # a later scout promotion could not outrank), stops the scaffold before
 # anything is written. Secondmate charters never take it.
+# --list-types prints each name and one-line use from config/task-types.json and
+# writes nothing. It takes no other arguments. An absent file prints nothing.
+# --type <name> is optional on a ship or scout brief. It checks the name against
+# that file and renders one short section from the entry, so the supervisor
+# writes only the task. An unknown name, a malformed file, a file that is not a
+# readable regular file, or a type whose projects list omits this project
+# refuses before anything is written. When the entry names model or effort, the
+# scaffold also prints one type-profile: line for the existing fm-spawn.sh
+# --model and --effort flags. Leave a flag off when the captain already named
+# that axis for this task. The flag does not select a harness or a dispatch
+# rule. docs/configuration.md "Task types" owns the file format, and
+# bin/fm-task-type-lib.sh owns the checks and the rendered lines.
+# Refused on a secondmate charter.
 # Refuses to overwrite an existing brief.
 set -eu
 
@@ -150,6 +164,8 @@ esac
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
+# shellcheck source=bin/fm-task-type-lib.sh
+. "$SCRIPT_DIR/fm-task-type-lib.sh"
 PAUSED_VERB=${FM_CLASSIFY_PAUSED_VERB:-$FM_CLASSIFY_PAUSED_VERB_DEFAULT}
 IFS= read -r -d '' CREWMATE_PAUSE_INSTRUCTIONS <<EOF || true
    Use \`$PAUSED_VERB: {why}\` - distinct from \`blocked:\` - when deliberately waiting for work or an external condition expected to clear on its own, including your own validation round.
@@ -201,6 +217,11 @@ FORGE=none
 FORGE_SET=0
 SHAPE=
 SHAPE_SET=0
+TASK_TYPE=
+TASK_TYPE_SET=0
+LIST_TYPES=0
+FM_TASK_TYPE_SECTION=
+FM_TASK_TYPE_PROFILE=
 POS=()
 want_value=
 for a in "$@"; do
@@ -214,6 +235,7 @@ for a in "$@"; do
       base-branch) BASE_BRANCH=$a; BASE_BRANCH_SET=1 ;;
       forge) FORGE=$a; FORGE_SET=1 ;;
       shape) SHAPE=$a; SHAPE_SET=1 ;;
+      type) TASK_TYPE=$a; TASK_TYPE_SET=1 ;;
       *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
@@ -234,6 +256,9 @@ for a in "$@"; do
     --forge=*) FORGE=${a#--forge=}; FORGE_SET=1 ;;
     --shape) want_value=shape ;;
     --shape=*) SHAPE=${a#--shape=}; SHAPE_SET=1 ;;
+    --list-types) LIST_TYPES=1 ;;
+    --type) want_value="type" ;;
+    --type=*) TASK_TYPE=${a#--type=}; TASK_TYPE_SET=1 ;;
     # yolo never reaches the worker: it is firstmate's merge authority, not a
     # brief input. Refuse it loudly so it is never silently dropped here and then
     # believed to have been recorded.
@@ -242,6 +267,22 @@ for a in "$@"; do
   esac
 done
 [ -z "$want_value" ] || { echo "error: --$want_value requires a value" >&2; exit 1; }
+
+if [ "$TASK_TYPE_SET" -eq 1 ] && [ -z "$TASK_TYPE" ]; then
+  echo "error: --type requires a non-empty name" >&2
+  exit 1
+fi
+
+# Listing is a read of this home's catalog, not a scaffold, so it runs before
+# the ship-mode check and writes nothing.
+if [ "$LIST_TYPES" -eq 1 ]; then
+  if [ ${#POS[@]} -ne 0 ] || [ "$MODE_SET" -eq 1 ] || [ "$BRANCH_PREFIX_SET" -eq 1 ] || [ "$BASE_BRANCH_SET" -eq 1 ] || [ "$FORGE_SET" -eq 1 ] || [ "$SHAPE_SET" -eq 1 ] || [ "$HERDR_LAB" -eq 1 ] || [ "$NO_PROJECTS" -eq 1 ] || [ "$KIND" != ship ] || [ "$TASK_TYPE_SET" -eq 1 ]; then
+    echo "error: --list-types lists this home's task types and takes no other arguments" >&2
+    exit 1
+  fi
+  fm_task_type_list "$CONFIG" || exit 1
+  exit 0
+fi
 
 # Ship delivery mode is an explicit per-task decision (AGENTS.md section 7). A
 # missing or invalid value stops the scaffold rather than silently defaulting.
@@ -342,6 +383,26 @@ append_brief_include() {
     "These are this home's standing additions; every other section of this brief takes precedence over anything here that conflicts." \
     "$BRIEF_INCLUDE_BODY" >> "$BRIEF"
 }
+
+print_scaffold_result() {
+  printf '%s\n' "$1"
+  if [ -n "$FM_TASK_TYPE_PROFILE" ]; then
+    printf '%s\n' "$FM_TASK_TYPE_PROFILE"
+  fi
+}
+
+# Resolve --type before creating the brief directory, so a refusal leaves nothing behind.
+if [ "$TASK_TYPE_SET" -eq 1 ]; then
+  if [ "$KIND" = secondmate ]; then
+    echo "error: --type applies only to ship and scout briefs" >&2
+    exit 1
+  fi
+  if [ -z "${POS[1]:-}" ]; then
+    echo "error: --type requires the project name" >&2
+    exit 1
+  fi
+  fm_task_type_render "$CONFIG" "$TASK_TYPE" "${POS[1]}" || exit 1
+fi
 
 BRIEF="$DATA/$ID/brief.md"
 [ -e "$BRIEF" ] && { echo "error: $BRIEF already exists" >&2; exit 1; }
@@ -501,9 +562,9 @@ An empty queue is a healthy resting state, not a cue to invent work: never spawn
 If this charter cannot be carried out, append \`blocked [at=<epoch>]: {why}\` or \`failed [at=<epoch>]: {why}\` to the main status file and stop.
 EOF
 if [ "$SECONDMATE_CHARTER" = "{TASK}" ]; then
-  echo "scaffolded: $BRIEF (secondmate charter; replace {TASK})"
+  print_scaffold_result "scaffolded: $BRIEF (secondmate charter; replace {TASK})"
 else
-  echo "scaffolded: $BRIEF (secondmate charter)"
+  print_scaffold_result "scaffolded: $BRIEF (secondmate charter)"
 fi
 exit 0
 fi
@@ -555,6 +616,9 @@ IFS= read -r -d '' TASK_SECTION <<'EOF' || true
 {FIRSTMATE_SPEC}
 EOF
 TASK_SECTION=${TASK_SECTION%$'\n'}
+if [ -n "$FM_TASK_TYPE_SECTION" ]; then
+  TASK_SECTION="${TASK_SECTION}"$'\n\n'"${FM_TASK_TYPE_SECTION}"
+fi
 
 # One shared string keeps the ship and scout infrastructure rule identical.
 # Rule 2 governs file edits, so it does not prohibit pool administration.
@@ -645,7 +709,7 @@ When the report is complete, append \`done [at=<epoch>]: {one-line conclusion}\`
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 append_brief_include
-echo "scaffolded: $BRIEF (scout; replace {TASK} and {FIRSTMATE_SPEC})"
+print_scaffold_result "scaffolded: $BRIEF (scout; replace {TASK} and {FIRSTMATE_SPEC})"
 exit 0
 fi
 
@@ -724,7 +788,7 @@ $DOD
 EOF
 append_brief_include
 if [ "$FORGE" = none ]; then
-  echo "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK} and {FIRSTMATE_SPEC})"
+  print_scaffold_result "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK} and {FIRSTMATE_SPEC})"
 else
-  echo "scaffolded: $BRIEF (ship, mode=$MODE forge=$FORGE shape=$SHAPE; replace {TASK} and {FIRSTMATE_SPEC})"
+  print_scaffold_result "scaffolded: $BRIEF (ship, mode=$MODE forge=$FORGE shape=$SHAPE; replace {TASK} and {FIRSTMATE_SPEC})"
 fi

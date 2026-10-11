@@ -198,6 +198,8 @@ A project's declared machine capacity (`config/project-capacity`) still bounds t
 Serialize only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe; same-file editing alone is insufficient, and genuine blockers remain durable.
 Write the task-specific brief under section 11 before spawning.
 Fill the task subsections according to section 11.
+When `config/task-types.json` is present, list types with `bin/fm-brief.sh --list-types` and pass `--type <name>` on the brief so the catalog supplies the type's fields.
+Pass a printed `type-profile:` model or effort through to `fm-spawn.sh` unless the captain already named that axis for this task (`docs/configuration.md` owns the catalog).
 
 ### Dispatch and supervision handoff
 
