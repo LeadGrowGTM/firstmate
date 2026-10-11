@@ -508,6 +508,36 @@ The lab home was deleted and the test entry was removed from the store and verif
 That automated spawn case runs against a fake claude, so it asserts the store entry and the launch command and nothing more; the live arms above are what establish that the entry actually suppresses the dialog.
 The composer-classification record below observes the same gate from the other side, where an untrusted worktree left Claude, Grok, and Muse unverified because the guard reads a first-launch trust dialog as an unreadable composer.
 
+## Claude Remote Control launch flag
+
+Verified 2026-10-11 on Claude Code 2.1.296.
+`bin/fm-spawn.sh` adds `--remote-control 'fm-<id>'` to a Claude secondmate launch directly after the permission flag.
+The probe ran the secondmate launch shape in a private tmux server against a throwaway `HOME` and `CLAUDE_CONFIG_DIR`, signed in with a placeholder API key only, so no real account or session was involved.
+
+```sh
+claude --dangerously-skip-permissions --remote-control fm-probe --settings '{"feedbackDrafts":"off"}' 'Reply with the single word probe.'
+```
+
+```
+❯ Reply with the single word probe.
+  ⎿  Invalid API key · Fix external API key
+❯
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+```
+
+The session reached the composer, the positional prompt arrived as the first message rather than being taken as the session name, and no Remote Control dialog appeared.
+An account that cannot use Remote Control therefore still launches and works, which is what Claude Code's own documentation states for `claude --remote-control`.
+Typing `/remote-control` into that session printed the eligibility refusal for an API-key account and connected nothing.
+
+`claude --help` on that version declares the flag as `--remote-control [name]`, an optional value, which is why the launch always names the session and never leaves the flag standing last before the prompt.
+`tests/fm-secondmate-harness.test.sh` pins the launch shape against a recording stub and `tests/fm-spawn-dispatch-profile.test.sh` pins that a ship or scout launch never carries the flag; both run against a fake claude and assert the argument list and nothing more.
+
+### Remote Control facts not verified
+
+- A launch with the flag on an eligible claude.ai sign-in, including that the session then appears on the phone, was not run here, because it cannot be isolated from a real account.
+- Whether that launch can stop at Remote Control's one-time confirmation on a signed-in machine that has never accepted it is unknown.
+  Claude Code documents the confirmation for `claude remote-control` and `/remote-control` only.
+
 ## Pi seeded-secondmate project trust
 
 [`fm-spawn.sh --help`](../../bin/fm-spawn.sh) owns the seeded-secondmate project-trust approval contract and compatibility fallback.

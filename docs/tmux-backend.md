@@ -37,6 +37,11 @@ tmux list-windows -t <session-name>
 tmux select-window -t <session-name>:fm-<id>
 ```
 
+Any terminal that reaches the machine's tmux server can attach this way, including a terminal pane in a desktop app.
+Orca on Windows, for example, shows the primary, the secondmates, and the task windows when one of its terminals is opened on the WSL distribution Firstmate runs in and attaches with the command above.
+That is Orca viewing the tmux backend, not the [Orca runtime backend](orca-backend.md), which is macOS-only.
+By default tmux sizes a window to its most recently active client, so attaching from a much smaller screen reflows that window for every other viewer; to follow the primary or a secondmate from a phone, use [Claude Remote Control](configuration.md#claude-remote-control-configclaude-remote-control) instead.
+
 Typing into an attached task window is authoritative direct intervention.
 Routine supervision does not require attachment: `bin/fm-peek.sh <id>` captures a bounded tail and `FM_HOME=<home> bin/fm-send.sh <id> '<text>'` steers the recorded endpoint.
 

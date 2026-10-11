@@ -2112,6 +2112,35 @@ test_claude_permission_mode_auto_reaches_scout_launch() {
   pass "config/claude-permission-mode=auto reaches scout launches too"
 }
 
+# Remote Control belongs to the primary session and secondmates only
+# (config/claude-remote-control, bin/fm-spawn.sh header). A ship or scout
+# launch must never register a phone-visible session, with the switch absent
+# or explicitly on, so each task would not add an entry to the captain's list.
+test_claude_task_worker_launch_never_carries_remote_control() {
+  local token kind rec id out status launch n=0
+  for token in absent on; do
+    for kind in ship scout; do
+      n=$((n + 1))
+      id="rc-worker-z$n"
+      rec=$(make_spawn_case "rc-worker-$token-$kind" claude "$id")
+      read_case_record "$rec"
+      [ "$token" = absent ] || printf '%s\n' "$token" > "$HOME_DIR/config/claude-remote-control"
+
+      if [ "$kind" = scout ]; then
+        out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --scout)
+      else
+        out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+      fi
+      status=$?
+      expect_code 0 "$status" "claude $kind spawn with claude-remote-control $token should succeed"$'\n'"$out"
+      launch=$(cat "$LAUNCH_LOG")
+      assert_contains "$launch" " claude --dangerously-skip-permissions " "$kind launch ($token) is not a claude worker launch"
+      assert_not_contains "$launch" "remote-control" "a $kind task-worker launch must never carry Remote Control (switch $token)"
+    done
+  done
+  pass "claude ship and scout task-worker launches never carry --remote-control"
+}
+
 # A Claude worker's Firstmate channel files all live outside its worktree cwd
 # (launch record in state/operational-inbox, steers in state/<id>.inbox, brief
 # in data/<id>), and since Claude Code 2.1.257 the first file-tool read of
@@ -2244,6 +2273,7 @@ test_claude_omits_config_dir_prefix_when_unset
 test_claude_permission_mode_bypass_matches_absent_launch
 test_claude_permission_mode_auto_swaps_only_the_permission_flag
 test_claude_permission_mode_auto_reaches_scout_launch
+test_claude_task_worker_launch_never_carries_remote_control
 test_claude_worker_launch_covers_task_channel_dirs
 test_claude_permission_mode_invalid_refuses_before_endpoint_or_metadata
 test_non_claude_harness_ignores_claude_permission_mode

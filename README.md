@@ -93,6 +93,8 @@ Then launch one of the co-primary harnesses; AGENTS.md takes over from there:
 claude
 ```
 
+To see and steer this session from the Claude mobile app or claude.ai, launch it as `claude --remote-control firstmate` instead; [Claude Remote Control](docs/configuration.md#claude-remote-control-configclaude-remote-control) owns the requirements and the secondmate default.
+
 **Grok**
 
 ```sh

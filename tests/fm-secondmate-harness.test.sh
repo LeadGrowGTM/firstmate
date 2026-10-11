@@ -742,6 +742,27 @@ sm_claude_add_dir() {  # <world> <id>
   printf "%s " "--add-dir '$real/$2.inbox'"
 }
 
+# The Remote Control flag a Claude secondmate launch carries by default,
+# between the permission flag and the --add-dir grant, naming the session by
+# its stable fm-<id> label. Prints a trailing space like sm_claude_add_dir.
+sm_claude_remote_control() {  # <id>
+  printf "%s " "--remote-control 'fm-$1'"
+}
+
+# sm_fake_claude_argv <fakebin>
+# Drops a claude stub that records the arguments it was actually started with,
+# one per line, into the file FM_FAKE_CLAUDE_ARGV names. Evaluating a captured
+# launch under it shows how the shell splits the real command, which a text
+# match on the launch line cannot: a mis-quoted or optional-value flag that
+# swallowed its neighbour shows up as a missing or merged argument.
+sm_fake_claude_argv() {
+  cat > "$1/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_FAKE_CLAUDE_ARGV"
+SH
+  chmod +x "$1/claude"
+}
+
 # spawn_secondmate_capture <world> <id> <home> <launchlog> [extra fm-spawn.sh args...]
 # Same shape as spawn_secondmate but captures the launch command into <launchlog>
 # and does not discard stderr, so callers can assert on both.
@@ -847,7 +868,7 @@ test_spawn_secondmate_harness_model_token() {
   [ "$(meta_field "$meta" model)" = opus ] || fail "model-token: meta model not opus (got '$(meta_field "$meta" model)')"
   [ "$(meta_field "$meta" effort)" = default ] || fail "model-token: meta effort not default (got '$(meta_field "$meta" effort)')"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
     "model-token: launch did not carry --model opus"
   assert_not_contains "$launch" "--effort" "model-token: launch must not carry an --effort flag"
   pass "C3 spawn: config/secondmate-harness's model token threads --model into the launch and meta"
@@ -869,7 +890,7 @@ test_spawn_secondmate_harness_model_and_effort_tokens() {
   [ "$(meta_field "$meta" model)" = opus ] || fail "model-effort-tokens: meta model not opus"
   [ "$(meta_field "$meta" effort)" = high ] || fail "model-effort-tokens: meta effort not high (got '$(meta_field "$meta" effort)')"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus' --effort 'high'" \
+  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus' --effort 'high'" \
     "model-effort-tokens: launch did not carry both --model opus and --effort high"
   pass "C4 spawn: config/secondmate-harness's model+effort tokens thread into the launch and meta"
 }
@@ -1085,7 +1106,7 @@ new_world() {
     [ "$dispatch_ignore" = no ] || printf 'config/crew-dispatch.json\n'
     printf 'config/crew-harness\nconfig/secondmate-harness\nconfig/backlog-backend\n'
     printf 'config/backend\nconfig/herdr-presentation-spaces\nconfig/startup-memory-budget\n'
-    printf 'config/claude-permission-mode\n'
+    printf 'config/claude-permission-mode\nconfig/claude-remote-control\n'
   } > "$w/main/.gitignore"
   printf 'v1\n' > "$w/main/AGENTS.md"
   printf 'r1\n' > "$w/main/README.md"
@@ -1488,7 +1509,7 @@ test_spawn_secondmate_claude_permission_mode_auto() {
   meta="$w/home/state/sm.meta"
   [ "$(meta_field "$meta" harness)" = claude ] || fail "permmode: meta harness not claude"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --permission-mode auto $(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+  assert_contains "$launch" "claude --permission-mode auto $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
     "permmode: secondmate launch did not swap the permission flag while keeping --model"
   assert_not_contains "$launch" "--dangerously-skip-permissions" "permmode: secondmate launch must not request bypass mode"
   pass "C2b spawn: config/claude-permission-mode=auto reaches a Claude secondmate launch"
@@ -1536,6 +1557,137 @@ test_spawn_secondmate_claude_grants_parent_inbox_dir() {
       || fail "claude secondmate launch under $mode would hit the outside-read gate on its parent inbox"$'\n'"$eval_out"
   done
   pass "claude secondmate launches cover the parent-home steering inbox in auto and bypass modes"
+}
+
+# config/claude-remote-control (bin/fm-spawn.sh header): a Claude secondmate
+# registers for Remote Control by default, under its stable fm-<id> label. Drive
+# the real emitted launch through a recording claude stub, with and without a
+# model and effort flag, so the proof is the argument list claude would
+# receive: the name is the flag's own value and the launch doorbell is still
+# the final positional argument rather than being swallowed as the name.
+test_spawn_secondmate_claude_remote_control_default_on() {
+  local w sm launchlog launch fakebin argv out status harness_line label doorbell
+  for label in bare tuned; do
+    w="$TMP_ROOT/spawn-claude-rc-$label"
+    sm="$w/sm"
+    launchlog="$w/launch.log"
+    argv="$w/claude-argv.txt"
+    mkdir -p "$w/home/config"
+    harness_line=claude
+    [ "$label" = bare ] || harness_line='claude opus high'
+    printf '%s\n' "$harness_line" > "$w/home/config/secondmate-harness"
+    make_seeded_home "$sm" sm
+
+    out=$(spawn_secondmate_capture "$w" sm "$sm" "$launchlog" 2>&1); status=$?
+    expect_code 0 "$status" "rc-default $label: claude secondmate spawn should succeed"$'\n'"$out"
+    launch=$(cat "$launchlog")
+
+    fakebin="$w/argv-bin"
+    mkdir -p "$fakebin"
+    sm_fake_claude_argv "$fakebin"
+    fm_eval_launch "$launch" "$sm" "$fakebin" "FM_FAKE_CLAUDE_ARGV=$argv" >/dev/null 2>&1 \
+      || fail "rc-default $label: the emitted launch did not run under the recording stub"
+    [ "$(grep -c -x -- '--remote-control' "$argv")" = 1 ] \
+      || fail "rc-default $label: claude did not receive exactly one --remote-control flag"$'\n'"$(cat "$argv")"
+    [ "$(grep -x -A1 -- '--remote-control' "$argv" | tail -n 1)" = fm-sm ] \
+      || fail "rc-default $label: the Remote Control session name is not the stable label fm-sm"$'\n'"$(cat "$argv")"
+    doorbell=$(tail -n 1 "$argv")
+    [ "$(printf '%s' "$doorbell" | "$ROOT/bin/fm-operational-input.sh" doorbell-kind)" = launch-brief ] \
+      || fail "rc-default $label: the launch doorbell is no longer the final argument (got '$doorbell')"
+    [ "$(sed -n 2p "$argv")" = --remote-control ] \
+      || fail "rc-default $label: --remote-control must directly follow the permission flag, never stand last before the prompt"$'\n'"$(cat "$argv")"
+  done
+  pass "C2c spawn: a Claude secondmate launches with --remote-control 'fm-<id>' by default and keeps its doorbell prompt"
+}
+
+# `off` removes only the Remote Control flag, and an explicit `on` equals the
+# absent default; the token is whitespace-trimmed.
+test_spawn_secondmate_claude_remote_control_switch() {
+  local w sm launchlog launch out status token
+  for token in off on; do
+    w="$TMP_ROOT/spawn-claude-rc-$token"
+    sm="$w/sm"
+    launchlog="$w/launch.log"
+    mkdir -p "$w/home/config"
+    printf 'claude opus\n' > "$w/home/config/secondmate-harness"
+    printf ' %s\n' "$token" > "$w/home/config/claude-remote-control"
+    make_seeded_home "$sm" sm
+
+    out=$(spawn_secondmate_capture "$w" sm "$sm" "$launchlog" 2>&1); status=$?
+    expect_code 0 "$status" "rc-$token: claude secondmate spawn should succeed"$'\n'"$out"
+    launch=$(cat "$launchlog")
+    if [ "$token" = off ]; then
+      assert_not_contains "$launch" "--remote-control" "rc-off: the off switch must remove the Remote Control flag"
+      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+        "rc-off: the off switch must leave the rest of the launch unchanged"
+    else
+      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings" \
+        "rc-on: an explicit on must launch exactly as an absent file does"
+    fi
+  done
+  pass "C2d spawn: config/claude-remote-control=off removes only the flag and on matches the default"
+}
+
+# Any other token refuses before an endpoint or record exists, naming the file.
+test_spawn_secondmate_claude_remote_control_rejects_unknown_token() {
+  local w sm launchlog out status
+  w="$TMP_ROOT/spawn-claude-rc-bad"
+  sm="$w/sm"
+  launchlog="$w/launch.log"
+  mkdir -p "$w/home/config"
+  printf 'claude\n' > "$w/home/config/secondmate-harness"
+  printf 'maybe\n' > "$w/home/config/claude-remote-control"
+  make_seeded_home "$sm" sm
+
+  out=$(spawn_secondmate_capture "$w" sm "$sm" "$launchlog" 2>&1); status=$?
+  expect_code 1 "$status" "rc-bad: an unrecognized claude-remote-control token must refuse the spawn"
+  assert_contains "$out" "config/claude-remote-control holds 'maybe'" "rc-bad: refusal must name the file and the offending token"
+  [ ! -e "$w/home/state/sm.meta" ] || fail "rc-bad: a refused spawn must not record the secondmate"
+  [ ! -s "$launchlog" ] || fail "rc-bad: a refused spawn must not launch anything"
+  pass "C2e spawn: an unrecognized config/claude-remote-control token refuses before any endpoint or record"
+}
+
+# Remote Control is a Claude Code feature: another harness's secondmate launch
+# is untouched whatever the file says.
+test_spawn_secondmate_remote_control_is_claude_only() {
+  local w sm launchlog launch out status
+  w="$TMP_ROOT/spawn-codex-rc"
+  sm="$w/sm"
+  launchlog="$w/launch.log"
+  mkdir -p "$w/home/config"
+  printf 'codex\n' > "$w/home/config/secondmate-harness"
+  printf 'on\n' > "$w/home/config/claude-remote-control"
+  make_seeded_home "$sm" sm
+
+  out=$(spawn_secondmate_capture "$w" sm "$sm" "$launchlog" 2>&1); status=$?
+  expect_code 0 "$status" "rc-codex: codex secondmate spawn should succeed"$'\n'"$out"
+  launch=$(cat "$launchlog")
+  assert_contains "$launch" "codex " "rc-codex: launch is not a codex launch"
+  assert_not_contains "$launch" "remote-control" "rc-codex: a non-Claude secondmate launch must not carry Remote Control"
+  pass "C2f spawn: config/claude-remote-control changes Claude secondmate launches only"
+}
+
+# The switch is the captain's choice for every secondmate, and a remote
+# host-local launch reads it from the secondmate home, so it inherits like
+# config/claude-permission-mode: present values converge and absence mirrors.
+test_claude_remote_control_inheritance_present_and_absent() {
+  local w head out err status
+  w=$(new_world rc-inherit)
+  head=$(git -C "$w/main" rev-parse HEAD)
+  add_sm_worktree "$w" sm "$head"
+
+  printf 'off\n' > "$w/home/config/claude-remote-control"
+  err="$w/rc-inherit.err"
+  out=$(run_config_push "$w" 2>"$err"); status=$?
+  expect_code 0 "$status" "claude-remote-control present push should succeed"
+  assert_contains "$out" "claude-remote-control: pushed" "present value should report pushed"
+  [ "$(cat "$w/sm/config/claude-remote-control")" = off ] || fail "claude-remote-control present value not pushed"
+
+  rm -f "$w/home/config/claude-remote-control"
+  out=$(run_config_push "$w" 2>"$err"); status=$?
+  expect_code 0 "$status" "claude-remote-control absence push should succeed"
+  [ -e "$w/sm/config/claude-remote-control" ] && fail "claude-remote-control not removed on primary absence"
+  pass "B12d claude-remote-control inheritance: present values and primary absence converge exactly"
 }
 
 # The file is a captain-wide safety preference, so it inherits like
@@ -2761,6 +2913,11 @@ test_bootstrap_sweep_materializes_and_inherits_memory_default
 test_backend_inheritance_present_and_absent
 test_spawn_secondmate_claude_permission_mode_auto
 test_spawn_secondmate_claude_grants_parent_inbox_dir
+test_spawn_secondmate_claude_remote_control_default_on
+test_spawn_secondmate_claude_remote_control_switch
+test_spawn_secondmate_claude_remote_control_rejects_unknown_token
+test_spawn_secondmate_remote_control_is_claude_only
+test_claude_remote_control_inheritance_present_and_absent
 test_claude_permission_mode_inheritance_present_and_absent
 test_presentation_inheritance_default_on_and_opt_out
 test_bootstrap_sweep_surfaces_config_propagation_failure
