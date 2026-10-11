@@ -99,6 +99,8 @@ printf 'args=%s\n' "$*" >> "$log"
 case "$*" in
   'get --lease --lease-holder '*)
     printf 'gitmarker=%s\n' "$(git config --global --get fm.marker 2>/dev/null)" >> "$log"
+    echo "fake treehouse lease progress" >&2
+    [ -z "${FM_FAKE_TREEHOUSE_LEASE_RC:-}" ] || exit "$FM_FAKE_TREEHOUSE_LEASE_RC"
     printf '%s\n' "${FM_FAKE_TREEHOUSE_PRINT:-}"
     ;;
 esac
@@ -241,7 +243,30 @@ test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree() {
     "spawn did not record this home's worktree"
   assert_no_grep "args=return --force $own" "$tree_log" \
     "a launched worker's lease was returned"
+  assert_not_contains "$out" "fake treehouse lease progress" \
+    "a successful lease spilled treehouse's progress onto the launch output"
   pass "a launch handed the other clone's copy leaves it and leases its own"
+}
+
+test_spawn_labels_treehouses_own_error_when_the_lease_fails() {
+  local id=pool-lease-fails case_dir=$TMP_ROOT/spawn-lease-fails
+  local foreign pane_log tree_log out status=0
+  prepare_spawn_home "$case_dir" "$id"
+  foreign=$case_dir/shared-pool/1/widget
+  add_worktree "$case_dir/other/projects/widget" "$foreign"
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  : > "$pane_log"
+  : > "$tree_log"
+  out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    FM_FAKE_TREEHOUSE_LEASE_RC=3 FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" \
+    FM_FAKE_EXIT_FLAG="$case_dir/exited" run_spawn "$foreign" "$id") || status=$?
+  [ "$status" -ne 0 ] || fail "spawn launched although the lease failed"$'\n'"$out"
+  assert_contains "$out" "treehouse exit 3" "the stop did not report treehouse's exit status"
+  assert_contains "$out" "treehouse: fake treehouse lease progress" \
+    "the stop did not carry treehouse's own error under its label"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "a failed lease published a task record"
+  pass "a failed lease reports treehouse's own error under its label"
 }
 
 test_spawn_refuses_a_leased_worktree_of_the_other_clone() {
@@ -375,6 +400,7 @@ test_real_treehouse_leases_from_the_homes_own_pool_with_the_operators_git() {
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
 test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
 test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
+test_spawn_labels_treehouses_own_error_when_the_lease_fails
 test_spawn_refuses_a_leased_worktree_of_the_other_clone
 test_spawn_that_stops_after_the_lease_returns_it
 test_spawn_keeps_the_shared_copy_of_its_own_clone

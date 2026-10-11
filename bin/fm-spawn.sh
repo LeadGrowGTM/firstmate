@@ -4539,9 +4539,11 @@ spawn_lease_clone_worktree() {
   case "$bound" in ''|*[!0-9]*|0*) bound=600 ;; esac
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
-    cd "$PROJ_ABS" || exit 1
-    fm_treehouse_home_pool_run "$FM_HOME" "$bound" get --lease --lease-holder "$ID"
-  ) 2>"$errfile" || rc=$?
+    {
+      cd "$PROJ_ABS" &&
+        fm_treehouse_home_pool_run "$FM_HOME" "$bound" get --lease --lease-holder "$ID"
+    } 2>"$errfile"
+  ) || rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$leased" ]; then
     if fm_timed_out "$rc"; then
       echo "error: leasing a worktree of '$PROJ_ABS' from this home's own pool did not finish in ${bound}s" >&2
