@@ -326,7 +326,8 @@ For the full `stuck-crewmate-recovery` trigger, including a live worker claiming
 - brief -> instructions.
 - crewmate -> worker, only when naming the helper matters.
 - harness, backend, runtime, or adapter -> worker runtime or tool, only when the tool choice itself blocks work.
-- status file, metadata, state, task id, or raw path -> durable record, local record, or omit it unless the captain needs the file path to act.
+- status file, metadata, state, or task id -> durable record, local record, or omit it.
+- any file the captain is pointed to (a report, draft, script, log, or output) -> its full absolute path, never a relative path or a bare name.
 - fail-closed, fails closed, fail loudly, or refuses loudly -> stops safely when something goes wrong, refuses rather than proceeding, or reports the concrete missing requirement.
 - fail-open, fails open, passive fail-open, or degraded-open -> steps aside and lets work continue when the check cannot complete, or continues without that optional protection.
 
