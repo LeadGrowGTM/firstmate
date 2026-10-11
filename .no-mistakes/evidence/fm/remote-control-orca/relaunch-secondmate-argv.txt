@@ -1,0 +1,9 @@
+claude
+--dangerously-skip-permissions
+--remote-control
+fm-rcgate
+--add-dir
+/tmp/fm-lab.1tPGM6/state/rcgate.inbox
+--settings
+{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}
+: Firstmate operational input waiting: read '/tmp/fm-lab-sm.ziZH6x/state/operational-inbox/1791723495-dc9ead1c1d96f5b8.msg' and handle its contents as Firstmate operational input.

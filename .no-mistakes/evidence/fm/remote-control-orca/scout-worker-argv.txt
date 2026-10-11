@@ -1,0 +1,15 @@
+claude
+--dangerously-skip-permissions
+--add-dir
+/tmp/fm-lab.1tPGM6/state/operational-inbox
+--add-dir
+/tmp/fm-lab.1tPGM6/state/rcscout.inbox
+--add-dir
+/tmp/fm-lab.1tPGM6/data/rcscout
+--add-dir
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4NG1X2KJH52X4V94FWNRW6V/.agents/skills
+--settings
+{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}
+--append-system-prompt
+You are a task worker launched by Firstmate, your supervising orchestrator for the same human operator. The launch-brief record named by the initial user messag
+: Firstmate operational input waiting: read '/tmp/fm-lab.1tPGM6/state/operational-inbox/1791723617-3c8f832ae4cdc9d1.msg' and handle its contents as Firstmate op

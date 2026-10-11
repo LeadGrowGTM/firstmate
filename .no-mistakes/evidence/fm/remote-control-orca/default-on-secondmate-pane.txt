@@ -1,0 +1,11 @@
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/fm-lab-sm.ziZH6x
+⚠ Remote managed settings failed to load (authentication rejected (401)) · no remote policy applied · /status for details
+❯ : Firstmate operational input waiting: read '/tmp/fm-lab-sm.ziZH6x/state/operational-inbox/1791723409-616f7896cc2ec931.msg' and handle its contents as Firstmate operational input.
+  ⎿  Invalid API key · Fix external API key
+✻ Worked for 0s · done 8:56 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

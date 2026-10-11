@@ -1,0 +1,12 @@
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   /tmp/fm-lab-sm.DoPmO0
+⚠ Remote managed settings failed to load (authentication rejected (401)) · no remote policy applied · /status for details
+❯ : Firstmate operational input waiting: read '/tmp/fm-lab-sm.DoPmO0/state/operational-inbox/1791723459-7537be3287b75b7a.msg' and handle its contents as Firstmate operational input.
+  ⎿  Invalid API key · Fix external API key
+✻ Worked for 0s · done 8:57 AM
+                                                                                                  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

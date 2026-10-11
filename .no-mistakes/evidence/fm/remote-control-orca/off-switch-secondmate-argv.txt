@@ -1,0 +1,7 @@
+claude
+--dangerously-skip-permissions
+--add-dir
+/tmp/fm-lab.1tPGM6/state/rcoff.inbox
+--settings
+{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}
+: Firstmate operational input waiting: read '/tmp/fm-lab-sm.DoPmO0/state/operational-inbox/1791723459-7537be3287b75b7a.msg' and handle its contents as Firstmate operational input.

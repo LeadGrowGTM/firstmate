@@ -1,0 +1,3 @@
+error: config/claude-remote-control holds 'maybe'; accepted values are: on (a Claude secondmate launches with --remote-control, the default when the file is absent), off
+SPAWN_RC=1
+bash-5.2$
