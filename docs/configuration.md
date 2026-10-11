@@ -1158,6 +1158,7 @@ At most once a day the check starts a sweep in the background, and a later poll 
 The sweep runs the same safe prune for each project clone under this home's `projects/`, then reports when:
 
 - the worktree copies under `~/.treehouse` use more than 5 GB;
+- that size could not be measured;
 - a prune did not run, with the reason.
 
 A finding is reported once and stays silent until it changes or clears.
