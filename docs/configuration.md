@@ -869,7 +869,6 @@ The file is a captain-wide safety preference, so it is inherited into secondmate
 
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md) records the permission-mode observations and the distinct startup dialogs.
 
-
 ## Claude Remote Control (config/claude-remote-control)
 
 Claude Code's [Remote Control](https://code.claude.com/docs/en/remote-control) lets a session be seen and steered from the Claude mobile app or claude.ai while it keeps running on its own machine.
