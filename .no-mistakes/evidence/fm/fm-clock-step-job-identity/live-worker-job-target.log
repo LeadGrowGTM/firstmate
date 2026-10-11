@@ -1,0 +1,8 @@
+rev=58fc8dd9 job_seconds=75 started=17:18:41
+recorded process identities 5s into the job:
+  state/worker.lock/start = starttime=21039036
+finished=17:19:54 wait_rc=0 job_exit=0 wait_error=
+job_stderr=
+job_side_effect_file=present
+worker.log:
+driver_rc=0

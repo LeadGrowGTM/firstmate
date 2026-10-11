@@ -1,0 +1,8 @@
+rev=1fd7afb5 job_seconds=75 started=16:51:53
+recorded process identities 5s into the job:
+  state/worker.lock/start = Sun Oct 11 16:51:52 2026
+finished=16:53:04 wait_rc=0 job_exit=0 wait_error=
+job_stderr=
+job_side_effect_file=present
+worker.log:
+driver_rc=0

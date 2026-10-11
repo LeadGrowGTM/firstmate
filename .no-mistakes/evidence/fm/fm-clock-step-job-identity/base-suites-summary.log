@@ -1,0 +1,5 @@
+base commit 1fd7afb5 (unmodified, extracted to a disposable checkout)
+fm-session-lock-ancestry exit=1 duration=61s ok=10 not_ok=1 worker_stopped_msgs=0
+fm-remote-secondmate-retire exit=1 duration=26s ok=0 not_ok=1 worker_stopped_msgs=1
+fm-remote-secondmate-launch-dialog exit=1 duration=31s ok=1 not_ok=1 worker_stopped_msgs=1
+fm-remote-reply exit=1 duration=32s ok=15 not_ok=1 worker_stopped_msgs=0

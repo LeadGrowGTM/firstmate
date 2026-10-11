@@ -1,0 +1,8 @@
+pid=2218407 kernel=6.6.87.2-microsoft-standard-WSL2
+distinct ps lstart strings for the one live process:
+     24 Sun Oct 11 17:18:36 2026
+     32 Sun Oct 11 17:18:38 2026
+     32 Sun Oct 11 17:18:39 2026
+     12 Sun Oct 11 17:18:40 2026
+distinct fm_remote_job_process_start identities for the same process:
+    100 starttime=21039031

@@ -1,0 +1,7 @@
+target commit: 58fc8dd918321cf2c1931de310f9c5814a6bf2ed
+fm-remote-job-process-start exit=0 duration=0s ok=4 not_ok=0 worker_stopped_msgs=0
+fm-session-lock-ancestry exit=0 duration=69s ok=16 not_ok=0 worker_stopped_msgs=0
+fm-remote-secondmate-retire exit=0 duration=125s ok=5 not_ok=0 worker_stopped_msgs=0
+fm-remote-secondmate-launch-dialog exit=0 duration=128s ok=7 not_ok=0 worker_stopped_msgs=0
+fm-remote-reply exit=0 duration=161s ok=42 not_ok=0 worker_stopped_msgs=0
+fm-test-run exit=1 duration=202s ok=39 not_ok=1 worker_stopped_msgs=0

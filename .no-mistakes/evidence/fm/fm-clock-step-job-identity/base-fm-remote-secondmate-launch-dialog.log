@@ -1,0 +1,5 @@
+ok - first launch: a remote second mate parked on the Bypass Permissions dialog wrapped by a 54-column pane fails with the one-time step named
+not ok - the rerun refusal must still name the dialog (missing: 'Bypass Permissions')
+--- output ---
+remote job worker stopped before this job completed
+error: remote secondmate ios inheritance failed; launch refused

@@ -1,0 +1,9 @@
+real worker's own lock record: pid=2218636 start='starttime=21039036'
+planted lock: pid=2218455 (live bystander) command='sleep 600' start='Sun Oct 11 17:18:40 2026' (old ps lstart format)
+bystander's current identity: starttime=21039033
+recorded_owner_alive: rejected the lstart record
+job: wait_rc=0 exit=0 stderr='' side_effect=present
+lock after new worker started: pid=2219928 start='starttime=21039062'
+bystander pid 2218455: still alive (never signalled)
+worker.log:
+driver_rc=0

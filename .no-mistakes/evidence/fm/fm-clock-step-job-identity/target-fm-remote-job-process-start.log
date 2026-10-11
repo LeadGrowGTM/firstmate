@@ -1,0 +1,4 @@
+ok - a moving lstart leaves the monotonic start identity unchanged
+ok - without a start tick the same process reports the changing lstart
+ok - lock ownership needs the exact monotonic identity and rejects an lstart record
+ok - a missing process has no start identity

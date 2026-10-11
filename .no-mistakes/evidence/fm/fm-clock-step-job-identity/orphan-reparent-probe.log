@@ -1,0 +1,2 @@
+orphan reparenting on this host (run from the gate's process tree):
+orphaned sleep pid=342317 now has ppid=210 (systemd); pid 1 is systemd
