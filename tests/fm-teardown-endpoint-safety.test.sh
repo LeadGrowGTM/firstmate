@@ -628,7 +628,6 @@ test_returned_slot_prunes_only_its_own_project_pool() {
 #!/usr/bin/env bash
 printf '%s\t%s\n' "\$PWD" "\$*" >> "$dir/treehouse.log"
 case "\$*" in
-  'status --json') printf '[]\n' ;;
   'prune --yes') [ "$variant" = ok ] || { echo 'simulated prune failure' >&2; exit 3; } ;;
 esac
 exit 0

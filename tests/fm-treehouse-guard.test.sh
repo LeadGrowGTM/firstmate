@@ -31,13 +31,6 @@ dir=${FAKE_TREEHOUSE_DIR:?}
 name=$(basename "$PWD")
 printf '%s\t%s\n' "$(pwd -P)" "$*" >> "$dir/log"
 case "$*" in
-  'status --json')
-    if [ -f "$dir/status-$name.json" ]; then
-      cat "$dir/status-$name.json"
-    else
-      printf '[]\n'
-    fi
-    ;;
   'prune --yes')
     [ ! -f "$dir/prune-sleep" ] || sleep "$(cat "$dir/prune-sleep")"
     if [ -f "$dir/prune-fail-$name" ]; then
@@ -45,10 +38,6 @@ case "$*" in
       exit 3
     fi
     echo "No stale worktrees pruned."
-    ;;
-  'prune --all')
-    [ ! -f "$dir/dryrun.out" ] || cat "$dir/dryrun.out"
-    [ ! -f "$dir/dryrun.rc" ] || exit "$(cat "$dir/dryrun.rc")"
     ;;
   *)
     echo "unexpected treehouse call: $*" >&2
@@ -72,7 +61,7 @@ SH
 make_home() {  # <world> <name> <project>...
   local world=$1 home="$1/$2" project
   shift 2
-  mkdir -p "$home/state" "$home/config" "$home/projects"
+  mkdir -p "$home/state" "$home/projects"
   for project in "$@"; do
     fm_git_init_commit "$home/projects/$project"
   done
@@ -82,7 +71,7 @@ make_home() {  # <world> <name> <project>...
 guard() {  # <world> <home> <guard-args>...
   local world=$1 home=$2
   shift 2
-  env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE \
+  env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_PROJECTS_OVERRIDE \
     HOME="$world/user" PATH="$world/fakebin:$PATH" FAKE_TREEHOUSE_DIR="$world/fake" \
     FM_HOME="$home" "$GUARD" "$@"
 }
@@ -91,14 +80,11 @@ guard() {  # <world> <home> <guard-args>...
 calls() { cat "$1/fake/log"; }
 calls_with() { grep -F -- "$2" "$1/fake/log" || true; }
 
-assert_only_safe_flags() {  # <world> <label>
+assert_only_the_safe_prune() {  # <world> <label>
   local world=$1 label=$2 line args
   while IFS= read -r line; do
     args=${line#*$'\t'}
-    case "$args" in
-      'status --json'|'prune --yes'|'prune --all') ;;
-      *) fail "$label: unexpected treehouse call '$args'" ;;
-    esac
+    [ "$args" = 'prune --yes' ] || fail "$label: unexpected treehouse call '$args'"
   done < "$world/fake/log"
 }
 
@@ -123,8 +109,8 @@ test_prune_runs_only_the_safe_prune_from_the_project() {
   out=$(guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
   expect_code 0 "$rc" "safe prune"
   [ -z "$out" ] || fail "a prune that ran should be silent: $out"
-  assert_equals "$(printf '%s\t%s\n%s\t%s' "$home/projects/alpha" 'status --json' "$home/projects/alpha" 'prune --yes')" \
-    "$(calls "$world")" "prune did not run exactly the status read and the safe prune from the project"
+  assert_equals "$(printf '%s\t%s' "$home/projects/alpha" 'prune --yes')" \
+    "$(calls "$world")" "prune did not run exactly the safe prune from the project"
 }
 
 test_prune_refuses_a_directory_that_is_not_a_clone_root() {
@@ -160,40 +146,6 @@ test_prune_bound_is_reported_as_a_prune_that_did_not_finish() {
   out=$(FM_TREEHOUSE_GUARD_PRUNE_SECS=1 guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
   expect_code 1 "$rc" "bounded prune"
   assert_contains "$out" "treehouse prune did not finish in 1s" "a prune that hit its bound was not reported as such"
-}
-
-test_prune_leaves_a_pool_holding_a_claimed_idle_copy() {
-  local world home out rc=0 slot="pool/3/alpha"
-  world=$(make_world prune-claim)
-  home=$(make_home "$world" home alpha)
-  mkdir -p "$world/user/.treehouse/$slot"
-  printf 'task=scout-7\nhome=%s\n' "$home" > "$world/user/.treehouse/pool/3/.fm-slot-owner"
-  printf '[{"name":"3","path":"%s","status":"available"}]\n' "$world/user/.treehouse/$slot" \
-    > "$world/fake/status-alpha.json"
-  out=$(guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
-  expect_code 1 "$rc" "prune with a claimed idle copy"
-  assert_contains "$out" "a task still claims an idle copy: copy 3 (task scout-7)" "claimed idle copy was not named"
-  [ -z "$(calls_with "$world" 'prune --yes')" ] || fail "a pool with a claimed idle copy was pruned"
-
-  # The same claim on a copy treehouse reports as in use is not at risk.
-  : > "$world/fake/log"
-  printf '[{"name":"3","path":"%s","status":"in-use"}]\n' "$world/user/.treehouse/$slot" \
-    > "$world/fake/status-alpha.json"
-  rc=0
-  out=$(guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
-  expect_code 0 "$rc" "prune with a claimed in-use copy"
-  [ -n "$(calls_with "$world" 'prune --yes')" ] || fail "a claim on an in-use copy blocked the prune"
-}
-
-test_prune_does_not_run_when_the_pool_cannot_be_read() {
-  local world home out rc=0
-  world=$(make_world prune-unread)
-  home=$(make_home "$world" home alpha)
-  printf 'not json\n' > "$world/fake/status-alpha.json"
-  out=$(guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
-  expect_code 1 "$rc" "prune with an unreadable pool"
-  assert_contains "$out" "its pool could not be read with treehouse status" "unreadable pool was not reported"
-  [ -z "$(calls_with "$world" 'prune --yes')" ] || fail "an unverified pool was pruned"
 }
 
 test_prune_waits_out_a_pool_another_launch_or_cleanup_is_using() {
@@ -238,15 +190,16 @@ test_sweep_prunes_only_this_homes_own_clones() {
     "$(calls_with "$world" 'prune --yes')" "first home did not prune exactly its own two clones"
   [ -z "$(calls_with "$world" "$home_b")" ] || fail "first home's sweep ran treehouse in the other home: $(calls_with "$world" "$home_b")"
   [ -z "$(calls_with "$world" 'not-a-clone')" ] || fail "sweep ran treehouse in a directory that is not a clone"
-  assert_only_safe_flags "$world" "first home sweep"
-  # The only machine-wide call is the read-only dry run, never combined with --yes.
-  assert_equals "$(printf '/\t%s' 'prune --all')" "$(calls_with "$world" '--all')" "the orphan dry run was not the lone machine-wide call"
+  assert_only_the_safe_prune "$world" "first home sweep"
+  [ -z "$(calls_with "$world" '--all')" ] || fail "first home's sweep made a machine-wide treehouse call: $(calls_with "$world" '--all')"
 
   : > "$world/fake/log"
   out=$(guard "$world" "$home_b" sweep 2>&1) || fail "sweep of the second home failed: $out"
   assert_equals "$(printf '%s\t%s' "$home_b/projects/gamma" 'prune --yes')" \
     "$(calls_with "$world" 'prune --yes')" "second home did not prune exactly its own clone"
   [ -z "$(calls_with "$world" "$home_a")" ] || fail "second home's sweep ran treehouse in the first home: $(calls_with "$world" "$home_a")"
+  assert_only_the_safe_prune "$world" "second home sweep"
+  [ -z "$(calls_with "$world" '--all')" ] || fail "second home's sweep made a machine-wide treehouse call: $(calls_with "$world" '--all')"
 }
 
 test_sweep_tolerates_a_failed_prune_and_reports_it() {
@@ -274,58 +227,13 @@ test_size_is_reported_only_past_the_limit() {
   [ -z "$out" ] || fail "a small treehouse root was reported: $out"
 
   printf '%s\n' $((6 * GB_KIB + GB_KIB / 2)) > "$world/fake/du-kib"
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep past the default limit failed: $out"
+  out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep past the limit failed: $out"
   assert_equals "treehouse-guard: worktree copies use 6.5 GB under $world/user/.treehouse (limit 5 GB)" "$out" \
-    "size past the default limit was not reported in one line"
+    "size past the limit was not reported in one line"
 
   printf '%s\n' $((5 * GB_KIB)) > "$world/fake/du-kib"
   out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep at the limit failed: $out"
   [ -z "$out" ] || fail "a root exactly at the limit was reported: $out"
-
-  printf '%s\n' $((6 * GB_KIB + GB_KIB / 2)) > "$world/fake/du-kib"
-  printf '8\n' > "$home/config/treehouse-size-limit"
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep under a configured limit failed: $out"
-  [ -z "$out" ] || fail "a root under the configured limit was reported: $out"
-
-  printf '6\n' > "$home/config/treehouse-size-limit"
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep past a configured limit failed: $out"
-  assert_contains "$out" "use 6.5 GB under $world/user/.treehouse (limit 6 GB)" "configured limit was not applied"
-
-  printf 'five\n' > "$home/config/treehouse-size-limit"
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep with a malformed limit failed: $out"
-  assert_equals "treehouse-guard: config/treehouse-size-limit is not a whole number of gigabytes, so size was not checked" "$out" \
-    "a malformed limit was guessed around instead of reported"
-}
-
-test_orphaned_pools_are_reported_and_left_in_place() {
-  local world home out
-  world=$(make_world orphans)
-  home=$(make_home "$world" home alpha)
-  mkdir -p "$world/user/.treehouse/gone-3f5163/1/gone" "$world/user/.treehouse/lost-aa11bb/2/lost"
-  # The report shape treehouse v2.1.1 prints, including a category that is not
-  # an orphan and a path abbreviated with the home directory.
-  cat > "$world/fake/dryrun.out" <<EOF
-Dry run: would prune 1 stale worktree across 4 pools and reclaim 8.2 KiB.
-2     8.2 KiB  ~/.treehouse/proj-3f5163/2/proj
-Skipped 3 unsafe idle worktrees:
-  orphaned (backing repository missing):
-  1     content could not be verified  ~/.treehouse/gone-3f5163/1/gone
-  2     content could not be verified  $world/user/.treehouse/lost-aa11bb/2/lost
-  remove failed:
-  2     git refused to remove worktree  ~/.treehouse/kept-9335e3/2/kept
-Re-run with --all --yes to delete these worktrees.
-EOF
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep with orphans failed: $out"
-  assert_equals "treehouse-guard: 2 orphaned pool(s) with a missing backing repository, left in place: gone-3f5163, lost-aa11bb" "$out" \
-    "orphaned pools were not reported from treehouse's own dry run"
-  assert_present "$world/user/.treehouse/gone-3f5163/1/gone" "an orphaned pool was removed"
-  assert_present "$world/user/.treehouse/lost-aa11bb/2/lost" "an orphaned pool was removed"
-  assert_only_safe_flags "$world" "orphan sweep"
-
-  printf '2\n' > "$world/fake/dryrun.rc"
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "sweep with a failed dry run failed: $out"
-  assert_equals "treehouse-guard: orphaned pools could not be checked (treehouse prune --all dry run exited 2)" "$out" \
-    "a failed dry run was read as no orphans"
 }
 
 test_check_sweeps_daily_and_reports_a_finding_once() {
@@ -416,13 +324,10 @@ test_prune_runs_only_the_safe_prune_from_the_project
 test_prune_refuses_a_directory_that_is_not_a_clone_root
 test_prune_failure_warns_and_exits_nonzero
 test_prune_bound_is_reported_as_a_prune_that_did_not_finish
-test_prune_leaves_a_pool_holding_a_claimed_idle_copy
-test_prune_does_not_run_when_the_pool_cannot_be_read
 test_prune_waits_out_a_pool_another_launch_or_cleanup_is_using
 test_sweep_prunes_only_this_homes_own_clones
 test_sweep_tolerates_a_failed_prune_and_reports_it
 test_size_is_reported_only_past_the_limit
-test_orphaned_pools_are_reported_and_left_in_place
 test_check_sweeps_daily_and_reports_a_finding_once
 test_sweep_outlives_the_checks_own_process_group
 test_arm_and_disarm_use_the_authenticated_custom_check
