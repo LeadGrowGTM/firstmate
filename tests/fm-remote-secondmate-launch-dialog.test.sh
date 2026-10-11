@@ -82,11 +82,12 @@ if [ "${argv[0]:-}" = fm-remote-doctor.sh ]; then
 fi
 # A claude launch records workspace trust in the launching account's own Claude
 # store, and the real entrypoint always resolves that account as the RUNNER's.
-# So the launch leg alone runs the same tracked command under the remote job
-# worker's empty-environment shape with a fixture account home, plus the
-# shortened confirmation window a fake agent needs. Every other leg still goes
-# through the real entrypoint.
-if [ "${argv[0]:-}" = fm-remote-secondmate-control.sh ] && [ "${argv[1]:-}" = launch ]; then
+# So the launch and relaunch legs alone run the same tracked command under the
+# remote job worker's empty-environment shape with a fixture account home, plus
+# the shortened confirmation window a fake agent needs. Every other leg still
+# goes through the real entrypoint.
+if [ "${argv[0]:-}" = fm-remote-secondmate-control.sh ] \
+  && { [ "${argv[1]:-}" = launch ] || [ "${argv[1]:-}" = relaunch ]; }; then
   exec /usr/bin/env -i \
     "PATH=$FM_FAKE_REMOTE_ROOT/bin:$PATH" \
     "HOME=$FM_FAKE_ACCOUNT_HOME" \
@@ -223,5 +224,45 @@ out=$(CONFIRM_POLLS=2 remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate 2>&1) 
   || fail "a launch with no recognized dialog on screen was refused: $out"
 assert_present "$PARENT/state/ios.meta" "a launch with no recognized dialog must still publish the parent's endpoint record"
 pass "no recognized dialog: a launch whose first turn has not started within the window is still reported"
+
+# --- relaunch: the replacement agent parks on the same dialog ----------------
+# The previous agent ran a turn and has already exited, so the host-local
+# control plane goes straight to launching the replacement into the same pane.
+agent_starts_charter_turn || fail "the fixture could not record the previous agent's turn"
+jq '.typed = {} | .working = {}' "$HERDR_STATE" > "$HERDR_STATE.exited" \
+  && mv "$HERDR_STATE.exited" "$HERDR_STATE"
+park_on_bypass_dialog
+cp "$PARENT/state/ios.meta" "$TMP_ROOT/ios-before-relaunch.meta"
+if out=$(remote_env "$ROOT/bin/fm-remote-secondmate-relaunch.sh" ios claude - - 2>&1); then
+  fail "a remote relaunch parked on the Bypass Permissions dialog reported success: $out"
+fi
+assert_contains "$out" 'Bypass Permissions' "the relaunch refusal must name the dialog the agent is parked on"
+assert_contains "$out" 'Yes, I accept' "the relaunch refusal must name the option a person has to choose"
+cmp -s "$TMP_ROOT/ios-before-relaunch.meta" "$PARENT/state/ios.meta" \
+  || fail "a parked relaunch must not republish the parent's endpoint record"
+if grep -Eq '^pane send-keys .*([Dd]own|[Uu]p|[Yy]es)' "$HERDR_LOG"; then
+  fail "the relaunch tried to move or answer the dialog: $(grep '^pane send-keys' "$HERDR_LOG")"
+fi
+pass "relaunch: a replacement agent parked on the Bypass Permissions dialog fails with the one-time step named"
+
+# --- relaunch after acceptance: the replacement's first turn is reported ------
+jq '.typed = {} | .working = {}' "$HERDR_STATE" > "$HERDR_STATE.exited" \
+  && mv "$HERDR_STATE.exited" "$HERDR_STATE"
+rm -f "$SCREEN"
+: > "$HERDR_LOG"
+(
+  for _ in $(seq 1 200); do
+    if grep -q "^pane send-text [^ ]* \\. '.*' --session " "$HERDR_LOG" 2>/dev/null; then
+      agent_starts_charter_turn && exit 0
+    fi
+    sleep 0.05
+  done
+) &
+starter=$!
+out=$(CONFIRM_POLLS=100 remote_env "$ROOT/bin/fm-remote-secondmate-relaunch.sh" ios claude - - 2>&1) \
+  || fail "an ordinary remote claude relaunch failed: $out"
+wait "$starter" || fail "the fixture never saw the relaunch command reach the pane"
+assert_contains "$out" 'relaunched ios harness=claude' "an ordinary relaunch must report the host's confirmation"
+pass "ordinary relaunch: a replacement agent that starts its charter turn is reported as relaunched"
 
 echo "ALL TESTS PASSED"

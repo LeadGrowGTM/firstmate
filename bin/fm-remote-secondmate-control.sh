@@ -18,9 +18,9 @@
 # Herdr backend in the dedicated fm-remote session, so launch refuses any other
 # selection rather than reading this home's config/backend. The interactive
 # default session remains for the user's work.
-# launch also refuses, without answering it, while the launched agent is parked
-# on a launch prompt only a person can answer; launch_refuse_parked_prompt owns
-# that check and its two timing knobs.
+# launch and relaunch also refuse, without answering it, while the launched
+# agent is parked on a launch prompt only a person can answer;
+# launch_refuse_parked_prompt owns that check and its two timing knobs.
 # fm-spawn/fm-send/fm-teardown keep owning the local endpoint mechanics.
 # The home's own workers keep their ordinary backend selection.
 # bin/fm-remote-doctor.sh owns that host's readiness for Herdr.
@@ -76,7 +76,7 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac; }
 
 validate_home() { # <id> [allow-absent]
@@ -194,9 +194,8 @@ launch_refuse_parked_prompt() { # <id>; needs the endpoint loaded
     verdict=$(fm_busy_classify "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$harness" "$id" "$CONTROL_STATE" "$screen")
     case "$verdict" in
       'unknown launch-prompt')
-        prompt=$(printf '%s' "$screen" | fm_busy_launch_prompt_name "$harness") \
-          || prompt='an interactive launch prompt that only a person can answer'
-        die "remote secondmate $id was launched but is not reading its charter: its pane $REMOTE_ENDPOINT_TARGET is waiting at $prompt. Firstmate never answers that prompt. On this second mate's host, open Herdr session $REMOTE_HERDR_SESSION (herdr --session $REMOTE_HERDR_SESSION), answer the prompt in that pane once, then run the same launch again from the primary; the waiting agent continues into its charter as soon as it is answered"
+        prompt=$(printf '%s' "$screen" | fm_busy_launch_prompt_name "$harness")
+        die "remote secondmate $id was launched but is not reading its charter: its pane $REMOTE_ENDPOINT_TARGET is waiting at $prompt. Firstmate never answers that prompt. On this second mate's host, open Herdr session $REMOTE_HERDR_SESSION (herdr --session $REMOTE_HERDR_SESSION), answer the prompt in that pane once, then run the same command again from the primary; the waiting agent continues into its charter as soon as it is answered"
         ;;
       'busy fm-spawn') ;;
       *) return 0 ;;
@@ -318,6 +317,8 @@ cmd_relaunch() {
   # endpoint's own republished metadata - rather than trusting these argv
   # values - is what makes that record correct even when relaunch resolved
   # "default" against a configured pin this call never saw.
+  remote_endpoint_require "$id"
+  launch_refuse_parked_prompt "$id"
   print_route "$id"
 }
 

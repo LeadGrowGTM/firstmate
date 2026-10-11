@@ -16,6 +16,7 @@
 # registered agent once anything has been typed into it, and submitting starts
 # one turn: the next agent read reports working and the pane settles back to
 # idle, which is the native transition the adapter confirms a submit with.
+# A pane's foreground process stays in the directory the pane was created in.
 #
 # Usage:
 #   . "$(dirname "${BASH_SOURCE[0]}")/remote-herdr-fixture.sh"
@@ -85,7 +86,9 @@ case "${1:-} ${2:-}" in
     if [ "$(jq_state -r --arg p "$pane" '[.tabs[]|select(.pane_id==$p)]|length')" = 0 ]; then
       printf '{"error":{"code":"pane_not_found","message":"%s"}}\n' "$pane"
     else
-      printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "$pane"
+      jq_state --arg p "$pane" \
+        '. as $s | ($s.tabs[]|select(.pane_id==$p)) as $t
+         | {result:{pane:{pane_id:$p, foreground_cwd:($t.cwd // ($s.workspaces[]|select(.workspace_id==$t.workspace_id)|.cwd))}}}'
     fi
     ;;
   "pane close")
