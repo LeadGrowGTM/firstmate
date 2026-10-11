@@ -1,0 +1,12 @@
+ok - two clones of one origin disagree about whose pool slot it is
+ok - a home's own pool sits outside the home and the clone, one per home
+ok - a launch handed the other clone's copy leaves it and leases its own
+ok - a failed lease reports treehouse's own error under its label
+ok - a lease of the other clone is returned and the launch stops
+ok - a launch that stops after leasing returns the lease
+ok - a shared copy of the spawning clone is kept
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-39fbc5/1/widget. Run 'treehouse return ~/.treehouse/widget-39fbc5/1/widget' to release it.
+🌳 Worktree returned to pool.
+ok - real treehouse leases from the home's own pool and fetches as the operator
+# all fm-shared-pool-trust tests passed

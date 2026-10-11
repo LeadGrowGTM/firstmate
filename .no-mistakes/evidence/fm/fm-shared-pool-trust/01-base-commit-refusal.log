@@ -1,0 +1,6 @@
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/base-repro/launch-brief.md records no ship branch; defaulting to legacy branch fm/base-repro
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/base-repro/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: base-repro ships mode=local-only while the standing posture for legion is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: refusing to pre-register Claude trust: '/tmp/fm-lab.RkkVtC/user/.treehouse/legion-1efe76/1/legion' is not a worktree of project '/tmp/fm-lab.RkkVtC/homes/website-genie/projects/legion'
+error: could not pre-register Claude workspace trust for /tmp/fm-lab.RkkVtC/user/.treehouse/legion-1efe76/1/legion; refusing to launch a claude worker that would wedge on the trust dialog; inspect window firstmate:fm-base-repro
+rc=1

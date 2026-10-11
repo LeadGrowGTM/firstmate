@@ -1,0 +1,8 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.RkkVtC/homes/website-genie
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/lease-fails/launch-brief.md records no ship branch; defaulting to legacy branch fm/lease-fails
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/lease-fails/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: lease-fails ships mode=local-only while the standing posture for legion is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: could not lease a worktree of '/tmp/fm-lab.RkkVtC/homes/website-genie/projects/legion' from this home's own pool (treehouse exit 1)
+treehouse: 🌳 Setting up worktree...
+treehouse: mkdir /tmp/fm-lab.RkkVtC/xdg/firstmate/website-genie-7ba551/.treehouse/legion-1efe76/1: permission denied
+rc=1

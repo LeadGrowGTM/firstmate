@@ -1,0 +1,26 @@
+## home alexander-media launch (owner of the shared pool)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.RkkVtC/homes/alexander-media
+warning: /tmp/fm-lab.RkkVtC/homes/alexander-media/data/owner-a/launch-brief.md records no ship branch; defaulting to legacy branch fm/owner-a
+warning: /tmp/fm-lab.RkkVtC/homes/alexander-media/data/owner-a/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: owner-a ships mode=local-only while the standing posture for legion is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned owner-a harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-owner-a worktree=/tmp/fm-lab.RkkVtC/user/.treehouse/legion-1efe76/1/legion
+rc=0
+
+## home website-genie launch while that copy is in use
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.RkkVtC/homes/website-genie
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/b-second/launch-brief.md records no ship branch; defaulting to legacy branch fm/b-second
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/b-second/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: b-second ships mode=local-only while the standing posture for legion is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned b-second harness=claude kind=ship mode=local-only yolo=off window=firstmate:fm-b-second worktree=/tmp/fm-lab.RkkVtC/user/.treehouse/legion-1efe76/2/legion
+rc=0
+
+## alexander-media worktrees
+/tmp/fm-lab.RkkVtC/homes/alexander-media/projects/legion  3e41b12 [main]
+/tmp/fm-lab.RkkVtC/user/.treehouse/legion-1efe76/1/legion 3e41b12 (detached HEAD)
+
+## website-genie worktrees
+/tmp/fm-lab.RkkVtC/homes/website-genie/projects/legion    3e41b12 [main]
+/tmp/fm-lab.RkkVtC/user/.treehouse/legion-1efe76/2/legion 3e41b12 (detached HEAD)
+
+## per-home pool folders
+website-genie-7ba551

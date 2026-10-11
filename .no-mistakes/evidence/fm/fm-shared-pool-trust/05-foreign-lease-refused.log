@@ -1,0 +1,6 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.RkkVtC/homes/website-genie
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/foreign-lease/launch-brief.md records no ship branch; defaulting to legacy branch fm/foreign-lease
+warning: /tmp/fm-lab.RkkVtC/homes/website-genie/data/foreign-lease/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: foreign-lease ships mode=local-only while the standing posture for legion is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: worktree '/tmp/fm-lab.RkkVtC/xdg/firstmate/website-genie-7ba551/.treehouse/legion-1efe76/1/legion' is not a worktree of spawning project '/tmp/fm-lab.RkkVtC/homes/website-genie/projects/legion'; refusing to launch a worker in another clone
+rc=1
