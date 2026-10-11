@@ -343,6 +343,18 @@ fm_meta_get() {  # <meta-file> <key>
   printf '%s' "$value"
 }
 
+# fm_remote_control_url_valid: true for exactly the link shape a remote host
+# reports for its agent's Claude Remote Control session
+# (bin/fm-remote-secondmate-control.sh remote_control_url). A parent writes the
+# reported value into its own task record, so anything else a host printed is
+# refused here rather than stored.
+fm_remote_control_url_valid() {  # <url>
+  local id
+  case "${1:-}" in https://claude.ai/code/session_?*) ;; *) return 1 ;; esac
+  id=${1#https://claude.ai/code/session_}
+  case "$id" in *[!A-Za-z0-9]*) return 1 ;; esac
+}
+
 # fm_backend_of_meta: the backend recorded in <meta-file>, defaulting to
 # `tmux` when the field is absent - the P1 compatibility contract.
 fm_backend_of_meta() {  # <meta-file>

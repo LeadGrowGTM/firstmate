@@ -9,6 +9,11 @@
 # fake Herdr CLI whose pane screen the test controls. The dialog text itself is
 # vendor-rendered, so tests/fm-launch-prompt-signals-live-e2e.test.sh owns the
 # proof that the real Claude Code renders what the fixture screen holds here.
+#
+# The same launches also carry the agent's Remote Control session link back to
+# the parent. The link is read from Claude Code's own per-session record, whose
+# shape is likewise vendor-owned; the records written here hold the fields
+# Claude Code 2.1.296 writes.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -96,6 +101,7 @@ if [ "${argv[0]:-}" = fm-remote-secondmate-control.sh ] \
     FM_REMOTE_JOB_ACTIVE=1 \
     "FM_REMOTE_LAUNCH_CONFIRM_POLLS=$FM_FAKE_CONFIRM_POLLS" \
     FM_REMOTE_LAUNCH_CONFIRM_INTERVAL=0.1 \
+    FM_REMOTE_CONTROL_LINK_POLLS=2 \
     "$FM_FAKE_REMOTE_ROOT/bin/${argv[0]}" "${argv[@]:1}"
 fi
 exec "$FM_FAKE_REMOTE_ENTRYPOINT" "$@"
@@ -124,8 +130,33 @@ remote_env() {
 
 # The screen the real Claude Code renders once per machine before a
 # --dangerously-skip-permissions session starts, with the selection on the
-# declining option.
-park_on_bypass_dialog() {
+# declining option. `narrow` is the same screen as a real remote host's agent
+# pane holds it: 54 columns wide with no client attached, so the heading breaks
+# after "Bypass Permissions" and "mode" lands on a line of its own.
+park_on_bypass_dialog() { # [narrow]
+  if [ "${1:-}" = narrow ]; then
+    cat > "$SCREEN" <<'SCREEN'
+──────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions
+  mode
+  In Bypass Permissions mode, Claude Code will not
+  ask for your approval before running potentially
+  dangerous commands.
+  This mode should only be used in a sandboxed
+  container/VM that has restricted internet access
+  and can easily be restored if damaged.
+  By proceeding, you accept all responsibility for
+  actions taken while running in Bypass Permissions
+  mode.
+  https://code.claude.com/docs/en/security
+  ❯ No, exit
+    Yes, I accept
+  Enter to confirm · Esc to cancel
+SCREEN
+    ! grep -q 'Claude Code running in Bypass Permissions mode' "$SCREEN" \
+      || fail "the 54-column screen holds the dialog heading on one line, so it pins nothing"
+    return 0
+  fi
   cat > "$SCREEN" <<'SCREEN'
 ────────────────────────────────────────────────────────────────────────────────
   WARNING: Claude Code running in Bypass Permissions mode
@@ -152,13 +183,29 @@ agent_starts_charter_turn() {
 
 pane_writes() { grep -c '^pane send-' "$HERDR_LOG" || true; }
 
+# Claude Code's own record of one running session, as the account that launched
+# the agent holds it. <bridge> empty means a session that has not registered
+# for Remote Control.
+SESSIONS="$ACCOUNT_HOME/.claude/sessions"
+session_record() { # <pid> <cwd> <started-ms> <bridge>
+  mkdir -p "$SESSIONS"
+  jq -n --argjson pid "$1" --arg cwd "$2" --argjson started "$3" --arg bridge "$4" \
+    '{pid: $pid, cwd: $cwd, startedAt: $started, kind: "interactive", entrypoint: "cli"}
+     + (if $bridge == "" then {} else {bridgeSessionId: $bridge} end)' > "$SESSIONS/$1.json"
+}
+# A pid that named a process once and names none now.
+( : ) &
+EXITED_PID=$!
+wait "$EXITED_PID"
+
 FM_SECONDMATE_CHARTER='Own iOS delivery on the fresh box.' \
   FM_SECONDMATE_SCOPE='iOS implementation and Xcode validation' \
   remote_env "$ROOT/bin/fm-remote-home-seed.sh" ios fresh-box "$REMOTE_ROOT" "$REMOTE_HOME" --no-projects >/dev/null \
   || fail "remote seed did not provision the route"
 
 # --- first launch on a fresh host: parked on the dialog ----------------------
-park_on_bypass_dialog
+# In the 54-column pane a real host has, which wraps the dialog heading.
+park_on_bypass_dialog narrow
 : > "$HERDR_LOG"
 if out=$(remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate 2>&1); then
   fail "a remote launch parked on the Bypass Permissions dialog reported success: $out"
@@ -171,9 +218,11 @@ assert_absent "$PARENT/state/ios.meta" "a parked launch must not publish the par
 if grep -Eq '^pane send-keys .*([Dd]own|[Uu]p|[Yy]es)' "$HERDR_LOG"; then
   fail "the launch tried to move or answer the dialog: $(grep '^pane send-keys' "$HERDR_LOG")"
 fi
-pass "first launch: a remote second mate parked on the Bypass Permissions dialog fails with the one-time step named"
+pass "first launch: a remote second mate parked on the Bypass Permissions dialog wrapped by a 54-column pane fails with the one-time step named"
 
 # --- rerun while still parked: the live endpoint is not proof of a start -----
+# The same dialog in a pane wide enough to hold its heading on one line.
+park_on_bypass_dialog
 : > "$HERDR_LOG"
 if out=$(remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate 2>&1); then
   fail "a rerun against the still-parked endpoint reported success: $out"
@@ -185,20 +234,38 @@ assert_absent "$PARENT/state/ios.meta" "a rerun against a parked endpoint must n
 pass "rerun while parked: the same refusal, and nothing is typed or keyed into the dialog"
 
 # --- a person accepts once on the host: the same command converges -----------
+# The running agent's session has registered for Remote Control. Beside it sit
+# the records that must not answer for it: an earlier launch whose process has
+# exited, a session in another directory, and one whose id is not a session id.
 rm -f "$SCREEN"
 agent_starts_charter_turn || fail "the fixture could not record the agent's first turn"
+session_record "$$" "$REMOTE_HOME" 2000 session_01LiveAgent
+session_record "$EXITED_PID" "$REMOTE_HOME" 9000 session_01EarlierLaunch
+session_record "$PPID" "$TMP_ROOT" 9500 session_01OtherDirectory
+session_record 1 "$REMOTE_HOME" 9900 'session_01 remote_host=elsewhere'
 : > "$HERDR_LOG"
 out=$(remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate 2>&1) \
   || fail "the rerun after the dialog was accepted failed: $out"
 assert_contains "$out" 'spawned ios harness=claude' "the accepted launch must report the spawn"
 assert_present "$PARENT/state/ios.meta" "the accepted launch must publish the parent's endpoint record"
+assert_contains "$out" 'remote control: https://claude.ai/code/session_01LiveAgent' \
+  "the launch must report the running agent's Remote Control link"
+grep -qxF -- 'remote_control_url=https://claude.ai/code/session_01LiveAgent' "$PARENT/state/ios.meta" \
+  || fail "the launch must record the running agent's Remote Control link"
+[ "$(grep -c 'remote_control_url=' "$PARENT/state/ios.meta")" = 1 ] \
+  || fail "the parent's record must hold exactly one Remote Control link: $(grep '^remote_control_url=' "$PARENT/state/ios.meta")"
 assert_present "$ACCOUNT_HOME/.claude.json" "the launch leg did not run under the fixture account home"
 [ "$(pane_writes)" = 0 ] \
   || fail "adopting the accepted endpoint must not launch a second agent into it: $(grep '^pane send-' "$HERDR_LOG")"
-pass "after acceptance: rerunning the launch adopts the running agent and reports success"
+pass "after acceptance: rerunning the launch adopts the running agent, reports success, and records its Remote Control link"
 
 # --- an ordinary launch on a host that already accepted ----------------------
+# This agent's session never registers for Remote Control, which is also what a
+# home with Remote Control off looks like from here: the launch stands, and no
+# link is reported or recorded.
 rm -f "$PARENT/state/ios.meta" "$SCREEN"
+rm -f "$SESSIONS"/*.json
+session_record "$$" "$REMOTE_HOME" 2000 ''
 reset_remote_herdr_fixture "$HERDR_STATE"
 : > "$HERDR_LOG"
 (
@@ -215,14 +282,20 @@ out=$(CONFIRM_POLLS=100 remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate 2>&1
 wait "$starter" || fail "the fixture never saw the launch command reach the pane"
 assert_contains "$out" 'spawned ios harness=claude' "an ordinary launch must report the spawn"
 assert_present "$PARENT/state/ios.meta" "an ordinary launch must publish the parent's endpoint record"
-pass "ordinary launch: an agent that starts its charter turn is reported as launched"
+assert_not_contains "$out" 'remote control:' "a launch with no registered session must report no Remote Control link"
+assert_no_grep 'remote_control_url=' "$PARENT/state/ios.meta" \
+  "a launch with no registered session must record no Remote Control link"
+pass "ordinary launch: an agent that starts its charter turn is reported as launched, with no link when its session has none"
 
 # --- no recognized dialog and no turn yet: the launch is not refused ---------
 rm -f "$PARENT/state/ios.meta"
 reset_remote_herdr_fixture "$HERDR_STATE"
+session_record "$$" "$REMOTE_HOME" 2000 session_01BeforeRelaunch
 out=$(CONFIRM_POLLS=2 remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate 2>&1) \
   || fail "a launch with no recognized dialog on screen was refused: $out"
 assert_present "$PARENT/state/ios.meta" "a launch with no recognized dialog must still publish the parent's endpoint record"
+grep -qxF -- 'remote_control_url=https://claude.ai/code/session_01BeforeRelaunch' "$PARENT/state/ios.meta" \
+  || fail "a launch whose session is already registered must record its Remote Control link"
 pass "no recognized dialog: a launch whose first turn has not started within the window is still reported"
 
 # --- relaunch: the replacement agent parks on the same dialog ----------------
@@ -231,7 +304,7 @@ pass "no recognized dialog: a launch whose first turn has not started within the
 agent_starts_charter_turn || fail "the fixture could not record the previous agent's turn"
 jq '.typed = {} | .working = {}' "$HERDR_STATE" > "$HERDR_STATE.exited" \
   && mv "$HERDR_STATE.exited" "$HERDR_STATE"
-park_on_bypass_dialog
+park_on_bypass_dialog narrow
 cp "$PARENT/state/ios.meta" "$TMP_ROOT/ios-before-relaunch.meta"
 if out=$(remote_env "$ROOT/bin/fm-remote-secondmate-relaunch.sh" ios claude - - 2>&1); then
   fail "a remote relaunch parked on the Bypass Permissions dialog reported success: $out"
@@ -246,9 +319,12 @@ fi
 pass "relaunch: a replacement agent parked on the Bypass Permissions dialog fails with the one-time step named"
 
 # --- relaunch after acceptance: the replacement's first turn is reported ------
+# The replacement registers a new session, so the link the parent held is dead.
 jq '.typed = {} | .working = {}' "$HERDR_STATE" > "$HERDR_STATE.exited" \
   && mv "$HERDR_STATE.exited" "$HERDR_STATE"
 rm -f "$SCREEN"
+session_record "$EXITED_PID" "$REMOTE_HOME" 2000 session_01BeforeRelaunch
+session_record "$$" "$REMOTE_HOME" 3000 session_01AfterRelaunch
 : > "$HERDR_LOG"
 (
   for _ in $(seq 1 200); do
@@ -263,6 +339,12 @@ out=$(CONFIRM_POLLS=100 remote_env "$ROOT/bin/fm-remote-secondmate-relaunch.sh" 
   || fail "an ordinary remote claude relaunch failed: $out"
 wait "$starter" || fail "the fixture never saw the relaunch command reach the pane"
 assert_contains "$out" 'relaunched ios harness=claude' "an ordinary relaunch must report the host's confirmation"
-pass "ordinary relaunch: a replacement agent that starts its charter turn is reported as relaunched"
+assert_contains "$out" 'remote control: https://claude.ai/code/session_01AfterRelaunch' \
+  "the relaunch must report the replacement agent's Remote Control link"
+grep -qxF -- 'remote_control_url=https://claude.ai/code/session_01AfterRelaunch' "$PARENT/state/ios.meta" \
+  || fail "the relaunch must record the replacement agent's Remote Control link"
+assert_no_grep 'session_01BeforeRelaunch' "$PARENT/state/ios.meta" \
+  "the relaunch must not keep the previous session's dead link"
+pass "ordinary relaunch: a replacement agent that starts its charter turn is reported as relaunched, and its link replaces the dead one"
 
 echo "ALL TESTS PASSED"

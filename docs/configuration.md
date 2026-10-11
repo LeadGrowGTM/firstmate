@@ -915,6 +915,7 @@ Until Remote Control's one-time confirmation has been accepted on that machine, 
 - The session makes outbound HTTPS requests only and opens no inbound port.
 - While a session is connected, its transcript is stored on Anthropic's servers; choose `off` for secondmates whose conversations must stay on their own machine.
 - A relaunched session registers again under the same name, and its earlier entry shows as offline.
+  For a remote secondmate, every launch and relaunch [reports the link of the session that is live now](remote-secondmates.md#the-remote-control-link).
 
 [`verification/runtime-backends.md`](verification/runtime-backends.md#claude-remote-control-launch-flag) records what was observed for the launch flag and what is still unverified.
 

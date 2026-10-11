@@ -92,12 +92,14 @@ printf 'herdr_session=fm-remote\n'
 printf 'harness=%s\n' "$harness"
 printf 'model=%s\n' "$model"
 printf 'effort=%s\n' "$effort"
+[ -z "${FM_FAKE_REMOTE_CONTROL:-}" ] || printf 'remote_control_url=%s\n' "$FM_FAKE_REMOTE_CONTROL"
 SH
 chmod +x "$FAKEBIN/fake-ssh"
 
 run_relaunch() {  # <args...>
   env FM_HOME="$HOME_DIR" FM_SSH_BIN="$FAKEBIN/fake-ssh" \
     FM_FAKE_RELAUNCH_MODE="${FM_FAKE_RELAUNCH_MODE:-}" \
+    FM_FAKE_REMOTE_CONTROL="${FM_FAKE_REMOTE_CONTROL:-}" \
     "$ROOT/bin/fm-remote-secondmate-relaunch.sh" "$@" 2>&1
 }
 
@@ -136,6 +138,32 @@ assert_grep 'model=claude-opus-5-5' "$HOME_DIR/state/ios.meta" \
 assert_no_grep 'harness=default' "$HOME_DIR/state/ios.meta" \
   "the parent record must not keep the unresolved request"
 pass "a remote relaunch records the identity the host confirmed"
+
+# --- the recorded Remote Control link follows the new session ----------------
+# A relaunch starts a new session, so the link the record held is dead whatever
+# the host reports next.
+reset_meta
+printf 'remote_control_url=https://claude.ai/code/session_01Before\n' >> "$HOME_DIR/state/ios.meta"
+FM_FAKE_REMOTE_CONTROL=https://claude.ai/code/session_01After
+OUT=$(run_relaunch ios claude claude-opus-5-5 medium); RC=$?
+expect_code 0 "$RC" "a relaunch that reports a Remote Control link should succeed"$'\n'"$OUT"
+[ "$(printf '%s\n' "$OUT" | tail -1)" = 'remote control: https://claude.ai/code/session_01After' ] \
+  || fail "the wrapper should end by reporting the new session's link: $OUT"
+[ "$(grep 'remote_control_url=' "$HOME_DIR/state/ios.meta")" = 'remote_control_url=https://claude.ai/code/session_01After' ] \
+  || fail "the parent record should hold only the new session's link: $(grep 'remote_control_url=' "$HOME_DIR/state/ios.meta")"
+for reported in '' 'https://claude.example/code/session_01After' 'https://claude.ai/code/session_01After extra=1'; do
+  FM_FAKE_REMOTE_CONTROL=$reported
+  OUT=$(run_relaunch ios claude claude-opus-5-5 medium); RC=$?
+  expect_code 0 "$RC" "a relaunch reporting '$reported' as its link should still succeed"$'\n'"$OUT"
+  assert_not_contains "$OUT" 'remote control:' "a relaunch reporting '$reported' must print no link"
+  assert_no_grep 'remote_control_url=' "$HOME_DIR/state/ios.meta" \
+    "a relaunch reporting '$reported' must leave no link recorded, the dead one included"
+  printf 'remote_control_url=https://claude.ai/code/session_01Before\n' >> "$HOME_DIR/state/ios.meta"
+done
+unset FM_FAKE_REMOTE_CONTROL
+assert_grep 'remote_host=remote-mac' "$HOME_DIR/state/ios.meta" \
+  "unrelated route fields must survive the link update"
+pass "a remote relaunch replaces the recorded Remote Control link, and drops it when the host reports none or anything else"
 
 # --- a refused relaunch leaves the parent's record untouched -----------------
 reset_meta

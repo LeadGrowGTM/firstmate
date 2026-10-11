@@ -511,6 +511,19 @@ CONTROL_LOCK_HELD=1
 fm_refuse_if_gate_agent
 FM_LOCK_LOG_PREFIX=teardown
 
+# A finished remote secondmate retirement removes the task record last, so
+# running it again finds no record. That is the retirement having converged,
+# not a broken record, and it is answered as such only on positive evidence:
+# nothing at all sits at the record path, the registry no longer routes the id,
+# and the reply source recorded the retirement (bin/fm-procevent-remote-reply.sh
+# `retired`). Every other missing or unsafe record keeps the refusal below.
+if [ ! -e "$META" ] && [ ! -L "$META" ] \
+  && fm_backlog_record_parent_authorized "$META" "task record" "$STATE" \
+  && ! grep -qE "^- $ID( |\$)" "$SECONDMATE_REG" 2>/dev/null \
+  && "$SCRIPT_DIR/fm-procevent-remote-reply.sh" retired "$ID" >/dev/null 2>&1; then
+  echo "teardown $ID: already retired; this home holds no record of it and nothing was changed"
+  exit 0
+fi
 fm_backlog_record_present "$META" "task record" "$STATE" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1

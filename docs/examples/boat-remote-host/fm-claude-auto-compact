@@ -1,0 +1,56 @@
+#!/bin/sh
+# Set, or with --check only verify, Claude Code's auto-compact window in this
+# account's user settings.
+#
+# Usage: fm-claude-auto-compact [--check]
+#
+# Setup step for a Boat sandbox that hosts a Claude second mate
+# (docs/remote-secondmates.md "Set up the sandbox"); run it from the clone.
+# A new sandbox account has no Claude Code user settings, so every session
+# there keeps its model's full context window until the top-level
+# `autoCompactWindow` key is written. That one key covers every model.
+# Claude Code writes its own keys into the same file, so this merges that
+# single key and leaves every other key as it found it. It copies nothing from
+# another machine, and a file that is not a JSON object is reported and left
+# untouched.
+# The file is settings.json under $CLAUDE_CONFIG_DIR, or under ~/.claude when
+# that is unset.
+# Prints `ok: autoCompactWindow=300000 in <file>` and exits 0 once the key
+# holds the value. --check changes nothing and exits 1 when it does not.
+window=300000
+dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+file=$dir/settings.json
+
+usage() { echo "usage: fm-claude-auto-compact [--check]" >&2; exit 2; }
+[ "$#" -le 1 ] || usage
+case "${1:-}" in
+  '') write=1 ;;
+  --check) write=0 ;;
+  *) usage ;;
+esac
+command -v jq >/dev/null 2>&1 || { echo "jq not found" >&2; exit 1; }
+
+holds() {
+  [ -f "$file" ] && jq -e --argjson window "$window" \
+    'type == "object" and .autoCompactWindow == $window' "$file" >/dev/null 2>&1
+}
+
+if [ "$write" = 1 ] && ! holds; then
+  mkdir -p "$dir" || exit 1
+  new=$file.fm-new.$$
+  if [ -s "$file" ]; then
+    jq -e 'type == "object"' "$file" >/dev/null 2>&1 \
+      || { echo "$file is not a JSON object; left untouched" >&2; exit 1; }
+    jq --argjson window "$window" '.autoCompactWindow = $window' "$file" > "$new"
+  else
+    jq -n --argjson window "$window" '{autoCompactWindow: $window}' > "$new"
+  fi || { rm -f "$new"; echo "could not write $file" >&2; exit 1; }
+  mv "$new" "$file" || { rm -f "$new"; echo "could not write $file" >&2; exit 1; }
+fi
+
+if holds; then
+  echo "ok: autoCompactWindow=$window in $file"
+else
+  echo "missing: autoCompactWindow=$window is not set in $file" >&2
+  exit 1
+fi

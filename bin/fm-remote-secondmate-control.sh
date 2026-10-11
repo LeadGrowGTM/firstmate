@@ -58,6 +58,12 @@
 # the default-off path. print_route echoes the carrier the endpoint actually
 # holds, including for an already-alive endpoint that was not relaunched, so the
 # parent records the identity the agent really received rather than an intent.
+#
+# The route block also carries `remote_control_url=`, the link of the Claude
+# Remote Control session the agent holds right now, when there is one;
+# remote_control_url owns where it is read and why its absence is never an
+# error. Every launch registers a new session, so the link changes at every
+# launch and relaunch and the previous one is dead.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,6 +83,8 @@ REMOTE_HERDR_SESSION=fm-remote
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
+# shellcheck source=bin/fm-worker-account-lib.sh
+. "$SCRIPT_DIR/fm-worker-account-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -156,8 +164,77 @@ state_value() { # <id>; prints recovery-grade state
   fm_backend_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" 2>/dev/null || printf 'unreadable\n'
 }
 
+# The link of the live Claude Remote Control session this home's agent holds,
+# or nothing. Claude Code keeps one record per running session under its
+# config directory (sessions/<pid>.json) and writes `bridgeSessionId` into it
+# once the session has registered for Remote Control; the link is that id under
+# https://claude.ai/code/. The record is the source because the pane wraps the
+# link across lines and the app's own title is not readable from the host.
+# The newest record of a running process started in this home wins, so a
+# record left behind by an earlier launch never answers for the current one.
+# Read-only, and silent about everything it cannot read: another harness,
+# Remote Control off, a session not registered yet, a missing jq, or a record
+# shape this does not recognize all print nothing, and the launch stands.
+remote_control_url() { # <harness>
+  local harness=$1 account root home_real file fields pid started bridge best='' best_started=-1
+  case "$harness" in claude) ;; *) return 0 ;; esac
+  command -v jq >/dev/null 2>&1 || return 0
+  account=$(fm_worker_account_resolve claude "$TARGET_HOME/config" 2>/dev/null) || return 0
+  if [ -n "$account" ]; then
+    root=${account#*$'\t'}
+    root=${root%%$'\t'*}
+    [ -n "$root" ] || root="${HOME:-}/.claude"
+  else
+    root=${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}
+  fi
+  [ -d "$root/sessions" ] || return 0
+  home_real=$(cd "$TARGET_HOME" 2>/dev/null && pwd -P) || return 0
+  for file in "$root/sessions"/*.json; do
+    [ -f "$file" ] && [ ! -L "$file" ] || continue
+    fields=$(jq -r --arg home "$TARGET_HOME" --arg real "$home_real" '
+      select(type == "object" and (.cwd == $home or .cwd == $real)
+        and (.pid | type == "number") and (.bridgeSessionId | type == "string"))
+      | "\(.pid) \(.startedAt // 0 | if type == "number" then floor else 0 end) \(.bridgeSessionId)"
+    ' "$file" 2>/dev/null) || continue
+    read -r pid started bridge <<EOF
+$fields
+EOF
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    case "$started" in ''|*[!0-9]*) continue ;; esac
+    case "$bridge" in session_*) ;; *) continue ;; esac
+    case "${bridge#session_}" in ''|*[!A-Za-z0-9]*) continue ;; esac
+    kill -0 "$pid" 2>/dev/null || continue
+    [ "$started" -gt "$best_started" ] || continue
+    best=$bridge
+    best_started=$started
+  done
+  [ -z "$best" ] || printf 'https://claude.ai/code/%s\n' "$best"
+}
+
+# A session registers for Remote Control a moment after it starts, so a launch
+# that reported the instant its first turn began would usually report no link.
+# Wait for one, but only where one is coming: a Claude agent whose launch was
+# seen to start (launch_refuse_parked_prompt), in a home whose
+# config/claude-remote-control (bin/fm-spawn.sh owns it) is not `off`. The
+# window is FM_REMOTE_CONTROL_LINK_POLLS (default 20) polls of
+# FM_REMOTE_LAUNCH_CONFIRM_INTERVAL; closing it empty is not a failure.
+remote_control_await() { # needs the endpoint loaded
+  local polls=${FM_REMOTE_CONTROL_LINK_POLLS:-20} interval=${FM_REMOTE_LAUNCH_CONFIRM_INTERVAL:-0.5}
+  local harness i=0
+  case "$polls" in ''|*[!0-9]*) polls=20 ;; esac
+  [ "$LAUNCH_TURN_SEEN" = 1 ] || return 0
+  harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
+  [ "$harness" = claude ] || return 0
+  [ "$(tr -d '[:space:]' < "$TARGET_HOME/config/claude-remote-control" 2>/dev/null || true)" != off ] || return 0
+  while [ "$i" -lt "$polls" ]; do
+    [ -z "$(remote_control_url "$harness")" ] || return 0
+    i=$((i + 1))
+    sleep "$interval"
+  done
+}
+
 print_route() { # <id>
-  local id=$1 harness model effort traceparent
+  local id=$1 harness model effort traceparent remote_control
   remote_endpoint_require "$id"
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
   model=$(fm_meta_get "$REMOTE_ENDPOINT_META" model)
@@ -171,6 +248,8 @@ print_route() { # <id>
   printf 'model=%s\n' "$model"
   printf 'effort=%s\n' "$effort"
   [ -z "$traceparent" ] || printf 'traceparent=%s\n' "$traceparent"
+  remote_control=$(remote_control_url "$harness")
+  [ -z "$remote_control" ] || printf 'remote_control_url=%s\n' "$remote_control"
 }
 
 cmd_route() {
@@ -204,9 +283,13 @@ cmd_route() {
 #
 # FM_REMOTE_LAUNCH_CONFIRM_POLLS (default 60) and
 # FM_REMOTE_LAUNCH_CONFIRM_INTERVAL (default 0.5 seconds) bound the window.
+# LAUNCH_TURN_SEEN reports which way it ended: 1 when the record moved past the
+# spawn seed, 0 when the window closed first.
+LAUNCH_TURN_SEEN=0
 launch_refuse_parked_prompt() { # <id>; needs the endpoint loaded
   local id=$1 polls=${FM_REMOTE_LAUNCH_CONFIRM_POLLS:-60} interval=${FM_REMOTE_LAUNCH_CONFIRM_INTERVAL:-0.5}
   local harness i=0 screen verdict prompt
+  LAUNCH_TURN_SEEN=0
   case "$polls" in ''|*[!0-9]*) polls=60 ;; esac
   harness=$(fm_meta_get "$REMOTE_ENDPOINT_META" harness)
   while :; do
@@ -218,7 +301,7 @@ launch_refuse_parked_prompt() { # <id>; needs the endpoint loaded
         die "remote secondmate $id was launched but is not reading its charter: its pane $REMOTE_ENDPOINT_TARGET is waiting at $prompt. Firstmate never answers that prompt. On this second mate's host, open Herdr session $REMOTE_HERDR_SESSION (herdr --session $REMOTE_HERDR_SESSION), answer the prompt in that pane once, then run the same command again from the primary; the waiting agent continues into its charter as soon as it is answered"
         ;;
       'busy fm-spawn') ;;
-      *) return 0 ;;
+      *) LAUNCH_TURN_SEEN=1; return 0 ;;
     esac
     i=$((i + 1))
     [ "$i" -lt "$polls" ] || return 0
@@ -254,6 +337,7 @@ cmd_launch() {
         # A live endpoint is not proof its agent ever started: a launch refused
         # for a parked prompt leaves exactly this endpoint behind.
         launch_refuse_parked_prompt "$id"
+        remote_control_await
         print_route "$id"
         return 0
         ;;
@@ -287,6 +371,7 @@ cmd_launch() {
     || die "remote launch recorded Herdr session '${herdr_session:-missing}', expected '$REMOTE_HERDR_SESSION'"
   remote_endpoint_require "$id"
   launch_refuse_parked_prompt "$id"
+  remote_control_await
   print_route "$id"
 }
 
@@ -339,6 +424,7 @@ cmd_relaunch() {
   # "default" against a configured pin this call never saw.
   remote_endpoint_require "$id"
   launch_refuse_parked_prompt "$id"
+  remote_control_await
   print_route "$id"
 }
 

@@ -11,6 +11,7 @@
 #   fm-procevent-remote-reply.sh source-id <secondmate-id>
 #   fm-procevent-remote-reply.sh relisten
 #   fm-procevent-remote-reply.sh retire <secondmate-id>
+#   fm-procevent-remote-reply.sh retired <secondmate-id>
 #
 # `arm` registers one blocking, non-destructive delta source for the remote
 # home's state/parent-replies.status log. The process-event runner owns blocking,
@@ -97,7 +98,7 @@ DOCUMENT_LOCAL_FAILURE=2
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,67p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 sha256_file() {
   if command -v shasum >/dev/null 2>&1; then
@@ -799,6 +800,19 @@ cmd_retire_finalize_locked() {
   rm -f -- "$(fm_pending_reply_remote_channel_watermark_path "$STATE" "$id")"
 }
 
+# `retired` answers whether this home finished retiring a remote secondmate of
+# that id and has not armed its reply source again since: the retirement count
+# is positive and no cursor exists. Read-only. It is what lets the parent tell a
+# rerun of a finished retirement apart from a record that was never there.
+cmd_retired() {
+  local id=${1:-} cursor
+  validate_id "$id"
+  cursor=$(cursor_path "$id")
+  [ ! -e "$cursor" ] && [ ! -L "$cursor" ] || return 1
+  read_retirement_count "$id"
+  [ "$RETIREMENT_COUNT" -gt 0 ]
+}
+
 cmd_retire() {
   local id=${1:-} force=${2:-} lock
   validate_id "$id"
@@ -837,6 +851,7 @@ case "${1:-}" in
   source-id) shift; [ "$#" -eq 1 ] || usage; source_id "$1" ;;
   relisten) shift; [ "$#" -eq 0 ] || usage; exit 0 ;;
   retire) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_retire "$@" ;;
+  retired) shift; [ "$#" -eq 1 ] || usage; cmd_retired "$@" ;;
   retire-quiesce-locked) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; require_parent_lifecycle_lock "$1"; cmd_retire_quiesce_locked "$@" ;;
   retire-finalize-locked) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; require_parent_lifecycle_lock "$1"; cmd_retire_finalize_locked "$@" ;;
   ''|-h|--help|help) usage ;;

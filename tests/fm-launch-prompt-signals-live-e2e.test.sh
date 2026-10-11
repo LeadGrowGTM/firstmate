@@ -32,6 +32,13 @@
 # worktree, the state of a freshly provisioned host whose account has never
 # accepted the confirmation, and it never touches the operator's own store.
 #
+# Both Claude dialogs are driven a second time in a 54-column pane, the width a
+# remote host's agent pane has with no client attached. There Claude Code breaks
+# each dialog's question across two rendered lines, which is the shape the
+# signatures missed on a real host, so each narrow arm first requires the
+# capture to hold no single line carrying the whole question (otherwise it
+# proved nothing) and then requires the same verdict.
+#
 # Precondition: this machine's default `claude` config must already be past
 # first-run onboarding (a subscription or API key already selected, and a
 # theme already chosen) - the guard targets a brand-new SCRATCH WORKTREE under
@@ -103,6 +110,8 @@ watcher_gate_not_busy() {  # <lab> <state> <target> <harness> <tail>
 # launch-prompt. Never answers the dialog: Escape only, never Enter.
 # A caller that must write something keyed to the lab before the launch names
 # a function in LAB_PREP, which is called with the lab directory.
+# A caller that needs a pane narrower than tmux's 80-column default names the
+# width in LAB_COLS.
 #
 # Writes the captured tail to <tail-out> rather than returning it on stdout:
 # a caller that needs the tail (the Pi case, which reuses it for pi-signed and
@@ -113,7 +122,9 @@ watcher_gate_not_busy() {  # <lab> <state> <target> <harness> <tail>
 check_harness() {  # <harness> <session> <extra-path> <extra-content> <expect-regex> <tail-out> <cmd...>
   local harness=$1 session=$2 extra_path=$3 extra_content=$4 expect=$5 tail_out=$6
   local target="$session:w" lab state tail out
+  local -a size=()
   shift 6
+  [ -z "${LAB_COLS:-}" ] || size=(-x "$LAB_COLS" -y 24)
   lab=$(mktemp -d "${TMPDIR:-/tmp}/fm-launch-prompt-$harness.XXXXXX") || fail "$harness: could not create the isolated lab"
   LABS+=("$lab")
   mkdir -p "$lab/wt"
@@ -125,7 +136,7 @@ check_harness() {  # <harness> <session> <extra-path> <extra-content> <expect-re
 
   [ -z "${LAB_PREP:-}" ] || "$LAB_PREP" "$lab" || fail "$harness: could not prepare the isolated lab"
 
-  "$REAL_TMUX" -L "$SOCKET" new-session -d -s "$session" -n w -c "$lab/wt" -- "$@" \
+  "$REAL_TMUX" -L "$SOCKET" new-session -d ${size[@]+"${size[@]}"} -s "$session" -n w -c "$lab/wt" -- "$@" \
     || fail "$harness: could not launch the real binary"
 
   tail=''
@@ -181,6 +192,32 @@ if [ -x "${CLAUDE_BIN:-}" ]; then
   fm_busy_launch_prompt_name claude < "$CLAUDE_BYPASS_TAIL" | grep -q 'Bypass Permissions' \
     || fail "claude: the real Bypass Permissions dialog was not named for the person who has to answer it"
   pass "claude: a real launch parked on its own rendered Bypass Permissions dialog surfaces through the watcher gate and is named"
+
+  # require_wrapped: the narrow capture must not hold <question> on one line.
+  require_wrapped() {  # <tail-file> <question-regex> <dialog>
+    [ -s "$1" ] || fail "claude: the 54-column $3 capture is empty"
+    ! grep -qiE "$2" "$1" \
+      || fail "claude: the 54-column pane rendered the $3 question on one line, so the narrow arm proved nothing"
+  }
+  CLAUDE_NARROW_TRUST_TAIL=$(mktemp "${TMPDIR:-/tmp}/fm-launch-prompt-claude-tail.XXXXXX") || fail "claude: could not create the tail capture file"
+  LABS+=("$CLAUDE_NARROW_TRUST_TAIL")
+  CLAUDE_NARROW_BYPASS_TAIL=$(mktemp "${TMPDIR:-/tmp}/fm-launch-prompt-claude-tail.XXXXXX") || fail "claude: could not create the tail capture file"
+  LABS+=("$CLAUDE_NARROW_BYPASS_TAIL")
+  LAB_COLS=54
+  check_harness claude fm-lp-claude-narrow-$$ '' '' \
+    'Yes, I trust this folder' "$CLAUDE_NARROW_TRUST_TAIL" \
+    "$CLAUDE_BIN" --dangerously-skip-permissions hello
+  require_wrapped "$CLAUDE_NARROW_TRUST_TAIL" 'Is this a project you created or one you trust' 'trust dialog'
+  LAB_PREP=claude_bypass_prep
+  check_harness claude fm-lp-claude-bypass-narrow-$$ '' '' \
+    'Yes, I accept' "$CLAUDE_NARROW_BYPASS_TAIL" \
+    env CLAUDE_CONFIG_DIR="$CLAUDE_BYPASS_CFG" "$CLAUDE_BIN" --dangerously-skip-permissions hello
+  LAB_PREP=
+  LAB_COLS=
+  require_wrapped "$CLAUDE_NARROW_BYPASS_TAIL" 'Claude Code running in Bypass Permissions mode' 'Bypass Permissions dialog'
+  fm_busy_launch_prompt_name claude < "$CLAUDE_NARROW_BYPASS_TAIL" | grep -q 'Bypass Permissions' \
+    || fail "claude: the real Bypass Permissions dialog wrapped at 54 columns was not named for the person who has to answer it"
+  pass "claude: both dialogs wrapped across lines in a 54-column pane still surface through the watcher gate"
 else
   note "claude not installed - launch-prompt signature not checked"
 fi
