@@ -494,6 +494,97 @@ SH
   pass "a pool inside the home or the project clone is refused before leasing"
 }
 
+test_a_configured_root_or_pool_link_inside_the_home_is_refused_before_leasing() {
+  local root=$TMP_ROOT/effective user home project state inside outside
+  local err out rc pool hash base physical fake log
+  user=$root/user
+  home=$root/home
+  project=$root/project
+  state=$root/xdg
+  inside=$home/state/actual-pool
+  outside=$root/outside-root
+  mkdir -p "$user" "$home/state" "$project" "$state" "$inside" "$outside"
+  git -C "$project" init -q
+
+  # An absolute root inside the home selects that directory, then .treehouse.
+  printf 'root = "%s"\n' "$inside" > "$project/treehouse.toml"
+  err=$root/config.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+    "$home" "$project" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a treehouse.toml root inside the home was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "a configured-root refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "$inside/.treehouse" \
+    "the refusal did not name the pool selected by the clone root"
+  assert_contains "$(cat "$err")" "inside Firstmate home" \
+    "the configured-root refusal did not say the pool is inside the home"
+  assert_contains "$(cat "$err")" "refusing to place a worker there" \
+    "the configured-root refusal did not say it will not place a worker"
+  [ ! -e "$inside/.treehouse" ] || fail "a refused root created a pool inside the home"
+  [ ! -e "$state/firstmate" ] || fail "a refused root created the per-home directory"
+
+  # A root outside the home and the clone still names the per-home directory.
+  printf 'root = "%s"\n' "$outside" > "$project/treehouse.toml"
+  out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+    "$home" "$project") || fail "a root outside the home and the clone was refused"$'\n'"$out"
+  physical=$(CDPATH='' cd -- "$home" && pwd -P)
+  hash=$(pool_hash6 "$physical")
+  base=$(basename -- "$physical")
+  assert_equals "$state/firstmate/${base}-$hash" "$out" \
+    "a safe root did not keep the per-home directory"
+
+  # A root inside the clone is the same refusal, against the clone.
+  mkdir -p "$project/nested"
+  printf 'root = "nested"\n' > "$project/treehouse.toml"
+  err=$root/clone.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+    "$home" "$project" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a treehouse.toml root inside the clone was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "a clone-root refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "inside project clone" \
+    "the clone-root refusal did not say the pool is inside the clone"
+  [ ! -e "$project/nested/.treehouse" ] || fail "a refused clone root created a pool"
+
+  # The per-home directory can sit outside while its .treehouse link points in.
+  rm -f -- "$project/treehouse.toml"
+  pool=$state/firstmate/${base}-$hash
+  mkdir -p "$pool"
+  ln -s "$inside" "$pool/.treehouse"
+  err=$root/link.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+    "$home" "$project" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a .treehouse link into the home was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "a pool-link refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "$inside" \
+    "the pool-link refusal did not name the physical directory"
+  assert_contains "$(cat "$err")" "inside Firstmate home" \
+    "the pool-link refusal did not say the pool is inside the home"
+
+  fake=$root/fake
+  log=$root/treehouse.log
+  mkdir -p "$fake"
+  cat > "$fake/treehouse" <<SH
+#!/usr/bin/env bash
+printf 'invoked\n' >> '$log'
+exit 0
+SH
+  chmod +x "$fake/treehouse"
+  : > "$log"
+  err=$root/run.err
+  rc=0
+  out=$(cd "$project" && PATH="$fake:$PATH" FM_TEST_XDG_STATE="$state" \
+    lib "$home" "$user" fm_treehouse_home_pool_run "$home" 30 get --lease 2>"$err") || rc=$?
+  expect_code 1 "$rc" "the lease runner followed a pool link into the home"$'\n'"$out"
+  assert_not_contains "$out" "invoked" "treehouse ran after the pool link was refused"
+  [ ! -s "$log" ] || fail "treehouse was invoked after the pool link was refused: $(cat "$log")"
+  assert_contains "$(cat "$err")" "inside Firstmate home" \
+    "the lease runner did not report the plain refusal"
+  [ ! -e "$inside/clone-b733ad" ] || fail "the lease runner created a worktree inside the home"
+  pass "a clone root or pool link inside the home is refused before leasing"
+}
+
 test_shasum_only_path_names_the_pool_from_the_home() {
   local root=$TMP_ROOT/shasum-only user home binpool cmd target out rc=0
   local physical hash base
@@ -551,6 +642,7 @@ test_spawn_refuses_a_pool_inside_the_home_with_a_plain_reason() {
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
 test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
 test_a_pool_inside_the_home_or_the_clone_is_refused_before_leasing
+test_a_configured_root_or_pool_link_inside_the_home_is_refused_before_leasing
 test_shasum_only_path_names_the_pool_from_the_home
 test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
 test_spawn_refuses_a_pool_inside_the_home_with_a_plain_reason

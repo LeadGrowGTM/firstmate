@@ -1182,8 +1182,8 @@ A reported finding is a recommendation, not cleanup authority.
 Treehouse still keys its default pool by directory name plus origin, so two clones with the same name and origin are offered one pool.
 A launch asks that pool first and keeps the copy only when it is a worktree of the spawning clone, which is what a single home always gets.
 When treehouse hands it another clone's idle copy, the launch leaves that copy at once and leases a worktree of its own clone from this home's own pool instead.
-That pool lives under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/` and must be outside the spawning home and project clone, so a worker there does not load that home's instructions.
-When that path resolves inside the Firstmate home or the project clone, the lease is refused and no other location is chosen.
+That pool lives under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/` unless the clone's treehouse.toml root selects another directory, and it must be outside the spawning home and project clone, so a worker there does not load that home's instructions.
+When the pool treehouse will use resolves inside the spawning home or the project clone, after that root setting and after links, the lease is refused and no other location is chosen.
 `<home>` is the home's folder name and `<hash>` is the first six hex digits of the sha256 of the home's absolute path, so two homes with one folder name stay apart.
 The one effect on the other home's pool is that treehouse resets the idle copy it offered to the default branch before handing it over, and takes it back unleased when the launch leaves it; no copy is added there.
 Treehouse reads the pool location from `HOME`, so that lease and its prune run treehouse with `HOME` set to the pool folder, while every git process it starts keeps the operator's `HOME`, git configuration, and credential helpers.

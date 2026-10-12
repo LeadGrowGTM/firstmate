@@ -1637,18 +1637,199 @@ _fm_treehouse_path_inside() {  # <path> <root>
   return 1
 }
 
+# The value of one treehouse.toml root assignment, without its quotes.
+# Returns 1 when the assignment is not a plain quoted or bare value.
+_fm_treehouse_toml_value() {  # <text-after-equals>
+  local rest=$1 body
+  case "$rest" in
+    \"*)
+      [[ "$rest" =~ ^\"((\\.|[^\\\"])*)\" ]] || return 1
+      body=${BASH_REMATCH[1]}
+      _fm_treehouse_unescape "$body"
+      ;;
+    \'*)
+      [[ "$rest" =~ ^\'([^\']*)\' ]] || return 1
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      ;;
+    *)
+      [[ "$rest" =~ ^([^[:space:]#]+) ]] || return 1
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      ;;
+  esac
+}
+
+_fm_treehouse_unescape() {  # <quoted-body>
+  local s=$1
+  local out=''
+  local ch nxt
+  while [ -n "$s" ]; do
+    ch=${s%"${s#?}"}
+    s=${s#?}
+    case "$ch" in
+      \\)
+        if [ -n "$s" ]; then
+          nxt=${s%"${s#?}"}
+          s=${s#?}
+          out=$out$nxt
+        else
+          out=$out$ch
+        fi
+        ;;
+      *) out=$out$ch ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+# Print the clone file's root, or nothing when the file or key is absent.
+# The last root assignment wins. A value that cannot be read fails closed.
+_fm_treehouse_toml_root() {  # <file>
+  local file=$1 line trimmed rest val found=0
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed=$line
+    while [ -n "$trimmed" ]; do
+      case "$trimmed" in
+        [[:space:]]*) trimmed=${trimmed#?} ;;
+        *) break ;;
+      esac
+    done
+    case "$trimmed" in
+      ''|'#'*) continue ;;
+      root*) rest=${trimmed#root} ;;
+      *) continue ;;
+    esac
+    case "$rest" in
+      [[:space:]]*|'='*) ;;
+      *) continue ;;
+    esac
+    while [ -n "$rest" ]; do
+      case "$rest" in
+        [[:space:]]*) rest=${rest#?} ;;
+        *) break ;;
+      esac
+    done
+    case "$rest" in
+      '='*) rest=${rest#=} ;;
+      *) return 1 ;;
+    esac
+    while [ -n "$rest" ]; do
+      case "$rest" in
+        [[:space:]]*) rest=${rest#?} ;;
+        *) break ;;
+      esac
+    done
+    val=$(_fm_treehouse_toml_value "$rest") || {
+      printf 'error: could not read the treehouse root in %s; refusing to place a worker there\n' \
+        "$file" >&2
+      return 1
+    }
+    found=1
+  done < "$file"
+  if [ "$found" -eq 1 ]; then
+    printf '%s\n' "$val"
+  fi
+}
+
+# Go's environment expansion for a root value: $NAME and ${NAME}.
+_fm_treehouse_expand_env() {  # <text>
+  local s=$1
+  local out=''
+  local ch name
+  while [ -n "$s" ]; do
+    case "$s" in
+      '$'*)
+        s=${s#\$}
+        name=
+        case "$s" in
+          '{'*)
+            s=${s#\{}
+            name=${s%%\}*}
+            [ "$name" != "$s" ] || return 1
+            s=${s#*"$name"}
+            s=${s#\}}
+            ;;
+          [A-Za-z_]*)
+            while [ -n "$s" ]; do
+              ch=${s%"${s#?}"}
+              case "$ch" in
+                [A-Za-z0-9_]) name=$name$ch; s=${s#?} ;;
+                *) break ;;
+              esac
+            done
+            ;;
+          *)
+            out=$out'$'
+            continue
+            ;;
+        esac
+        if [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+          out=$out${!name-}
+        fi
+        ;;
+      *)
+        out=$out${s%%\$*}
+        if [ "$s" = "${s#*\$}" ]; then
+          break
+        fi
+        s=\$${s#*\$}
+        ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+# The pool directory treehouse will use: the clone's root setting when it has
+# one, otherwise <synthetic>/.treehouse. Links are resolved. Creates nothing.
+_fm_treehouse_effective_pool() {  # <synthetic-dir> <project-or-empty>
+  local synthetic=$1 project=${2:-} repo top raw expanded base
+  repo=
+  if [ -n "$project" ]; then
+    repo=$project
+    if top=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null); then
+      repo=$(CDPATH='' cd -- "$top" && pwd -P) || return 1
+    fi
+  fi
+  if [ -n "$repo" ] && [ -f "$repo/treehouse.toml" ]; then
+    raw=$(_fm_treehouse_toml_root "$repo/treehouse.toml") || return 1
+    if [ -n "$raw" ]; then
+      expanded=$(HOME=$synthetic _fm_treehouse_expand_env "$raw") || {
+        printf 'error: could not read the treehouse root in %s; refusing to place a worker there\n' \
+          "$repo/treehouse.toml" >&2
+        return 1
+      }
+      if [ -z "$expanded" ]; then
+        base=$repo
+      else
+        case "$expanded" in
+          /*) base=$expanded ;;
+          *) base=$repo/$expanded ;;
+        esac
+      fi
+      while [ "$base" != / ] && [ "${base%/}" != "$base" ]; do
+        base=${base%/}
+      done
+      _fm_treehouse_resolve_dir "$base/.treehouse"
+      return
+    fi
+  fi
+  _fm_treehouse_resolve_dir "$synthetic/.treehouse"
+}
+
 # Treehouse keys its default pool by directory name plus origin, so two homes
 # that clone one origin are offered one pool. A home that is handed another
 # clone's copy leases from a pool of its own instead. That pool sits under the
 # user state directory, outside the spawning home and project clone, so a
 # worker in it loads no instructions from that home. The folder is the home's
 # name plus the first 6 hex digits of the sha256 of its physical path, which keeps
-# two homes of one name apart. Treehouse puts its pools in `.treehouse` there.
-# The destination is resolved physically before anything is created. When it
-# lands inside the spawning home, or inside the project clone when one is
-# given, this refuses and prints no path; no other location is chosen.
+# two homes of one name apart. Treehouse puts its pools in `.treehouse` there,
+# unless the clone's treehouse.toml root selects another directory and then
+# joins `.treehouse`. The check uses that selected directory after links
+# resolve, not the folder named above. When the resolved pool is inside the
+# spawning home, or inside the project clone when one is given, this refuses
+# and prints no path; no other location is chosen.
 fm_treehouse_home_pool() {  # <fm-home> [project]
-  local home state hex pool project base
+  local home state hex pool project base effective
   [ -n "${1:-}" ] || return 1
   home=$(CDPATH='' cd -- "$1" 2>/dev/null && pwd -P) || return 1
   state=${XDG_STATE_HOME:-}
@@ -1670,18 +1851,20 @@ fm_treehouse_home_pool() {  # <fm-home> [project]
   [ "${#hex}" -ge 6 ] || return 1
   base=$(basename -- "$home") || return 1
   pool=$(_fm_treehouse_resolve_dir "$state/firstmate/${base}-${hex:0:6}") || return 1
-  if _fm_treehouse_path_inside "$pool" "$home"; then
-    printf 'error: per-home treehouse pool %s is inside Firstmate home %s; refusing to place a worker there\n' \
-      "$pool" "$home" >&2
-    return 1
-  fi
+  project=
   if [ -n "${2:-}" ]; then
     project=$(CDPATH='' cd -- "$2" 2>/dev/null && pwd -P) || return 1
-    if _fm_treehouse_path_inside "$pool" "$project"; then
-      printf 'error: per-home treehouse pool %s is inside project clone %s; refusing to place a worker there\n' \
-        "$pool" "$project" >&2
-      return 1
-    fi
+  fi
+  effective=$(_fm_treehouse_effective_pool "$pool" "$project") || return 1
+  if _fm_treehouse_path_inside "$effective" "$home"; then
+    printf 'error: per-home treehouse pool %s is inside Firstmate home %s; refusing to place a worker there\n' \
+      "$effective" "$home" >&2
+    return 1
+  fi
+  if [ -n "$project" ] && _fm_treehouse_path_inside "$effective" "$project"; then
+    printf 'error: per-home treehouse pool %s is inside project clone %s; refusing to place a worker there\n' \
+      "$effective" "$project" >&2
+    return 1
   fi
   printf '%s\n' "$pool"
 }
@@ -1695,9 +1878,10 @@ fm_treehouse_home_pool() {  # <fm-home> [project]
 fm_treehouse_home_pool_run() {  # <fm-home> <seconds> <treehouse-args...>
   local pool seconds=$2 git project home
   [ -n "${HOME:-}" ] || return 1
-  # The caller is already in the project clone. Refuse a pool inside that
-  # clone or the home before creating the directory or starting treehouse.
-  # home is saved because shift below discards the function's own arguments.
+  # The caller is already in the project clone. Refuse the pool treehouse
+  # will use, after that clone's root setting and after links, when it is
+  # inside the clone or the home. Do this before creating the directory or
+  # starting treehouse. home is saved because shift discards the arguments.
   home=$1
   project=$(pwd -P) || return 1
   pool=$(fm_treehouse_home_pool "$home" "$project") || return 1
