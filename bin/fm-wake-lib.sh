@@ -1590,10 +1590,34 @@ fm_treehouse_same_clone() {  # <project-dir> <worktree>
 }
 
 _fm_treehouse_resolve_dir() {  # <path>
-  local path
+  local path dir tail base
   [ -n "$1" ] || return 1
-  path=$(realpath -m -s -- "$1") || return 1
-  realpath -m -- "$path"
+  path=$(python3 -c 'import os, sys; print(os.path.normpath(sys.argv[1]))' "$1") || return 1
+  if [ -d "$path" ]; then
+    (CDPATH='' cd -- "$path" && pwd -P)
+    return
+  fi
+  dir=$path
+  tail=
+  while [ ! -d "$dir" ]; do
+    case "$dir" in
+      /|.) return 1 ;;
+    esac
+    base=${dir##*/}
+    [ -n "$base" ] || return 1
+    if [ -n "$tail" ]; then
+      tail=$base/$tail
+    else
+      tail=$base
+    fi
+    case "$dir" in
+      */*) dir=${dir%/*} ;;
+      *) dir=. ;;
+    esac
+    [ -n "$dir" ] || dir=/
+  done
+  dir=$(CDPATH='' cd -- "$dir" && pwd -P) || return 1
+  printf '%s/%s\n' "${dir%/}" "$tail"
 }
 
 # True when path is root or a directory under it. A shared string prefix with

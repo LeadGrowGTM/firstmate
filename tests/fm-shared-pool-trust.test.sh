@@ -613,7 +613,7 @@ test_shasum_only_path_names_the_pool_from_the_home() {
   home=$root/crew
   binpool=$root/bin
   mkdir -p "$home" "$user" "$binpool"
-  for cmd in bash env uname mkdir awk basename realpath shasum; do
+  for cmd in bash env uname mkdir awk basename python3 shasum; do
     target=$(command -v "$cmd") || fail "$cmd is not installed"
     ln -s "$target" "$binpool/$cmd"
   done
