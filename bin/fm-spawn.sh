@@ -1328,6 +1328,12 @@ SPAWN_CREW_RESERVATION=
 SPAWN_ENDPOINT_CLOSED=0
 
 spawn_fresh_commit_rollback() {
+  if [ -n "$SPAWN_CREW_RESERVATION" ] && [ "$SPAWN_LAUNCH_SENT" = 1 ] &&
+    [ "$SPAWN_ENDPOINT_CLOSED" != 1 ]; then
+    FM_BACKLOG_TRANSITION_ERROR="launch delivery for $ID may have started a worker; preserving its task and busy records"
+    echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    return 1
+  fi
   if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
     "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
     SPAWN_FRESH_COMMIT_PENDING=0
@@ -1356,6 +1362,14 @@ parse_orca_worktree_result() {
 
 spawn_abort_cleanup() {
   local status=$?
+  if [ "$status" -ne 0 ] && [ "$SPAWN_LAUNCH_SENT" = 1 ] &&
+    [ -n "$SPAWN_CREW_RESERVATION" ] &&
+    [ -n "${LAUNCH_FILE:-}" ] &&
+    mv -- "$LAUNCH_FILE" "$LAUNCH_STAGE" 2>/dev/null; then
+    rm -f -- "$LAUNCH_STAGE"
+    spawn_send_key "$T" C-c 2>/dev/null || true
+    SPAWN_LAUNCH_SENT=0
+  fi
   if [ -n "$SPAWN_CREW_RESERVATION" ] && [ "$SPAWN_LAUNCH_SENT" = 0 ]; then
     rm -f -- "$SPAWN_CREW_RESERVATION"
   fi
@@ -5674,8 +5688,8 @@ if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
   exit 1
 fi
 if [ -n "$SPAWN_CREW_RESERVATION" ]; then
-  LAUNCH="( set +e; ( $LAUNCH
-); fm_crew_status=\$?; rm -f -- $(shell_quote "$SPAWN_CREW_RESERVATION"); exit \"\$fm_crew_status\" )"
+  LAUNCH="mv -- $(shell_quote "$LAUNCH_FILE") $(shell_quote "$LAUNCH_FILE.started") && ( set +e; ( $LAUNCH
+); fm_crew_status=\$?; rm -f -- $(shell_quote "$SPAWN_CREW_RESERVATION") $(shell_quote "$LAUNCH_FILE.started"); exit \"\$fm_crew_status\" )"
 fi
 if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   chmod 0600 "$LAUNCH_STAGE" && mv -f "$LAUNCH_STAGE" "$LAUNCH_FILE"); then

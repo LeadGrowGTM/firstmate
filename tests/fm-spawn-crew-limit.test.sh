@@ -239,6 +239,141 @@ SH
   pass "launch delivery is serialized and its reservation lasts through buffered startup"
 }
 
+test_failed_delivery_releases_only_unstarted_launches() {
+  local mode route dir home project wt fb id out status reservation attempts
+  for route in fresh relaunch; do
+    for mode in literal enter started; do
+      dir="$TMP_ROOT/failure-$route-$mode"
+      home="$dir/home"
+      project="$dir/project"
+      wt="$dir/wt"
+      id="crew-fail-$route-$mode-$$"
+      fb=$(fm_test_make_spawn_fakebin "$dir/fake" gh gh-axi no-mistakes)
+      fm_test_spawn_home "$home" codex
+      fm_git_worktree "$project" "$wt" "failure-$route-$mode"
+      fm_test_spawn_brief "$home" "$id"
+      mv "$fb/tmux" "$fb/tmux-delegate"
+      cat > "$fb/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *pane_current_command*) printf 'bash\n'; exit 0 ;;
+  *pane_tty*) exit 0 ;;
+esac
+if [ "${1:-}" = send-keys ] && [ "${4:-}" = -l ]; then
+  payload=${5:-}
+  case "$payload" in
+    ". '"*"'")
+      printf '%s\n' "$payload" > "$FM_FAIL_DIR/command"
+      printf '%s\n' "$payload" > "$FM_FAIL_DIR/buffer"
+      staged=${payload#". '"}
+      staged=${staged%"'"}
+      cp "$staged" "$FM_FAIL_DIR/parsed-command"
+      printf '%s\n' "$FM_FAIL_HOME/state/$FM_FAIL_ID".crew-* > "$FM_FAIL_DIR/reservation"
+      [ "$FM_FAIL_MODE" != literal ] || exit 23
+      ;;
+  esac
+fi
+if [ "${1:-}" = send-keys ] && [ "${4:-}" = C-c ]; then
+  reservation=$(cat "$FM_FAIL_DIR/reservation")
+  [ -f "$reservation" ] || exit 26
+  rm -f "$FM_FAIL_DIR/buffer"
+fi
+if [ "${1:-}" = send-keys ] && [ "${4:-}" = Enter ] && [ -f "$FM_FAIL_DIR/command" ]; then
+  case "$FM_FAIL_MODE" in
+    enter) exit 24 ;;
+    started)
+      bash "$FM_FAIL_DIR/command" > "$FM_FAIL_DIR/worker.out" 2>&1 < /dev/null &
+      attempts=0
+      while [ ! -e "$FM_FAIL_DIR/started" ] && [ "$attempts" -lt 200 ]; do
+        /bin/sleep 0.05
+        attempts=$((attempts + 1))
+      done
+      [ -e "$FM_FAIL_DIR/started" ] || exit 25
+      exit 24
+      ;;
+  esac
+fi
+exec "$(dirname "$0")/tmux-delegate" "$@"
+SH
+      cat > "$fb/codex" <<'SH'
+#!/bin/sh
+[ "${FM_FAIL_MODE:-}" = started ] || exit 7
+touch "$FM_FAIL_DIR/started"
+attempts=0
+while [ ! -e "$FM_FAIL_DIR/stop" ] && [ "$attempts" -lt 400 ]; do
+  /bin/sleep 0.05
+  attempts=$((attempts + 1))
+done
+exit 7
+SH
+      chmod +x "$fb/tmux" "$fb/codex"
+      if [ "$route" = relaunch ]; then
+        status=0
+        out=$(FM_FAIL_DIR="$dir" FM_FAIL_HOME="$home" FM_FAIL_ID="$id" FM_FAIL_MODE=none FM_BACKEND=tmux \
+          fm_test_run_spawn "$home" "$wt" "$fb" "$id" "$project" --mode no-mistakes --yolo off) || status=$?
+        expect_code 0 "$status" "could not seed relaunch fixture: $out"
+        (cd "$wt" && PATH="$fb:$PATH" bash "$dir/command") > "$dir/seed.out" 2>&1 || true
+        rm -f "$dir/command"
+      fi
+      status=0
+      if [ "$route" = fresh ]; then
+        out=$(FM_FAIL_DIR="$dir" FM_FAIL_HOME="$home" FM_FAIL_ID="$id" FM_FAIL_MODE="$mode" FM_BACKEND=tmux \
+          fm_test_run_spawn "$home" "$wt" "$fb" "$id" "$project" --mode no-mistakes --yolo off) || status=$?
+      else
+        out=$(FM_FAIL_DIR="$dir" FM_FAIL_HOME="$home" FM_FAIL_ID="$id" FM_FAIL_MODE="$mode" \
+          FM_FAKE_DUPLICATE_WINDOW="fm-$id" FM_BACKEND=tmux \
+          fm_test_run_spawn "$home" "$wt" "$fb" "$id" --relaunch) || status=$?
+      fi
+      if [ "$mode" = literal ]; then
+        expect_code 23 "$status" "$route literal failure was not preserved: $out"
+      else
+        if [ "$route" = fresh ] && [ "$mode" = started ]; then
+          expect_code 1 "$status" "running worker preservation was not reported: $out"
+        else
+          expect_code 24 "$status" "$route Enter failure was not preserved: $out"
+        fi
+      fi
+      reservation=$(cat "$dir/reservation")
+      if [ "$mode" = started ]; then
+        [ -f "$reservation" ] || fail "$route transport error released a running worker's reservation"
+        [ -f "$home/state/$id.meta" ] || fail "$route transport error removed a running worker's task record"
+        write_live "$home" occupied-a ship
+        out=$(FM_FAIL_DIR="$dir" FM_FAIL_HOME="$home" FM_FAIL_ID="$id" FM_FAIL_MODE=none \
+          FM_FAKE_DUPLICATE_WINDOW="fm-$id" FM_BACKEND=tmux \
+          fm_test_run_spawn "$home" "$wt" "$fb" next-c "$project" --mode no-mistakes --yolo off) || true
+        assert_contains "$out" "at most two crews" "$route failed transport hid a started worker from admission: $out"
+        touch "$dir/stop"
+        attempts=0
+        while [ -e "$reservation" ] && [ "$attempts" -lt 200 ]; do
+          /bin/sleep 0.05
+          attempts=$((attempts + 1))
+        done
+        assert_absent "$reservation" "$route completed worker retained its reservation"
+      else
+        assert_absent "$reservation" "$route $mode failure stranded its reservation"
+        assert_absent "$dir/buffer" "$route $mode failure left buffered shell input"
+        status=0
+        (cd "$wt" && FM_FAIL_DIR="$dir" FM_FAIL_MODE=started PATH="$fb:$PATH" bash "$dir/command") > "$dir/delayed.out" 2>&1 || status=$?
+        [ "$status" -ne 0 ] || fail "cancelled source line still succeeded"
+        status=0
+        (cd "$wt" && FM_FAIL_DIR="$dir" FM_FAIL_MODE=started PATH="$fb:$PATH" bash "$dir/parsed-command") > "$dir/parsed.out" 2>&1 || status=$?
+        [ "$status" -ne 0 ] || fail "already parsed cancelled command still succeeded"
+        assert_absent "$dir/started" "a delayed cancelled command launched a worker"
+        if [ "$route" = relaunch ]; then
+          rm -f "$dir/command"
+          status=0
+          out=$(FM_FAIL_DIR="$dir" FM_FAIL_HOME="$home" FM_FAIL_ID="$id" FM_FAIL_MODE=none \
+            FM_FAKE_DUPLICATE_WINDOW="fm-$id" FM_BACKEND=tmux \
+            fm_test_run_spawn "$home" "$wt" "$fb" "$id" --relaunch) || status=$?
+          expect_code 0 "$status" "cancelled $mode delivery prevented recovery: $out"
+          (cd "$wt" && PATH="$fb:$PATH" bash "$dir/command") > "$dir/recovered.out" 2>&1 || true
+        fi
+      fi
+      pass "$route $mode delivery failure preserves only a started worker's slot"
+    done
+  done
+}
+
 test_third_live_crew_is_refused
 test_scouts_count_and_secondmates_do_not
 test_other_home_is_not_counted
@@ -246,5 +381,6 @@ test_uncertain_endpoints_consume_one_slot
 test_dead_and_pending_records
 test_relaunch_takes_admission_lock
 test_launch_reservation_lifetime
+test_failed_delivery_releases_only_unstarted_launches
 
 echo "# all fm-spawn-crew-limit tests passed"
