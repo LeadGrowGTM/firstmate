@@ -363,8 +363,50 @@ SH
     "$(calls "$world")" "a home pool holding no pool of this clone was still pruned"
 }
 
+test_sweep_sizes_a_configured_root_once_and_refuses_a_home_root() {
+  local world home project configured unsafe out rc=0
+  world=$(make_world configured-root)
+  home=$(make_home "$world" home alpha)
+  project=$home/projects/alpha
+  configured=$world/configured
+  unsafe=$home/state/unsafe
+  mkdir -p "$configured/.treehouse/alpha-0a1b2c"
+  printf 'root = "%s"\n' "$configured" > "$project/treehouse.toml"
+  printf '%s\n' "$configured/.treehouse" > "$world/fake/configured-root"
+  cat > "$world/fakebin/du" <<'SH'
+#!/usr/bin/env bash
+dir=${FAKE_TREEHOUSE_DIR:?}
+target=${@: -1}
+printf '%s\n' "$target" >> "$dir/du-log"
+if [ "$target" = "$(cat "$dir/configured-root")" ]; then
+  printf '%s\t%s\n' "$((6 * 1048576))" "$target"
+else
+  printf '0\t%s\n' "$target"
+fi
+SH
+  chmod +x "$world/fakebin/du"
+  out=$(guard "$world" "$home" sweep 2>&1) || fail "configured-root sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $configured/.treehouse (limit 5 GB)" "$out" \
+    "the configured pool's size was not reported once"
+  assert_equals "$(printf '%s\t%s' "$project" 'prune --yes')" \
+    "$(calls "$world")" "the configured pool was pruned more than once"
+  assert_equals 1 "$(grep -Fxc -- "$configured/.treehouse" "$world/fake/du-log")" \
+    "the configured pool was measured more than once"
+
+  printf 'root = "%s"\n' "$unsafe" > "$project/treehouse.toml"
+  rc=0
+  out=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" bash -c \
+    'set -u; . "$1"; fm_treehouse_home_pool "$2" "$3"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home" "$project" 2>&1) || rc=$?
+  expect_code 1 "$rc" "a configured root inside the home was accepted"
+  assert_contains "$out" "inside Firstmate home" "the unsafe root was not refused"
+  [ ! -e "$unsafe/.treehouse" ] || fail "the unsafe root created a pool inside the home"
+}
+
 test_prune_runs_only_the_safe_prune_from_the_project
 test_prune_also_prunes_a_present_per_home_pool
+test_sweep_sizes_a_configured_root_once_and_refuses_a_home_root
 test_prune_refuses_a_directory_that_is_not_a_clone_root
 test_prune_failure_warns_and_exits_nonzero
 test_prune_bound_is_reported_as_a_prune_that_did_not_finish
