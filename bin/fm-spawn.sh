@@ -280,7 +280,9 @@
 #   When `treehouse get` hands the pane another clone's copy, the launch leaves
 #   that subshell, which returns the copy, and leases from this home's own pool
 #   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, outside every home and
-#   project). A lease that is still another clone is returned and the launch
+#   project). A location that resolves inside the spawning home or the project
+#   clone is refused before the lease, and no other location is chosen. A lease
+#   that is still another clone is returned and the launch
 #   stops. Relaunch resumes in the recorded worktree whichever clone it belongs
 #   to. Orca and secondmate launches do not use this pool.
 #   That placement is proven only at launch. Every ship or scout pane therefore
@@ -4537,6 +4539,9 @@ spawn_wait_left_path() {  # <path>
 spawn_lease_clone_worktree() {
   local errfile leased rc=0 bound=${FM_SPAWN_TREEHOUSE_LEASE_SECS:-600}
   case "$bound" in ''|*[!0-9]*|0*) bound=600 ;; esac
+  # Before the redirect below, so a refusal stays a plain reason rather than
+  # a line labeled as treehouse's own output. Nothing is created on refusal.
+  fm_treehouse_home_pool "$FM_HOME" "$PROJ_ABS" >/dev/null || return 1
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
     {

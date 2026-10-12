@@ -1589,6 +1589,54 @@ fm_treehouse_same_clone() {  # <project-dir> <worktree>
   [ "$project_common" = "$slot_common" ]
 }
 
+# Physical path of a directory, or of its deepest existing ancestor plus the
+# missing tail. Creates nothing. A symlink is resolved before that tail is
+# appended, so a state directory linked inside a home is still inside it.
+_fm_treehouse_resolve_dir() {  # <path>
+  local path=$1 dir tail base
+  [ -n "$path" ] || return 1
+  while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do
+    path=${path%/}
+  done
+  if [ -d "$path" ]; then
+    (CDPATH='' cd -- "$path" && pwd -P)
+    return
+  fi
+  dir=$path
+  tail=
+  while [ ! -d "$dir" ]; do
+    case "$dir" in
+      /|.) return 1 ;;
+    esac
+    base=${dir##*/}
+    [ -n "$base" ] || return 1
+    if [ -n "$tail" ]; then
+      tail=$base/$tail
+    else
+      tail=$base
+    fi
+    case "$dir" in
+      */*) dir=${dir%/*} ;;
+      *) dir=. ;;
+    esac
+    [ -n "$dir" ] || dir=/
+  done
+  dir=$(CDPATH='' cd -- "$dir" && pwd -P) || return 1
+  printf '%s/%s\n' "${dir%/}" "$tail"
+}
+
+# True when path is root or a directory under it. A shared string prefix with
+# no slash boundary is not inside: /tmp/crew-extra is not inside /tmp/crew.
+_fm_treehouse_path_inside() {  # <path> <root>
+  local path=$1 root=$2
+  [ -n "$path" ] && [ -n "$root" ] || return 1
+  [ "$path" = "$root" ] && return 0
+  case "$path" in
+    "$root"/*) return 0 ;;
+  esac
+  return 1
+}
+
 # Treehouse keys its default pool by directory name plus origin, so two homes
 # that clone one origin are offered one pool. A home that is handed another
 # clone's copy leases from a pool of its own instead. That pool sits under the
@@ -1596,8 +1644,11 @@ fm_treehouse_same_clone() {  # <project-dir> <worktree>
 # so a worker in it loads no home's instructions. The folder is the home's name
 # plus the first 6 hex digits of the sha256 of its physical path, which keeps
 # two homes of one name apart. Treehouse puts its pools in `.treehouse` there.
-fm_treehouse_home_pool() {  # <fm-home>
-  local home state hex
+# The destination is resolved physically before anything is created. When it
+# lands inside the spawning home, or inside the project clone when one is
+# given, this refuses and prints no path; no other location is chosen.
+fm_treehouse_home_pool() {  # <fm-home> [project]
+  local home state hex pool project base
   [ -n "${1:-}" ] || return 1
   home=$(CDPATH='' cd -- "$1" 2>/dev/null && pwd -P) || return 1
   state=${XDG_STATE_HOME:-}
@@ -1605,6 +1656,10 @@ fm_treehouse_home_pool() {  # <fm-home>
     [ -n "${HOME:-}" ] || return 1
     state=$HOME/.local/state
   fi
+  while [ "$state" != / ] && [ "${state%/}" != "$state" ]; do
+    state=${state%/}
+  done
+  [ -n "$state" ] || return 1
   if command -v sha256sum >/dev/null 2>&1; then
     hex=$(printf '%s' "$home" | sha256sum | awk '{ print $1 }') || return 1
   elif command -v shasum >/dev/null 2>&1; then
@@ -1613,7 +1668,22 @@ fm_treehouse_home_pool() {  # <fm-home>
     return 1
   fi
   [ "${#hex}" -ge 6 ] || return 1
-  printf '%s/firstmate/%s-%s\n' "$state" "$(basename -- "$home")" "${hex:0:6}"
+  base=$(basename -- "$home") || return 1
+  pool=$(_fm_treehouse_resolve_dir "$state/firstmate/${base}-${hex:0:6}") || return 1
+  if _fm_treehouse_path_inside "$pool" "$home"; then
+    printf 'error: per-home treehouse pool %s is inside Firstmate home %s; refusing to place a worker there\n' \
+      "$pool" "$home" >&2
+    return 1
+  fi
+  if [ -n "${2:-}" ]; then
+    project=$(CDPATH='' cd -- "$2" 2>/dev/null && pwd -P) || return 1
+    if _fm_treehouse_path_inside "$pool" "$project"; then
+      printf 'error: per-home treehouse pool %s is inside project clone %s; refusing to place a worker there\n' \
+        "$pool" "$project" >&2
+      return 1
+    fi
+  fi
+  printf '%s\n' "$pool"
 }
 
 # Run treehouse against this home's own pool, from the caller's directory,
@@ -1623,13 +1693,18 @@ fm_treehouse_home_pool() {  # <fm-home>
 # HOME back, so a fetch still finds the operator's git config and credential
 # helpers. A fetch that would prompt fails instead of waiting on a terminal.
 fm_treehouse_home_pool_run() {  # <fm-home> <seconds> <treehouse-args...>
-  local pool seconds=$2 git
+  local pool seconds=$2 git project home
   [ -n "${HOME:-}" ] || return 1
+  # The caller is already in the project clone. Refuse a pool inside that
+  # clone or the home before creating the directory or starting treehouse.
+  # home is saved because shift below discards the function's own arguments.
+  home=$1
+  project=$(pwd -P) || return 1
+  pool=$(fm_treehouse_home_pool "$home" "$project") || return 1
   _fm_wake_require_timeout || return 1
-  pool=$(fm_treehouse_home_pool "$1") || return 1
   shift 2
   mkdir -p -- "$pool" || return 1
-  pool=$(CDPATH='' cd -- "$pool" 2>/dev/null && pwd -P) || return 1
+  pool=$(fm_treehouse_home_pool "$home" "$project") || return 1
   git=$(type -P git) || return 1
   fm_run_timed "$seconds" env FM_TREEHOUSE_GIT="$git" FM_TREEHOUSE_GIT_HOME="$HOME" \
     PATH="$FM_WAKE_LIB_DIR/treehouse-git:$PATH" GIT_TERMINAL_PROMPT=0 HOME="$pool" \

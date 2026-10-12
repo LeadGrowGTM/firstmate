@@ -126,6 +126,20 @@ assert_outside() {  # <path> <dir> <msg>
   esac
 }
 
+# First six hex digits of the sha256 of a string. sha256sum wins when both
+# tools exist, matching the pool helper; shasum is the fallback.
+pool_hash6() {  # <text>
+  local hex
+  if command -v sha256sum >/dev/null 2>&1; then
+    hex=$(printf '%s' "$1" | sha256sum | awk '{ print $1 }') || fail "sha256sum failed"
+  elif command -v shasum >/dev/null 2>&1; then
+    hex=$(printf '%s' "$1" | shasum -a 256 | awk '{ print $1 }') || fail "shasum failed"
+  else
+    fail "sha256sum and shasum are both absent"
+  fi
+  printf '%s\n' "${hex:0:6}"
+}
+
 add_worktree() {  # <repo> <path> [branch]
   local repo=$1 path=$2 branch=${3:-}
   mkdir -p -- "$(dirname -- "$path")"
@@ -166,7 +180,7 @@ test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home() {
     || fail "the first home's pool could not be resolved"
   pool_second=$(lib "$second" "$user" fm_treehouse_home_pool "$second") \
     || fail "the second home's pool could not be resolved"
-  hash=$(printf '%s' "$first" | sha256sum | awk '{ print substr($1, 1, 6) }')
+  hash=$(pool_hash6 "$(CDPATH='' cd -- "$first" && pwd -P)")
   assert_equals "$user/.local/state/firstmate/crew-$hash" "$pool_first" \
     "the pool was not the home's name plus the hash of its path under the user state directory"
   assert_not_equals "$pool_first" "$pool_second" \
@@ -397,9 +411,149 @@ test_real_treehouse_leases_from_the_homes_own_pool_with_the_operators_git() {
   pass "real treehouse leases from the home's own pool and fetches as the operator"
 }
 
+test_a_pool_inside_the_home_or_the_clone_is_refused_before_leasing() {
+  local root=$TMP_ROOT/refuse user
+  local home err out rc pool hash
+  user=$root/user
+  mkdir -p "$user"
+
+  # The user state directory is the home's own state directory.
+  home=$root/direct/home
+  mkdir -p "$home/state"
+  err=$root/direct.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$home/state" lib "$home" "$user" fm_treehouse_home_pool "$home" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a pool under the home's state directory was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "a refused pool printed a path: $out"
+  assert_contains "$(cat "$err")" "inside Firstmate home" \
+    "the refusal did not say the pool is inside the home"
+  assert_contains "$(cat "$err")" "refusing to place a worker there" \
+    "the refusal did not say it will not place a worker"
+  [ ! -e "$home/state/firstmate" ] || fail "a refused pool was created inside the home"
+
+  # A link that sits outside the home still counts once it points inside.
+  local linked=$root/linked/home link=$root/linked/outside-state
+  mkdir -p "$linked/state"
+  ln -s "$linked/state" "$link"
+  case "$link/" in
+    "$linked"/*) fail "the symlink fixture is inside the home" ;;
+  esac
+  err=$root/link.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$link" lib "$linked" "$user" fm_treehouse_home_pool "$linked" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a pool reached through a symlink into the home was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "a symlink refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "$linked" "the refusal did not name the physical home"
+  [ ! -e "$linked/state/firstmate" ] || fail "a symlink refusal created the pool inside the home"
+
+  # The project clone is not under the home, and the state directory is inside it.
+  local other=$root/other/home
+  local project=$root/other/project
+  local xdg=$project/xdg
+  mkdir -p "$other" "$xdg"
+  err=$root/project.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$xdg" lib "$other" "$user" fm_treehouse_home_pool "$other" "$project" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a pool inside the project clone was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "a project refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "inside project clone" \
+    "the refusal did not say the pool is inside the project clone"
+  [ ! -e "$xdg/firstmate" ] || fail "a refused pool was created inside the project clone"
+
+  # A directory whose name merely starts with the home's name is outside it.
+  local crew=$root/prefix/crew extra=$root/prefix/crew-extra
+  mkdir -p "$crew" "$extra"
+  pool=$(FM_TEST_XDG_STATE="$extra" lib "$crew" "$user" fm_treehouse_home_pool "$crew") \
+    || fail "a state directory next to the home was refused"
+  hash=$(pool_hash6 "$(CDPATH='' cd -- "$crew" && pwd -P)")
+  assert_equals "$extra/firstmate/crew-$hash" "$pool" \
+    "a neighboring state directory was not used as itself"
+  assert_outside "$pool" "$crew" "a neighboring state directory was treated as inside the home"
+
+  # The lease runner stops before treehouse when the pool is inside the home.
+  local run_home=$root/run/home run_project=$root/run/project
+  local fake=$root/run/fake log=$root/run/treehouse.log
+  mkdir -p "$run_home/state" "$run_project" "$fake"
+  cat > "$fake/treehouse" <<SH
+#!/usr/bin/env bash
+printf 'invoked\n' >> '$log'
+exit 0
+SH
+  chmod +x "$fake/treehouse"
+  : > "$log"
+  err=$root/run.err
+  rc=0
+  out=$(cd "$run_project" && PATH="$fake:$PATH" FM_TEST_XDG_STATE="$run_home/state" \
+    lib "$run_home" "$user" fm_treehouse_home_pool_run "$run_home" 30 get --lease 2>"$err") || rc=$?
+  expect_code 1 "$rc" "the lease runner accepted a pool inside the home"$'\n'"$out"
+  assert_not_contains "$out" "invoked" "treehouse ran after the pool was refused"
+  [ ! -s "$log" ] || fail "treehouse was invoked after the pool was refused: $(cat "$log")"
+  assert_contains "$(cat "$err")" "inside Firstmate home" \
+    "the lease runner did not report the plain refusal"
+  [ ! -e "$run_home/state/firstmate" ] || fail "the lease runner created a pool inside the home"
+  pass "a pool inside the home or the project clone is refused before leasing"
+}
+
+test_shasum_only_path_names_the_pool_from_the_home() {
+  local root=$TMP_ROOT/shasum-only user home binpool cmd target out rc=0
+  local physical hash base
+  user=$root/user
+  home=$root/crew
+  binpool=$root/bin
+  mkdir -p "$home" "$user" "$binpool"
+  for cmd in bash env uname mkdir awk basename shasum; do
+    target=$(command -v "$cmd") || fail "$cmd is not installed"
+    ln -s "$target" "$binpool/$cmd"
+  done
+  if PATH="$binpool" command -v sha256sum >/dev/null 2>&1; then
+    fail "sha256sum is still visible on the shasum-only path"
+  fi
+  out=$(PATH="$binpool" lib "$home" "$user" fm_treehouse_home_pool "$home") || rc=$?
+  expect_code 0 "$rc" "the pool could not be named with only shasum"$'\n'"$out"
+  physical=$(CDPATH='' cd -- "$home" && pwd -P)
+  hash=$(printf '%s' "$physical" | shasum -a 256 | awk '{ print substr($1, 1, 6) }')
+  base=$(basename -- "$physical")
+  assert_equals "$user/.local/state/firstmate/${base}-$hash" "$out" \
+    "the shasum-only pool did not use shasum of the physical home path"
+  pass "a path with only shasum still names the pool from the home path"
+}
+
+test_spawn_refuses_a_pool_inside_the_home_with_a_plain_reason() {
+  local id=pool-inside-home case_dir=$TMP_ROOT/spawn-inside
+  local foreign pane_log tree_log out status=0
+  if [ -z "${CASE_URL:-}" ]; then
+    CASE_URL=$(make_same_origin_clones "$TMP_ROOT/spawn-origin-inside")
+  fi
+  prepare_spawn_home "$case_dir" "$id"
+  foreign=$case_dir/shared-pool/1/widget
+  add_worktree "$case_dir/other/projects/widget" "$foreign"
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  : > "$pane_log"
+  : > "$tree_log"
+  out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" \
+    FM_FAKE_EXIT_FLAG="$case_dir/exited" \
+    XDG_STATE_HOME="$CASE_HOME/state" \
+    fm_test_run_spawn "$CASE_HOME" "$foreign" "$CASE_FAKEBIN" "$id" \
+    "$CASE_HOME/projects/widget" --mode no-mistakes --yolo off) || status=$?
+  [ "$status" -ne 0 ] || fail "spawn launched with the pool inside the home"$'\n'"$out"
+  assert_contains "$out" "inside Firstmate home" \
+    "the refusal did not say the pool is inside the home"
+  assert_not_contains "$out" "treehouse: error:" \
+    "the refusal was relabeled as treehouse output"
+  assert_no_grep "args=get --lease" "$tree_log" "spawn leased after the pool was refused"
+  [ ! -e "$CASE_HOME/state/firstmate" ] || fail "a refused pool was created inside the home"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "a refused pool published a task record"
+  pass "a launch refuses a pool inside the home before leasing, in its own words"
+}
+
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
 test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
+test_a_pool_inside_the_home_or_the_clone_is_refused_before_leasing
+test_shasum_only_path_names_the_pool_from_the_home
 test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
+test_spawn_refuses_a_pool_inside_the_home_with_a_plain_reason
 test_spawn_labels_treehouses_own_error_when_the_lease_fails
 test_spawn_refuses_a_leased_worktree_of_the_other_clone
 test_spawn_that_stops_after_the_lease_returns_it
