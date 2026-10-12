@@ -709,6 +709,35 @@ test_spawn_refuses_a_pool_inside_the_home_with_a_plain_reason() {
   pass "a launch refuses a pool inside the home before leasing, in its own words"
 }
 
+test_spawn_refuses_a_clone_root_inside_home_before_first_get() {
+  local id=clone-root-inside-home case_dir=$TMP_ROOT/spawn-clone-root-inside
+  local own root pane_log tree_log out status=0
+  if [ -z "${CASE_URL:-}" ]; then
+    CASE_URL=$(make_same_origin_clones "$TMP_ROOT/spawn-origin-clone-root-inside")
+  fi
+  prepare_spawn_home "$case_dir" "$id"
+  root=$CASE_HOME/state/unsafe-pool
+  printf 'root = "%s"\n' "$root" > "$CASE_HOME/projects/widget/treehouse.toml"
+  own=$case_dir/shared-pool/1/widget
+  add_worktree "$CASE_HOME/projects/widget" "$own"
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  : > "$pane_log"
+  : > "$tree_log"
+  out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    run_spawn "$own" "$id") || status=$?
+  [ "$status" -ne 0 ] || fail "spawn launched from a clone root inside the home"$'\n'"$out"
+  assert_contains "$out" "inside Firstmate home" \
+    "the refusal did not identify the home boundary"
+  assert_no_exact_line "treehouse get" "$pane_log" \
+    "spawn requested a shared copy before refusing the configured pool"
+  assert_no_grep "args=get" "$tree_log" \
+    "treehouse acquired a worktree before the configured pool was refused"
+  [ ! -e "$root" ] || fail "a refused configured root was created"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "a refused launch published a task record"
+  pass "a fresh launch refuses an in-home clone root before treehouse get"
+}
+
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
 test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
 test_a_pool_inside_the_home_or_the_clone_is_refused_before_leasing
@@ -717,6 +746,7 @@ test_root_reader_accepts_only_complete_supported_lines
 test_shasum_only_path_names_the_pool_from_the_home
 test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
 test_spawn_refuses_a_pool_inside_the_home_with_a_plain_reason
+test_spawn_refuses_a_clone_root_inside_home_before_first_get
 test_spawn_labels_treehouses_own_error_when_the_lease_fails
 test_spawn_refuses_a_leased_worktree_of_the_other_clone
 test_spawn_that_stops_after_the_lease_returns_it
