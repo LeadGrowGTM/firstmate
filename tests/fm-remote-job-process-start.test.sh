@@ -13,18 +13,37 @@ sleep 300 &
 LIVE_PID=$!
 GROUP_PGID=
 LIVE_GROUP_PGID=
+MATCH_PGID=
 RECLAIM_WORKER_PID=
+CHILD_PID=
+cleanup_owned_child() {
+  local pid=$1 kind=$2 owned
+  [ -n "$pid" ] || return 0
+  for owned in $(jobs -pr); do
+    [ "$owned" = "$pid" ] || continue
+    if [ "$kind" = group ]; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    else
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+    break
+  done
+  wait "$pid" 2>/dev/null || true
+}
 cleanup_process_start_fixture() {
-  if [ -n "$RECLAIM_WORKER_PID" ]; then
-    kill -TERM "$RECLAIM_WORKER_PID" 2>/dev/null || true
-    wait "$RECLAIM_WORKER_PID" 2>/dev/null || true
+  cleanup_owned_child "$RECLAIM_WORKER_PID" process
+  if [ -n "${FM_TEST_CHILD_STOP_FILE:-}" ]; then
+    : > "$FM_TEST_CHILD_STOP_FILE" 2>/dev/null || true
+    if [ -n "$CHILD_PID" ]; then
+      for _ in $(seq 1 50); do
+        [ -f "$FM_TEST_CHILD_STOPPED_FILE" ] && break
+        sleep 0.05
+      done
+    fi
   fi
-  [ -z "$GROUP_PGID" ] || kill -KILL -- "-$GROUP_PGID" 2>/dev/null || true
-  if [ -n "$LIVE_GROUP_PGID" ]; then
-    kill -KILL -- "-$LIVE_GROUP_PGID" 2>/dev/null || true
-    wait "$LIVE_GROUP_PGID" 2>/dev/null || true
-  fi
-  kill "$LIVE_PID" 2>/dev/null || true
+  cleanup_owned_child "$LIVE_GROUP_PGID" group
+  cleanup_owned_child "$MATCH_PGID" group
+  cleanup_owned_child "$LIVE_PID" process
   rm -rf -- "$TMP_ROOT"
 }
 trap cleanup_process_start_fixture EXIT
@@ -162,10 +181,13 @@ if [ "$(uname -s)" = Linux ]; then
 trap 'printf "TERM\n" >> "$FM_TEST_SIGNAL_LOG"' TERM
 trap 'printf "HUP\n" >> "$FM_TEST_SIGNAL_LOG"' HUP
 printf '%s\n' "$$" > "$FM_TEST_CHILD_PID_FILE"
-while :; do sleep 0.1; done
+while [ ! -e "$FM_TEST_CHILD_STOP_FILE" ]; do sleep 0.1; done
+: > "$FM_TEST_CHILD_STOPPED_FILE"
 SH
   chmod +x "$GROUP_ROOT/child.sh"
   export FM_TEST_CHILD_PID_FILE="$GROUP_ROOT/child.pid"
+  export FM_TEST_CHILD_STOP_FILE="$GROUP_ROOT/child.stop"
+  export FM_TEST_CHILD_STOPPED_FILE="$GROUP_ROOT/child.stopped"
   export FM_TEST_SIGNAL_LOG="$GROUP_ROOT/signals"
   # shellcheck disable=SC2016 # The child shell expands $1, not this shell.
   setsid bash -c '"$1" &' _ "$GROUP_ROOT/child.sh" >/dev/null 2>&1 &
@@ -190,7 +212,8 @@ SH
     FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux "$GROUP_ROOT/remote/bin/fm-remote-job-worker.sh" --serve \
     > "$GROUP_ROOT/worker.out" 2> "$GROUP_ROOT/worker.err" &
   RECLAIM_WORKER_PID=$!
-  for identity in old missing; do
+  SAME_BOOT_ID=$(fm_remote_job_process_boot_id) || fail "could not read the boot id for the same-boot group record"
+  for identity in old missing same-boot; do
     job="$FM_REMOTE_JOB_JOBS/job-leaderless-$identity"
     mkdir -m 700 "$job" "$job/.claim"
     : > "$job/stdout"
@@ -198,6 +221,10 @@ SH
     printf '%s\n' "$GROUP_PGID" > "$job/.claim/group"
     if [ "$identity" = old ]; then
       printf 'Sun Oct 11 16:26:44 2026\n' > "$job/.claim/group_start"
+    elif [ "$identity" = same-boot ]; then
+      # This is the record shape that used to authorize a signal: a numeric
+      # start tick scoped to the current boot, with the leader already gone.
+      printf 'starttime=1 boot_id=%s\n' "$SAME_BOOT_ID" > "$job/.claim/group_start"
     fi
     chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
     fm_remote_job_write_state "$job" running || fail "could not seed the running job"
@@ -208,15 +235,42 @@ SH
     [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity group record did not publish exit 125"
-    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
-      || fail "the $identity group record published the wrong error"
+    expected_error='remote job worker stopped before this job completed; orphaned helper processes may still be running'
+    [ "$identity" = missing ] && expected_error='remote job worker stopped before this job completed'
+    [ "$(cat "$job/stderr")" = "$expected_error" ] \
+      || fail "the $identity group record published the wrong error: $(cat "$job/stderr")"
+    [ "$(wc -l < "$job/stderr")" -eq 1 ] \
+      || fail "the $identity group record published more than one error line"
+    [ ! -e "$job/.unverified-group" ] \
+      || fail "the $identity group record published an unverified-group marker"
     sleep 0.2
     [ ! -e "$FM_TEST_SIGNAL_LOG" ] || fail "the $identity group record signalled the surviving child"
     state=$(/bin/ps -p "$CHILD_PID" -o state= 2>/dev/null) \
       || fail "the $identity group record killed the surviving child"
     case "$state" in *Z*) fail "the $identity group record killed the surviving child" ;; esac
   done
-  pass "leaderless groups with old or missing start records are reclaimed without signals"
+  pass "leaderless groups are reclaimed without signals, including a same-boot tick"
+
+  DEAD_GROUP_PGID=2147483647
+  ! kill -0 -- "-$DEAD_GROUP_PGID" 2>/dev/null || fail "the dead group fixture is alive"
+  job="$FM_REMOTE_JOB_JOBS/job-dead-group"
+  mkdir -m 700 "$job" "$job/.claim"
+  : > "$job/stdout"
+  : > "$job/stderr"
+  printf '%s\n' "$DEAD_GROUP_PGID" > "$job/.claim/group"
+  printf '%s\n' "$LEGACY_START" > "$job/.claim/group_start"
+  chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
+  fm_remote_job_write_state "$job" running || fail "could not seed the dead group job"
+  for _ in $(seq 1 150); do
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] && break
+    sleep 0.05
+  done
+  [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
+    || fail "the dead group record was not reclaimed"
+  [ "$(cat "$job/exit")" = 125 ] || fail "the dead group record did not publish exit 125"
+  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+    || fail "the dead group record published the wrong error"
+  pass "a fully dead group has no orphaned-helper warning"
 
   setsid sleep 300 >/dev/null 2>&1 &
   LIVE_GROUP_PGID=$!
@@ -255,4 +309,52 @@ SH
     case "$state" in *Z*) fail "the $identity live group was signalled" ;; esac
   done
   pass "live groups with old or different-boot start records are reclaimed without signals"
+
+  cat > "$GROUP_ROOT/leader.sh" <<'SH'
+#!/usr/bin/env bash
+trap '' TERM
+printf '%s\n' "$$" > "$FM_TEST_MATCH_PID_FILE"
+while :; do sleep 0.1; done
+SH
+  chmod +x "$GROUP_ROOT/leader.sh"
+  export FM_TEST_MATCH_PID_FILE="$GROUP_ROOT/match.pid"
+  setsid "$GROUP_ROOT/leader.sh" >/dev/null 2>&1 &
+  MATCH_PGID=$!
+  for _ in $(seq 1 100); do
+    [ -f "$FM_TEST_MATCH_PID_FILE" ] && break
+    sleep 0.05
+  done
+  [ -f "$FM_TEST_MATCH_PID_FILE" ] || fail "the matching leader did not start"
+  [ "$(cat "$FM_TEST_MATCH_PID_FILE")" = "$MATCH_PGID" ] \
+    || fail "the matching leader is not this shell's child"
+  [ "$(fm_remote_job_process_pgid "$MATCH_PGID")" = "$MATCH_PGID" ] \
+    || fail "the matching leader did not start in its own process group"
+  kill -0 "$MATCH_PGID" 2>/dev/null || fail "the matching leader exited before reclaim"
+  match_start=$(fm_remote_job_process_start "$MATCH_PGID") \
+    || fail "the matching leader has no process identity"
+  job="$FM_REMOTE_JOB_JOBS/job-live-match"
+  mkdir -m 700 "$job" "$job/.claim"
+  : > "$job/stdout"
+  : > "$job/stderr"
+  printf '%s\n' "$MATCH_PGID" > "$job/.claim/group"
+  printf '%s\n' "$match_start" > "$job/.claim/group_start"
+  chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
+  fm_remote_job_write_state "$job" running || fail "could not seed the matching leader job"
+  for _ in $(seq 1 150); do
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] && break
+    sleep 0.05
+  done
+  [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
+    || fail "the matching leader record was not reclaimed"
+  [ "$(cat "$job/exit")" = 125 ] || fail "the matching leader record did not publish exit 125"
+  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+    || fail "the matching leader record published the wrong error: $(cat "$job/stderr")"
+  for _ in $(seq 1 50); do
+    kill -0 "$MATCH_PGID" 2>/dev/null || break
+    sleep 0.05
+  done
+  if kill -0 "$MATCH_PGID" 2>/dev/null; then
+    fail "the matching leader was not signalled"
+  fi
+  pass "a live leader whose identity matches the record is signalled"
 fi

@@ -384,23 +384,18 @@ worker_supervisor_identity_status() { # <job-dir> <pid>
 }
 
 # A live leader whose start identity mismatches proves PID reuse and makes the
-# recorded group stale; an unreadable live leader stays indeterminate so the
+# recorded group stale. An unreadable live leader stays indeterminate so the
 # stop loop retries rather than signaling or declaring the group dead.
+# A departed leader leaves any surviving members unverified: the group id may
+# have been reused in this boot, so this path never authorizes a signal, on
+# Linux or elsewhere.
 worker_group_identity_status() { # <job-dir> <pid>
-  local job=$1 pid=$2 recorded_start actual_start boot_id tick file="$1/.claim/group_start"
+  local pid=$2 recorded_start actual_start file="$1/.claim/group_start"
   [ -e "$file" ] || [ -L "$file" ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$file" 256 2>/dev/null) || return 2
   actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || {
     kill -0 "$pid" 2>/dev/null && return 2
-    worker_process_or_group_alive group "$pid" || return 1
-    if [ "$(uname -s 2>/dev/null)" = Linux ]; then
-      boot_id=$(fm_remote_job_process_boot_id) || return 1
-      case "$recorded_start" in "starttime="*" boot_id=$boot_id") ;; *) return 1 ;; esac
-      tick=${recorded_start#starttime=}
-      tick=${tick% boot_id="$boot_id"}
-      case "$tick" in ''|*[!0-9]*) return 1 ;; esac
-    fi
-    return 0
+    return 1
   }
   [ "$recorded_start" = "$actual_start" ] && return 0
   return 1
@@ -637,13 +632,19 @@ worker_clear_dead_claim() { # <job-dir>
 }
 
 # Reclaim a running job this serving loop does not own: a record left by a
-# crashed worker, whether its lane process died with it or survived it. The
-# recorded execution is stopped either way - a surviving foreign lane is not
-# supervised by any owner and a second lane for its home must never start
-# beside it - and the record publishes unknown completion, exactly as a
-# crashed single-process worker's job always has.
+# crashed worker, whether its lane process died with it or survived it. A
+# verified recorded execution is stopped, so a second lane for its home does
+# not start beside that execution. A group whose leader is already gone is not
+# signalled, so its members may still be running. The record publishes unknown
+# completion, exactly as a crashed single-process worker's job always has.
 worker_reclaim_running_job() { # <job-dir>
-  local job=$1 file state
+  local job=$1 file state group_pid members_may_remain=0
+  if fm_remote_job_read_single_line "$job/.claim/group_start" 256 >/dev/null 2>&1 \
+    && group_pid=$(worker_read_process_id "$job/.claim/group") \
+    && ! kill -0 "$group_pid" 2>/dev/null \
+    && worker_process_or_group_alive group "$group_pid"; then
+    members_may_remain=1
+  fi
   worker_stop_recorded_execution "$job" || return 1
   state=$(fm_remote_job_read_state "$job" 2>/dev/null) || return 1
   worker_clear_dead_claim "$job" || return 1
@@ -659,7 +660,11 @@ worker_reclaim_running_job() { # <job-dir>
     [ -f "$job/$file" ] && [ ! -L "$job/$file" ] || return 1
   done
   : > "$job/stdout"
-  printf 'remote job worker stopped before this job completed\n' > "$job/stderr"
+  if [ "$members_may_remain" -eq 1 ]; then
+    printf '%s\n' 'remote job worker stopped before this job completed; orphaned helper processes may still be running' > "$job/stderr"
+  else
+    printf '%s\n' 'remote job worker stopped before this job completed' > "$job/stderr"
+  fi
   worker_publish_result "$job" 125
 }
 
