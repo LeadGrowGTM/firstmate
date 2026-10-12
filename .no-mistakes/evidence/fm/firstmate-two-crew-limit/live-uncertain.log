@@ -1,0 +1,24 @@
+Two unverifiable orca records:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 82s ago, grace 300s) - full banner already printed this episode.
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (live-a, live-b); at most two crews may run for one lead, so task candidate was not launched; slots include pending launches and endpoints not proven stopped
+One unverifiable orca record:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 84s ago, grace 300s) - full banner already printed this episode.
+error: task candidate has no brief at inaccessible data path /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home/data/candidate/brief.md
+Two unverifiable cmux records:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 85s ago, grace 300s) - full banner already printed this episode.
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (live-a, live-b); at most two crews may run for one lead, so task candidate was not launched; slots include pending launches and endpoints not proven stopped
+One unverifiable cmux record:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 86s ago, grace 300s) - full banner already printed this episode.
+error: task candidate has no brief at inaccessible data path /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home/data/candidate/brief.md
+Two unverifiable zellij records:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 88s ago, grace 300s) - full banner already printed this episode.
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (live-a, live-b); at most two crews may run for one lead, so task candidate was not launched; slots include pending launches and endpoints not proven stopped
+One unverifiable zellij record:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 90s ago, grace 300s) - full banner already printed this episode.
+error: task candidate has no brief at inaccessible data path /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home/data/candidate/brief.md

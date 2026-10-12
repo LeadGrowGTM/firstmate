@@ -1,0 +1,25 @@
+/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh
+SPAWNING first
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh/data/first/launch-brief.md records no ship branch; defaulting to legacy branch fm/first
+notice: first ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned first harness=codex kind=ship mode=local-only yolo=off window=primary:fm-first worktree=/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/pool/.treehouse/project-a381e1/1/project
+SPAWN first exit=0
+SPAWNING second
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 9s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh/data/second/launch-brief.md records no ship branch; defaulting to legacy branch fm/second
+notice: second ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned second harness=codex kind=ship mode=local-only yolo=off window=primary:fm-second worktree=/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/pool/.treehouse/project-a381e1/2/project
+SPAWN second exit=0
+SPAWNING third
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh
+WARNING: watcher still down (same stale episode; last beat: 24s ago, grace 300s) - full banner already printed this episode.
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (first, second); at most two crews may run for one lead, so task third was not launched; slots include pending launches and endpoints not proven stopped
+SPAWN third exit=1

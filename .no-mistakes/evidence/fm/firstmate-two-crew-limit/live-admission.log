@@ -1,0 +1,47 @@
+live-a state: alive
+live-b state: alive
+SCENARIO: two running crews refuse a third
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (live-a, live-b); at most two crews may run for one lead, so task candidate was not launched; slots include pending launches and endpoints not proven stopped
+exit=1
+SCENARIO: a running scout consumes a crew slot
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 5s ago, grace 300s) - full banner already printed this episode.
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (live-a, live-b); at most two crews may run for one lead, so task candidate was not launched; slots include pending launches and endpoints not proven stopped
+exit=1
+SCENARIO: secondmate is excluded from ordinary crew capacity
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 8s ago, grace 300s) - full banner already printed this episode.
+error: task candidate has no brief at inaccessible data path /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home/data/candidate/brief.md
+exit=1
+/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/other-home
+SCENARIO: another owner has independent capacity
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/other-home
+error: task candidate has no brief at inaccessible data path /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/other-home/data/candidate/brief.md
+exit=1
+error connecting to /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/t/tmux-2001/fm-lab-other (File name too long)
+SCENARIO: wrong server cannot make two existing crews disappear
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 0s ago, grace 300s) - full banner already printed this episode.
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (live-a, live-b); at most two crews may run for one lead, so task candidate was not launched; slots include pending launches and endpoints not proven stopped
+exit=1
+stopped endpoint state: .crew-lab/remaining.sh: line 27: fm_backend_agent_state: command not found
+stopped endpoint state: dead
+SCENARIO: stopped worker releases its slot
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+error: task candidate has no brief at inaccessible data path /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home/data/candidate/brief.md
+exit=1
+SCENARIO: pending launch in a shell retains its slot
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/home
+WARNING: watcher still down (same stale episode; last beat: 8s ago, grace 300s) - full banner already printed this episode.
+error: spawn refused - this Firstmate home already has 2 occupied crew slots (live-a, live-b); at most two crews may run for one lead, so task candidate was not launched; slots include pending launches and endpoints not proven stopped
+exit=1
+Live admission checks completed.

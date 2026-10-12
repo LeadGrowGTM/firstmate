@@ -1,0 +1,13 @@
+first after declining trust: dead
+second after declining trust: dead
+Both real launch wrappers released their reservations on exit.
+Fresh concurrent spawn exit=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh
+WARNING: watcher still down (same stale episode; last beat: 78s ago, grace 300s) - full banner already printed this episode.
+error: this home's task set is locked by another operation (a forced teardown is enumerating or removing its tasks); refusing to launch task third rather than racing it
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh
+WARNING: watcher still down (same stale episode; last beat: 78s ago, grace 300s) - full banner already printed this episode.
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/fresh/data/first/launch-brief.md records no ship branch; defaulting to legacy branch fm/first
+notice: first ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned first harness=codex kind=ship mode=local-only yolo=off window=primary:fm-first worktree=/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.crew-lab/pool/.treehouse/project-a381e1/1/project
+Concurrent recovery/fresh admission serialized at the shared home lock.

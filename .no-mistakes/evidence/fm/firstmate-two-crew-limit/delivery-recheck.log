@@ -1,0 +1,103 @@
+/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/unstarted/home
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/unstarted/home
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/unstarted/home/data/delivery-unstarted-1043831/launch-brief.md records no ship branch; defaulting to legacy branch fm/delivery-unstarted-1043831
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/unstarted/home/data/delivery-unstarted-1043831/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+can't find window: nonexistent-delivery-target
+Real tmux buffered launch for unstarted
+Cleanup sent C-c through real tmux
+ok - real transport failure before startup releases reservation and cancels buffered launch
+bash-5.2$ cd '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ cd -- '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ export GOTMPDIR=/tmp/fm-delivery-unstarted-1043831/gotmp
+bash-5.2$ export COMPACT_ADVISER_DISABLE=1
+bash-5.2$ export FM_TASK_ID=delivery-unstarted-1043831
+bash-5.2$ . '/tmp/fm-delivery-unstarted-1043831+88d1e217b64b8b08dc59760e23204915bfbb5dc69fea2903fa7308c03b23300f/launch.
+s1791821435.1043904.7079.sh'^C
+bash-5.2$
+bash-5.2$ touch '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/unstarted/
+after-cancel'
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/data/delivery-started-1043831/launch-brief.md records no ship branch; defaulting to legacy branch fm/delivery-started-1043831
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/data/delivery-started-1043831/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+can't find window: nonexistent-delivery-target
+error: launch delivery for delivery-started-1043831 may have started a worker; preserving its task and busy records
+Real tmux buffered launch for started
+ok - real transport error after startup preserves worker and metadata until worker exits
+bash-5.2$ cd '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ cd -- '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ export GOTMPDIR=/tmp/fm-delivery-started-1043831/gotmp
+bash-5.2$ export COMPACT_ADVISER_DISABLE=1
+bash-5.2$ export FM_TASK_ID=delivery-started-1043831
+bash-5.2$ . '/tmp/fm-delivery-started-1043831+b1ec0f1db11057a374bded9f9ded9c31f9ce6d2746c62b7ee100c8c5d07b6569/launch.s1
+791821440.1045026.1331.sh'
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/applypatch-msg': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/post-applypatch': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/pre-push': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/pre-commit': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/sendemail-validate': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/post-rewrite': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/pre-merge-commit': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/pre-auto-gc': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/post-checkout': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/post-merge': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/prepare-commit-msg': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/commit-msg': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/pre-applypatch': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/pre-rebase': Permission denied
+rm: cannot remove '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/state/delivery-started-1043831.git-hooks/post-commit': Permission denied
+
+Cleanup correction: restored owner write permission on disposable directories and removed .delivery-lab successfully. Both behavioral assertions passed before cleanup. No product source changed.

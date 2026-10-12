@@ -1,0 +1,60 @@
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/unstarted/home/data/delivery-unstarted-987338/launch-brief.md records no ship branch; defaulting to legacy branch fm/delivery-unstarted-987338
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/unstarted/home/data/delivery-unstarted-987338/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+can't find window: nonexistent-delivery-target
+Real tmux buffered launch for unstarted
+Cleanup sent C-c through real tmux
+ok - real transport failure before startup releases reservation and cancels buffered launch
+bash-5.2$ cd '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE8
+7QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ cd -- '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7
+KE87QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ export GOTMPDIR=/tmp/fm-delivery-unstarted-987338/gotmp
+bash-5.2$ export COMPACT_ADVISER_DISABLE=1
+bash-5.2$ export FM_TASK_ID=delivery-unstarted-987338
+bash-5.2$ . '/tmp/fm-delivery-unstarted-987338+88d1e217b64b8b08dc59760e23204915b
+fbb5dc69fea2903fa7308c03b23300f/launch.s1791821291.987404.16331.sh'^C
+bash-5.2$
+bash-5.2$ touch '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7
+KE87QSFKC46TDXM/.delivery-lab/unstarted/after-cancel'
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/data/delivery-started-987338/launch-brief.md records no ship branch; defaulting to legacy branch fm/delivery-started-987338
+warning: /home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE87QSFKC46TDXM/.delivery-lab/started/home/data/delivery-started-987338/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+can't find window: nonexistent-delivery-target
+error: launch delivery for delivery-started-987338 may have started a worker; preserving its task and busy records
+Real tmux buffered launch for started
+ok - real transport error after startup preserves worker and metadata until worker exits
+bash-5.2$ cd '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7KE8
+7QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ cd -- '/home/firstmate/.no-mistakes/worktrees/8be14fbb8fb5/01M4RC9WKC7
+KE87QSFKC46TDXM/.delivery-lab/wt'
+bash-5.2$ export GOTMPDIR=/tmp/fm-delivery-started-987338/gotmp
+bash-5.2$ export COMPACT_ADVISER_DISABLE=1
+bash-5.2$ export FM_TASK_ID=delivery-started-987338
+bash-5.2$ . '/tmp/fm-delivery-started-987338+b1ec0f1db11057a374bded9f9ded9c31f9c
+e6d2746c62b7ee100c8c5d07b6569/launch.s1791821295.988483.10871.sh'
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
