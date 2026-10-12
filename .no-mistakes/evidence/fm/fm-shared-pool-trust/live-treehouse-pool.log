@@ -1,0 +1,25 @@
+SCENARIO same-origin default Treehouse pool
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-26535f/1/widget. Run 'treehouse return ~/.treehouse/widget-26535f/1/widget' to release it.
+home A slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/operator/.treehouse/widget-26535f/1/widget
+🌳 Worktree returned to pool.
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-26535f/1/widget. Run 'treehouse return ~/.treehouse/widget-26535f/1/widget' to release it.
+home B default slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/operator/.treehouse/widget-26535f/1/widget
+home A common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/homeA/projects/widget/.git
+home B common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/homeB/projects/widget/.git
+default slot common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/homeA/projects/widget/.git
+default pool collision: confirmed
+🌳 Worktree returned to pool.
+SCENARIO isolated home B lease with operator Git config
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-26535f/1/widget. Run 'treehouse return ~/.treehouse/widget-26535f/1/widget' to release it.
+per-home pool: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/xdg/firstmate/homeB-ce3f8a
+private slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/xdg/firstmate/homeB-ce3f8a/.treehouse/widget-26535f/1/widget
+private slot common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/homeB/projects/widget/.git
+own clone outside home and project: confirmed
+🌳 Worktree returned to pool.
+SCENARIO unsafe XDG state inside home
+guard exit: 1
+guard output: error: per-home treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/homeB/state/firstmate/homeB-ce3f8a is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.live-pool.uSh6cU/homeB; refusing to place a worker there
+no unsafe pool created: confirmed

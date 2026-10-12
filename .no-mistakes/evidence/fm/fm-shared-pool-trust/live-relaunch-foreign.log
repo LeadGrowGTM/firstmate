@@ -1,0 +1,20 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E
+recorded foreign worktree common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/other/projects/widget/.git
+spawning project common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/projects/widget/.git
+recorded pane cwd: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/foreign/widget
+relaunch exit: 0
+relaunch output:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 0s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/data/relaunch/launch-brief.md records no ship branch; defaulting to legacy branch fm/relaunch
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/data/relaunch/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: relaunch ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned relaunch harness=sleep kind=ship mode=local-only yolo=off window=primary:fm-relaunch worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/foreign/widget
+recorded worktree after relaunch: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/foreign/widget
+pane cwd after relaunch: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.mtGO0E/foreign/widget

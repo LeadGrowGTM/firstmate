@@ -1,0 +1,24 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-638789/1/widget. Run 'treehouse return ~/.treehouse/widget-638789/1/widget' to release it.
+🌳 Worktree returned to pool.
+seeded foreign slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX/operator/.treehouse/widget-638789/1/widget
+tmux server HOME: HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX/operator
+tmux server XDG state: XDG_STATE_HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-state.Hd3rNr
+primary pane size: 120x40
+spawn exit: 0
+spawn output:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX/data/labspawn/launch-brief.md records no ship branch; defaulting to legacy branch fm/labspawn
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX/data/labspawn/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: labspawn ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned labspawn harness=sleep kind=ship mode=local-only yolo=off window=primary:fm-labspawn worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-state.Hd3rNr/firstmate/.fm-lab.7IEcDX-d31952/.treehouse/widget-638789/1/widget
+task worktree: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-state.Hd3rNr/firstmate/.fm-lab.7IEcDX-d31952/.treehouse/widget-638789/1/widget
+spawning clone common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX/projects/widget/.git
+task worktree common dir: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.7IEcDX/projects/widget/.git
+own clone: yes
+task in per-home pool: yes
+tmux windows:
+claude /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA
+operator /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA
+fm-labspawn /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-state.Hd3rNr/firstmate/.fm-lab.7IEcDX-d31952/.treehouse/widget-638789/1/widget

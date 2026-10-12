@@ -1,0 +1,6 @@
+corrupt pool state path: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.pool-error.gSQfbI/xdg/firstmate/home-11c5ee/.treehouse/widget-0472aa/treehouse-state.json
+lease exit: 0
+lease output: 🌳 Setting up worktree...
+treehouse: WARNING: state file /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.pool-error.gSQfbI/xdg/firstmate/home-11c5ee/.treehouse/widget-0472aa/treehouse-state.json is corrupt or truncated (invalid character 'o' in literal null (expecting 'u')); recovering from worktrees found on disk. They are marked leased until verified - see `treehouse status`, then `treehouse return` or `treehouse destroy --include-leased`.
+🌳 Leased worktree at ~/.treehouse/widget-0472aa/1/widget. Run 'treehouse return ~/.treehouse/widget-0472aa/1/widget' to release it.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.pool-error.gSQfbI/xdg/firstmate/home-11c5ee/.treehouse/widget-0472aa/1/widget

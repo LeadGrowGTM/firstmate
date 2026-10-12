@@ -1,0 +1,18 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-ea20d9/1/widget. Run 'treehouse return ~/.treehouse/widget-ea20d9/1/widget' to release it.
+🌳 Worktree returned to pool.
+seeded foreign slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV/operator/.treehouse/widget-ea20d9/1/widget
+tmux server environment: HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV/operator
+primary pane size: 120x40
+spawn exit: 1
+spawn output:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV/data/labspawn/launch-brief.md records no ship branch; defaulting to legacy branch fm/labspawn
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV/data/labspawn/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: labspawn ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: per-home treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV/xdg/firstmate/.fm-lab.6AOxWV-19e4d9 is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV; refusing to place a worker there
+tmux windows:
+claude /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA
+operator /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA
+fm-labspawn /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.6AOxWV/projects/widget

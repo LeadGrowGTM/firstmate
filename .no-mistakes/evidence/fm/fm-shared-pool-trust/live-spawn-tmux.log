@@ -1,0 +1,49 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-6a5167/1/widget. Run 'treehouse return ~/.treehouse/widget-6a5167/1/widget' to release it.
+🌳 Worktree returned to pool.
+seeded foreign slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/operator/.treehouse/widget-6a5167/1/widget
+primary pane size: 120x40
+primary pane excerpt:
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA
+
+
+
+
+
+
+
+
+spawn exit: 0
+spawn output:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/data/labspawn/launch-brief.md records no ship branch; defaulting to legacy branch fm/labspawn
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/data/labspawn/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: labspawn ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned labspawn harness=sleep kind=ship mode=local-only yolo=off window=primary:fm-labspawn worktree=/home/mitch/.treehouse/widget-6a5167/1/widget
+task worktree metadata:
+worktree=/home/mitch/.treehouse/widget-6a5167/1/widget
+project=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/projects/widget
+harness=sleep
+tmux windows:
+claude /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA
+operator /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA
+fm-labspawn /home/mitch/.treehouse/widget-6a5167/1/widget
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/post-checkout': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/pre-push': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/sendemail-validate': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/post-commit': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/pre-auto-gc': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/post-merge': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/post-applypatch': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/post-rewrite': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/pre-commit': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/prepare-commit-msg': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/applypatch-msg': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/commit-msg': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/pre-merge-commit': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/pre-applypatch': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.DLGuk8/state/labspawn.git-hooks/pre-rebase': Permission denied

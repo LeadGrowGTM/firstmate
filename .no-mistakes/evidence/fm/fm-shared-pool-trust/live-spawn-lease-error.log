@@ -1,0 +1,19 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.njSbZu
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-b992b6/1/widget. Run 'treehouse return ~/.treehouse/widget-b992b6/1/widget' to release it.
+🌳 Worktree returned to pool.
+seeded foreign slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.njSbZu/operator/.treehouse/widget-b992b6/1/widget
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-b992b6/1/widget. Run 'treehouse return ~/.treehouse/widget-b992b6/1/widget' to release it.
+preoccupied private slot: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-state.8Lc5Ox/firstmate/.fm-lab.njSbZu-95586a/.treehouse/widget-b992b6/1/widget
+private tmux HOME: HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.njSbZu/operator
+spawn exit: 1
+spawn output:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.njSbZu
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.njSbZu/data/labspawn/launch-brief.md records no ship branch; defaulting to legacy branch fm/labspawn
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.njSbZu/data/labspawn/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: labspawn ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: could not lease a worktree of '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4PYXEREMMJ4KPEQAD1BNWQA/.fm-lab.njSbZu/projects/widget' from this home's own pool (treehouse exit 1)
+treehouse: 🌳 Setting up worktree...
+treehouse: all 1 worktrees are in use or dirty (max_trees = 1). Run 'treehouse status' to see details, or increase max_trees in treehouse.toml
+task record exists: no
