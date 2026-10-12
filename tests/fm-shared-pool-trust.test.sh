@@ -523,6 +523,18 @@ test_a_configured_root_or_pool_link_inside_the_home_is_refused_before_leasing() 
   [ ! -e "$inside/.treehouse" ] || fail "a refused root created a pool inside the home"
   [ ! -e "$state/firstmate" ] || fail "a refused root created the per-home directory"
 
+  printf 'root = """%s"""\n' "$inside" > "$project/treehouse.toml"
+  err=$root/triple.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+    "$home" "$project" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a triple-quoted root inside the home was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "a triple-quoted root refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "$project/treehouse.toml" \
+    "the triple-quoted root refusal did not name the configuration file"
+  [ ! -e "$inside/.treehouse" ] || fail "a refused triple-quoted root created a pool inside the home"
+  [ ! -e "$state/firstmate" ] || fail "a refused triple-quoted root created the per-home directory"
+
   printf 'root = "%s/missing/../home/state/actual-pool"\n' "$root" > "$project/treehouse.toml"
   err=$root/unclean.err
   rc=0

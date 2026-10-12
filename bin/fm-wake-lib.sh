@@ -1637,6 +1637,7 @@ _fm_treehouse_path_inside() {  # <path> <root>
 _fm_treehouse_toml_value() {  # <text-after-equals>
   local rest=$1 body
   case "$rest" in
+    '"""'*|"'''"*) return 1 ;;
     \"*)
       [[ "$rest" =~ ^\"((\\.|[^\\\"])*)\" ]] || return 1
       body=${BASH_REMATCH[1]}
@@ -1692,6 +1693,11 @@ _fm_treehouse_toml_root() {  # <file>
     done
     case "$trimmed" in
       ''|'#'*) continue ;;
+      \"*|\'*)
+        printf 'error: could not read the treehouse root in %s; refusing to place a worker there\n' \
+          "$file" >&2
+        return 1
+        ;;
       root*) rest=${trimmed#root} ;;
       *) continue ;;
     esac
