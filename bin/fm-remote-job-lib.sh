@@ -998,17 +998,20 @@ fm_remote_job_process_start_tick() { # <pid>
 }
 
 fm_remote_job_process_start() {
-  local pid=$1 ps_bin value tick proc_root
+  local pid=$1 ps_bin value tick proc_root boot_id
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   proc_root=${FM_REMOTE_JOB_PROC_ROOT:-/proc}
   # A readable stat file is authoritative. A parse failure must not fall
   # through to the wall clock, or a malformed tick would look like a new
-  # process. Only the absence of the file uses the portable fallback.
+  # process.
   if [ -r "$proc_root/$pid/stat" ]; then
     tick=$(fm_remote_job_process_start_tick "$pid") || return 1
-    printf 'starttime=%s\n' "$tick"
+    boot_id=$(cat "$proc_root/sys/kernel/random/boot_id" 2>/dev/null) || return 1
+    case "$boot_id" in ''|*$'\n'*|*$'\r'*) return 1 ;; esac
+    printf 'starttime=%s boot_id=%s\n' "$tick" "$boot_id"
     return 0
   fi
+  [ ! -e "$proc_root/sys/kernel/random/boot_id" ] || return 1
   # Platforms without a readable stat file (macOS) keep the historical ps
   # lstart bytes, so an identity recorded before this change still compares
   # equal. The string is not trimmed and the locale is not pinned, because
