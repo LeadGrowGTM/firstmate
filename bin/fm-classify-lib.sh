@@ -1799,11 +1799,12 @@ $fully_presented
       # contiguous cursor may advance through the captured endpoint. Routine
       # lines remain unacknowledged only while they are the sole unread content,
       # preserving delayed signal annotations without replaying a handled note
-      # that happened to follow a routine line.
+      # that happened to follow a routine line. The drain's one-shot warning
+      # about an unparsed decision line is such a presentation too.
       while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
           *[![:space:]]*)
-            if status_line_is_unread_surface "$line"; then safe=true; break; fi
+            if status_line_is_unread_surface "$line" || status_line_is_unparsed_decision "$line"; then safe=true; break; fi
             ;;
         esac
       done <<EOF
@@ -2018,6 +2019,23 @@ status_line_is_unread_surface() {  # <status-line>
   return 1
 }
 
+# 0 when <status-line> opens with a needs-decision or blocked verb word yet its
+# verb parse failed, while it still carries a "key=" token - for example the
+# unbracketed "needs-decision key=x at=1: ...". Both folds drop such a line, so
+# its decision would go missing without a word; the wake drain passes this
+# predicate to scan_unread_surface_snapshot to warn about it once, when it is
+# first presented. The key grammar is not loosened: the line never opens.
+status_line_is_unparsed_decision() {  # <status-line>
+  local line=$1 first verb
+  case "$line" in *key=*) ;; *) return 1 ;; esac
+  first=${line#"${line%%[![:space:]]*}"}
+  first=${first%%[[:space:]:[]*}
+  case "$first" in needs-decision|blocked) ;; *) return 1 ;; esac
+  status_line_verb "$line" verb
+  case "$verb" in needs-decision|blocked) return 1 ;; esac
+  return 0
+}
+
 # Fleet-wide unread informational lines: one "<task>\t<status-line>" row per
 # still-unread `note:` or pending-reply resolution, in glob (task id) order.
 # Prints nothing when none are unread. Directory scan rejects status symlinks
@@ -2042,8 +2060,11 @@ EOF
   return 0
 }
 
-scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
-  local state=$1 snapshot=$2 task endpoint ident f lines line
+# The snapshot sibling reads only each snapshot endpoint's unread span. An
+# optional <predicate> replaces status_line_is_unread_surface as the line filter,
+# so another one-shot surface reuses this same bounded, presentation-cursor span.
+scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot> [<predicate>]
+  local state=$1 snapshot=$2 predicate=${3:-status_line_is_unread_surface} task endpoint ident f lines line
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     f="$state/$task.status"
@@ -2051,7 +2072,7 @@ scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      status_line_is_unread_surface "$line" || continue
+      "$predicate" "$line" || continue
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $lines

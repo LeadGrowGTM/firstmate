@@ -465,16 +465,123 @@ EOF
 # fm-classify-lib.sh's "incremental (cursor-backed) open-decisions fold").
 # Bounded and silent: prints nothing when no decision is open, which is the
 # common case.
+#
+# Two advisory annotations ride on this section; neither changes which keys are
+# open, closes anything, or alters the drain's exit status.
+# - An open decision whose note names exactly one GitHub PR URL is checked
+#   against that PR: a `done [key=merged-*]` line naming the URL in the same
+#   status log marks it merged at no cost, and otherwise bin/fm-pr-state.sh reads
+#   live state. A merged or closed PR adds one line under the entry carrying the
+#   exact close command. Live reads are deduplicated per drain, capped at
+#   OPEN_DECISION_PR_LOOKUP_CAP, run concurrently, and each bounded by
+#   OPEN_DECISION_PR_LOOKUP_SECONDS; a failed, slow, or unavailable lookup adds
+#   nothing.
+# - A needs-decision or blocked line the fold cannot parse
+#   (status_line_is_unparsed_decision) is warned about once, from the same
+#   unread span print_unread_status_section reads, so the cost stays bounded by
+#   new appends and a line is never re-printed after its presentation.
+OPEN_DECISION_PR_LOOKUP_CAP=8
+OPEN_DECISION_PR_LOOKUP_SECONDS=4
+OPEN_DECISION_UNPARSED_CAP=5
+
+# Set OPEN_DECISION_PR_URL to the one distinct GitHub PR URL <note> names; fails
+# on zero or several. A global rather than output, so the per-entry call forks
+# nothing.
+OPEN_DECISION_PR_URL=
+open_decision_pr_url() {  # <note>
+  local rest=$1 re='https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+' url
+  OPEN_DECISION_PR_URL=
+  while [[ $rest =~ $re ]]; do
+    url=${BASH_REMATCH[0]}
+    [ -z "$OPEN_DECISION_PR_URL" ] || [ "$OPEN_DECISION_PR_URL" = "$url" ] \
+      || { OPEN_DECISION_PR_URL=; return 1; }
+    OPEN_DECISION_PR_URL=$url
+    rest=${rest#*"$url"}
+  done
+  [ -n "$OPEN_DECISION_PR_URL" ]
+}
+
+# 0 when <status-file> already records the merge of <url> as a
+# `done [key=merged-*]` line (bin/fm-merge-outcome-lib.sh writes it).
+open_decision_pr_merge_recorded() {  # <status-file> <url>
+  local f=$1 url=$2 line verb key
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in *"$url"|*"$url"[!0-9]*) ;; *) continue ;; esac
+    status_line_verb "$line" verb
+    [ "$verb" = "done" ] || continue
+    key=$(_fm_decision_key "$line" '') || continue
+    case "$key" in merged-?*) return 0 ;; esac
+  done < <(grep -F -- "$url" "$f" 2>/dev/null)
+  return 1
+}
+
+# Print one "<url>\t<merged at TS|closed>" line per PR in <urls> (one per line)
+# that bin/fm-pr-state.sh reports as terminal. Concurrent and bounded; silent on
+# any failure.
+open_decision_pr_states() {  # <urls>
+  local urls=$1 dir url i=0 pids='' pid result
+  [ -n "$urls" ] || return 0
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-open-decision-pr.XXXXXX" 2>/dev/null) || return 0
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    i=$((i + 1))
+    printf '%s' "$url" > "$dir/$i.url"
+    fm_run_timed "$OPEN_DECISION_PR_LOOKUP_SECONDS" "$SCRIPT_DIR/fm-pr-state.sh" "$url" \
+      > "$dir/$i.out" 2>/dev/null < /dev/null &
+    pids="$pids $!"
+  done <<EOF
+$urls
+EOF
+  for pid in $pids; do
+    wait "$pid" 2>/dev/null && printf '0' > "$dir/$pid.ok"
+  done
+  i=0
+  for pid in $pids; do
+    i=$((i + 1))
+    [ -f "$dir/$pid.ok" ] || continue
+    result=$(head -n 1 "$dir/$i.out" 2>/dev/null) || continue
+    case "$result" in
+      'STATE: merged at '?*) printf '%s\tmerged at %s\n' "$(cat "$dir/$i.url")" "${result#STATE: merged at }" ;;
+      'STATE: closed') printf '%s\tclosed\n' "$(cat "$dir/$i.url")" ;;
+    esac
+  done
+  rm -rf -- "$dir"
+}
+
 print_open_decisions_section() {
   local snapshot=${1:-} open task key verb note line item_bytes=220 global_bytes=4000
   local output='' used=0 shown=0 omitted=0 bytes
+  local url urls='' known='' lookups=0 pr_state annotation unparsed lineno warned=0 more=0
 
   if [ -n "$snapshot" ]; then
+    # Before the fold: with no presentation manifest yet, the unread span is
+    # seeded from the fold cursor that scan_open_decisions_snapshot advances.
+    unparsed=$(scan_unread_surface_snapshot "$STATE" "$snapshot" status_line_is_unparsed_decision) || return 1
     open=$(scan_open_decisions_snapshot "$STATE" "$snapshot") || return 1
   else
     open=$(scan_open_decisions_incremental "$STATE") || return 1
+    unparsed=''
   fi
-  [ -n "$open" ] || return 0
+  [ -n "$open" ] || [ -n "$unparsed" ] || return 0
+
+  # PR states: the offline merge record first, then capped live lookups for the
+  # rest, each URL read at most once per drain.
+  while IFS=$(printf '\t') read -r task key verb note; do
+    [ -n "$task" ] || continue
+    open_decision_pr_url "$note" || continue
+    url=$OPEN_DECISION_PR_URL
+    case "$known$urls" in *"$url"$'\t'*|*"$url"$'\n'*) continue ;; esac
+    if open_decision_pr_merge_recorded "$STATE/$task.status" "$url"; then
+      known="$known$url"$'\t'"merged"$'\n'
+    elif [ "$lookups" -lt "$OPEN_DECISION_PR_LOOKUP_CAP" ]; then
+      urls="$urls$url"$'\n'
+      lookups=$((lookups + 1))
+    fi
+  done <<EOF
+$open
+EOF
+  known="$known$(open_decision_pr_states "$urls")"$'\n'
 
   while IFS=$(printf '\t') read -r task key verb note; do
     [ -n "$task" ] || continue
@@ -487,11 +594,23 @@ print_open_decisions_section() {
     fm_cap_line_var "$line" $((item_bytes - 1))
     line=$FM_LINE_CAP_LINE
     bytes=$(( ${#line} + 1 ))
+    annotation=''
+    if open_decision_pr_url "$note"; then
+      url=$OPEN_DECISION_PR_URL
+      pr_state=$(printf '%s' "$known" | grep -F -- "$url"$'\t' | head -n 1)
+      pr_state=${pr_state#*$'\t'}
+      if [ -n "$pr_state" ]; then
+        annotation="  ^ PR $url is $pr_state; if that settles it, close it: bin/fm-send.sh $task --resolve-key $key 'PR $url ${pr_state%% *}'"
+        bytes=$((bytes + ${#annotation} + 1))
+      fi
+    fi
     if [ $((used + bytes)) -gt "$global_bytes" ]; then
       omitted=$((omitted + 1))
       continue
     fi
     output="$output$line
+"
+    [ -z "$annotation" ] || output="$output$annotation
 "
     used=$((used + bytes))
     shown=$((shown + 1))
@@ -499,17 +618,38 @@ print_open_decisions_section() {
 $open
 EOF
 
-  [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ] || return 0
-  printf 'OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):\n' || return 1
-  printf '%s' "$output" || return 1
-  if [ "$omitted" -gt 0 ]; then
-    printf 'OPEN DECISIONS: %d more omitted (byte cap)\n' "$omitted" || return 1
+  if [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ]; then
+    printf 'OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):\n' || return 1
+    printf '%s' "$output" || return 1
+    if [ "$omitted" -gt 0 ]; then
+      printf 'OPEN DECISIONS: %d more omitted (byte cap)\n' "$omitted" || return 1
+    fi
+    # Answerer-closes hint, printed at exactly the moment an answer gets written:
+    # the send that answers a listed decision also closes it, so closure never
+    # depends on the busy worker writing a matching resolved line (contract:
+    # bin/fm-send.sh header).
+    printf "OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'\n" || return 1
   fi
-  # Answerer-closes hint, printed at exactly the moment an answer gets written:
-  # the send that answers a listed decision also closes it, so closure never
-  # depends on the busy worker writing a matching resolved line (contract:
-  # bin/fm-send.sh header).
-  printf "OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'\n" || return 1
+
+  while IFS=$(printf '\t') read -r task line; do
+    [ -n "$task" ] || continue
+    if [ "$warned" -ge "$OPEN_DECISION_UNPARSED_CAP" ]; then
+      more=$((more + 1))
+      continue
+    fi
+    lineno=$(grep -n -F -x -- "$line" "$STATE/$task.status" 2>/dev/null | tail -n 1)
+    lineno=${lineno%%:*}
+    fm_cap_line_var "$line" $((item_bytes - 1))
+    printf 'OPEN DECISIONS: unparsed decision line %s:%s, not read as open; rewrite it with [key=<slug>]: %s\n' \
+      "$STATE/$task.status" "${lineno:-?}" "$FM_LINE_CAP_LINE" || return 1
+    warned=$((warned + 1))
+  done <<EOF
+$unparsed
+EOF
+  if [ "$more" -gt 0 ]; then
+    printf 'OPEN DECISIONS: %d more unparsed decision lines omitted\n' "$more" || return 1
+  fi
+  return 0
 }
 
 # Print the RECORD DIVERGENCE section: every captain call whose two records

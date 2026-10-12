@@ -702,6 +702,8 @@ test_secondmate_marked_request_reporting_contract() {
 
   assert_grep 'include that exact token in your parent status reply' "$brief" \
     "secondmate charter lost correlated parent results"
+  assert_grep 'bin/fm-captain-hold.sh hold --corr <id>' "$brief" \
+    "secondmate charter does not tell a held call to answer through hold --corr"
   assert_grep 'bin/fm-secondmate-report.sh <verb> <corr_id> <note>' "$brief" \
     "secondmate charter lost the mechanical helper invocation"
   assert_grep 'do not pass a status path' "$brief" \

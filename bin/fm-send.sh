@@ -163,7 +163,9 @@
 # transition and is never written for those keys. If this send cannot produce
 # a note the guard will accept, or the structural key would be lost to the
 # status-line cap, it refuses before sending and names the cause rather than
-# exiting 0 on a silent no-op. After a delivered close it also
+# exiting 0 on a silent no-op. A marked steer to a secondmate that names no
+# --resolve-key lists that home's open blocker keys on stderr as advisory
+# output only. After a delivered close it also
 # re-folds and fails loudly if the named key is still open. On the inbox plane
 # the close happens at ENQUEUE time, because enqueue is durable delivery to
 # the task's record; the worker reading the answer late is covered by the
@@ -681,6 +683,17 @@ if [ -n "$RESOLVE_KEYS" ]; then
       exit 1
     fi
   done
+fi
+
+# Advisory only, never a refusal or an exit-status change: a text steer to a
+# secondmate that carries no --resolve-key lists that home's open blocker keys
+# on stderr with the exact close command, so a notice that clears one does not
+# leave it open. Nothing prints when none are open.
+if [ "$MARK_FROM_FIRSTMATE" = 1 ] && [ -z "$RESOLVE_KEYS" ] && [ "${1:-}" != "--key" ]; then
+  open_blocker_keys=$(status_open_decisions "$STATE/$TARGET_TASK_ID.status" \
+    | awk -F '\t' '$2 == "blocked" { printf "%s%s", sep, $1; sep = " " }')
+  [ -z "$open_blocker_keys" ] ||
+    echo "fm-send: advisory: $TARGET_TASK_ID has open blockers: $open_blocker_keys; if this steer clears one, close it: bin/fm-send.sh $TARGET_TASK_ID --resolve-key <key> '<what cleared it>'" >&2
 fi
 
 # Close each answered decision in this home's ledger, only after the answer is

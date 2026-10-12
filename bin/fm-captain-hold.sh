@@ -21,7 +21,8 @@
 #
 # Usage:
 #   fm-captain-hold.sh hold <task-id> --reason <reason> \
-#     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD]
+#     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD] \
+#     [--corr <corr-id>]
 #   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
 #   fm-captain-hold.sh reconcile-requests --source-id <source-id> --source <provenance>   (task ids on stdin)
@@ -208,6 +209,10 @@
 # a released and re-held task opens and closes a distinct parent decision with
 # no new persisted state, and an exact retry republishes the same line, which
 # the channel deduplicates. A main home has no channel and publishes nothing.
+# `hold --corr <id>` answers a marked request from the main firstmate with the
+# hold itself: the published line carries `corr=<id>` at the head of its note,
+# which bin/fm-pending-reply-lib.sh's fm_pending_reply_line_resolves accepts,
+# so no second correlated decision line is needed. A malformed id is refused.
 # The hold or answer is already durable in the backlog, so a channel that
 # cannot be written is reported as `actionable:` on stderr rather than undoing
 # the record; bin/fm-inactive-reconcile.sh's diagnostics name a broken binding.
@@ -239,11 +244,12 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-parent-channel-lib.sh"
 
 PARENT_HOLD_PUBLISHED=0
-publish_parent_hold() {  # <task-id> <occurrence> <verb> <note>
-  local id=$1 occurrence=$2 verb=$3 note=$4 rc=0
+publish_parent_hold() {  # <task-id> <occurrence> <verb> <note> [<corr-id>]
+  local id=$1 occurrence=$2 verb=$3 note=$4 corr=${5:-} rc=0
   PARENT_HOLD_PUBLISHED=0
+  [ -z "$corr" ] || corr="corr=$corr "
   fm_parent_channel_report "$FM_HOME" "$STATE" \
-    "$verb [key=captain-hold-$id-$occurrence]: captain hold $id: $(fm_parent_channel_clean_note "$note")" || rc=$?
+    "$verb [key=captain-hold-$id-$occurrence]: ${corr}captain hold $id: $(fm_parent_channel_clean_note "$note")" || rc=$?
   case "$rc" in
     0|1) PARENT_HOLD_PUBLISHED=1 ;;
     *) printf 'actionable: task %s is held for the captain in this home but that did not reach the parent channel (rc=%s)\n' "$id" "$rc" >&2 ;;
@@ -901,7 +907,7 @@ verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how> <origi
 }
 
 command_hold() {
-  local id=${1:-} title='' reason='' repo='' origin='' until='' show state existing_title body='' hold_kind hold_set occurrence
+  local id=${1:-} title='' reason='' repo='' origin='' until='' corr='' corr_given=0 show state existing_title body='' hold_kind hold_set occurrence
   local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason previous_origin='' hold_status=0
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
@@ -912,6 +918,7 @@ command_hold() {
       --repo) shift; repo=${1:-} ;;
       --origin) shift; origin=${1:-} ;;
       --until) shift; until=${1:-} ;;
+      --corr) shift; corr=${1:-}; corr_given=1 ;;
       *) usage >&2; exit 2 ;;
     esac
     shift
@@ -928,6 +935,11 @@ command_hold() {
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) : ;;
       *) fail "--until must be a YYYY-MM-DD date: $until" ;;
     esac
+  fi
+  if [ "$corr_given" = 1 ]; then
+    corr=${corr#corr=}
+    _fm_classify_is_corr_token "corr=$corr" || fail "--corr must be a 16-hex correlation id: $corr"
+    corr=$(printf '%s' "$corr" | tr 'A-F' 'a-f')
   fi
   hold_set=${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
   case "$hold_set" in
@@ -1007,7 +1019,7 @@ command_hold() {
   occurrence=$(( $(resolution_record_count "$(show_field "$show" body)") + 1 ))
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id lost its hold-set stamp while being held"
-  publish_parent_hold "$id" "$occurrence" needs-decision "$reason"
+  publish_parent_hold "$id" "$occurrence" needs-decision "$reason" "$corr"
   printf '%s\n' "$id"
 }
 
