@@ -2019,21 +2019,13 @@ status_line_is_unread_surface() {  # <status-line>
   return 1
 }
 
-# 0 when <status-line> opens with a needs-decision or blocked verb word yet its
-# verb parse failed, while it still carries a "key=" token - for example the
-# unbracketed "needs-decision key=x at=1: ...". Both folds drop such a line, so
-# its decision would go missing without a word; the wake drain passes this
-# predicate to scan_unread_surface_snapshot to warn about it once, when it is
-# first presented. The key grammar is not loosened: the line never opens.
 status_line_is_unparsed_decision() {  # <status-line>
-  local line=$1 first verb
-  case "$line" in *key=*) ;; *) return 1 ;; esac
+  local line=$1 first folded
   first=${line#"${line%%[![:space:]]*}"}
   first=${first%%[[:space:]:[]*}
   case "$first" in needs-decision|blocked) ;; *) return 1 ;; esac
-  status_line_verb "$line" verb
-  case "$verb" in needs-decision|blocked) return 1 ;; esac
-  return 0
+  folded=$(_fm_decision_fold_line '' "$line" "$FM_CLASSIFY_RESOLVE_VERB_DEFAULT" "$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT" ship)
+  [ -z "$folded" ]
 }
 
 # Fleet-wide unread informational lines: one "<task>\t<status-line>" row per

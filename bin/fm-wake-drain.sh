@@ -552,7 +552,7 @@ EOF
 print_open_decisions_section() {
   local snapshot=${1:-} open task key verb note line item_bytes=220 global_bytes=4000
   local output='' used=0 shown=0 omitted=0 bytes
-  local url urls='' known='' lookups=0 pr_state annotation unparsed lineno warned=0 more=0
+  local url urls='' known='' lookups=0 unchecked=0 pr_state annotation unparsed lineno warned=0 more=0
 
   if [ -n "$snapshot" ]; then
     # Before the fold: with no presentation manifest yet, the unread span is
@@ -577,6 +577,8 @@ print_open_decisions_section() {
     elif [ "$lookups" -lt "$OPEN_DECISION_PR_LOOKUP_CAP" ]; then
       urls="$urls$url"$'\n'
       lookups=$((lookups + 1))
+    else
+      unchecked=$((unchecked + 1))
     fi
   done <<EOF
 $open
@@ -623,6 +625,9 @@ EOF
     printf '%s' "$output" || return 1
     if [ "$omitted" -gt 0 ]; then
       printf 'OPEN DECISIONS: %d more omitted (byte cap)\n' "$omitted" || return 1
+    fi
+    if [ "$unchecked" -gt 0 ]; then
+      printf 'OPEN DECISIONS: %d PR-linked decisions were not checked this drain (lookup cap)\n' "$unchecked" || return 1
     fi
     # Answerer-closes hint, printed at exactly the moment an answer gets written:
     # the send that answers a listed decision also closes it, so closure never

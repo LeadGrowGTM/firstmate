@@ -72,7 +72,7 @@ test_reserved_key_namespace_is_owned_by_its_library() {
 
   grep -F 'pending-reply-id=abcdef0123456789' "$out" >/dev/null \
     || fail "a foreign resolution cleared a reserved decision it does not own: $(cat "$out")"
-  if grep -F 'shipping is blocked on infra' "$out" >/dev/null; then
+  if grep -F 'task9 [key=pending-reply-abcdef0123456789] blocked: shipping is blocked on infra' "$out" >/dev/null; then
     fail "a foreign line took over a reserved decision key: $(cat "$out")"
   fi
 
@@ -328,6 +328,34 @@ test_pr_lookups_are_capped_and_bounded() {
   pass "PR lookups are capped per drain, bounded in time, and silent when they fail"
 }
 
+test_pr_decisions_over_lookup_cap_are_counted() {
+  local dir state out map i
+  dir=$(make_case pr-over-cap)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  : > "$map"
+  for i in 1 2 3 4 5 6 7 8 9; do
+    printf 'https://github.com/o/r/pull/%s open\n' "$i" >> "$map"
+    printf 'needs-decision [key=k%s]: merge https://github.com/o/r/pull/%s?\n' "$i" "$i" > "$state/t$i.status"
+  done
+  printf 'blocked [key=same]: also waiting on https://github.com/o/r/pull/9\n' > "$state/tz.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with PR decisions over the lookup cap"
+  [ "$(grep -c '^pr view ' "$dir/gh.log")" = 8 ] \
+    || fail "the lookup cap changed: $(cat "$dir/gh.log")"
+  [ "$(grep -c 'needs-decision:' "$out")" = 9 ] \
+    || fail "an over-cap decision disappeared: $(cat "$out")"
+  grep -F 'tz [key=same] blocked:' "$out" >/dev/null \
+    || fail "the repeated over-cap PR decision disappeared: $(cat "$out")"
+  [ "$(grep -c '^OPEN DECISIONS: 2 PR-linked decisions were not checked this drain (lookup cap)$' "$out")" = 1 ] \
+    || fail "the two unchecked PR-linked decisions were not counted once: $(cat "$out")"
+  pass "PR-linked decisions beyond the lookup cap are visibly counted"
+}
+
 test_unparsed_decision_line_is_warned_once() {
   local dir state out
   dir=$(make_case unparsed)
@@ -336,6 +364,9 @@ test_unparsed_decision_line_is_warned_once() {
   {
     printf 'working: started\n'
     printf 'needs-decision key=x-article at=1791734068: pick the data source\n'
+    printf 'needs-decision [key=bad!]: invalid key\n'
+    printf 'needs-decision at=1: malformed head\n'
+    printf 'blocked [key=bad!]: invalid blocker key\n'
     printf 'needs-decision [key=ok]: a well-formed ask\n'
     printf 'blocked: waiting on key=value prose, not a key\n'
   } > "$state/mate.status"
@@ -343,7 +374,13 @@ test_unparsed_decision_line_is_warned_once() {
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on an unparsed decision line"
   grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:2, not read as open; rewrite it with [key=<slug>]: needs-decision key=x-article at=1791734068: pick the data source" "$out" >/dev/null \
     || fail "an unbracketed decision key was not warned with its file and line: $(cat "$out")"
-  [ "$(grep -c 'unparsed decision line' "$out")" = 1 ] \
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:3, not read as open; rewrite it with [key=<slug>]: needs-decision [key=bad!]: invalid key" "$out" >/dev/null \
+    || fail "an invalid decision key was not warned: $(cat "$out")"
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:4, not read as open; rewrite it with [key=<slug>]: needs-decision at=1: malformed head" "$out" >/dev/null \
+    || fail "a malformed head without a bracketed key was not warned: $(cat "$out")"
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:5, not read as open; rewrite it with [key=<slug>]: blocked [key=bad!]: invalid blocker key" "$out" >/dev/null \
+    || fail "an invalid blocker key was not warned: $(cat "$out")"
+  [ "$(grep -c 'unparsed decision line' "$out")" = 4 ] \
     || fail "a well-formed or keyless line was warned as unparsed: $(cat "$out")"
   if grep -F '[key=x-article]' "$out" >/dev/null; then
     fail "the unparsed line was treated as an open decision: $(cat "$out")"
@@ -361,7 +398,7 @@ test_unparsed_decision_line_is_warned_once() {
     printf 'blocked key=codex: signed out\n'
   } >> "$state/mate.status"
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "third drain failed"
-  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:6," "$out" >/dev/null \
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:9," "$out" >/dev/null \
     || fail "a new unparsed line with no open decision beside it was not warned: $(cat "$out")"
   [ "$(grep -c 'unparsed decision line' "$out")" = 1 ] \
     || fail "the earlier unparsed line re-printed: $(cat "$out")"
@@ -379,4 +416,5 @@ test_buried_decision_surfaces_on_the_empty_queue_fast_path
 test_status_symlink_is_not_followed
 test_pr_gated_decision_is_flagged_with_its_close_command
 test_pr_lookups_are_capped_and_bounded
+test_pr_decisions_over_lookup_cap_are_counted
 test_unparsed_decision_line_is_warned_once
