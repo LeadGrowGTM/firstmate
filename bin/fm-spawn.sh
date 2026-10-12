@@ -163,9 +163,7 @@
 #   focus-sensitive presentation mutation.
 #   Every single-task invocation holds one task-id-scoped lock across backend
 #   creation through metadata publication, so concurrent same-id spawns serialize
-#   even when they select different backends. A fresh spawn first takes the
-#   per-home task-set lock and refuses rather than waits when forced teardown owns
-#   it; relaunch is exempt because the existing task's control lock covers it.
+#   even when they select different backends.
 #   A fresh Treehouse-backed spawn also takes the project-identity lock in the local
 #   root Firstmate home's state directory before slot allocation and holds it through
 #   task metadata publication. Teardown holds that same lock while proving and
@@ -1326,6 +1324,7 @@ CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 GIT_HOOKS_DIR=
 SPAWN_LAUNCH_SENT=0
+SPAWN_CREW_RESERVATION=
 SPAWN_ENDPOINT_CLOSED=0
 
 spawn_fresh_commit_rollback() {
@@ -1357,6 +1356,9 @@ parse_orca_worktree_result() {
 
 spawn_abort_cleanup() {
   local status=$?
+  if [ -n "$SPAWN_CREW_RESERVATION" ] && [ "$SPAWN_LAUNCH_SENT" = 0 ]; then
+    rm -f -- "$SPAWN_CREW_RESERVATION"
+  fi
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
     [ -n "$SPAWN_META_TMP" ] &&
@@ -1743,30 +1745,17 @@ if [ "$RELAUNCH" -eq 0 ]; then
     echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
   }
-  # A FRESH spawn changes which tasks this home has, so it must not interleave
-  # with a forced teardown that has already enumerated that set: a record
-  # published inside the enumerate-then-remove window is invisible to the
-  # teardown's per-task preflight but visible to its cleanup, and gets mutated
-  # while never lifecycle-locked (bin/fm-wake-lib.sh's fm_task_set_lock_path
-  # owns the evidence; bin/fm-teardown.sh holds the same lock from enumeration
-  # through cleanup). Taken before this task's own locks, matching the
-  # acquisition order documented there, and held through publication.
-  #
-  # A relaunch is exempt: it republishes a task that already exists, so it is
-  # already covered by that task's control lock, which the teardown preflight
-  # tests.
-  #
-  # Refusing rather than waiting is the fail-closed direction: the home may be
-  # moments from removal, so there is nothing worth waiting for.
-  SPAWN_TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || {
-    echo "error: could not resolve the task-set lock for $STATE" >&2
-    exit 1
-  }
-  if ! fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
-    echo "error: this home's task set is locked by another operation (a forced teardown is enumerating or removing its tasks); refusing to create task $ID rather than racing it" >&2
-    exit 1
-  fi
-  SPAWN_TASK_SET_LOCK_HELD=1
+fi
+SPAWN_TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || {
+  echo "error: could not resolve the task-set lock for $STATE" >&2
+  exit 1
+}
+if ! fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
+  echo "error: this home's task set is locked by another operation (a forced teardown is enumerating or removing its tasks); refusing to launch task $ID rather than racing it" >&2
+  exit 1
+fi
+SPAWN_TASK_SET_LOCK_HELD=1
+if [ "$RELAUNCH" -eq 0 ]; then
   spawn_refuse_if_away_spend_cap
   spawn_require_relocated_queued_work
 fi
@@ -1901,7 +1890,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
     esac
   fi
   case "$RELAUNCH_STATE" in
-    dead) ;;
+    dead)
+      relaunch_generation=$(fm_meta_get "$RELAUNCH_META" spawn_gen)
+      if [ -n "$relaunch_generation" ] && [ -e "$STATE/$ID.crew-$relaunch_generation" ]; then
+        echo "error: task $ID still has an admitted launch that has not finished; refusing to relaunch into its endpoint" >&2
+        exit 1
+      fi
+      ;;
     missing) RELAUNCH_REBIND=1 ;;
     *)
       echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
@@ -3218,13 +3213,8 @@ if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
     exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
   fi
 fi
-# A lead's home admits at most two live ordinary crews. This is deliberately a
-# fixed safety limit, rather than another captain-configurable posture: the
-# task-set lock above serializes fresh spawns in this home, while each existing
-# task's recorded backend endpoint is the liveness authority.
-FM_SPAWN_LIVE_CREW_LIMIT=2
 spawn_refuse_if_live_crew_limit() {
-  local meta kind id backend target state live=0 holders=
+  local meta kind id backend target state absence generation live=0 holders=
   [ "$KIND" != secondmate ] || return 0
   for meta in "$STATE"/*.meta; do
     [ -f "$meta" ] && [ ! -L "$meta" ] || continue
@@ -3234,25 +3224,28 @@ spawn_refuse_if_live_crew_limit() {
     [ "$kind" != secondmate ] || continue
     backend=$(fm_backend_of_meta "$meta")
     target=$(fm_backend_target_of_meta "$meta")
-    if [ -z "$target" ]; then
-      echo "error: spawn refused - could not verify liveness for existing crew $id in this Firstmate home (backend=$backend, missing endpoint); refusing rather than risk exceeding the two-crew limit" >&2
-      exit 1
+    state=unverified
+    if [ -n "$target" ]; then
+      state=$(fm_backend_agent_state "$backend" "$target")
     fi
-    state=$(fm_backend_agent_state "$backend" "$target")
+    if [ "$state" = missing ]; then
+      absence=$(fm_control_endpoint_absence_verdict "$backend" "$target")
+      state=${absence%%$'\t'*}
+    fi
+    generation=$(fm_meta_get "$meta" spawn_gen)
     case "$state" in
-    alive)
-      live=$((live + 1))
-      holders="${holders:+$holders, }$id"
-      ;;
-    dead | missing) ;;
-    *)
-      echo "error: spawn refused - could not verify liveness for existing crew $id in this Firstmate home (backend=$backend, state=${state:-unknown}); refusing rather than risk exceeding the two-crew limit" >&2
-      exit 1
+    gone) continue ;;
+    dead)
+      if [ -z "$generation" ] || [ ! -e "$STATE/$id.crew-$generation" ]; then
+        continue
+      fi
       ;;
     esac
+    live=$((live + 1))
+    holders="${holders:+$holders, }$id"
   done
-  if [ "$live" -ge "$FM_SPAWN_LIVE_CREW_LIMIT" ]; then
-    echo "error: spawn refused - this Firstmate home already has $live live crews ($holders); at most two crews may run for one lead, so task $ID was not launched" >&2
+  if [ "$live" -ge 2 ]; then
+    echo "error: spawn refused - this Firstmate home already has $live occupied crew slots ($holders); at most two crews may run for one lead, so task $ID was not launched; slots include pending launches and endpoints not proven stopped" >&2
     exit 1
   fi
 }
@@ -5199,6 +5192,10 @@ fi
 META_WINDOW=$T
 [ "$BACKEND" = orca ] && META_WINDOW=$W
 SPAWN_GEN="s$(date +%s).${BASHPID:-$$}.$RANDOM"
+if [ "$KIND" != secondmate ]; then
+  SPAWN_CREW_RESERVATION="$STATE_REAL/$ID.crew-$SPAWN_GEN"
+  (umask 077 && : > "$SPAWN_CREW_RESERVATION") || exit 1
+fi
 SPAWN_META_PATH="$STATE/$ID.meta"
 if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
@@ -5354,13 +5351,6 @@ fi
 if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
   fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
-fi
-if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
-  # The record is published, so this task is now part of the set a teardown
-  # enumerates and locks per task. The set lock is only needed across that
-  # publication.
-  SPAWN_TASK_SET_LOCK_HELD=0
-  fm_lock_release "$SPAWN_TASK_SET_LOCK"
 fi
 "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 [ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
@@ -5682,6 +5672,10 @@ LAUNCH_STAGE="$LAUNCH_DIR/.launch.$SPAWN_GEN.tmp"
 if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
   echo "error: task launch file $LAUNCH_FILE already exists; refusing to replace it" >&2
   exit 1
+fi
+if [ -n "$SPAWN_CREW_RESERVATION" ]; then
+  LAUNCH="( set +e; ( $LAUNCH
+); fm_crew_status=\$?; rm -f -- $(shell_quote "$SPAWN_CREW_RESERVATION"); exit \"\$fm_crew_status\" )"
 fi
 if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   chmod 0600 "$LAUNCH_STAGE" && mv -f "$LAUNCH_STAGE" "$LAUNCH_FILE"); then
