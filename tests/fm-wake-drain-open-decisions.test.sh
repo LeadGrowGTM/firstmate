@@ -356,6 +356,48 @@ test_pr_decisions_over_lookup_cap_are_counted() {
   pass "PR-linked decisions beyond the lookup cap are visibly counted"
 }
 
+test_later_offline_merge_record_covers_shared_pr() {
+  local dir state out map i
+  dir=$(make_case pr-later-offline)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  : > "$map"
+  printf 'https://github.com/o/r/pull/24 fail\n' >> "$map"
+  printf 'needs-decision [key=first]: merge https://github.com/o/r/pull/24?\n' > "$state/t9.status"
+  printf 'blocked [key=second]: waiting on https://github.com/o/r/pull/24\n' > "$state/tz.status"
+  printf 'done [key=merged-tz]: merged https://github.com/o/r/pull/24\n' >> "$state/tz.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with a later offline merge record"
+  grep -A1 -F 't9 [key=first]' "$out" | grep -F 'PR https://github.com/o/r/pull/24 is merged' >/dev/null \
+    || fail "the first decision did not use the later offline merge record: $(cat "$out")"
+  grep -A1 -F 'tz [key=second]' "$out" | grep -F 'PR https://github.com/o/r/pull/24 is merged' >/dev/null \
+    || fail "the second decision did not use its own offline merge record: $(cat "$out")"
+  if grep -F 'pr view https://github.com/o/r/pull/24 ' "$dir/gh.log" >/dev/null; then
+    fail "a failing live lookup hid the later offline merge record: $(cat "$dir/gh.log")"
+  fi
+
+  for i in 1 2 3 4 5 6 7 8; do
+    printf 'https://github.com/o/r/pull/%s fail\n' "$i" >> "$map"
+    printf 'needs-decision [key=k%s]: merge https://github.com/o/r/pull/%s?\n' "$i" "$i" > "$state/t$i.status"
+  done
+  : > "$dir/gh.log"
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with an offline merge after the lookup cap"
+  if grep -F 'PR-linked decisions were not checked' "$out" >/dev/null; then
+    fail "a decision with an offline merge record was counted as unchecked: $(cat "$out")"
+  fi
+  [ "$(grep -c '^pr view ' "$dir/gh.log")" = 8 ] \
+    || fail "the lookup cap changed while an offline merge was available: $(cat "$dir/gh.log")"
+  if grep -F 'pr view https://github.com/o/r/pull/24 ' "$dir/gh.log" >/dev/null; then
+    fail "an offline merged PR was looked up despite a failing live result: $(cat "$dir/gh.log")"
+  fi
+  pass "a later offline merge record covers every decision sharing its PR"
+}
+
 test_unparsed_decision_line_is_warned_once() {
   local dir state out
   dir=$(make_case unparsed)
@@ -405,6 +447,33 @@ test_unparsed_decision_line_is_warned_once() {
   pass "a decision line the fold cannot parse is warned once with its file and line"
 }
 
+test_identical_unparsed_lines_keep_distinct_positions() {
+  local dir state out
+  dir=$(make_case repeated-unparsed)
+  state="$dir/state"
+  out="$dir/drain.out"
+  printf 'note: first presentation\n' > "$state/mate.status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "initial drain failed"
+  {
+    printf 'working: next phase\n'
+    printf 'needs-decision [key=bad!]: choose\n'
+    printf 'needs-decision [key=bad!]: choose\n'
+  } >> "$state/mate.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on repeated malformed lines"
+  grep -F "unparsed decision line $state/mate.status:3," "$out" >/dev/null \
+    || fail "the first malformed line did not keep its position: $(cat "$out")"
+  grep -F "unparsed decision line $state/mate.status:4," "$out" >/dev/null \
+    || fail "the second malformed line did not keep its position: $(cat "$out")"
+  [ "$(grep -c 'unparsed decision line' "$out")" = 2 ] \
+    || fail "the repeated malformed lines were not each warned once: $(cat "$out")"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "later drain failed"
+  if grep -F 'unparsed decision line' "$out" >/dev/null; then
+    fail "the repeated malformed lines were warned after presentation: $(cat "$out")"
+  fi
+  pass "repeated malformed lines retain distinct positions and warn once"
+}
+
 test_buried_decision_still_surfaces
 test_over_long_decision_note_is_capped_with_a_marker
 test_explicit_resolution_closes_it
@@ -417,4 +486,6 @@ test_status_symlink_is_not_followed
 test_pr_gated_decision_is_flagged_with_its_close_command
 test_pr_lookups_are_capped_and_bounded
 test_pr_decisions_over_lookup_cap_are_counted
+test_later_offline_merge_record_covers_shared_pr
 test_unparsed_decision_line_is_warned_once
+test_identical_unparsed_lines_keep_distinct_positions

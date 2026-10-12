@@ -557,7 +557,7 @@ print_open_decisions_section() {
   if [ -n "$snapshot" ]; then
     # Before the fold: with no presentation manifest yet, the unread span is
     # seeded from the fold cursor that scan_open_decisions_snapshot advances.
-    unparsed=$(scan_unread_surface_snapshot "$STATE" "$snapshot" status_line_is_unparsed_decision) || return 1
+    unparsed=$(scan_unread_surface_snapshot "$STATE" "$snapshot" status_line_is_unparsed_decision numbered) || return 1
     open=$(scan_open_decisions_snapshot "$STATE" "$snapshot") || return 1
   else
     open=$(scan_open_decisions_incremental "$STATE") || return 1
@@ -571,10 +571,18 @@ print_open_decisions_section() {
     [ -n "$task" ] || continue
     open_decision_pr_url "$note" || continue
     url=$OPEN_DECISION_PR_URL
-    case "$known$urls" in *"$url"$'\t'*|*"$url"$'\n'*) continue ;; esac
     if open_decision_pr_merge_recorded "$STATE/$task.status" "$url"; then
-      known="$known$url"$'\t'"merged"$'\n'
-    elif [ "$lookups" -lt "$OPEN_DECISION_PR_LOOKUP_CAP" ]; then
+      case "$known" in *"$url"$'\t'*) ;; *) known="$known$url"$'\t'"merged"$'\n' ;; esac
+    fi
+  done <<EOF
+$open
+EOF
+  while IFS=$(printf '\t') read -r task key verb note; do
+    [ -n "$task" ] || continue
+    open_decision_pr_url "$note" || continue
+    url=$OPEN_DECISION_PR_URL
+    case "$known$urls" in *"$url"$'\t'*|*"$url"$'\n'*) continue ;; esac
+    if [ "$lookups" -lt "$OPEN_DECISION_PR_LOOKUP_CAP" ]; then
       urls="$urls$url"$'\n'
       lookups=$((lookups + 1))
     else
@@ -636,14 +644,12 @@ EOF
     printf "OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'\n" || return 1
   fi
 
-  while IFS=$(printf '\t') read -r task line; do
+  while IFS=$(printf '\t') read -r task lineno line; do
     [ -n "$task" ] || continue
     if [ "$warned" -ge "$OPEN_DECISION_UNPARSED_CAP" ]; then
       more=$((more + 1))
       continue
     fi
-    lineno=$(grep -n -F -x -- "$line" "$STATE/$task.status" 2>/dev/null | tail -n 1)
-    lineno=${lineno%%:*}
     fm_cap_line_var "$line" $((item_bytes - 1))
     printf 'OPEN DECISIONS: unparsed decision line %s:%s, not read as open; rewrite it with [key=<slug>]: %s\n' \
       "$STATE/$task.status" "${lineno:-?}" "$FM_LINE_CAP_LINE" || return 1
