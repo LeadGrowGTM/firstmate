@@ -88,7 +88,7 @@ Active-command and result waits use a separate sampling interval; the [`fm-remot
 On Linux with a readable `/proc/<pid>/stat`, let running remote jobs finish before updating to the worker identity based on the process start tick and kernel boot ID.
 An in-flight job whose stored identity is the previous wall-clock start time is treated as unowned and published stopped with exit 125, without signalling the live process.
 On macOS, the worker keeps the wall-clock identity, so its existing records still match.
-After a group leader exits, a surviving group is not signalled.
+During reclaim, a surviving group whose leader has exited is not signalled.
 The group id cannot be verified as the recorded job once that leader is gone, on Linux and on macOS.
 Reclaim clears the job as stale and records that orphaned helper processes may still be running.
 A group whose live leader matches the recorded identity is still signalled.

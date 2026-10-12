@@ -239,6 +239,10 @@ SH
     [ "$identity" = missing ] && expected_error='remote job worker stopped before this job completed'
     [ "$(cat "$job/stderr")" = "$expected_error" ] \
       || fail "the $identity group record published the wrong error: $(cat "$job/stderr")"
+    [ "$(wc -l < "$job/stderr")" -eq 1 ] \
+      || fail "the $identity group record published more than one error line"
+    [ ! -e "$job/.unverified-group" ] \
+      || fail "the $identity group record published an unverified-group marker"
     sleep 0.2
     [ ! -e "$FM_TEST_SIGNAL_LOG" ] || fail "the $identity group record signalled the surviving child"
     state=$(/bin/ps -p "$CHILD_PID" -o state= 2>/dev/null) \
