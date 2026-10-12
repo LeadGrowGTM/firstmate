@@ -1,0 +1,32 @@
+{
+  "types": [
+    {
+      "name": "list-build",
+      "use": "Build or enrich a company or people list.",
+      "agents": ["company-builder", "people-builder", "enrichment"],
+      "check": "npm test",
+      "hand_back": "List path and row count.",
+      "touch": "The list file the brief names.",
+      "projects": ["gtm-orchestrator"]
+    },
+    {
+      "name": "bison-launch",
+      "use": "Upload a list and run the post-launch check.",
+      "agents": ["uploader", "post-launch"],
+      "check": "npm test",
+      "hand_back": "Upload id and the post-launch result.",
+      "effort": "low",
+      "touch": "The campaign the brief names.",
+      "projects": ["gtm-orchestrator"]
+    },
+    {
+      "name": "copy-draft",
+      "use": "Draft or rewrite campaign copy.",
+      "skills": [".agents/skills/campaign-copywriting/SKILL.md"],
+      "agents": ["copywriter"],
+      "hand_back": "Draft path and what the copy says.",
+      "effort": "medium",
+      "touch": "The draft file the brief names."
+    }
+  ]
+}
