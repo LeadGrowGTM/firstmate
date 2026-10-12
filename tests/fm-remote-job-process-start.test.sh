@@ -167,6 +167,7 @@ SH
   chmod +x "$GROUP_ROOT/child.sh"
   export FM_TEST_CHILD_PID_FILE="$GROUP_ROOT/child.pid"
   export FM_TEST_SIGNAL_LOG="$GROUP_ROOT/signals"
+  # shellcheck disable=SC2016 # The child shell expands $1, not this shell.
   setsid bash -c '"$1" &' _ "$GROUP_ROOT/child.sh" >/dev/null 2>&1 &
   GROUP_PGID=$!
   wait "$GROUP_PGID" || fail "the leaderless group fixture did not launch"
@@ -201,10 +202,10 @@ SH
     chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
     fm_remote_job_write_state "$job" running || fail "could not seed the running job"
     for _ in $(seq 1 150); do
-      [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] && break
+      [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] && break
       sleep 0.05
     done
-    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] \
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity group record did not publish exit 125"
     [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
@@ -241,10 +242,10 @@ SH
     chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
     fm_remote_job_write_state "$job" running || fail "could not seed the running job"
     for _ in $(seq 1 150); do
-      [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] && break
+      [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] && break
       sleep 0.05
     done
-    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] \
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity live group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity live group did not publish exit 125"
     [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \

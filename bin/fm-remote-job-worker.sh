@@ -397,7 +397,7 @@ worker_group_identity_status() { # <job-dir> <pid>
       boot_id=$(fm_remote_job_process_boot_id) || return 1
       case "$recorded_start" in "starttime="*" boot_id=$boot_id") ;; *) return 1 ;; esac
       tick=${recorded_start#starttime=}
-      tick=${tick% boot_id=$boot_id}
+      tick=${tick% boot_id="$boot_id"}
       case "$tick" in ''|*[!0-9]*) return 1 ;; esac
     fi
     return 0
