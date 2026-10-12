@@ -1,0 +1,7 @@
+ok - a moving lstart leaves the monotonic start identity unchanged
+ok - without a start tick the same process reports the changing lstart
+ok - lock ownership requires the same boot and tick and rejects old records
+ok - the real kernel start tick and boot id are the process identity
+ok - a missing process has no start identity
+ok - leaderless groups with old or missing start records are reclaimed without signals
+ok - live groups with old or different-boot start records are reclaimed without signals
