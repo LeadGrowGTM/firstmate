@@ -1,17 +1,13 @@
-HOLD RESULT
-corr-call
+$ bin/fm-captain-hold.sh hold release-call --corr 0123456789abcdef
+release-call
 
-PARENT CHANNEL
-needs-decision [key=captain-hold-corr-call-1] [at=1791817972]: corr=0123456789abcdef captain hold corr-call: captain choice pending
+Parent channel after first hold:
+needs-decision [key=captain-hold-release-call-1] [at=1791820306]: corr=0123456789abcdef captain hold release-call: Captain review pending
 
-INVALID PREFIX RESULT
+Retry same hold:
+release-call
+Parent hold line count: 1
+
+Invalid corr= prefix attempt:
 fm-captain-hold: --corr must be a 16-hex correlation id: corr=0123456789abcdef
-refused as expected
-
-PENDING-REPLY CONSUMER
-parent request resolved by hold line
-
-RETRY
-corr-call
-parent channel line count: 1
-invalid task present in backlog: no
+refused; invalid task in backlog: no

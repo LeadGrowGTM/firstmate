@@ -1,0 +1,101 @@
+Lab Claude pane before send:
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M4RCDNVZZ0T7JN9KFCE53ZF9
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                    ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix typecheck errors"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+
+$ bin/fm-send.sh fm-domain "Lab check: reply LAB_OK without tools."
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4RCDNVZZ0T7JN9KFCE53ZF9/.phase-send-lab.I5LtTO/parent
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: advisory: domain has open blockers: codex-signin; if this steer clears one, close it: bin/fm-send.sh domain --resolve-key <key> '<what cleared it>'
+fm-send: doorbell not typed because the agent in primary:fm-domain has exited; the steer is durably recorded at /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4RCDNVZZ0T7JN9KFCE53ZF9/.phase-send-lab.I5LtTO/parent/state/domain.inbox/001.msg for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane
+
+Status after send:
+blocked [key=codex-signin]: signed out
+blocked [key=quota]: out of quota
+resolved [key=quota]: quota reset
+needs-decision [key=pick]: choose a name
+
+Claude pane after send:
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M4RCDNVZZ0T7JN9KFCE53ZF9
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                    ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix typecheck errors"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

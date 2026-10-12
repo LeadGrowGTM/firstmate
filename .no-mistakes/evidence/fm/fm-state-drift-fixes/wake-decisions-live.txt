@@ -1,0 +1,29 @@
+First wake drain:
+STATUS OUTCOME BACKSTOP (newest captain-facing task event has no covering branch outcome):
+captain done [key=merged-captain]: merged https://github.com/example/project/pull/25
+ordinary done [key=merged-ordinary]: merged https://github.com/example/project/pull/24
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+captain [key=captain-hold-release-1] needs-decision: check https://github.com/example/project/pull/25
+  ^ PR https://github.com/example/project/pull/25 is merged; call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain's answer or evidence-backed reconcile close), never by resolving the key as moot
+malformed [key=valid] needs-decision: decide this
+mate [key=captain-hold-release-call-1] needs-decision: corr=0123456789abcdef captain hold release-call: Captain review pending
+ordinary [key=release] needs-decision: check https://github.com/example/project/pull/24
+  ^ PR https://github.com/example/project/pull/24 is merged; if that settles it, close it: bin/fm-send.sh ordinary --resolve-key release 'PR https://github.com/example/project/pull/24 merged'
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+OPEN DECISIONS: unparsed decision line /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4RCDNVZZ0T7JN9KFCE53ZF9/.phase-lab.ocrANL/parent/state/malformed.status:2, not read as open; rewrite it with [key=<slug>]: needs-decision key=broken: malformed decision
+
+Second wake drain, warning should not repeat:
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+captain [key=captain-hold-release-1] needs-decision: check https://github.com/example/project/pull/25
+  ^ PR https://github.com/example/project/pull/25 is merged; call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain's answer or evidence-backed reconcile close), never by resolving the key as moot
+malformed [key=valid] needs-decision: decide this
+mate [key=captain-hold-release-call-1] needs-decision: corr=0123456789abcdef captain hold release-call: Captain review pending
+ordinary [key=release] needs-decision: check https://github.com/example/project/pull/24
+  ^ PR https://github.com/example/project/pull/24 is merged; if that settles it, close it: bin/fm-send.sh ordinary --resolve-key release 'PR https://github.com/example/project/pull/24 merged'
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+
+Persisted status after drains:
+needs-decision [key=release]: check https://github.com/example/project/pull/24
+done [key=merged-ordinary]: merged https://github.com/example/project/pull/24
+needs-decision [key=captain-hold-release-1]: check https://github.com/example/project/pull/25
+done [key=merged-captain]: merged https://github.com/example/project/pull/25
