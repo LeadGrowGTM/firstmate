@@ -1640,9 +1640,9 @@ _fm_treehouse_path_inside() {  # <path> <root>
 # Treehouse keys its default pool by directory name plus origin, so two homes
 # that clone one origin are offered one pool. A home that is handed another
 # clone's copy leases from a pool of its own instead. That pool sits under the
-# user state directory, outside every Firstmate home and every project clone,
-# so a worker in it loads no home's instructions. The folder is the home's name
-# plus the first 6 hex digits of the sha256 of its physical path, which keeps
+# user state directory, outside the spawning home and project clone, so a
+# worker in it loads no instructions from that home. The folder is the home's
+# name plus the first 6 hex digits of the sha256 of its physical path, which keeps
 # two homes of one name apart. Treehouse puts its pools in `.treehouse` there.
 # The destination is resolved physically before anything is created. When it
 # lands inside the spawning home, or inside the project clone when one is

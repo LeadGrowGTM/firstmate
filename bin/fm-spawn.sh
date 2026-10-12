@@ -279,9 +279,9 @@
 #   treehouse offers it from a pool keyed only by directory name and origin.
 #   When `treehouse get` hands the pane another clone's copy, the launch leaves
 #   that subshell, which returns the copy, and leases from this home's own pool
-#   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, outside every home and
-#   project). A location that resolves inside the spawning home or the project
-#   clone is refused before the lease, and no other location is chosen. A lease
+#   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, outside the spawning
+#   home and project). A location that resolves inside the spawning home or the
+#   project clone is refused before the lease, and no other location is chosen. A lease
 #   that is still another clone is returned and the launch
 #   stops. Relaunch resumes in the recorded worktree whichever clone it belongs
 #   to. Orca and secondmate launches do not use this pool.

@@ -1182,7 +1182,7 @@ A reported finding is a recommendation, not cleanup authority.
 Treehouse still keys its default pool by directory name plus origin, so two clones with the same name and origin are offered one pool.
 A launch asks that pool first and keeps the copy only when it is a worktree of the spawning clone, which is what a single home always gets.
 When treehouse hands it another clone's idle copy, the launch leaves that copy at once and leases a worktree of its own clone from this home's own pool instead.
-That pool lives under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/`, outside every Firstmate home and every project clone, so a worker there loads no home's instructions.
+That pool lives under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/` and must be outside the spawning home and project clone, so a worker there does not load that home's instructions.
 When that path resolves inside the Firstmate home or the project clone, the lease is refused and no other location is chosen.
 `<home>` is the home's folder name and `<hash>` is the first six hex digits of the sha256 of the home's absolute path, so two homes with one folder name stay apart.
 The one effect on the other home's pool is that treehouse resets the idle copy it offered to the default branch before handing it over, and takes it back unleased when the launch leaves it; no copy is added there.
@@ -1204,8 +1204,8 @@ Run `treehouse prune --yes` from the root of the clone that owns that pool, whic
 ### Per-repository caps (max_trees)
 
 Treehouse reads `max_trees` from the `treehouse.toml` at the root of the clone it runs in.
-When that clone has no `treehouse.toml`, the whole configuration, `max_trees` included, comes from the user-level `~/.config/treehouse/config.toml` if that file exists.
-The built-in limit of 16 copies applies only when neither file exists.
+For the default pool, when that clone has no `treehouse.toml`, the whole configuration, `max_trees` included, comes from the user-level `~/.config/treehouse/config.toml` if that file exists.
+The built-in limit of 16 copies applies to the default pool when neither file exists, and to this home's own pool when the clone has no `treehouse.toml`.
 
 ```toml
 max_trees = 2
@@ -1225,7 +1225,7 @@ The Firstmate pool also holds the leased copies behind local secondmate homes, a
 The cap is 10 because the peak number of simultaneous Firstmate copies on the owner's machine was 8.
 Once a repository has its own `treehouse.toml`, treehouse takes `max_trees` and `root` for that repository from it and no longer from `~/.config/treehouse/config.toml`.
 A user who set a user-level `root` must therefore expect this repository's pool to use the default root.
-User-level hooks still apply.
+User-level hooks still apply to the default pool.
 
 A launch into a pool that is already at its cap is refused at once rather than waiting for a copy: `treehouse get` and `treehouse get --lease` both exit 1 with a message naming `max_trees`.
 [Project capacity](#project-capacity-configproject-capacity) does not prevent that on its own, because a place frees when a PR is ready while the copy stays held until cleanup.
