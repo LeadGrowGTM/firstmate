@@ -364,7 +364,7 @@ SH
 }
 
 test_sweep_sizes_a_configured_root_once_and_refuses_a_home_root() {
-  local world home project configured unsafe out rc=0
+  local world home project configured nested unsafe out rc=0
   world=$(make_world configured-root)
   home=$(make_home "$world" home alpha)
   project=$home/projects/alpha
@@ -378,11 +378,11 @@ test_sweep_sizes_a_configured_root_once_and_refuses_a_home_root() {
 dir=${FAKE_TREEHOUSE_DIR:?}
 target=${@: -1}
 printf '%s\n' "$target" >> "$dir/du-log"
-if [ "$target" = "$(cat "$dir/configured-root")" ]; then
-  printf '%s\t%s\n' "$((6 * 1048576))" "$target"
-else
-  printf '0\t%s\n' "$target"
-fi
+configured=$(cat "$dir/configured-root")
+case "$configured" in
+  "$target"|"$target"/*) printf '%s\t%s\n' "$((6 * 1048576))" "$target" ;;
+  *) printf '0\t%s\n' "$target" ;;
+esac
 SH
   chmod +x "$world/fakebin/du"
   out=$(guard "$world" "$home" sweep 2>&1) || fail "configured-root sweep failed: $out"
@@ -392,6 +392,22 @@ SH
     "$(calls "$world")" "the configured pool was pruned more than once"
   assert_equals 1 "$(grep -Fxc -- "$configured/.treehouse" "$world/fake/du-log")" \
     "the configured pool was measured more than once"
+
+  nested=$world/user/.treehouse/custom
+  mkdir -p "$nested/.treehouse/alpha-0a1b2c"
+  printf 'root = "%s"\n' "$nested" > "$project/treehouse.toml"
+  printf '%s\n' "$nested/.treehouse" > "$world/fake/configured-root"
+  : > "$world/fake/log"
+  : > "$world/fake/du-log"
+  out=$(guard "$world" "$home" sweep 2>&1) || fail "nested-root sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $world/user/.treehouse (limit 5 GB)" "$out" \
+    "the nested pool's bytes were reported twice"
+  assert_equals "$(printf '%s\t%s' "$project" 'prune --yes')" \
+    "$(calls "$world")" "the nested configured pool was pruned more than once"
+  assert_equals 1 "$(grep -Fxc -- "$world/user/.treehouse" "$world/fake/du-log")" \
+    "the parent pool was not measured once"
+  assert_equals 0 "$(grep -Fxc -- "$nested/.treehouse" "$world/fake/du-log")" \
+    "the nested pool was measured again under its parent"
 
   printf 'root = "%s"\n' "$unsafe" > "$project/treehouse.toml"
   rc=0

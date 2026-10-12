@@ -272,6 +272,11 @@ sweep_size() {
     done
   fi
   for root in "${roots[@]}"; do
+    for prior in "${roots[@]}"; do
+      if [ "$root" != "$prior" ] && _fm_treehouse_path_inside "$root" "$prior"; then
+        continue 2
+      fi
+    done
     for prior in "${measured[@]}"; do
       [ "$root" != "$prior" ] || continue 2
     done

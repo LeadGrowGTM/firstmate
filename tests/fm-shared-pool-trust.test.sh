@@ -618,6 +618,43 @@ SH
   pass "a clone root or pool link inside the home is refused before leasing"
 }
 
+test_root_reader_accepts_only_complete_supported_lines() {
+  local root=$TMP_ROOT/root-lines user home project state outside line err out rc
+  local accepted=() rejected=()
+  user=$root/user
+  home=$root/home
+  project=$root/project
+  state=$root/state
+  outside=$root/outside
+  mkdir -p "$user" "$home" "$project" "$state" "$outside"
+  git -C "$project" init -q
+  accepted=('other = ignored' '"other" = "ignored"' 'root = ""'
+    "root = '$outside'" "root = \"$outside\"" "root = $outside")
+  for line in "${accepted[@]}"; do
+    printf '%s\n' "$line" > "$project/treehouse.toml"
+    rc=0
+    out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+      "$home" "$project" 2>&1) || rc=$?
+    expect_code 0 "$rc" "a supported root line was refused: $line"$'\n'"$out"
+    [ -n "$out" ] || fail "a supported root line returned no pool: $line"
+  done
+  rejected=("root = \"$outside\" trailing" "root = {path=\"$outside\"}"
+    "\"root\" = \"$outside\"" "'root' = '$outside'"
+    "root.path = \"$outside\"" "root = '''$outside'''")
+  for line in "${rejected[@]}"; do
+    printf '%s\n' "$line" > "$project/treehouse.toml"
+    err=$root/root.err
+    rc=0
+    out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+      "$home" "$project" 2>"$err") || rc=$?
+    expect_code 1 "$rc" "an unsupported root line was accepted: $line"$'\n'"$out"
+    [ -z "$out" ] || fail "an unsupported root line printed a pool: $line"
+    assert_contains "$(cat "$err")" "$project/treehouse.toml" \
+      "an unsupported root line did not name its file: $line"
+  done
+  pass "only complete supported root lines are accepted"
+}
+
 test_shasum_only_path_names_the_pool_from_the_home() {
   local root=$TMP_ROOT/shasum-only user home binpool cmd target out rc=0
   local physical hash base
@@ -676,6 +713,7 @@ test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
 test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
 test_a_pool_inside_the_home_or_the_clone_is_refused_before_leasing
 test_a_configured_root_or_pool_link_inside_the_home_is_refused_before_leasing
+test_root_reader_accepts_only_complete_supported_lines
 test_shasum_only_path_names_the_pool_from_the_home
 test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
 test_spawn_refuses_a_pool_inside_the_home_with_a_plain_reason
