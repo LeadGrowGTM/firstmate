@@ -1,0 +1,20 @@
+SEND OUTPUT
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4R8AJZG3MSQMEVVVAAM6AEG/.test-send.Hll643
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: advisory: domain has open blockers: codex-signin; if this steer clears one, close it: bin/fm-send.sh domain --resolve-key <key> '<what cleared it>'
+fm-send: doorbell not typed because the agent in fm-lab-send:fm-domain has exited; the steer is durably recorded at /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4R8AJZG3MSQMEVVVAAM6AEG/.test-send.Hll643/state/domain.inbox/001.msg for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane
+
+PERSISTED STATUS
+blocked [key=codex-signin]: signed out
+blocked [key=quota]: exceeded quota
+resolved [key=quota]: reset
+needs-decision [key=choice]: pick a plan
+
+INBOX FILES
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4R8AJZG3MSQMEVVVAAM6AEG/.test-send.Hll643/state/domain.inbox/001.msg

@@ -1,0 +1,18 @@
+FIRST DRAIN
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=release] needs-decision: check https://github.com/cli/cli/pull/1 before release
+  ^ PR https://github.com/cli/cli/pull/1 is merged at 2019-10-04T16:01:04Z; if that settles it, close it: bin/fm-send.sh mate --resolve-key release 'PR https://github.com/cli/cli/pull/1 merged'
+mate [key=captain-hold-call-1] needs-decision: call on https://github.com/cli/cli/pull/1
+  ^ PR https://github.com/cli/cli/pull/1 is merged at 2019-10-04T16:01:04Z; call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain's answer or evidence-backed reconcile close), never by resolving the key as moot
+mate [key=two-prs] needs-decision: compare https://github.com/cli/cli/pull/1 and https://github.com/cli/cli/pull/2
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+OPEN DECISIONS: unparsed decision line /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4R8AJZG3MSQMEVVVAAM6AEG/.test-gh.JWljxk/state/mate.status:4, not read as open; rewrite it with [key=<slug>]: needs-decision key=bad: malformed decision
+
+SECOND DRAIN
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=release] needs-decision: check https://github.com/cli/cli/pull/1 before release
+  ^ PR https://github.com/cli/cli/pull/1 is merged at 2019-10-04T16:01:04Z; if that settles it, close it: bin/fm-send.sh mate --resolve-key release 'PR https://github.com/cli/cli/pull/1 merged'
+mate [key=captain-hold-call-1] needs-decision: call on https://github.com/cli/cli/pull/1
+  ^ PR https://github.com/cli/cli/pull/1 is merged at 2019-10-04T16:01:04Z; call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain's answer or evidence-backed reconcile close), never by resolving the key as moot
+mate [key=two-prs] needs-decision: compare https://github.com/cli/cli/pull/1 and https://github.com/cli/cli/pull/2
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'

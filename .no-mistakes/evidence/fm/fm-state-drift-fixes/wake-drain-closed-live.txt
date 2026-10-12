@@ -1,0 +1,4 @@
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=closed-release] needs-decision: check https://github.com/cli/cli/pull/14646
+  ^ PR https://github.com/cli/cli/pull/14646 is closed; if that settles it, close it: bin/fm-send.sh mate --resolve-key closed-release 'PR https://github.com/cli/cli/pull/14646 closed'
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'

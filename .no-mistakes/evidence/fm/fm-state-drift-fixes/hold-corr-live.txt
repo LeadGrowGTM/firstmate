@@ -1,0 +1,17 @@
+HOLD RESULT
+corr-call
+
+PARENT CHANNEL
+needs-decision [key=captain-hold-corr-call-1] [at=1791817972]: corr=0123456789abcdef captain hold corr-call: captain choice pending
+
+INVALID PREFIX RESULT
+fm-captain-hold: --corr must be a 16-hex correlation id: corr=0123456789abcdef
+refused as expected
+
+PENDING-REPLY CONSUMER
+parent request resolved by hold line
+
+RETRY
+corr-call
+parent channel line count: 1
+invalid task present in backlog: no
