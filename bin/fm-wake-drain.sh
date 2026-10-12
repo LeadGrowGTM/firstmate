@@ -471,8 +471,10 @@ EOF
 # - An open decision whose note names exactly one GitHub PR URL is checked
 #   against that PR: a `done [key=merged-*]` line naming the URL in the same
 #   status log marks it merged at no cost, and otherwise bin/fm-pr-state.sh reads
-#   live state. A merged or closed PR adds one line under the entry carrying the
-#   exact close command. Live reads are deduplicated per drain, capped at
+#   live state. A merged or closed PR adds one line under the entry: ordinary
+#   keys get the exact fm-send close command, while captain-hold keys point to
+#   closure through the owning home's fm-captain-hold lifecycle. Live reads are
+#   deduplicated per drain, capped at
 #   OPEN_DECISION_PR_LOOKUP_CAP, run concurrently, and each bounded by
 #   OPEN_DECISION_PR_LOOKUP_SECONDS; a failed, slow, or unavailable lookup adds
 #   nothing.

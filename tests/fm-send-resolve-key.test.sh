@@ -693,7 +693,7 @@ test_unrelated_writer_cannot_close_or_hijack_reserved_key() {
   out=$(drain_out "$home")
   printf '%s' "$out" | grep -F "pending-reply-id=$corr" >/dev/null \
     || fail "an unrelated answered: resolution cleared a reserved decision: $out"
-  if printf '%s' "$out" | grep -F 'shipping is blocked on infra' >/dev/null; then
+  if printf '%s' "$out" | grep -F "mate [key=$key] blocked: shipping is blocked on infra" >/dev/null; then
     fail "an unrelated writer took over a reserved decision key: $out"
   fi
 
