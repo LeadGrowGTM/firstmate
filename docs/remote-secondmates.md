@@ -85,6 +85,12 @@ It never runs in the SSH process or a Herdr pane.
 Linux uses the same queue and worker protocol without the Aqua-session requirement.
 The [`fm-remote-job-worker.sh` header](../bin/fm-remote-job-worker.sh) owns dispatch cadence and the quiet-scan latency for work arriving after its post-activity burst.
 Active-command and result waits use a separate sampling interval; the [`fm-remote-job-lib.sh` header](../bin/fm-remote-job-lib.sh) owns its defaults, overrides, and completion, cancellation, and timeout latency contract.
+On Linux with a readable `/proc/<pid>/stat`, let running remote jobs finish before updating to the worker identity based on the process start tick and kernel boot ID.
+An in-flight job whose stored identity is the previous wall-clock start time is treated as unowned and published stopped with exit 125, without signalling the live process.
+On macOS, the worker keeps the wall-clock identity, so its existing records still match.
+After a group leader exits, a surviving group remains eligible for signalling as before.
+Linux requires a stored tick identity in the current boot, while macOS accepts a readable start record.
+The departed leader's start tick cannot be rechecked.
 
 On macOS, worker repair serializes the replacement decision and LaunchAgent reload with other callers, including its bounded startup wait.
 A live process tracked by launchd gets time to publish readiness even if the caller that started it disconnected before publication.

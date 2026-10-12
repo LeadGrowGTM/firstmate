@@ -968,9 +968,61 @@ fm_remote_job_worker_ready_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.r
 fm_remote_job_worker_identity_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.identity"; }
 fm_remote_job_worker_lock_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.lock"; }
 
+# ps(1) for the wall-clock fallback. FM_REMOTE_JOB_PS_BIN is a test seam so a
+# suite can hand back a different lstart on every read. Command and pgid reads
+# stay on the system ps, because that seam only simulates the start-time string.
+fm_remote_job_process_start_ps_bin() {
+  if [ -n "${FM_REMOTE_JOB_PS_BIN:-}" ] && [ -x "${FM_REMOTE_JOB_PS_BIN}" ]; then
+    printf '%s\n' "$FM_REMOTE_JOB_PS_BIN"
+    return 0
+  fi
+  if [ -x /bin/ps ]; then printf '%s\n' /bin/ps; return 0; fi
+  if [ -x /usr/bin/ps ]; then printf '%s\n' /usr/bin/ps; return 0; fi
+  return 1
+}
+
+# Linux /proc stat field 22: clock ticks since boot. The same field
+# fm_pid_identity prefers. It does not move when the wall clock steps.
+fm_remote_job_process_start_tick() { # <pid>
+  local pid=$1 proc_root stat_line starttime
+  local -a stat_fields
+  proc_root=${FM_REMOTE_JOB_PROC_ROOT:-/proc}
+  [ -r "$proc_root/$pid/stat" ] || return 1
+  stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
+  # After the final comm delimiter, array index 19 is proc stat field 22.
+  read -r -a stat_fields <<< "${stat_line##*)}"
+  [ "${#stat_fields[@]}" -ge 20 ] || return 1
+  starttime=${stat_fields[19]}
+  case "$starttime" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$starttime"
+}
+
+fm_remote_job_process_boot_id() {
+  local boot_id
+  boot_id=$(cat "${FM_REMOTE_JOB_PROC_ROOT:-/proc}/sys/kernel/random/boot_id" 2>/dev/null) || return 1
+  case "$boot_id" in ''|*$'\n'*|*$'\r'*) return 1 ;; esac
+  printf '%s\n' "$boot_id"
+}
+
 fm_remote_job_process_start() {
-  local pid=$1 ps_bin value
-  if [ -x /bin/ps ]; then ps_bin=/bin/ps; elif [ -x /usr/bin/ps ]; then ps_bin=/usr/bin/ps; else return 1; fi
+  local pid=$1 ps_bin value tick proc_root boot_id
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  proc_root=${FM_REMOTE_JOB_PROC_ROOT:-/proc}
+  # A readable stat file is authoritative. A parse failure must not fall
+  # through to the wall clock, or a malformed tick would look like a new
+  # process.
+  if [ -r "$proc_root/$pid/stat" ]; then
+    tick=$(fm_remote_job_process_start_tick "$pid") || return 1
+    boot_id=$(fm_remote_job_process_boot_id) || return 1
+    printf 'starttime=%s boot_id=%s\n' "$tick" "$boot_id"
+    return 0
+  fi
+  [ ! -e "$proc_root/sys/kernel/random/boot_id" ] || return 1
+  # Platforms without a readable stat file (macOS) keep the historical ps
+  # lstart bytes, so an identity recorded before this change still compares
+  # equal. The string is not trimmed and the locale is not pinned, because
+  # either change would itself look like a different process.
+  ps_bin=$(fm_remote_job_process_start_ps_bin) || return 1
   value=$("$ps_bin" -p "$pid" -o lstart= 2>/dev/null) || return 1
   [ -n "$value" ] || return 1
   case "$value" in *$'\n'*|*$'\r'*) return 1 ;; esac
