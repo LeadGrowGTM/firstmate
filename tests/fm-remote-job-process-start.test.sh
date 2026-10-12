@@ -12,6 +12,7 @@ mkdir -p "$TMP_ROOT"
 sleep 300 &
 LIVE_PID=$!
 GROUP_PGID=
+LIVE_GROUP_PGID=
 RECLAIM_WORKER_PID=
 cleanup_process_start_fixture() {
   if [ -n "$RECLAIM_WORKER_PID" ]; then
@@ -19,6 +20,10 @@ cleanup_process_start_fixture() {
     wait "$RECLAIM_WORKER_PID" 2>/dev/null || true
   fi
   [ -z "$GROUP_PGID" ] || kill -KILL -- "-$GROUP_PGID" 2>/dev/null || true
+  if [ -n "$LIVE_GROUP_PGID" ]; then
+    kill -KILL -- "-$LIVE_GROUP_PGID" 2>/dev/null || true
+    wait "$LIVE_GROUP_PGID" 2>/dev/null || true
+  fi
   kill "$LIVE_PID" 2>/dev/null || true
   rm -rf -- "$TMP_ROOT"
 }
@@ -211,4 +216,42 @@ SH
     case "$state" in *Z*) fail "the $identity group record killed the surviving child" ;; esac
   done
   pass "leaderless groups with old or missing start records are reclaimed without signals"
+
+  setsid sleep 300 >/dev/null 2>&1 &
+  LIVE_GROUP_PGID=$!
+  [ "$(fm_remote_job_process_pgid "$LIVE_GROUP_PGID")" = "$LIVE_GROUP_PGID" ] \
+    || fail "the live group fixture did not start in its own process group"
+  live_start=$(fm_remote_job_process_start "$LIVE_GROUP_PGID") \
+    || fail "the live group has no process identity"
+  live_tick=${live_start#starttime=}
+  live_tick=${live_tick%% boot_id=*}
+  current_boot_id=$(fm_remote_job_process_boot_id) || fail "the live group has no boot id"
+  [ "$current_boot_id" != "$OTHER_BOOT_ID" ] || fail "the different-boot fixture matches this boot"
+  for identity in old other-boot; do
+    job="$FM_REMOTE_JOB_JOBS/job-live-$identity"
+    mkdir -m 700 "$job" "$job/.claim"
+    : > "$job/stdout"
+    : > "$job/stderr"
+    printf '%s\n' "$LIVE_GROUP_PGID" > "$job/.claim/group"
+    if [ "$identity" = old ]; then
+      printf '%s\n' "$LEGACY_START" > "$job/.claim/group_start"
+    else
+      printf 'starttime=%s boot_id=%s\n' "$live_tick" "$OTHER_BOOT_ID" > "$job/.claim/group_start"
+    fi
+    chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
+    fm_remote_job_write_state "$job" running || fail "could not seed the running job"
+    for _ in $(seq 1 150); do
+      [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] && break
+      sleep 0.05
+    done
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] \
+      || fail "the $identity live group record was not reclaimed"
+    [ "$(cat "$job/exit")" = 125 ] || fail "the $identity live group did not publish exit 125"
+    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+      || fail "the $identity live group published the wrong error"
+    state=$(/bin/ps -p "$LIVE_GROUP_PGID" -o state= 2>/dev/null) \
+      || fail "the $identity live group was signalled"
+    case "$state" in *Z*) fail "the $identity live group was signalled" ;; esac
+  done
+  pass "live groups with old or different-boot start records are reclaimed without signals"
 fi
