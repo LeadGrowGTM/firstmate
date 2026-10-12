@@ -88,6 +88,7 @@ Active-command and result waits use a separate sampling interval; the [`fm-remot
 On a remote host with a readable `/proc/<pid>/stat` (Linux), let running remote jobs finish before updating across the change that moved the worker's process identity from the wall-clock start time to the monotonic start tick and kernel boot ID.
 A start record written by the previous wall-clock identity does not match there, so the replacement treats that in-flight job as unowned and publishes it stopped without signalling the live process.
 A host without that file (macOS) keeps the wall-clock identity, so its records still match.
+A leaderless live group is still accepted for signalling after its leader exits: Linux checks the stored tick format and current boot ID, while macOS accepts a readable start record. The departed leader's start tick cannot be rechecked.
 
 On macOS, worker repair serializes the replacement decision and LaunchAgent reload with other callers, including its bounded startup wait.
 A live process tracked by launchd gets time to publish readiness even if the caller that started it disconnected before publication.
