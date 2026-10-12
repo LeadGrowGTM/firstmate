@@ -13,6 +13,7 @@ sleep 300 &
 LIVE_PID=$!
 GROUP_PGID=
 LIVE_GROUP_PGID=
+MATCH_PGID=
 RECLAIM_WORKER_PID=
 cleanup_process_start_fixture() {
   if [ -n "$RECLAIM_WORKER_PID" ]; then
@@ -23,6 +24,10 @@ cleanup_process_start_fixture() {
   if [ -n "$LIVE_GROUP_PGID" ]; then
     kill -KILL -- "-$LIVE_GROUP_PGID" 2>/dev/null || true
     wait "$LIVE_GROUP_PGID" 2>/dev/null || true
+  fi
+  if [ -n "$MATCH_PGID" ]; then
+    kill -KILL -- "-$MATCH_PGID" 2>/dev/null || true
+    wait "$MATCH_PGID" 2>/dev/null || true
   fi
   kill "$LIVE_PID" 2>/dev/null || true
   rm -rf -- "$TMP_ROOT"
@@ -190,7 +195,8 @@ SH
     FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux "$GROUP_ROOT/remote/bin/fm-remote-job-worker.sh" --serve \
     > "$GROUP_ROOT/worker.out" 2> "$GROUP_ROOT/worker.err" &
   RECLAIM_WORKER_PID=$!
-  for identity in old missing; do
+  SAME_BOOT_ID=$(fm_remote_job_process_boot_id) || fail "could not read the boot id for the same-boot group record"
+  for identity in old missing same-boot; do
     job="$FM_REMOTE_JOB_JOBS/job-leaderless-$identity"
     mkdir -m 700 "$job" "$job/.claim"
     : > "$job/stdout"
@@ -198,6 +204,10 @@ SH
     printf '%s\n' "$GROUP_PGID" > "$job/.claim/group"
     if [ "$identity" = old ]; then
       printf 'Sun Oct 11 16:26:44 2026\n' > "$job/.claim/group_start"
+    elif [ "$identity" = same-boot ]; then
+      # This is the record shape that used to authorize a signal: a numeric
+      # start tick scoped to the current boot, with the leader already gone.
+      printf 'starttime=1 boot_id=%s\n' "$SAME_BOOT_ID" > "$job/.claim/group_start"
     fi
     chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
     fm_remote_job_write_state "$job" running || fail "could not seed the running job"
@@ -208,15 +218,22 @@ SH
     [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity group record did not publish exit 125"
-    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
-      || fail "the $identity group record published the wrong error"
+    if [ "$identity" = missing ]; then
+      [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+        || fail "the $identity group record published the wrong error"
+    else
+      [ "$(cat "$job/stderr")" = "remote job worker stopped before this job completed
+orphaned helper processes may still be running" ] \
+        || fail "the $identity group record did not note that members may still be running: $(cat "$job/stderr")"
+    fi
+    [ ! -e "$job/.unverified-group" ] || fail "the $identity group record left its internal note behind"
     sleep 0.2
     [ ! -e "$FM_TEST_SIGNAL_LOG" ] || fail "the $identity group record signalled the surviving child"
     state=$(/bin/ps -p "$CHILD_PID" -o state= 2>/dev/null) \
       || fail "the $identity group record killed the surviving child"
     case "$state" in *Z*) fail "the $identity group record killed the surviving child" ;; esac
   done
-  pass "leaderless groups with old or missing start records are reclaimed without signals"
+  pass "leaderless groups are reclaimed without signals, including a same-boot tick"
 
   setsid sleep 300 >/dev/null 2>&1 &
   LIVE_GROUP_PGID=$!
@@ -255,4 +272,51 @@ SH
     case "$state" in *Z*) fail "the $identity live group was signalled" ;; esac
   done
   pass "live groups with old or different-boot start records are reclaimed without signals"
+
+  cat > "$GROUP_ROOT/leader.sh" <<'SH'
+#!/usr/bin/env bash
+trap '' TERM
+printf '%s\n' "$$" > "$FM_TEST_MATCH_PID_FILE"
+while :; do sleep 0.1; done
+SH
+  chmod +x "$GROUP_ROOT/leader.sh"
+  export FM_TEST_MATCH_PID_FILE="$GROUP_ROOT/match.pid"
+  setsid "$GROUP_ROOT/leader.sh" >/dev/null 2>&1 &
+  disown "$!" 2>/dev/null || true
+  for _ in $(seq 1 100); do
+    [ -f "$FM_TEST_MATCH_PID_FILE" ] && break
+    sleep 0.05
+  done
+  [ -f "$FM_TEST_MATCH_PID_FILE" ] || fail "the matching leader did not start"
+  MATCH_PGID=$(cat "$FM_TEST_MATCH_PID_FILE")
+  [ "$(fm_remote_job_process_pgid "$MATCH_PGID")" = "$MATCH_PGID" ] \
+    || fail "the matching leader did not start in its own process group"
+  kill -0 "$MATCH_PGID" 2>/dev/null || fail "the matching leader exited before reclaim"
+  match_start=$(fm_remote_job_process_start "$MATCH_PGID") \
+    || fail "the matching leader has no process identity"
+  job="$FM_REMOTE_JOB_JOBS/job-live-match"
+  mkdir -m 700 "$job" "$job/.claim"
+  : > "$job/stdout"
+  : > "$job/stderr"
+  printf '%s\n' "$MATCH_PGID" > "$job/.claim/group"
+  printf '%s\n' "$match_start" > "$job/.claim/group_start"
+  chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
+  fm_remote_job_write_state "$job" running || fail "could not seed the matching leader job"
+  for _ in $(seq 1 150); do
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] && break
+    sleep 0.05
+  done
+  [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
+    || fail "the matching leader record was not reclaimed"
+  [ "$(cat "$job/exit")" = 125 ] || fail "the matching leader record did not publish exit 125"
+  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+    || fail "the matching leader record published the wrong error: $(cat "$job/stderr")"
+  for _ in $(seq 1 50); do
+    kill -0 "$MATCH_PGID" 2>/dev/null || break
+    sleep 0.05
+  done
+  if kill -0 "$MATCH_PGID" 2>/dev/null; then
+    fail "the matching leader was not signalled"
+  fi
+  pass "a live leader whose identity matches the record is signalled"
 fi
