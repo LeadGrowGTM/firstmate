@@ -5,14 +5,24 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 TMP_ROOT=$(fm_test_tmproot fm-remote-job-process-start)
-trap 'rm -rf -- "$TMP_ROOT"' EXIT
 mkdir -p "$TMP_ROOT"
 # shellcheck source=bin/fm-remote-job-lib.sh
 . "$ROOT/bin/fm-remote-job-lib.sh"
 
 sleep 300 &
 LIVE_PID=$!
-trap 'kill "$LIVE_PID" 2>/dev/null || true; rm -rf -- "$TMP_ROOT"' EXIT
+GROUP_PGID=
+RECLAIM_WORKER_PID=
+cleanup_process_start_fixture() {
+  if [ -n "$RECLAIM_WORKER_PID" ]; then
+    kill -TERM "$RECLAIM_WORKER_PID" 2>/dev/null || true
+    wait "$RECLAIM_WORKER_PID" 2>/dev/null || true
+  fi
+  [ -z "$GROUP_PGID" ] || kill -KILL -- "-$GROUP_PGID" 2>/dev/null || true
+  kill "$LIVE_PID" 2>/dev/null || true
+  rm -rf -- "$TMP_ROOT"
+}
+trap cleanup_process_start_fixture EXIT
 
 # Field 22 of this fixture is the start tick.
 # The live pid is only the filename the reader opens, so the same checks run where /proc is absent.
@@ -135,3 +145,70 @@ unset FM_REMOTE_JOB_PS_BIN
 fm_remote_job_process_start 2147483647 >/dev/null 2>&1 \
   && fail "a missing process returned an identity"
 pass "a missing process has no start identity"
+
+if [ "$(uname -s)" = Linux ]; then
+  command -v setsid >/dev/null || fail "setsid is required for the leaderless group fixture"
+  GROUP_ROOT="$TMP_ROOT/leaderless"
+  mkdir -p "$GROUP_ROOT/account" "$GROUP_ROOT/home" "$GROUP_ROOT/remote/bin"
+  cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" "$GROUP_ROOT/remote/bin/"
+  : > "$GROUP_ROOT/remote/AGENTS.md"
+  cat > "$GROUP_ROOT/child.sh" <<'SH'
+#!/usr/bin/env bash
+trap 'printf "TERM\n" >> "$FM_TEST_SIGNAL_LOG"' TERM
+trap 'printf "HUP\n" >> "$FM_TEST_SIGNAL_LOG"' HUP
+printf '%s\n' "$$" > "$FM_TEST_CHILD_PID_FILE"
+while :; do sleep 0.1; done
+SH
+  chmod +x "$GROUP_ROOT/child.sh"
+  export FM_TEST_CHILD_PID_FILE="$GROUP_ROOT/child.pid"
+  export FM_TEST_SIGNAL_LOG="$GROUP_ROOT/signals"
+  setsid bash -c '"$1" &' _ "$GROUP_ROOT/child.sh" >/dev/null 2>&1 &
+  GROUP_PGID=$!
+  wait "$GROUP_PGID" || fail "the leaderless group fixture did not launch"
+  for _ in $(seq 1 100); do
+    [ -f "$FM_TEST_CHILD_PID_FILE" ] && break
+    sleep 0.05
+  done
+  [ -f "$FM_TEST_CHILD_PID_FILE" ] || fail "the group child did not start"
+  CHILD_PID=$(cat "$FM_TEST_CHILD_PID_FILE")
+  [ "$(fm_remote_job_process_pgid "$CHILD_PID")" = "$GROUP_PGID" ] \
+    || fail "the surviving child was not in the leader's process group"
+  ! kill -0 "$GROUP_PGID" 2>/dev/null || fail "the group leader did not exit"
+  kill -0 -- "-$GROUP_PGID" 2>/dev/null || fail "the leaderless group did not survive"
+  [ ! -e "$FM_TEST_SIGNAL_LOG" ] || fail "the group fixture signalled its own child"
+
+  unset FM_REMOTE_JOB_PROC_ROOT
+  export FM_REMOTE_JOB_STATE_ROOT="$GROUP_ROOT/state"
+  fm_remote_job_prepare_state "$GROUP_ROOT/account" || fail "$FM_REMOTE_JOB_ERROR"
+  HOME="$GROUP_ROOT/account" FM_ROOT_OVERRIDE="$GROUP_ROOT/remote" \
+    FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux "$GROUP_ROOT/remote/bin/fm-remote-job-worker.sh" --serve \
+    > "$GROUP_ROOT/worker.out" 2> "$GROUP_ROOT/worker.err" &
+  RECLAIM_WORKER_PID=$!
+  for identity in old missing; do
+    job="$FM_REMOTE_JOB_JOBS/job-leaderless-$identity"
+    mkdir -m 700 "$job" "$job/.claim"
+    : > "$job/stdout"
+    : > "$job/stderr"
+    printf '%s\n' "$GROUP_PGID" > "$job/.claim/group"
+    if [ "$identity" = old ]; then
+      printf 'Sun Oct 11 16:26:44 2026\n' > "$job/.claim/group_start"
+    fi
+    chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
+    fm_remote_job_write_state "$job" running || fail "could not seed the running job"
+    for _ in $(seq 1 150); do
+      [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] && break
+      sleep 0.05
+    done
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = done ] \
+      || fail "the $identity group record was not reclaimed"
+    [ "$(cat "$job/exit")" = 125 ] || fail "the $identity group record did not publish exit 125"
+    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+      || fail "the $identity group record published the wrong error"
+    sleep 0.2
+    [ ! -e "$FM_TEST_SIGNAL_LOG" ] || fail "the $identity group record signalled the surviving child"
+    state=$(/bin/ps -p "$CHILD_PID" -o state= 2>/dev/null) \
+      || fail "the $identity group record killed the surviving child"
+    case "$state" in *Z*) fail "the $identity group record killed the surviving child" ;; esac
+  done
+  pass "leaderless groups with old or missing start records are reclaimed without signals"
+fi

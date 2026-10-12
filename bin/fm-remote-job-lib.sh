@@ -997,6 +997,13 @@ fm_remote_job_process_start_tick() { # <pid>
   printf '%s\n' "$starttime"
 }
 
+fm_remote_job_process_boot_id() {
+  local boot_id
+  boot_id=$(cat "${FM_REMOTE_JOB_PROC_ROOT:-/proc}/sys/kernel/random/boot_id" 2>/dev/null) || return 1
+  case "$boot_id" in ''|*$'\n'*|*$'\r'*) return 1 ;; esac
+  printf '%s\n' "$boot_id"
+}
+
 fm_remote_job_process_start() {
   local pid=$1 ps_bin value tick proc_root boot_id
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -1006,8 +1013,7 @@ fm_remote_job_process_start() {
   # process.
   if [ -r "$proc_root/$pid/stat" ]; then
     tick=$(fm_remote_job_process_start_tick "$pid") || return 1
-    boot_id=$(cat "$proc_root/sys/kernel/random/boot_id" 2>/dev/null) || return 1
-    case "$boot_id" in ''|*$'\n'*|*$'\r'*) return 1 ;; esac
+    boot_id=$(fm_remote_job_process_boot_id) || return 1
     printf 'starttime=%s boot_id=%s\n' "$tick" "$boot_id"
     return 0
   fi
