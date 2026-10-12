@@ -481,7 +481,10 @@ EOF
 # - A needs-decision or blocked line the fold cannot parse
 #   (status_line_is_unparsed_decision) is warned about once, from the same
 #   unread span print_unread_status_section reads, so the cost stays bounded by
-#   new appends and a line is never re-printed after its presentation.
+#   new appends and a line is never re-printed after its presentation. Quoted
+#   line text is capped at OPEN_DECISION_UNPARSED_CAP lines; past the cap each
+#   location is still named as <file>:<line>, because the presentation cursor
+#   advances and no later drain names those lines again.
 OPEN_DECISION_PR_LOOKUP_CAP=8
 OPEN_DECISION_PR_LOOKUP_SECONDS=4
 OPEN_DECISION_UNPARSED_CAP=5
@@ -554,7 +557,7 @@ EOF
 print_open_decisions_section() {
   local snapshot=${1:-} open task key verb note line item_bytes=220 global_bytes=4000
   local output='' used=0 shown=0 ordinary_shown=0 omitted=0 bytes
-  local url urls='' known='' lookups=0 unchecked=0 pr_state annotation unparsed lineno warned=0 more=0
+  local url urls='' known='' lookups=0 unchecked=0 pr_state annotation unparsed lineno warned=0 more=0 more_locations=''
 
   if [ -n "$snapshot" ]; then
     # Before the fold: with no presentation manifest yet, the unread span is
@@ -658,6 +661,7 @@ EOF
     [ -n "$task" ] || continue
     if [ "$warned" -ge "$OPEN_DECISION_UNPARSED_CAP" ]; then
       more=$((more + 1))
+      more_locations="$more_locations $STATE/$task.status:${lineno:-?}"
       continue
     fi
     fm_cap_line_var "$line" $((item_bytes - 1))
@@ -668,7 +672,8 @@ EOF
 $unparsed
 EOF
   if [ "$more" -gt 0 ]; then
-    printf 'OPEN DECISIONS: %d more unparsed decision lines omitted\n' "$more" || return 1
+    printf 'OPEN DECISIONS: %d more unparsed decision lines, not read as open (text omitted):%s\n' \
+      "$more" "$more_locations" || return 1
   fi
   return 0
 }

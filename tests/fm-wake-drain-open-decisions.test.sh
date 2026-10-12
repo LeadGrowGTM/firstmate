@@ -483,6 +483,36 @@ test_unparsed_decision_line_is_warned_once() {
   pass "a decision line the fold cannot parse is warned once with its file and line"
 }
 
+# Past the warning cap the quoted text is dropped but every location is still
+# named: the presentation cursor advances, so no later drain names those lines.
+test_unparsed_lines_past_the_cap_are_each_located() {
+  local dir state out i
+  dir=$(make_case unparsed-over-cap)
+  state="$dir/state"
+  out="$dir/drain.out"
+  printf 'working: started\n' > "$state/mate.status"
+  for i in 1 2 3 4 5 6 7 8; do
+    printf 'needs-decision key=k%s: malformed ask %s\n' "$i" "$i" >> "$state/mate.status"
+  done
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with more malformed lines than the cap"
+  for i in 2 3 4 5 6; do
+    grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:$i, not read as open" "$out" >/dev/null \
+      || fail "malformed line $i within the cap was not warned with its text: $(cat "$out")"
+  done
+  grep -F "OPEN DECISIONS: 3 more unparsed decision lines, not read as open (text omitted): $state/mate.status:7 $state/mate.status:8 $state/mate.status:9" "$out" >/dev/null \
+    || fail "a malformed line past the cap was not named by location: $(cat "$out")"
+  if grep -F 'malformed ask 7' "$out" >/dev/null; then
+    fail "text past the cap was quoted: $(cat "$out")"
+  fi
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "second drain failed"
+  if grep -F 'unparsed decision line' "$out" >/dev/null; then
+    fail "an already presented malformed line was warned again: $(cat "$out")"
+  fi
+  pass "malformed decision lines past the warning cap are each named by file and line"
+}
+
 test_identical_unparsed_lines_keep_distinct_positions() {
   local dir state out
   dir=$(make_case repeated-unparsed)
@@ -526,3 +556,4 @@ test_pr_decisions_over_lookup_cap_are_counted
 test_later_offline_merge_record_covers_shared_pr
 test_unparsed_decision_line_is_warned_once
 test_identical_unparsed_lines_keep_distinct_positions
+test_unparsed_lines_past_the_cap_are_each_located
