@@ -3218,6 +3218,45 @@ if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
     exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
   fi
 fi
+# A lead's home admits at most two live ordinary crews. This is deliberately a
+# fixed safety limit, rather than another captain-configurable posture: the
+# task-set lock above serializes fresh spawns in this home, while each existing
+# task's recorded backend endpoint is the liveness authority.
+FM_SPAWN_LIVE_CREW_LIMIT=2
+spawn_refuse_if_live_crew_limit() {
+  local meta kind id backend target state live=0 holders=
+  [ "$KIND" != secondmate ] || return 0
+  for meta in "$STATE"/*.meta; do
+    [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+    id=$(basename "$meta" .meta)
+    [ "$RELAUNCH" -eq 1 ] && [ "$id" = "$ID" ] && continue
+    kind=$(fm_meta_get "$meta" kind)
+    [ "$kind" != secondmate ] || continue
+    backend=$(fm_backend_of_meta "$meta")
+    target=$(fm_backend_target_of_meta "$meta")
+    if [ -z "$target" ]; then
+      echo "error: spawn refused - could not verify liveness for existing crew $id in this Firstmate home (backend=$backend, missing endpoint); refusing rather than risk exceeding the two-crew limit" >&2
+      exit 1
+    fi
+    state=$(fm_backend_agent_state "$backend" "$target")
+    case "$state" in
+    alive)
+      live=$((live + 1))
+      holders="${holders:+$holders, }$id"
+      ;;
+    dead | missing) ;;
+    *)
+      echo "error: spawn refused - could not verify liveness for existing crew $id in this Firstmate home (backend=$backend, state=${state:-unknown}); refusing rather than risk exceeding the two-crew limit" >&2
+      exit 1
+      ;;
+    esac
+  done
+  if [ "$live" -ge "$FM_SPAWN_LIVE_CREW_LIMIT" ]; then
+    echo "error: spawn refused - this Firstmate home already has $live live crews ($holders); at most two crews may run for one lead, so task $ID was not launched" >&2
+    exit 1
+  fi
+}
+spawn_refuse_if_live_crew_limit
 [ -f "$BRIEF" ] || {
   echo "error: task $ID has no brief at inaccessible data path $BRIEF" >&2
   exit 1
