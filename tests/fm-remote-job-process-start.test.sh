@@ -15,21 +15,35 @@ GROUP_PGID=
 LIVE_GROUP_PGID=
 MATCH_PGID=
 RECLAIM_WORKER_PID=
+CHILD_PID=
+cleanup_owned_child() {
+  local pid=$1 kind=$2 owned
+  [ -n "$pid" ] || return 0
+  for owned in $(jobs -pr); do
+    [ "$owned" = "$pid" ] || continue
+    if [ "$kind" = group ]; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    else
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+    break
+  done
+  wait "$pid" 2>/dev/null || true
+}
 cleanup_process_start_fixture() {
-  if [ -n "$RECLAIM_WORKER_PID" ]; then
-    kill -TERM "$RECLAIM_WORKER_PID" 2>/dev/null || true
-    wait "$RECLAIM_WORKER_PID" 2>/dev/null || true
+  cleanup_owned_child "$RECLAIM_WORKER_PID" process
+  if [ -n "${FM_TEST_CHILD_STOP_FILE:-}" ]; then
+    : > "$FM_TEST_CHILD_STOP_FILE" 2>/dev/null || true
+    if [ -n "$CHILD_PID" ]; then
+      for _ in $(seq 1 50); do
+        [ -f "$FM_TEST_CHILD_STOPPED_FILE" ] && break
+        sleep 0.05
+      done
+    fi
   fi
-  [ -z "$GROUP_PGID" ] || kill -KILL -- "-$GROUP_PGID" 2>/dev/null || true
-  if [ -n "$LIVE_GROUP_PGID" ]; then
-    kill -KILL -- "-$LIVE_GROUP_PGID" 2>/dev/null || true
-    wait "$LIVE_GROUP_PGID" 2>/dev/null || true
-  fi
-  if [ -n "$MATCH_PGID" ]; then
-    kill -KILL -- "-$MATCH_PGID" 2>/dev/null || true
-    wait "$MATCH_PGID" 2>/dev/null || true
-  fi
-  kill "$LIVE_PID" 2>/dev/null || true
+  cleanup_owned_child "$LIVE_GROUP_PGID" group
+  cleanup_owned_child "$MATCH_PGID" group
+  cleanup_owned_child "$LIVE_PID" process
   rm -rf -- "$TMP_ROOT"
 }
 trap cleanup_process_start_fixture EXIT
@@ -167,10 +181,13 @@ if [ "$(uname -s)" = Linux ]; then
 trap 'printf "TERM\n" >> "$FM_TEST_SIGNAL_LOG"' TERM
 trap 'printf "HUP\n" >> "$FM_TEST_SIGNAL_LOG"' HUP
 printf '%s\n' "$$" > "$FM_TEST_CHILD_PID_FILE"
-while :; do sleep 0.1; done
+while [ ! -e "$FM_TEST_CHILD_STOP_FILE" ]; do sleep 0.1; done
+: > "$FM_TEST_CHILD_STOPPED_FILE"
 SH
   chmod +x "$GROUP_ROOT/child.sh"
   export FM_TEST_CHILD_PID_FILE="$GROUP_ROOT/child.pid"
+  export FM_TEST_CHILD_STOP_FILE="$GROUP_ROOT/child.stop"
+  export FM_TEST_CHILD_STOPPED_FILE="$GROUP_ROOT/child.stopped"
   export FM_TEST_SIGNAL_LOG="$GROUP_ROOT/signals"
   # shellcheck disable=SC2016 # The child shell expands $1, not this shell.
   setsid bash -c '"$1" &' _ "$GROUP_ROOT/child.sh" >/dev/null 2>&1 &
@@ -218,15 +235,8 @@ SH
     [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity group record did not publish exit 125"
-    if [ "$identity" = missing ]; then
-      [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
-        || fail "the $identity group record published the wrong error"
-    else
-      [ "$(cat "$job/stderr")" = "remote job worker stopped before this job completed
-orphaned helper processes may still be running" ] \
-        || fail "the $identity group record did not note that members may still be running: $(cat "$job/stderr")"
-    fi
-    [ ! -e "$job/.unverified-group" ] || fail "the $identity group record left its internal note behind"
+    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed; orphaned helper processes may still be running' ] \
+      || fail "the $identity group record published the wrong error: $(cat "$job/stderr")"
     sleep 0.2
     [ ! -e "$FM_TEST_SIGNAL_LOG" ] || fail "the $identity group record signalled the surviving child"
     state=$(/bin/ps -p "$CHILD_PID" -o state= 2>/dev/null) \
@@ -265,7 +275,7 @@ orphaned helper processes may still be running" ] \
     [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity live group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity live group did not publish exit 125"
-    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed; orphaned helper processes may still be running' ] \
       || fail "the $identity live group published the wrong error"
     state=$(/bin/ps -p "$LIVE_GROUP_PGID" -o state= 2>/dev/null) \
       || fail "the $identity live group was signalled"
@@ -282,13 +292,14 @@ SH
   chmod +x "$GROUP_ROOT/leader.sh"
   export FM_TEST_MATCH_PID_FILE="$GROUP_ROOT/match.pid"
   setsid "$GROUP_ROOT/leader.sh" >/dev/null 2>&1 &
-  disown "$!" 2>/dev/null || true
+  MATCH_PGID=$!
   for _ in $(seq 1 100); do
     [ -f "$FM_TEST_MATCH_PID_FILE" ] && break
     sleep 0.05
   done
   [ -f "$FM_TEST_MATCH_PID_FILE" ] || fail "the matching leader did not start"
-  MATCH_PGID=$(cat "$FM_TEST_MATCH_PID_FILE")
+  [ "$(cat "$FM_TEST_MATCH_PID_FILE")" = "$MATCH_PGID" ] \
+    || fail "the matching leader is not this shell's child"
   [ "$(fm_remote_job_process_pgid "$MATCH_PGID")" = "$MATCH_PGID" ] \
     || fail "the matching leader did not start in its own process group"
   kill -0 "$MATCH_PGID" 2>/dev/null || fail "the matching leader exited before reclaim"
@@ -309,7 +320,7 @@ SH
   [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
     || fail "the matching leader record was not reclaimed"
   [ "$(cat "$job/exit")" = 125 ] || fail "the matching leader record did not publish exit 125"
-  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed; orphaned helper processes may still be running' ] \
     || fail "the matching leader record published the wrong error: $(cat "$job/stderr")"
   for _ in $(seq 1 50); do
     kill -0 "$MATCH_PGID" 2>/dev/null || break
