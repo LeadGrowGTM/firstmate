@@ -235,7 +235,9 @@ SH
     [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity group record did not publish exit 125"
-    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed; orphaned helper processes may still be running' ] \
+    expected_error='remote job worker stopped before this job completed; orphaned helper processes may still be running'
+    [ "$identity" = missing ] && expected_error='remote job worker stopped before this job completed'
+    [ "$(cat "$job/stderr")" = "$expected_error" ] \
       || fail "the $identity group record published the wrong error: $(cat "$job/stderr")"
     sleep 0.2
     [ ! -e "$FM_TEST_SIGNAL_LOG" ] || fail "the $identity group record signalled the surviving child"
@@ -244,6 +246,27 @@ SH
     case "$state" in *Z*) fail "the $identity group record killed the surviving child" ;; esac
   done
   pass "leaderless groups are reclaimed without signals, including a same-boot tick"
+
+  DEAD_GROUP_PGID=2147483647
+  ! kill -0 -- "-$DEAD_GROUP_PGID" 2>/dev/null || fail "the dead group fixture is alive"
+  job="$FM_REMOTE_JOB_JOBS/job-dead-group"
+  mkdir -m 700 "$job" "$job/.claim"
+  : > "$job/stdout"
+  : > "$job/stderr"
+  printf '%s\n' "$DEAD_GROUP_PGID" > "$job/.claim/group"
+  printf '%s\n' "$LEGACY_START" > "$job/.claim/group_start"
+  chmod 600 "$job/stdout" "$job/stderr" "$job/.claim"/*
+  fm_remote_job_write_state "$job" running || fail "could not seed the dead group job"
+  for _ in $(seq 1 150); do
+    [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] && break
+    sleep 0.05
+  done
+  [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
+    || fail "the dead group record was not reclaimed"
+  [ "$(cat "$job/exit")" = 125 ] || fail "the dead group record did not publish exit 125"
+  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
+    || fail "the dead group record published the wrong error"
+  pass "a fully dead group has no orphaned-helper warning"
 
   setsid sleep 300 >/dev/null 2>&1 &
   LIVE_GROUP_PGID=$!
@@ -275,7 +298,7 @@ SH
     [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
       || fail "the $identity live group record was not reclaimed"
     [ "$(cat "$job/exit")" = 125 ] || fail "the $identity live group did not publish exit 125"
-    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed; orphaned helper processes may still be running' ] \
+    [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
       || fail "the $identity live group published the wrong error"
     state=$(/bin/ps -p "$LIVE_GROUP_PGID" -o state= 2>/dev/null) \
       || fail "the $identity live group was signalled"
@@ -320,7 +343,7 @@ SH
   [ "$(fm_remote_job_read_state "$job" 2>/dev/null || true)" = "done" ] \
     || fail "the matching leader record was not reclaimed"
   [ "$(cat "$job/exit")" = 125 ] || fail "the matching leader record did not publish exit 125"
-  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed; orphaned helper processes may still be running' ] \
+  [ "$(cat "$job/stderr")" = 'remote job worker stopped before this job completed' ] \
     || fail "the matching leader record published the wrong error: $(cat "$job/stderr")"
   for _ in $(seq 1 50); do
     kill -0 "$MATCH_PGID" 2>/dev/null || break

@@ -638,7 +638,13 @@ worker_clear_dead_claim() { # <job-dir>
 # signalled, so its members may still be running. The record publishes unknown
 # completion, exactly as a crashed single-process worker's job always has.
 worker_reclaim_running_job() { # <job-dir>
-  local job=$1 file state
+  local job=$1 file state group_pid members_may_remain=0
+  if fm_remote_job_read_single_line "$job/.claim/group_start" 256 >/dev/null 2>&1 \
+    && group_pid=$(worker_read_process_id "$job/.claim/group") \
+    && ! kill -0 "$group_pid" 2>/dev/null \
+    && worker_process_or_group_alive group "$group_pid"; then
+    members_may_remain=1
+  fi
   worker_stop_recorded_execution "$job" || return 1
   state=$(fm_remote_job_read_state "$job" 2>/dev/null) || return 1
   worker_clear_dead_claim "$job" || return 1
@@ -654,7 +660,11 @@ worker_reclaim_running_job() { # <job-dir>
     [ -f "$job/$file" ] && [ ! -L "$job/$file" ] || return 1
   done
   : > "$job/stdout"
-  printf '%s\n' 'remote job worker stopped before this job completed; orphaned helper processes may still be running' > "$job/stderr"
+  if [ "$members_may_remain" -eq 1 ]; then
+    printf '%s\n' 'remote job worker stopped before this job completed; orphaned helper processes may still be running' > "$job/stderr"
+  else
+    printf '%s\n' 'remote job worker stopped before this job completed' > "$job/stderr"
+  fi
   worker_publish_result "$job" 125
 }
 
