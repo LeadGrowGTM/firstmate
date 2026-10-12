@@ -164,6 +164,22 @@
 #   Every single-task invocation holds one task-id-scoped lock across backend
 #   creation through metadata publication, so concurrent same-id spawns serialize
 #   even when they select different backends.
+#   Fresh launches and relaunches also hold the per-home task-set lock through
+#   launch handoff and cleanup; contention refuses rather than waits.
+#   Crew admission is fixed at two occupied ship/scout slots in this FM_HOME,
+#   across projects and backends; secondmates neither consume slots nor face
+#   this limit, and other homes are counted independently.
+#   A third crew is refused with exit 1 and the occupying task ids, not queued
+#   by this command. Relaunch checks the same limit excluding its own record.
+#   Pending launches and endpoints not proven stopped consume slots, including
+#   missing endpoints whose absence cannot be verified and unverified backends.
+#   A proven-gone endpoint releases its slot; a dead endpoint releases it only
+#   without an outstanding state/<id>.crew-<spawn_gen> reservation.
+#   Reservations bridge buffered startup and are removed when the launch exits.
+#   Failed delivery cancels an unstarted launch before releasing its reservation;
+#   a launch that already claimed its command retains its reservation and records.
+#   A dead endpoint with an outstanding reservation cannot be relaunched.
+#   tests/fm-spawn-crew-limit.test.sh covers these admission and delivery rules.
 #   A fresh Treehouse-backed spawn also takes the project-identity lock in the local
 #   root Firstmate home's state directory before slot allocation and holds it through
 #   task metadata publication. Teardown holds that same lock while proving and
