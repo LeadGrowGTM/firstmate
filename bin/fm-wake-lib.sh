@@ -1589,40 +1589,11 @@ fm_treehouse_same_clone() {  # <project-dir> <worktree>
   [ "$project_common" = "$slot_common" ]
 }
 
-# Physical path of a directory, or of its deepest existing ancestor plus the
-# missing tail. Creates nothing. A symlink is resolved before that tail is
-# appended, so a state directory linked inside a home is still inside it.
 _fm_treehouse_resolve_dir() {  # <path>
-  local path=$1 dir tail base
-  [ -n "$path" ] || return 1
-  while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do
-    path=${path%/}
-  done
-  if [ -d "$path" ]; then
-    (CDPATH='' cd -- "$path" && pwd -P)
-    return
-  fi
-  dir=$path
-  tail=
-  while [ ! -d "$dir" ]; do
-    case "$dir" in
-      /|.) return 1 ;;
-    esac
-    base=${dir##*/}
-    [ -n "$base" ] || return 1
-    if [ -n "$tail" ]; then
-      tail=$base/$tail
-    else
-      tail=$base
-    fi
-    case "$dir" in
-      */*) dir=${dir%/*} ;;
-      *) dir=. ;;
-    esac
-    [ -n "$dir" ] || dir=/
-  done
-  dir=$(CDPATH='' cd -- "$dir" && pwd -P) || return 1
-  printf '%s/%s\n' "${dir%/}" "$tail"
+  local path
+  [ -n "$1" ] || return 1
+  path=$(realpath -m -s -- "$1") || return 1
+  realpath -m -- "$path"
 }
 
 # True when path is root or a directory under it. A shared string prefix with
@@ -1670,9 +1641,10 @@ _fm_treehouse_unescape() {  # <quoted-body>
         if [ -n "$s" ]; then
           nxt=${s%"${s#?}"}
           s=${s#?}
+          [ "$nxt" = '"' ] || [ "$nxt" = '\' ] || return 1
           out=$out$nxt
         else
-          out=$out$ch
+          return 1
         fi
         ;;
       *) out=$out$ch ;;

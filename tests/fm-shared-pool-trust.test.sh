@@ -523,6 +523,27 @@ test_a_configured_root_or_pool_link_inside_the_home_is_refused_before_leasing() 
   [ ! -e "$inside/.treehouse" ] || fail "a refused root created a pool inside the home"
   [ ! -e "$state/firstmate" ] || fail "a refused root created the per-home directory"
 
+  printf 'root = "%s/missing/../home/state/actual-pool"\n' "$root" > "$project/treehouse.toml"
+  err=$root/unclean.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+    "$home" "$project" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a root with a nonexistent component before .. was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "an unclean-root refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "$inside/.treehouse" \
+    "the refusal did not name the cleaned pool path"
+  [ ! -e "$root/missing" ] || fail "the nonexistent component was created"
+
+  printf 'root = "%s/\\u0068ome/state/actual-pool"\n' "$root" > "$project/treehouse.toml"
+  err=$root/escape.err
+  rc=0
+  out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
+    "$home" "$project" 2>"$err") || rc=$?
+  expect_code 1 "$rc" "a root with an unsupported escape was accepted"$'\n'"$out"
+  [ -z "$out" ] || fail "an escaped-root refusal printed a path: $out"
+  assert_contains "$(cat "$err")" "$project/treehouse.toml" \
+    "the escaped-root refusal did not name the configuration file"
+
   # A root outside the home and the clone still names the per-home directory.
   printf 'root = "%s"\n' "$outside" > "$project/treehouse.toml"
   out=$(FM_TEST_XDG_STATE="$state" lib "$home" "$user" fm_treehouse_home_pool \
@@ -592,7 +613,7 @@ test_shasum_only_path_names_the_pool_from_the_home() {
   home=$root/crew
   binpool=$root/bin
   mkdir -p "$home" "$user" "$binpool"
-  for cmd in bash env uname mkdir awk basename shasum; do
+  for cmd in bash env uname mkdir awk basename realpath shasum; do
     target=$(command -v "$cmd") || fail "$cmd is not installed"
     ln -s "$target" "$binpool/$cmd"
   done
