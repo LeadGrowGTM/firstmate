@@ -551,7 +551,7 @@ EOF
 
 print_open_decisions_section() {
   local snapshot=${1:-} open task key verb note line item_bytes=220 global_bytes=4000
-  local output='' used=0 shown=0 omitted=0 bytes
+  local output='' used=0 shown=0 ordinary_shown=0 omitted=0 bytes
   local url urls='' known='' lookups=0 unchecked=0 pr_state annotation unparsed lineno warned=0 more=0
 
   if [ -n "$snapshot" ]; then
@@ -610,7 +610,12 @@ EOF
       pr_state=$(printf '%s' "$known" | grep -F -- "$url"$'\t' | head -n 1)
       pr_state=${pr_state#*$'\t'}
       if [ -n "$pr_state" ]; then
-        annotation="  ^ PR $url is $pr_state; if that settles it, close it: bin/fm-send.sh $task --resolve-key $key 'PR $url ${pr_state%% *}'"
+        case "$key" in
+          captain-hold-*)
+            annotation="  ^ PR $url is $pr_state; call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain's answer or evidence-backed reconcile close), never by resolving the key as moot"
+            ;;
+          *) annotation="  ^ PR $url is $pr_state; if that settles it, close it: bin/fm-send.sh $task --resolve-key $key 'PR $url ${pr_state%% *}'" ;;
+        esac
         bytes=$((bytes + ${#annotation} + 1))
       fi
     fi
@@ -624,6 +629,7 @@ EOF
 "
     used=$((used + bytes))
     shown=$((shown + 1))
+    case "$key" in captain-hold-*) ;; *) ordinary_shown=1 ;; esac
   done <<EOF
 $open
 EOF
@@ -641,7 +647,9 @@ EOF
     # the send that answers a listed decision also closes it, so closure never
     # depends on the busy worker writing a matching resolved line (contract:
     # bin/fm-send.sh header).
-    printf "OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'\n" || return 1
+    if [ "$ordinary_shown" -gt 0 ]; then
+      printf "OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'\n" || return 1
+    fi
   fi
 
   while IFS=$(printf '\t') read -r task lineno line; do

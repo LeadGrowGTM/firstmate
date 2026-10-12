@@ -1500,7 +1500,7 @@ EOF2
   channel="$parent/state/corr-mate.status"
 
   run_captain "$mate" hold corr-call --title "Choose the corr release" \
-    --reason "corr choice pending" --repo sample --corr "corr=0123456789ABCDEF" >/dev/null \
+    --reason "corr choice pending" --repo sample --corr "$corr" >/dev/null \
     || fail "hold with --corr failed"
   assert_grep "needs-decision [key=captain-hold-corr-call-1]: corr=$corr captain hold corr-call: corr choice pending" \
     <(sed -E 's/ \[at=[0-9]+\]//' "$channel") "the hold line did not carry the correlation token"
@@ -1516,7 +1516,7 @@ EOF2
   [ "$(grep -c 'captain-hold-corr-call-1' "$channel")" = 1 ] \
     || fail "a repeated --corr hold duplicated the parent decision: $(cat "$channel")"
 
-  for bad in 0123 0123456789abcdeg 0123456789abcdef0 ''; do
+  for bad in 0123 0123456789abcdeg 0123456789abcdef0 '' "corr=$corr" 0123456789ABCDEF; do
     if run_captain "$mate" hold bad-corr-call --title "Bad corr" --reason "x" \
       --repo sample --corr "$bad" >/dev/null 2>&1; then
       fail "a malformed --corr '$bad' was accepted"

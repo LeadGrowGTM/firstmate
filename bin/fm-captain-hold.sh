@@ -22,7 +22,7 @@
 # Usage:
 #   fm-captain-hold.sh hold <task-id> --reason <reason> \
 #     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD] \
-#     [--corr <corr-id>]
+#     [--corr <raw-lowercase-16-hex-id>]
 #   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
 #   fm-captain-hold.sh reconcile-requests --source-id <source-id> --source <provenance>   (task ids on stdin)
@@ -212,7 +212,7 @@
 # `hold --corr <id>` answers a marked request from the main firstmate with the
 # hold itself: the published line carries `corr=<id>` at the head of its note,
 # which bin/fm-pending-reply-lib.sh's fm_pending_reply_line_resolves accepts,
-# so no second correlated decision line is needed. A malformed id is refused.
+# so no second correlated decision line is needed. Only the raw lowercase id is accepted.
 # The hold or answer is already durable in the backlog, so a channel that
 # cannot be written is reported as `actionable:` on stderr rather than undoing
 # the record; bin/fm-inactive-reconcile.sh's diagnostics name a broken binding.
@@ -937,9 +937,8 @@ command_hold() {
     esac
   fi
   if [ "$corr_given" = 1 ]; then
-    corr=${corr#corr=}
     _fm_classify_is_corr_token "corr=$corr" || fail "--corr must be a 16-hex correlation id: $corr"
-    corr=$(printf '%s' "$corr" | tr 'A-F' 'a-f')
+    case "$corr" in *[!0-9a-f]*) fail "--corr must be a raw lowercase correlation id: $corr" ;; esac
   fi
   hold_set=${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
   case "$hold_set" in

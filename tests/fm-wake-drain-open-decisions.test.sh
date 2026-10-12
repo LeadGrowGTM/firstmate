@@ -294,6 +294,42 @@ test_pr_gated_decision_is_flagged_with_its_close_command() {
   pass "an open decision gated on one merged or closed PR is flagged with its exact close command"
 }
 
+test_captain_hold_pr_uses_owning_home_close_path() {
+  local dir state out map
+  dir=$(make_case captain-hold-pr)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  printf 'https://github.com/o/r/pull/31 closed\n' > "$map"
+  printf 'needs-decision [key=captain-hold-release-1]: review https://github.com/o/r/pull/24\n' > "$state/mate.status"
+  printf 'done [key=merged-release]: merged https://github.com/o/r/pull/24\n' >> "$state/mate.status"
+  printf 'blocked [key=captain-hold-release-2]: review https://github.com/o/r/pull/31\n' > "$state/mate-closed.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on PR-gated captain holds"
+  grep -A1 -F 'mate [key=captain-hold-release-1]' "$out" | grep -F 'PR https://github.com/o/r/pull/24 is merged' >/dev/null \
+    || fail "the merged PR flag was lost for a captain hold: $(cat "$out")"
+  grep -A1 -F 'mate-closed [key=captain-hold-release-2]' "$out" | grep -F 'PR https://github.com/o/r/pull/31 is closed' >/dev/null \
+    || fail "the closed PR flag was lost for a captain hold: $(cat "$out")"
+  grep -F 'call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain' "$out" >/dev/null \
+    || fail "the owning-home close instruction was missing: $(cat "$out")"
+  grep -F 'evidence-backed reconcile close), never by resolving the key as moot' "$out" >/dev/null \
+    || fail "the held-call close restriction was missing: $(cat "$out")"
+  if grep -F 'bin/fm-send.sh' "$out" >/dev/null; then
+    fail "a captain hold was offered the ordinary status-key close path: $(cat "$out")"
+  fi
+
+  printf 'needs-decision [key=ordinary]: review https://github.com/o/r/pull/24\n' > "$state/ordinary.status"
+  printf 'done [key=merged-ordinary]: merged https://github.com/o/r/pull/24\n' >> "$state/ordinary.status"
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with an ordinary PR decision"
+  grep -A1 -F 'ordinary [key=ordinary]' "$out" | grep -F "bin/fm-send.sh ordinary --resolve-key ordinary 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "the ordinary decision lost its exact close command: $(cat "$out")"
+  pass "captain holds retain PR flags but close only in their owning home"
+}
+
 test_pr_lookups_are_capped_and_bounded() {
   local dir state out map i start elapsed
   dir=$(make_case pr-bounded)
@@ -484,6 +520,7 @@ test_open_decision_surfaces_even_with_an_unrelated_queued_wake
 test_buried_decision_surfaces_on_the_empty_queue_fast_path
 test_status_symlink_is_not_followed
 test_pr_gated_decision_is_flagged_with_its_close_command
+test_captain_hold_pr_uses_owning_home_close_path
 test_pr_lookups_are_capped_and_bounded
 test_pr_decisions_over_lookup_cap_are_counted
 test_later_offline_merge_record_covers_shared_pr
