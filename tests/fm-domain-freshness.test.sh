@@ -17,6 +17,9 @@ MERGE_SHA=1111111111111111111111111111111111111111
 PARENT_SHA=2222222222222222222222222222222222222222
 PARENT_TREE=3333333333333333333333333333333333333333
 MERGE_TREE=4444444444444444444444444444444444444444
+BASE_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+HEAD_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FILE_SHA=cccccccccccccccccccccccccccccccccccccccc
 N=0
 cat > "$FAKEBIN/gh-axi" <<'SH'
 #!/usr/bin/env bash
@@ -107,8 +110,12 @@ pr() { # number, merged time, updated time
     '{number:$n,html_url:("https://github.com/acme/widgets/pull/"+($n|tostring)),title:"Shared change",labels:[],merged_at:$when,updated_at:$updated}'
 }
 detail() { # number, merged time, changed count
-  jq -n --argjson n "$1" --arg when "$2" --argjson count "$3" \
-    '{html_url:("https://github.com/acme/widgets/pull/"+($n|tostring)),merged_at:$when,changed_files:$count,base:{ref:"main",sha:"base-sha",repo:{full_name:"acme/widgets"}},head:{ref:"topic",sha:"head-sha",repo:{full_name:"acme/widgets"}}}'
+  jq -n --argjson n "$1" --arg when "$2" --argjson count "$3" --arg base "$BASE_SHA" --arg head "$HEAD_SHA" \
+    '{html_url:("https://github.com/acme/widgets/pull/"+($n|tostring)),merged_at:$when,changed_files:$count,base:{ref:"main",sha:$base,repo:{full_name:"acme/widgets"}},head:{ref:"topic",sha:$head,repo:{full_name:"acme/widgets"}}}'
+}
+pr_file() {
+  jq -n --arg path "$1" --arg status "$2" --arg old "${3:-}" --arg sha "$FILE_SHA" \
+    '{filename:$path,status:$status,sha:$sha,additions:(if $status == "removed" then 0 else 1 end),deletions:(if $status == "removed" then 1 else 0 end),changes:1,blob_url:("https://github.com/acme/widgets/blob/"+$sha+"/"+$path),raw_url:("https://github.com/acme/widgets/raw/"+$sha+"/"+$path)} + (if $old == "" then {} else {previous_filename:$old} end)'
 }
 merge_history() {
   local number=$1 parents=${2:-2} scratch="$FEED/detail-history.json"
@@ -364,12 +371,12 @@ new_home
 config "$repo_sources"
 pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 12 2026-10-13T11:00:00Z 101 > "$FEED/detail-12.json"
-jq -n '[range(0;100)|{filename:("src/file-"+(.|tostring)),status:"modified",sha:"sha",additions:1,deletions:0,changes:1}]' > "$FEED/files-12-1.json"
-printf '[{"filename":"src/last","status":"added","sha":"last","additions":1,"deletions":0,"changes":1}]\n' > "$FEED/files-12-2.json"
+jq -n --arg sha "$FILE_SHA" '[range(0;100)|("src/file-"+(.|tostring)) as $path|{filename:$path,status:"modified",sha:$sha,additions:1,deletions:0,changes:1,blob_url:("https://github.com/acme/widgets/blob/"+$sha+"/"+$path),raw_url:("https://github.com/acme/widgets/raw/"+$sha+"/"+$path)}]' > "$FEED/files-12-1.json"
+pr_file src/last added | jq -s . > "$FEED/files-12-2.json"
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'paginated PR files'
 bundle
-jq -e '.evidence[0].kind == "merged-pr" and (.evidence[0].files | length == 101) and .evidence[0].files[-1].filename == "src/last" and .evidence[0].base.ref == "main" and .evidence[0].head.sha == "head-sha"' "$OUT" >/dev/null || fail 'paginated PR file metadata incomplete'
+jq -e --arg sha "$HEAD_SHA" '.evidence[0].kind == "merged-pr" and (.evidence[0].files | length == 101) and .evidence[0].files[-1].filename == "src/last" and .evidence[0].base.ref == "main" and .evidence[0].head.sha == $sha' "$OUT" >/dev/null || fail 'paginated PR file metadata incomplete'
 assert_grep '/pulls/12/files?per_page=100&page=2' "$FEED/requests" 'second PR file page was not requested'
 pass 'merged PR includes every paginated file and base/head metadata'
 
@@ -383,12 +390,7 @@ detail 30 2026-10-13T11:00:00Z 4 > "$FEED/detail-30.json"
 merge_history 30
 jq '.base.sha = "1111111111111111111111111111111111111111"' "$FEED/detail-30.json" > "$FEED/detail-history.json"
 mv "$FEED/detail-history.json" "$FEED/detail-30.json"
-jq -n '[
-  {filename:"AGENTS.md",status:"modified"},
-  {filename:"skills/one/SKILL.md",status:"added"},
-  {filename:"CLAUDE.md",status:"removed"},
-  {filename:"skills/new.md",previous_filename:"skills/old.md",status:"renamed"}
-]' > "$FEED/files-30-1.json"
+{ pr_file AGENTS.md modified; pr_file skills/one/SKILL.md added; pr_file CLAUDE.md removed; pr_file skills/new.md renamed skills/old.md; } | jq -s . > "$FEED/files-30-1.json"
 tree_content "$PARENT_TREE" AGENTS.md '# Before'
 tree_content "$MERGE_TREE" AGENTS.md '# Resolved after'
 tree_content "$MERGE_TREE" skills/one/SKILL.md '# Added'
@@ -398,11 +400,11 @@ tree_content "$MERGE_TREE" skills/new.md '# New name'
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'canonical forge casing and instruction revisions'
 bundle
-jq -e '(.evidence | length) == 2 and
+jq -e --arg sha "$HEAD_SHA" '(.evidence | length) == 2 and
   (any(.evidence[]; .kind == "new-issue" and .repository == "acme/widgets")) and
   (any(.evidence[]; .kind == "merged-pr" and .repository == "acme/widgets" and .base.repository == "acme/widgets" and
     .linked_contributions[0].task == "owned" and
-    .base.sha == "1111111111111111111111111111111111111111" and .head.sha == "head-sha" and
+    .base.sha == "1111111111111111111111111111111111111111" and .head.sha == $sha and
     .files[0].instruction.before.content == "# Before" and .files[0].instruction.after.content == "# Resolved after" and
     .files[1].instruction.before == null and .files[1].instruction.after.content == "# Added" and
     .files[2].instruction.before.content == "# Removed" and .files[2].instruction.after == null and
@@ -414,7 +416,7 @@ config "$repo_sources"
 pr 40 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 40 2026-10-13T11:00:00Z 1 | jq '.head.repo.full_name = "contrib/widgets"' > "$FEED/detail-40.json"
 merge_history 40
-printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-40-1.json"
+pr_file AGENTS.md modified | jq -s . > "$FEED/files-40-1.json"
 tree_content "$PARENT_TREE" AGENTS.md '# Base revision'
 tree_content "$MERGE_TREE" AGENTS.md '# Merged fork revision'
 collect "$HOME_DIR" "$NOW"
@@ -430,7 +432,7 @@ config "$repo_sources"
 pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
 merge_history 41
-printf '[{"filename":"AGENTS.md","status":"added"}]\n' > "$FEED/files-41-1.json"
+pr_file AGENTS.md added | jq -s 'map(del(.sha, .blob_url, .raw_url))' > "$FEED/files-41-1.json"
 tree_content "$MERGE_TREE" AGENTS.md '# Deleted fork merged revision'
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'deleted fork merged content'
@@ -444,7 +446,7 @@ config "$repo_sources"
 pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
 merge_history 41
-printf '[{"filename":"AGENTS.md","status":"added"}]\n' > "$FEED/files-41-1.json"
+pr_file AGENTS.md added | jq -s . > "$FEED/files-41-1.json"
 tree_content "$MERGE_TREE" AGENTS.md '# Missing merged blob'
 rm "$FEED/blob-$(printf '%s' '# Missing merged blob' | git hash-object --stdin).json"
 collect "$HOME_DIR" "$NOW"
@@ -459,7 +461,7 @@ config "$repo_sources"
 pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 42 2026-10-13T11:00:00Z 1 > "$FEED/detail-42.json"
 merge_history 42 1
-printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-42-1.json"
+pr_file AGENTS.md modified | jq -s . > "$FEED/files-42-1.json"
 tree_content "$PARENT_TREE" AGENTS.md '# Before linear merge'
 tree_content "$MERGE_TREE" AGENTS.md '# After linear merge'
 collect "$HOME_DIR" "$NOW"
@@ -481,7 +483,7 @@ for head_case in same fork deleted; do
   if [ "$head_case" != same ]; then
     mv "$FEED/detail-history.json" "$FEED/detail-43.json"
   fi
-  printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-43-1.json"
+  pr_file AGENTS.md modified | jq -s . > "$FEED/files-43-1.json"
   tree_content "$PARENT_TREE" AGENTS.md '# Before squash'
   tree_content "$MERGE_TREE" AGENTS.md '# After squash'
   pr 43 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/associated-$MERGE_SHA-1.json"
@@ -499,7 +501,7 @@ config "$repo_sources"
 pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 42 2026-10-13T11:00:00Z 1 > "$FEED/detail-42.json"
 merge_history 42 1
-printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-42-1.json"
+pr_file AGENTS.md modified | jq -s . > "$FEED/files-42-1.json"
 jq '.commits = 2' "$FEED/detail-42.json" > "$FEED/detail-history.json"
 mv "$FEED/detail-history.json" "$FEED/detail-42.json"
 pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/associated-$MERGE_SHA-1.json"
@@ -547,13 +549,80 @@ new_home
 config "$repo_sources"
 pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 12 2026-10-13T11:00:00Z 2 > "$FEED/detail-12.json"
-printf '[{"filename":"src/only","status":"added"}]\n' > "$FEED/files-12-1.json"
+pr_file src/only added | jq -s . > "$FEED/files-12-1.json"
 collect "$HOME_DIR" "$NOW"
 expect_code 2 "$STATUS" 'incomplete PR changed-file count'
 bundle
 jq -e '.complete == false and .coverage[0].complete == false and (.coverage[0].reason | contains("changed-file")) and (.evidence | length == 0)' "$OUT" >/dev/null || fail 'truncated PR files were treated as complete'
 jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'truncated PR feed advanced the cursor'
 pass 'changed-file count mismatch fails coverage without checkpoint'
+
+for malformed in renamed-path status file-sha missing-file-sha file-count blob-url raw-url base-ref base-sha head-ref head-sha pr-title pr-labels; do
+  new_home
+  config "$repo_sources"
+  pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+  detail 12 2026-10-13T11:00:00Z 1 > "$FEED/detail-12.json"
+  pr_file src/one modified | jq -s . > "$FEED/files-12-1.json"
+  case "$malformed" in
+    renamed-path) jq '.[0].status = "renamed" | del(.[0].previous_filename)' "$FEED/files-12-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/files-12-1.json" ;;
+    status) jq '.[0].status = "mystery"' "$FEED/files-12-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/files-12-1.json" ;;
+    file-sha) jq '.[0].sha = "invalid"' "$FEED/files-12-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/files-12-1.json" ;;
+    missing-file-sha) jq '.[0] |= del(.sha)' "$FEED/files-12-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/files-12-1.json" ;;
+    file-count) jq '.[0].changes = -1' "$FEED/files-12-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/files-12-1.json" ;;
+    blob-url) jq '.[0].blob_url = "http://invalid.test/blob"' "$FEED/files-12-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/files-12-1.json" ;;
+    raw-url) jq '.[0].raw_url = 12' "$FEED/files-12-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/files-12-1.json" ;;
+    base-ref) jq '.base.ref = null' "$FEED/detail-12.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/detail-12.json" ;;
+    base-sha) jq '.base.sha = "invalid"' "$FEED/detail-12.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/detail-12.json" ;;
+    head-ref) jq 'del(.head.ref)' "$FEED/detail-12.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/detail-12.json" ;;
+    head-sha) jq '.head.sha = null' "$FEED/detail-12.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/detail-12.json" ;;
+    pr-title) jq '.[0].title = null' "$FEED/pulls-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/pulls-1.json" ;;
+    pr-labels) jq '.[0].labels = [{color:"ff0000"}]' "$FEED/pulls-1.json" > "$FEED/bad.json" ; mv "$FEED/bad.json" "$FEED/pulls-1.json" ;;
+  esac
+  collect "$HOME_DIR" "$NOW"
+  expect_code 2 "$STATUS" "malformed $malformed forge metadata"
+  bundle
+  jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail "$malformed metadata claimed complete coverage"
+  jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$malformed metadata advanced the checkpoint"
+done
+for malformed in issue-title issue-labels; do
+  new_home
+  config "$repo_sources"
+  issue 12 2026-10-13T11:00:00Z | jq -s . > "$FEED/issues-1.json"
+  if [ "$malformed" = issue-title ]; then
+    jq '.[0].title = false' "$FEED/issues-1.json" > "$FEED/bad.json"
+  else
+    jq '.[0].labels = "bug"' "$FEED/issues-1.json" > "$FEED/bad.json"
+  fi
+  mv "$FEED/bad.json" "$FEED/issues-1.json"
+  collect "$HOME_DIR" "$NOW"
+  expect_code 2 "$STATUS" "malformed $malformed forge metadata"
+  bundle
+  jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail "$malformed metadata claimed complete coverage"
+  jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$malformed metadata advanced the checkpoint"
+done
+pass 'malformed retained forge metadata fails source coverage without checkpoint'
+
+new_home
+config "$repo_sources"
+pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 12 2026-10-13T11:00:00Z 1 > "$FEED/detail-12.json"
+pr_file src/removed removed | jq -s 'map(del(.sha, .blob_url, .raw_url))' > "$FEED/files-12-1.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'removed file with absent optional URLs and SHA'
+bundle
+jq -e '.coverage[0].complete and .evidence[0].files[0].status == "removed" and .evidence[0].files[0].sha == null' "$OUT" >/dev/null || fail 'removed file optional metadata was rejected'
+pass 'removed files may omit optional identity and URLs'
+
+new_home
+config "$repo_sources"
+pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 12 2026-10-13T11:00:00Z 1 > "$FEED/detail-12.json"
+pr_file src/submodule modified | jq -s 'map(.sha = null | .blob_url = null | .raw_url = null)' > "$FEED/files-12-1.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'nullable PR file identity and URLs'
+bundle
+jq -e '.coverage[0].complete and .evidence[0].files[0].sha == null and .evidence[0].files[0].blob_url == null and .evidence[0].files[0].raw_url == null' "$OUT" >/dev/null || fail 'nullable file metadata was rejected'
+pass 'GitHub nullable file metadata remains readable'
 
 new_home
 mkdir -p "$HOME_DIR/skills/a"

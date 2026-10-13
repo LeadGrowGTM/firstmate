@@ -160,6 +160,32 @@ def forge_identity(url, repo, kind, number):
     return match[1]
 
 
+def forge_sha(value):
+    return isinstance(value, str) and re.fullmatch(r'[0-9a-fA-F]{40}', value) is not None
+
+
+def forge_file(item, deleted_head):
+    status = item.get('status')
+    if not isinstance(item.get('filename'), str) or not item['filename'] or status not in ('added', 'removed', 'modified', 'renamed', 'copied', 'changed', 'unchanged'):
+        raise CoverageError('malformed PR file metadata')
+    if status in ('renamed', 'copied') and (not isinstance(item.get('previous_filename'), str) or not item['previous_filename']):
+        raise CoverageError('missing PR file original path')
+    if 'previous_filename' in item and item['previous_filename'] is not None and (not isinstance(item['previous_filename'], str) or not item['previous_filename']):
+        raise CoverageError('invalid PR file original path')
+    if any(type(item.get(name)) is not int or item[name] < 0 for name in ('additions', 'deletions', 'changes')):
+        raise CoverageError('invalid PR file change counts')
+    optional = status == 'removed' or deleted_head
+    if not optional and any(name not in item for name in ('sha', 'blob_url', 'raw_url')):
+        raise CoverageError('missing PR file identity or URL')
+    if item.get('sha') is not None and not forge_sha(item['sha']):
+        raise CoverageError('invalid PR file SHA')
+    for name in ('blob_url', 'raw_url'):
+        value = item.get(name)
+        if value is not None and (not isinstance(value, str) or not re.fullmatch(r'https://(?:github\.com|raw\.githubusercontent\.com)/\S+', value)):
+            raise CoverageError('invalid PR file URL')
+    return {key: item.get(key) for key in ('filename', 'previous_filename', 'status', 'sha', 'additions', 'deletions', 'changes', 'blob_url', 'raw_url')}
+
+
 def instruction_file(path):
     parts = path.lower().split('/')
     return parts[-1] in ('agents.md', 'claude.md', 'gemini.md', 'skill.md') or ('skills' in parts[:-1] and parts[-1].endswith('.md'))
@@ -270,29 +296,35 @@ def forge(source, previous, now, contributions):
                     raise CoverageError('invalid forge object number')
                 url = row.get('html_url')
                 actual_repo = forge_identity(url, repo, 'pull' if kind == 'merged-pr' else 'issues', number)
+                title, labels = row.get('title'), row.get('labels')
+                if not isinstance(title, str) or not title or not isinstance(labels, list) or any(not isinstance(label, dict) or not isinstance(label.get('name'), str) or not label['name'] for label in labels):
+                    raise CoverageError('invalid forge title or labels')
                 key = kind + ':' + url.casefold()
                 if key in seen:
                     continue
                 event = {'kind': kind, 'url': url, 'repository': actual_repo, timestamp: when,
-                         'title': row.get('title'), 'labels': row.get('labels', [])}
+                         'title': title, 'labels': labels}
                 if kind == 'merged-pr':
                     detail = api(prefix + '/pulls/' + str(number))
                     if not isinstance(detail, dict) or detail.get('merged_at') != when or not isinstance(detail.get('html_url'), str) or detail['html_url'].casefold() != url.casefold():
                         raise CoverageError('inconsistent merged PR detail')
-                    base, head = detail.get('base', {}), detail.get('head', {})
-                    base_repo = (base.get('repo') or {}).get('full_name')
-                    head_repo = (head.get('repo') or {}).get('full_name')
-                    if not base.get('ref') or not base.get('sha') or not head.get('sha') or not isinstance(base_repo, str) or base_repo.casefold() != repo.casefold():
+                    base, head = detail.get('base'), detail.get('head')
+                    if not isinstance(base, dict) or not isinstance(head, dict) or not isinstance(base.get('repo'), dict) or (head.get('repo') is not None and not isinstance(head['repo'], dict)):
                         raise CoverageError('missing PR base/head metadata')
+                    base_repo = base['repo'].get('full_name')
+                    head_repo = head['repo'].get('full_name') if head.get('repo') is not None else None
+                    if not isinstance(base.get('ref'), str) or not base['ref'] or not forge_sha(base.get('sha')) or not forge_sha(head.get('sha')) or not isinstance(base_repo, str) or base_repo.casefold() != repo.casefold():
+                        raise CoverageError('missing PR base/head metadata')
+                    if head_repo is not None and (not isinstance(head.get('ref'), str) or not head['ref']):
+                        raise CoverageError('missing PR head ref')
+                    if head.get('ref') is not None and (not isinstance(head['ref'], str) or not head['ref']):
+                        raise CoverageError('invalid PR head ref')
                     if head_repo is not None and (not isinstance(head_repo, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', head_repo)):
                         raise CoverageError('invalid PR head repository')
                     files = []
                     for file_rows in pages(prefix + '/pulls/' + str(number) + '/files'):
                         for item in file_rows:
-                            if not isinstance(item.get('filename'), str) or not isinstance(item.get('status'), str):
-                                raise CoverageError('malformed PR file metadata')
-                            file = {key: item.get(key) for key in ['filename', 'previous_filename', 'status', 'sha', 'additions', 'deletions', 'changes', 'blob_url', 'raw_url']}
-                            files.append(file)
+                            files.append(forge_file(item, head_repo is None))
                     if type(detail.get('changed_files')) is not int or len(files) != detail['changed_files']:
                         raise CoverageError('truncated PR changed-file set')
                     trees = None
