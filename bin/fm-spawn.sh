@@ -5854,13 +5854,15 @@ fi
 # The Orca view tab's identity (opened above). With the switch on and no tab,
 # any Orca identity the pane inherited is cleared so the agent cannot badge an
 # unrelated tab; a relaunch that keeps its previous tab keeps the identity that
-# tab already gave the reused pane.
+# tab already gave the reused pane. A forwarded identity also clears any
+# inherited hook port and token, which Orca's hook reads from the endpoint file.
 ORCA_VIEW_EXPORT=
 if [ -n "$ORCA_VIEW_IDENTITY_FILE" ]; then
   ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE") || ORCA_VIEW_EXPORT=
 fi
 ORCA_VIEW_ENV_NAMES=
 if [ -n "$ORCA_VIEW_EXPORT" ]; then
+  spawn_send_text_line "$T" "unset ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"
   spawn_send_text_line "$T" "$ORCA_VIEW_EXPORT"
 elif [ "$ORCA_VIEW_ENABLED" = on ] && { [ "$RELAUNCH" -eq 0 ] || [ -z "$ORCA_VIEW_PRIOR_HANDLE" ]; }; then
   spawn_send_text_line "$T" "unset ORCA_PANE_KEY ORCA_TAB_ID ORCA_WORKTREE_ID ORCA_AGENT_HOOK_ENDPOINT ORCA_AGENT_HOOK_ENV ORCA_AGENT_HOOK_VERSION ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"

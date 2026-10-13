@@ -838,7 +838,9 @@ The tab attaches a grouped tmux view session named `orca-<id>` that shows exactl
 An existing session of that name, such as one a hand-opened tab created, is reused rather than duplicated.
 The view session tracks the window by its stable tmux window id, never by index or name, and returns to it whenever it is moved off it, such as after a relaunch or another window closes.
 When the secondmate's window itself is gone, the view ends and the tab says so rather than showing another session.
-The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate's working and done badges on that tab.
+The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate as working, waiting on you, or done on that tab.
+Waiting covers a permission prompt and a question the agent asks.
+Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
 A relaunch, including a worker account switchover, opens a fresh tab and closes the previous one once the relaunch has gone through.
 Cleanup closes the recorded tab, and it removes the view session only when Firstmate created that session.
 Orca refuses to close a pinned tab, so Firstmate leaves a pinned tab open and reports it rather than unpinning it.
@@ -847,12 +849,22 @@ Ship and scout workers never get a tab, and other runtime backends ignore the sw
 
 The primary session is not spawned by Firstmate.
 To give it the same kind of tab, run `bin/fm-orca-view.sh open --target <session>:<window> --view-session orca-main` once from the primary's home.
-That tab shows the primary's window, but its badges need the primary's own launch to carry the tab's identity, which this command does not change.
+That tab shows the primary's window, but its states need the primary's own launch to carry the tab's identity, which this command does not change.
 
 Any home, the primary or a secondmate, can also pop open a tab on one window of its own tmux server with `bin/fm-orca-view.sh window <@N>`, naming the window by its stable tmux id.
 It needs no switch, reuses the same tab-opening code and window-following view, and reaches Orca on WSL through an interop socket it proves live rather than the one the tmux server inherited.
 When Orca is unreachable it says why and exits without a tab.
 `bin/fm-orca-view.sh --help` owns the command line lookup, the tab command, and the identity it forwards.
+
+### Giving already-running sessions their identity
+
+Sessions launched before the switch was turned on carry no Orca identity, so Orca never shows them as working or waiting.
+They get one at their next relaunch, and nothing here stops or interrupts a running session.
+For the secondmates, turn the switch on in the home that spawned them, then run [`bin/fm-session-refresh.sh`](session-refresh.md) with their ids from that home.
+It relaunches each one only after it reads idle twice, one at a time, and leaves a busy one for a later run; each relaunch opens a fresh tab and forwards its identity.
+A hand-opened tab for that secondmate is left open for you to close, and the view session it made is reused.
+For the primary, open its tab with `bin/fm-orca-view.sh open --target <session>:<window> --view-session orca-main --identity-file <home>/state/orca-main.identity`, then save the identity with `bin/fm-orca-view.sh identity --file <home>/state/orca-main.identity > <home>/state/orca-main.env`.
+At the primary's next restart, at a moment it is idle, run `. <home>/state/orca-main.env` in its window's shell before starting it again.
 
 ## Harness support
 

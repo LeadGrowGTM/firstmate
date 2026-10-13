@@ -250,10 +250,12 @@ SH
   chmod +x "$1/sleep"
 }
 
-# relaunch_secondmate <case> <id> <switch>: a live secondmate whose record
-# names the tab term-0, relaunched through the operator verb.
+# relaunch_secondmate <case> <id> <switch> [untracked]: a live secondmate whose
+# record names the tab term-0, relaunched through the operator verb. With
+# `untracked` the record names no tab, as for a secondmate launched before the
+# switch, whose hand-opened tab made the view session.
 relaunch_secondmate() {
-  local name=$1 id=$2 switch=$3 sm
+  local name=$1 id=$2 switch=$3 untracked=${4:-} sm
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
   VIEW_DIR="$CASE_DIR/fake"
@@ -285,9 +287,11 @@ relaunch_secondmate() {
     echo "model=default"
     echo "effort=default"
     echo "home=$sm"
-    echo "orca_view_handle=term-0"
-    echo "orca_view_session=orca-$id"
-    echo "orca_view_owned=1"
+    if [ -z "$untracked" ]; then
+      echo "orca_view_handle=term-0"
+      echo "orca_view_session=orca-$id"
+      echo "orca_view_owned=1"
+    fi
   } > "$HOME_DIR/state/$id.meta"
   mkdir -p "$CASE_DIR/user-home"
   OUT=$(env PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_DIR="$VIEW_DIR" FM_FAKE_VIEW_DIR="$VIEW_DIR" \
@@ -318,6 +322,27 @@ test_relaunch_replaces_the_tab() {
   pass "relaunch: opens a fresh tab, forwards its identity, then closes the previous tab and keeps the view session"
 }
 
+# A secondmate already running when the switch is turned on gets its identity at
+# its next relaunch. Its hand-opened tab is never closed, and the view session
+# that tab made is reused but never becomes this feature's to remove.
+test_relaunch_adopts_a_secondmate_launched_before_the_switch() {
+  local seen launch
+  relaunch_secondmate relaunch-adopt sm-adopt on untracked
+  expect_code 0 "$STATUS" "relaunching a secondmate launched before the switch should succeed: $OUT"
+  assert_equals term-1 "$(meta sm-adopt orca_view_handle)" "the relaunch records its fresh tab"
+  assert_equals orca-sm-adopt "$(meta sm-adopt orca_view_session)" "the hand-opened tab's view session is reused"
+  assert_equals 0 "$(meta sm-adopt orca_view_owned)" "a view session this feature did not create is never owned"
+  assert_no_grep "terminal close" "$VIEW_DIR/orca.log" "no tab is closed, so a hand-opened tab stays open"
+  [ ! -s "$VIEW_DIR/killed" ] || fail "no view session may be removed: $(cat "$VIEW_DIR/killed")"
+  install_env_probe "$FAKEBIN"
+  launch=$(grep -E 'encode launch-brief|Firstmate operational input waiting' "$VIEW_DIR/literal" | tail -1)
+  [ -n "$launch" ] || fail "the relaunch sent no replacement launch"
+  seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$VIEW_DIR/keys")" "$launch") \
+    || fail "the replacement launch failed to run: $seen"
+  assert_equals "pane=tab-1:leaf token=unset" "$seen" "the replacement agent starts with the fresh tab's identity"
+  pass "relaunch adopts a secondmate launched before the switch: fresh tab and identity, hand-opened tab untouched"
+}
+
 test_relaunch_with_switch_off_keeps_the_tab() {
   relaunch_secondmate relaunch-off sm-keep off
   expect_code 0 "$STATUS" "a secondmate relaunch with the switch off should succeed: $OUT"
@@ -345,4 +370,5 @@ test_switch_on_opens_and_forwards_identity
 test_unavailable_orca_steps_aside
 test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
+test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab
