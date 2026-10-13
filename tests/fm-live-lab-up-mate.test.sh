@@ -67,3 +67,35 @@ for mode in off on; do
   fi
   pass "up --mate with supervision host $mode reaches readiness"
 done
+
+# The real Treehouse CLI ignores TREEHOUSE_ROOT. A disposable worker project
+# must give it a project config before a worker spawn acquires a checkout.
+cat > "$TMP_ROOT/source/bin/fm-brief.sh" <<'SH'
+#!/usr/bin/env bash
+mkdir -p "$FM_HOME/data/$1"
+printf '{TASK}\n{FIRSTMATE_SPEC}\n' > "$FM_HOME/data/$1/brief.md"
+SH
+cat > "$TMP_ROOT/source/bin/fm-tasks-axi.sh" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+cat > "$TMP_ROOT/source/bin/fm-spawn.sh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "$TMP_ROOT/source/bin/"{fm-brief,fm-tasks-axi,fm-spawn}.sh
+git -C "$TMP_ROOT/source" add bin/fm-brief.sh bin/fm-tasks-axi.sh bin/fm-spawn.sh
+git -C "$TMP_ROOT/source" -c user.name=t -c user.email=t@example.invalid commit -qm worker-stubs
+lab="$TMP_ROOT/lab-worker-root"
+out=$(PATH="$TMP_ROOT/fakebin:$PATH" SHELL=/bin/sh "$ROOT/bin/fm-live-lab.sh" up --harness claude --worker --source "$TMP_ROOT/source" --timeout 0 "$lab" 2>&1)
+expect_code 1 "$?" "stubbed worker spawn stops the lab before launching a model"
+assert_present "$lab/home/projects/notes/.git" "up created the disposable worker project"
+command -v treehouse >/dev/null 2>&1 || fail "Treehouse is required to verify the worker checkout root"
+lease=$(cd "$lab/home/projects/notes" && treehouse get --lease --lease-holder fm-live-lab-root-test 2>/dev/null)
+(cd "$lab/home/projects/notes" && treehouse return "$lease" >/dev/null 2>&1) \
+  || fail "could not return the lab worker Treehouse checkout"
+case "$lease" in
+  "$lab"/home/projects/notes/.treehouse/*) ;;
+  *) fail "lab worker Treehouse checkout escaped the lab: $lease" ;;
+esac
+pass "up confines a real Treehouse worker checkout to the lab"

@@ -39,8 +39,8 @@
 #                    tmux-dir, with no user tmux config (its plugins never run
 #                    in a lab), started from an empty environment so no inherited
 #                    TMUX, Herdr, or Pi marker reaches a lab process.
-#                    TREEHOUSE_ROOT points into <lab-root>, so a worker's pool
-#                    never lands in ~/.treehouse, and DISABLE_AUTOUPDATER=1
+#                    The lab notes project configures its Treehouse root inside
+#                    <lab-root>, and DISABLE_AUTOUPDATER=1
 #                    keeps Claude Code from replacing the shared binary under
 #                    a running lab, as every live run does (tests/lib.sh).
 #                    A set CLAUDE_CONFIG_DIR (absolute) is passed to every lab
@@ -168,7 +168,7 @@ lab_tmux() {
 lab_env_base() {
   printf '%s\n' "HOME=$HOME" "USER=${USER:-$(id -un)}" "LOGNAME=${USER:-$(id -un)}" \
     "PATH=$PATH" "SHELL=${SHELL:-/bin/zsh}" "TERM=xterm-256color" "LANG=${LANG:-en_US.UTF-8}" \
-    "TMUX_TMPDIR=$TMUX_DIR" "TREEHOUSE_ROOT=$ROOT/treehouse" "FM_BACKEND=tmux" "DISABLE_AUTOUPDATER=1"
+    "TMUX_TMPDIR=$TMUX_DIR" "FM_BACKEND=tmux" "DISABLE_AUTOUPDATER=1"
   [ -z "${CLAUDE_DIR:-}" ] || printf '%s\n' "CLAUDE_CONFIG_DIR=$CLAUDE_DIR"
 }
 
@@ -424,6 +424,7 @@ MD
   git clone -q --bare "$seed" "$origin"
   rm -rf "$seed"
   git clone -q "$origin" "$LAB/projects/notes"
+  printf 'root = "./"\n' > "$LAB/projects/notes/treehouse.toml"
   printf '# Projects\n\n- notes [local-only +yolo] - tiny lab notes library\n' > "$LAB/data/projects.md"
 }
 
@@ -527,7 +528,7 @@ cmd_up() {
   git -C "$LAB" fetch -q "$source" "$ref" || die "cannot fetch $ref from $source"
   git -C "$LAB" checkout -q -f -B main FETCH_HEAD || die "cannot check out $ref"
   git -C "$LAB" config user.name lab && git -C "$LAB" config user.email lab@example.invalid
-  mkdir -p "$LAB/state" "$LAB/data" "$LAB/config" "$LAB/projects" "$ROOT/treehouse"
+  mkdir -p "$LAB/state" "$LAB/data" "$LAB/config" "$LAB/projects"
   printf 'tmux\n' > "$LAB/config/backend"
   printf 'claude\n' > "$LAB/config/crew-harness"
   printf 'claude sonnet low\n' > "$LAB/config/secondmate-harness"
