@@ -744,7 +744,14 @@ if [ "$READ_ONLY" -eq 0 ]; then
     fi
   fi
   "$SCRIPT_DIR/fm-statusbar.sh" sync >/dev/null 2>&1 || true
-  [ -z "$PRIMARY_FLEET_SESSION" ] || "$SCRIPT_DIR/fm-statusbar.sh" apply --primary "$PRIMARY_FLEET_SESSION" >/dev/null 2>&1 || true
+  if [ -n "$PRIMARY_FLEET_SESSION" ]; then
+    PRIMARY_FLEET_BINDING=$(tmux show-options -qv -t "$PRIMARY_FLEET_SESSION" @fm_fleet_state 2>/dev/null) || PRIMARY_FLEET_BINDING=
+    if [ -e "$FM_HOME/.fm-secondmate-home" ] || { [ -n "$PRIMARY_FLEET_BINDING" ] && [ "$PRIMARY_FLEET_BINDING" != "$STATE" ]; }; then
+      "$SCRIPT_DIR/fm-statusbar.sh" apply "$PRIMARY_FLEET_SESSION" >/dev/null 2>&1 || true
+    else
+      "$SCRIPT_DIR/fm-statusbar.sh" apply --primary "$PRIMARY_FLEET_SESSION" >/dev/null 2>&1 || true
+    fi
+  fi
   if [ "$REEMIT" -eq 0 ]; then
     rm -f "$COMPLETION_FILE" 2>/dev/null || true
   fi

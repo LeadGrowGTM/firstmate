@@ -461,8 +461,8 @@ tmux new-window -d -t firstmate: -n fm-live-second "sleep 600"
 printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$FLEET_STATE/crew-a.meta"
 printf 'window=firstmate:fm-gone-crew\nkind=ship\n' >"$FLEET_STATE/crew-gone.meta"
 printf 'window=firstmate:fm-live-second\nkind=secondmate\n' >"$FLEET_STATE/second-a.meta"
-printf 'window=remote:second-r\nkind=secondmate\nbackend=remote\n' >"$FLEET_STATE/second-r.meta"
-printf 'window=remote:crew-r\nkind=scout\nbackend=remote\n' >"$FLEET_STATE/crew-r.meta"
+printf 'window=remote:second-r\nkind=secondmate\nremote_backend=herdr\nremote_host=example.invalid\n' >"$FLEET_STATE/second-r.meta"
+printf 'window=remote:crew-r\nkind=scout\nremote_backend=herdr\nremote_host=example.invalid\n' >"$FLEET_STATE/crew-r.meta"
 fleet=$(FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" fleet)
 [ "$fleet" = "crew 2 | 2nd 2" ] || fail "fleet counted wrong" "$fleet"
 rm -f "$FLEET_STATE"/*.meta
@@ -478,6 +478,10 @@ case "$left" in *"fleet"*) pass "apply --primary puts the fleet count in status-
 other=$(tmux show-options -t orca-later -v status-left)
 case "$other" in *"fleet"*) pass "grouped view session shares the fleet count" ;; *) fail "view session lacks fleet count" "$other" ;; esac
 
+# fm-spawn's ordinary apply must preserve the established primary hook.
+hooks=$(tmux show-hooks -g)
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
+[ "$(tmux show-hooks -g)" = "$hooks" ] || fail "ordinary apply replaced the primary hook"
 tmux new-session -d -t firstmate -s fleet-later
 [ "$(tmux show-options -t fleet-later -v status-left)" = "$left" ] || fail "late view lost fleet count"
 bound=$(FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" fleet firstmate)
@@ -486,7 +490,22 @@ tmux set-option -u -t fleet-later 'status-format[0]'
 fleet_render=$(render fleet-later 100 'crew 1 | 2nd 1')
 case "$fleet_render" in *'crew 1 | 2nd 1'*) ;; *) fail "fleet job failed to render on its private socket" "$fleet_render" ;; esac
 case "$fleet_render" in *DO_NOT_DISPLAY*) fail "fleet exposed an unrelated metadata value" ;; esac
-pass "fleet count binds to the primary home and survives later views"
+pass "fleet count survives startup, ordinary spawn apply and a late view"
+
+mkdir -p "$WORK/second-home/state"
+touch "$WORK/second-home/.fm-secondmate-home"
+# Exercise the public boundary even if a caller mistakenly requests ownership.
+FM_HOME="$WORK/second-home" FM_STATE_OVERRIDE="$WORK/second-home/state" statusbar "$SB" "$SOCKET_PATH" apply --primary firstmate
+[ "$(tmux show-options -qv -t firstmate @fm_fleet_state)" = "$FLEET_STATE" ] || fail "secondmate overwrote main fleet state"
+[ "$(tmux show-options -qv -t firstmate status-left)" = "$left" ] || fail "secondmate replaced main fleet job"
+FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" apply --primary firstmate
+[ "$(tmux show-options -qv -t firstmate @fm_fleet_state)" = "$FLEET_STATE" ] || fail "different home stole main fleet state"
+tmux new-session -d -s second-only -n second 'sleep 600'
+FM_HOME="$WORK/second-home" FM_STATE_OVERRIDE="$WORK/second-home/state" statusbar "$SB" "$SOCKET_PATH" apply --primary second-only
+[ -z "$(tmux show-options -qv -t second-only @fm_fleet_state)" ] || fail "secondmate claimed an unbound session"
+tmux new-session -d -t firstmate -s after-second
+[ "$(tmux show-options -qv -t after-second status-left)" = "$left" ] || fail "secondmate lost main fleet hook"
+pass "secondmate startup and other homes preserve primary fleet ownership"
 
 # --- persistent config: preserve user settings and survive server restart ---
 config="$WORK/user tmux.conf"

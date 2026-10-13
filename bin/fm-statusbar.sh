@@ -173,11 +173,16 @@ cmd_sync() {
 }
 
 cmd_apply() {
-  local ses fmt win group group_id sid member_group target_sid primary=0 left hook
+  local ses fmt win group group_id sid member_group target_sid primary=0 left hook binding
   if [ "${1:-}" = --primary ]; then primary=1; shift; fi
   ses=${1:-}
   [ "$#" -eq 1 ] && [ -n "$ses" ] || { echo 'usage: fm-statusbar.sh apply [--primary] <session>' >&2; return 2; }
   command -v tmux >/dev/null 2>&1 || return 0
+  binding=$(tmux show-options -qv -t "$ses" @fm_fleet_state 2>/dev/null) || binding=
+  # Startup in a secondmate pane must never claim its parent's session.
+  if [ -e "$FM_HOME/.fm-secondmate-home" ] || { [ -n "$binding" ] && [ "$binding" != "$STATE" ]; }; then
+    primary=0
+  fi
   fmt=$(fm_sb_format)
   while IFS= read -r win; do
     [ -n "$win" ] || continue
@@ -198,6 +203,8 @@ cmd_apply() {
       tmux set-option -t "$sid" status-left "$left" 2>/dev/null || true
     fi
   done < <(tmux list-sessions -F '#{session_id} #{session_group}' 2>/dev/null)
+  # An ordinary apply must retain the primary's fleet job and hook verbatim.
+  if [ "$primary" -eq 0 ] && [ -n "$binding" ]; then return 0; fi
   group_id=${target_sid#\$}
   hook='set-option status-right-length 200; set-option status-right "#{E:pane-border-format}"'
   if [ "$primary" -eq 1 ]; then
@@ -223,8 +230,11 @@ cmd_fleet() {
     win=$(sed -n 's/^window=//p' "$meta" | head -1)
     kind=$(sed -n 's/^kind=//p' "$meta" | head -1)
     [ -n "$win" ] || continue
-    case "${backend:-tmux}" in
+    case "$win" in
+      remote:*) ;;
+      *) case "${backend:-tmux}" in
       tmux) printf '%s\n' "$live" | grep -qxF -- "$win" || continue ;;
+      esac ;;
     esac
     if [ "$kind" = secondmate ]; then second=$((second + 1)); else crew=$((crew + 1)); fi
   done
