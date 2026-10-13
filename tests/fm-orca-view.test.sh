@@ -517,6 +517,39 @@ test_view_follows_the_agent_window() {
   pass "view follows its agent's window by id: a relaunch re-selects it, a move snaps back, and a closed window ends the view with a message"
 }
 
+test_timeout_defaults() {
+  local real_timeout timeout_log="$TMP_ROOT/timeout.log" wsl="$TMP_ROOT/timeout-wsl" out handle value
+  real_timeout=$(command -v timeout) || fail "timeout is unavailable for the Orca deadline test"
+  mkdir -p "$wsl"
+  : > "$wsl/1_interop"
+  printf '#!/bin/sh\nexit 0\n' > "$SHIM/interop-timeout-probe"
+  chmod +x "$SHIM/interop-timeout-probe"
+  cat > "$SHIM/timeout" <<'SH'
+#!/bin/sh
+printf '%s\n' "$3" >> "$FM_FAKE_TIMEOUT_LOG"
+exec "$FM_FAKE_REAL_TIMEOUT" "$@"
+SH
+  chmod +x "$SHIM/timeout"
+  for value in 0 invalid; do
+    : > "$timeout_log"
+    out=$(FM_FAKE_TIMEOUT_LOG="$timeout_log" FM_FAKE_REAL_TIMEOUT="$real_timeout" \
+      FM_WSL_INTEROP_DIR="$wsl" FM_WSL_INTEROP_PROBE="$SHIM/interop-timeout-probe" \
+      FM_WSL_INTEROP_TIMEOUT="$value" FM_ORCA_VIEW_TIMEOUT="$value" \
+      run_view window "$DEV_ID") || fail "window failed with timeout value $value: $out"
+    grep -qx '3' "$timeout_log" || fail "the interop probe did not use its bounded default for $value"
+    grep -qx '60' "$timeout_log" || fail "Orca create did not use its bounded default for $value"
+    handle=$(returned_handle "$out")
+    FM_FAKE_TIMEOUT_LOG="$timeout_log" FM_FAKE_REAL_TIMEOUT="$real_timeout" \
+      FM_WSL_INTEROP_DIR="$wsl" FM_WSL_INTEROP_PROBE="$SHIM/interop-timeout-probe" \
+      FM_WSL_INTEROP_TIMEOUT="$value" FM_ORCA_VIEW_TIMEOUT="$value" \
+      run_view close --handle "$handle" --view-session "orca-w${DEV_ID#@}" >/dev/null \
+      || fail "close failed with timeout value $value"
+    assert_equals 2 "$(grep -c '^60$' "$timeout_log")" \
+      "Orca close also uses its bounded default for $value"
+  done
+  pass "zero and invalid Orca and WSL timeouts fall back to bounded defaults"
+}
+
 test_switch_values
 test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
@@ -529,3 +562,4 @@ test_wsl_uses_live_interop
 test_window_helper
 test_close_keeps_shared_view
 test_close
+test_timeout_defaults
