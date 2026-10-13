@@ -464,6 +464,25 @@ test_cli_override_and_help() {
   pass "T8 FM_BOAT_BIN selects the CLI; --help prints the usage"
 }
 
+test_task_owned_pins() {
+  new_case task-owned-pins
+  set_info running 203.0.113.7:19034 null true
+  set_hostkey host1
+  printf 'Host existing\n  HostName existing.invalid\n' > "$SSH/config"
+  cp "$SSH/config" "$CASE/config.before"
+  mkdir "$CASE/pins"
+  refresh FM_BOAT_SSH_DIR="$CASE/pins" "$ID" boat-scoped
+  expect_code 0 "$CODE" "task-owned SSH pins must succeed"$'\n'"$ERR"
+  cmp -s "$SSH/config" "$CASE/config.before" || fail "normal SSH config changed"
+  assert_equals "$SSH/ascii_box_ed25519" \
+    "$(ssh -T -F "$CASE/pins/config" -G boat-scoped | awk '$1 == "identityfile" { print $2; exit }')" \
+    "scoped pins must use the existing key"
+  assert_equals 203.0.113.7 \
+    "$(ssh -T -F "$CASE/pins/config" -G boat-scoped | awk '$1 == "hostname" { print $2; exit }')" \
+    "scoped pins must resolve independently"
+  pass "T9 task-owned pins leave normal SSH configuration untouched"
+}
+
 test_first_run_writes_pinned_alias
 test_resume_replaces_only_the_alias
 test_ip_fallback
@@ -472,5 +491,6 @@ test_unsafe_config_is_refused
 test_restore_wait
 test_remove
 test_cli_override_and_help
+test_task_owned_pins
 
 echo "# all fm-boat-alias-refresh tests passed"

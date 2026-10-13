@@ -557,6 +557,41 @@ The check reads Boat and reports; it never stops a sandbox.
   Keeping one running continuously is a Boat plan and sandbox setting; see Boat's [long-running tasks](https://docs.boat.dev/long-running-tasks) guide.
 - A worker that is mid-task when the sandbox stops loses its process, and how its work resumes on a Boat sandbox has not been exercised.
 
+## Code-only Boat overflow
+
+An explicitly Boat-selected ship or scout can use [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) through the existing `boat-eng` remote route.
+Firstmate still labels and selects work at intake; the sender does not evaluate routing policy or choose a model profile.
+The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, refusal behavior, and transport recovery commands in their headers and `--help`.
+
+Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
+Do not transfer an existing mate home or inherited private material.
+The approved box and SSH alias are pinned by the sender; `--prepare --code-only` performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
+The alias helper's `FM_BOAT_SSH_DIR` knob permits pins in a task-owned directory while using the existing Boat SSH key.
+
+Send one JSON task envelope whose `intent` and `spec` contain only code-only task prose, with the concrete `harness`, `model`, and `effort` already resolved under the ordinary dispatch and quota rules:
+
+```sh
+FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < <request.json>
+```
+
+The box generates its own normal worker brief and operational paths, allocates its own worktree, and calls the existing spawn command with merge authority off.
+The box-wide three-worker cap conservatively reserves retained worker records until ordinary teardown, including completed agents whose panes may still exist.
+`local-only` and unallowlisted projects are refused.
+A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
+
+Use the existing remote commands for supervision, steering, and report retrieval:
+
+```sh
+bin/fm-on.sh boat-eng fm-crew-state.sh <task-id>
+bin/fm-on.sh boat-eng fm-peek.sh <task-id>
+bin/fm-on.sh boat-eng fm-send.sh <task-id> '<steer>'
+bin/fm-on.sh boat-eng fm-remote-file.sh get data/<task-id>/report.md
+```
+
+The controller owns the idle stop and any cap-checked extension; auto-stop remains a hard bound if it disappears.
+The sender stops and refuses on unreadable spend state or a cap violation, and preserves an uncertain remote launch for same-task reconciliation.
+It adds no worker retry, merge path, or supervision loop.
+
 ## Provision a route
 
 1. Create and fill the normal secondmate charter first.

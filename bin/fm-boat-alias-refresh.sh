@@ -57,6 +57,8 @@
 #
 # Environment knobs:
 #   FM_BOAT_BIN           the Boat CLI to run (boat)
+#   FM_BOAT_SSH_DIR       directory for the alias/config pins (~/.ssh); the
+#                         existing Boat key is still read from ~/.ssh
 #   FM_BOAT_HYDRATE_WAIT  seconds to wait for the restore (600; 0 checks once)
 #   FM_BOAT_HYDRATE_POLL  seconds between restore checks (5; above 0)
 #
@@ -65,9 +67,9 @@
 # finish in time; 2 invalid use.
 set -eu
 
-SSH_DIR="$HOME/.ssh"
+SSH_DIR="${FM_BOAT_SSH_DIR:-$HOME/.ssh}"
 CONFIG="$SSH_DIR/config"
-KEY="$SSH_DIR/ascii_box_ed25519"
+KEY="$HOME/.ssh/ascii_box_ed25519"
 BOAT_BIN=${FM_BOAT_BIN:-boat}
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
