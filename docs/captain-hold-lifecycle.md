@@ -34,6 +34,7 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 | Subcommand | What it does | Details |
 | --- | --- | --- |
 | `hold` | Creates or reuses a task and holds it for the captain. | [Creating a hold](#creating-a-hold-hold) |
+| `migrate-options` | Previews or imports legacy decision copy into local captain-held tasks. | [Creating a hold](#creating-a-hold-hold) |
 | `answer` | Records the captain's exact words and resolves the call. | [Answering a call](#answering-a-call-answer) |
 | `complete` | Records the reviewed captain-held task ids in the originating task's metadata. | [Recording a reviewed inventory](#recording-a-reviewed-inventory-complete) |
 | `verify` | Read-only check that scout teardown runs before removing source state. | [Checking before scout teardown](#checking-before-scout-teardown-verify) |
@@ -43,6 +44,7 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 | `reconcile-requests` | Internal intake that records a reconcile request from a board selection. | [Reconcile](#reconcile-re-check-reality-never-a-blind-close) |
 | `reconcile close`, `reconcile note`, `reconcile list` | Retire or list pending reconcile requests. | [Verifying and retiring a request](#verifying-and-retiring-a-request) |
 | `diverged` | Read-only report of a call whose two records disagree. | [Record divergence](#record-divergence) |
+| `orphans` | Read-only check for open `needs-decision` keys without a matching local captain hold. | [Creating a hold](#creating-a-hold-hold) |
 
 ### Creating a hold (`hold`)
 
@@ -56,7 +58,8 @@ It works in this order:
 5. It verifies the hold and timestamp.
 
 Publishing the stamp first ensures a snapshot cannot observe a newly captain-held task without the timestamp that defines its age.
-Decision option copy lives in that task's active hold reason and is projected into Bearings across owning homes.
+Decision option copy lives in that task's active hold reason.
+The snapshot projects it into Bearings for markdown-backed homes; Beads-backed homes do not yet project that copy into decision cards.
 [`bin/fm-captain-hold.sh --help`](../bin/fm-captain-hold.sh) owns the option format and dry-run-first legacy import command; the import never deletes its source file.
 The drain flags an open `needs-decision` task/key without a matching local captain-held task, and discloses an unavailable backlog check rather than claiming the home is clear.
 
