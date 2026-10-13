@@ -68,11 +68,8 @@ assert_store_value() {  # <store> <expected-json> <msg> <key...>
   [ "$actual" = "$expected" ] || fail "$msg (expected $expected, got $actual)"
 }
 
-# assert_all_flags <store> <path> <msg>: all three registered flags - trust,
-# external-includes approved, external-includes warning-shown - are true on
-# the project entry at <path>. The external-imports flags are the ones the
-# running app reads only from the PROJECT-root entry, never the worktree
-# entry, so this is what actually proves the dialog is suppressed.
+# assert_all_flags <store> <path> <msg>: trust and external-import approval
+# are true at the canonical project entry read by Claude.
 assert_all_flags() {
   local store=$1 key=$2 msg=$3
   node -e '
@@ -83,21 +80,14 @@ assert_all_flags() {
   ' "$store" "$key" || fail "$msg"
 }
 
-# assert_trust_only_no_import_consent <store> <path> <msg>: the entry at
-# <path> carries hasTrustDialogAccepted===true but NEITHER external-imports
-# flag is true - the shape a registration must leave behind when the project
-# entry had no prior explicit "Yes, allow" for external CLAUDE.md imports, so
-# a spawn never manufactures that consent from an absent flag.
 assert_trust_only_no_import_consent() {
   local store=$1 key=$2 msg=$3
   node -e '
     const j=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));
     const e=(j.projects||{})[process.argv[2]]||{};
-    const trustOk = e.hasTrustDialogAccepted === true;
-    const noImportConsent =
+    process.exit(e.hasTrustDialogAccepted === true &&
       e.hasClaudeMdExternalIncludesApproved !== true &&
-      e.hasClaudeMdExternalIncludesWarningShown !== true;
-    process.exit(trustOk && noImportConsent ? 0 : 1);
+      e.hasClaudeMdExternalIncludesWarningShown !== true ? 0 : 1);
   ' "$store" "$key" || fail "$msg"
 }
 
@@ -173,17 +163,9 @@ test_fresh_worktree_is_trusted() {
   pass "fm-claude-trust.sh: a fresh task worktree is trusted"
 }
 
-# The trust dialog is read only from the PROJECT-root entry, never the
-# worktree entry (Claude Code's own git-root canonicalization collapses every
-# linked worktree to its primary checkout for that check, with no
-# ancestor-walk fallback the way the trust check has), so this proves both
-# entries carry the trust flag after one registration. External-imports
-# consent is a SEPARATE grant this script never manufactures: on a genuinely
-# fresh project (no prior interactive answer at all) neither entry may carry
-# hasClaudeMdExternalIncludesApproved or hasClaudeMdExternalIncludesWarningShown
-# - see test_registration_carries_forward_existing_import_consent below for
-# the case where the project already said yes.
-test_fresh_worktree_also_trusts_the_project_root_without_import_consent() {
+# Ordinary worker launches register trust while leaving import approval to
+# Claude's interactive decision.
+test_fresh_worktree_trusts_project_without_import_approval() {
   local rec out
   rec=$(make_case fresh-project)
   read_case "$rec"
@@ -191,18 +173,13 @@ test_fresh_worktree_also_trusts_the_project_root_without_import_consent() {
   expect_code 0 $? "a fresh linked worktree must be trusted: $out"
   assert_contains "$out" "$PROJ" "registration did not report the project root it also trusted"
   assert_trust_only_no_import_consent "$CONFIG/.claude.json" "$WT" \
-    "the worktree entry either lost trust or gained unearned import consent"
+    "the worktree entry lost trust or gained import approval"
   assert_trust_only_no_import_consent "$CONFIG/.claude.json" "$PROJ" \
-    "the project-root entry either lost trust or gained unearned import consent"
-  pass "fm-claude-trust.sh: a fresh registration trusts the project root without manufacturing import consent"
+    "the project-root entry lost trust or gained import approval"
+  pass "fm-claude-trust.sh: a fresh registration trusts the project root without import approval"
 }
 
-# The Greptile-flagged regression this pins: a project entry that already
-# carries an explicit "Yes, allow" (hasClaudeMdExternalIncludesApproved===true)
-# is exactly the standing consent this script may refresh - and refreshing it
-# is what actually suppresses the external-imports dialog for the worker,
-# since that check reads only the project entry (see the disassembly note at
-# the top of fm-claude-trust.sh), never the worktree one.
+# Existing approval remains intact when a worker refreshes the launch flags.
 test_registration_carries_forward_existing_import_consent() {
   local rec store
   rec=$(make_case import-consent-carried)
@@ -212,11 +189,11 @@ test_registration_carries_forward_existing_import_consent() {
 {"hasCompletedOnboarding":true,"projects":{"$PROJ":{"hasTrustDialogAccepted":true,"hasClaudeMdExternalIncludesApproved":true,"hasClaudeMdExternalIncludesWarningShown":true}}}
 JSON
   run_trust "$CONFIG" "$WT" "$PROJ" >/dev/null || fail "registration failed against a project that already approved external imports"
-  assert_all_flags "$store" "$WT" \
-    "the worktree entry did not carry the refreshed import consent"
+  assert_trust_only_no_import_consent "$store" "$WT" \
+    "the worktree entry lost trust or gained redundant import consent"
   assert_all_flags "$store" "$PROJ" \
     "the project-root entry lost its own already-granted import consent"
-  pass "fm-claude-trust.sh: carries forward a project's already-granted import consent to the worktree entry"
+  pass "fm-claude-trust.sh: preserves a project's already-granted import consent"
 }
 
 # The project-root entry is the same store the launching user's interactive
@@ -233,7 +210,7 @@ test_project_root_entry_preserves_other_keys() {
 JSON
   run_trust "$CONFIG" "$WT" "$PROJ" >/dev/null || fail "registration failed against an existing project entry"
   assert_trust_only_no_import_consent "$store" "$PROJ" \
-    "the project-root entry did not gain trust, or gained unearned import consent it had never been asked for"
+    "the project-root entry lost trust or gained import approval"
   assert_store_value "$store" '["Read"]' "the project entry's unrelated settings were lost" projects "$PROJ" allowedTools
   pass "fm-claude-trust.sh: preserves unrelated keys on the project-root entry"
 }
@@ -270,7 +247,7 @@ JSON
 # false before the dialog was ever shown; answering the dialog either way sets
 # hasClaudeMdExternalIncludesWarningShown to true. So false/false is "never
 # asked", not "No, disable": it must be treated like an absent flag - trust
-# registered, no import consent manufactured - rather than refused.
+# recorded - rather than refused.
 test_project_root_entry_default_import_flags_are_not_a_decline() {
   local rec store out
   rec=$(make_case project-default-flags)
@@ -282,10 +259,59 @@ JSON
   out=$(run_trust "$CONFIG" "$WT" "$PROJ")
   expect_code 0 $? "a never-asked default entry must not be refused as a decline: $out"
   assert_trust_only_no_import_consent "$store" "$WT" \
-    "the worktree entry either lost trust or gained unearned import consent"
+    "the worktree entry lost trust or gained import approval"
   assert_trust_only_no_import_consent "$store" "$PROJ" \
-    "the project-root entry either lost trust or gained import consent it was never asked for"
+    "the project-root entry lost trust or gained import approval"
   pass "fm-claude-trust.sh: a never-asked default external-imports pair is not treated as a decline"
+}
+
+test_nested_home_pool_preapproves_imports() {
+  local pool case_dir home proj wt config
+  for pool in .treehouse .worktrees/.treehouse; do
+    case_dir="$TMP_ROOT/nested-$pool"
+    home="$case_dir/home"
+    proj="$home/projects/project"
+    wt="$proj/$pool/worker"
+    config="$case_dir/claude-config"
+    mkdir -p "$config"
+    seed_secondmate_home "$home" nested-n1
+    fm_git_worktree "$proj" "$wt" nested-worker
+    if [ "$pool" = .worktrees/.treehouse ]; then
+      cat > "$config/.claude.json" <<JSON
+{"projects":{"$proj":{"hasClaudeMdExternalIncludesApproved":false,"hasClaudeMdExternalIncludesWarningShown":false}}}
+JSON
+    fi
+    run_trust "$config" "$wt" "$proj" >/dev/null || fail "nested pool registration failed"
+    assert_trust_only_no_import_consent "$config/.claude.json" "$wt" "nested worker trust was not recorded or redundant import approval was written"
+    assert_all_flags "$config/.claude.json" "$proj" "nested canonical project flags were not recorded"
+  done
+  pass "fm-claude-trust.sh: nested home pools pre-approve imports at the canonical project"
+}
+
+test_unseeded_pool_and_outside_pool_leave_imports_undecided() {
+  local case_dir home proj wt config
+  case_dir="$TMP_ROOT/unseeded-pool"
+  proj="$case_dir/home/projects/project"
+  wt="$proj/.worktrees/.treehouse/worker"
+  config="$case_dir/claude-config"
+  mkdir -p "$config"
+  seed_secondmate_home "$case_dir/home" unseeded-n1
+  rm -f "$case_dir/home/.fm-secondmate-home"
+  fm_git_worktree "$proj" "$wt" unseeded-worker
+  run_trust "$config" "$wt" "$proj" >/dev/null || fail "unseeded pool registration failed"
+  assert_trust_only_no_import_consent "$config/.claude.json" "$proj" "unseeded pool gained import approval"
+
+  case_dir="$TMP_ROOT/outside-pool"
+  home="$case_dir/home"
+  proj="$home/projects/project"
+  wt="$case_dir/worker"
+  config="$case_dir/claude-config"
+  mkdir -p "$config"
+  seed_secondmate_home "$home" outside-n1
+  fm_git_worktree "$proj" "$wt" outside-worker
+  run_trust "$config" "$wt" "$proj" >/dev/null || fail "outside-pool registration failed"
+  assert_trust_only_no_import_consent "$config/.claude.json" "$proj" "worker outside the pool gained import approval"
+  pass "fm-claude-trust.sh: only seeded in-repo pools gain import approval"
 }
 
 test_registration_is_idempotent() {
@@ -477,7 +503,7 @@ test_project_argument_that_is_itself_a_worktree_resolves_to_the_primary_checkout
   expect_code 0 $? "a project argument that is itself a linked worktree must resolve to its primary checkout: $out"
   assert_contains "$out" "$PROJ" "the outcome did not name the resolved primary checkout"
   assert_trust_only_no_import_consent "$CONFIG/.claude.json" "$PROJ" \
-    "the resolved primary checkout either lost trust or gained unearned import consent"
+    "the resolved primary checkout lost trust or gained import approval"
   assert_not_trusted "$CONFIG/.claude.json" "$proj_wt" \
     "the linked worktree argument itself was recorded as the project root"
   pass "fm-claude-trust.sh: a project argument that is itself a linked worktree resolves to the primary checkout"
@@ -658,8 +684,10 @@ test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief() {
     fm_test_run_spawn "$home" "$wt" "$fakebin" trustspawn "$proj" claude \
     --mode no-mistakes --yolo off)
   expect_code 0 $? "the claude spawn must succeed: $out"
-  assert_trusted "$config/.claude.json" "$wt" \
-    "the claude spawn did not pre-register trust for its worktree"
+  assert_trust_only_no_import_consent "$config/.claude.json" "$wt" \
+    "the claude spawn lost worktree trust or added import approval"
+  assert_trust_only_no_import_consent "$config/.claude.json" "$proj" \
+    "the claude spawn lost project trust or added import approval"
   assert_present "$launch_log" "the claude spawn sent no launch command"
   assert_grep 'claude --dangerously-skip-permissions' "$launch_log" \
     "the launch command was not the claude worker launch"
@@ -841,11 +869,13 @@ test_secondmate_spawn_fails_closed_when_home_trust_cannot_be_recorded() {
 }
 
 test_fresh_worktree_is_trusted
-test_fresh_worktree_also_trusts_the_project_root_without_import_consent
+test_fresh_worktree_trusts_project_without_import_approval
 test_registration_carries_forward_existing_import_consent
 test_project_root_entry_preserves_other_keys
 test_project_root_entry_declined_external_imports_is_not_overridden
 test_project_root_entry_default_import_flags_are_not_a_decline
+test_nested_home_pool_preapproves_imports
+test_unseeded_pool_and_outside_pool_leave_imports_undecided
 test_registration_is_idempotent
 test_primary_checkout_is_refused
 test_cdpath_cannot_defeat_the_primary_checkout_refusal
