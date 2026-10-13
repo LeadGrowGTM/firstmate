@@ -1623,6 +1623,70 @@ fm_treehouse_worktree_check() {  # <fm-home> <project> <worktree>
   done
 }
 
+fm_treehouse_pool_check() {  # <fm-home> <project> <treehouse-home>
+  local home project pool boundary label
+  home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
+  project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
+  [ -n "${3:-}" ] || return 1
+  pool=$(HOME=$3 python3 - "$project" <<'PY'
+import hashlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+try:
+    import tomllib
+    project = Path(sys.argv[1])
+    user = Path(os.environ["HOME"])
+    if os.environ.get("TREEHOUSE_ROOT"):
+        raise ValueError("TREEHOUSE_ROOT prevents a reliable pool check")
+    repo_config = project / "treehouse.toml"
+    user_config = user / ".config/treehouse/config.toml"
+    config = repo_config if repo_config.exists() else user_config
+    root = ""
+    if config.exists():
+        with config.open("rb") as file:
+            values = tomllib.load(file)
+        roots = [value for key, value in values.items() if key.lower() == "root"]
+        if len(roots) > 1 or (roots and not isinstance(roots[0], str)):
+            raise ValueError(f"ambiguous or non-string root in {config}")
+        if roots:
+            root = roots[0]
+    if root:
+        expanded = os.path.expandvars(root)
+        if "$" in expanded:
+            raise ValueError(f"could not expand root in {config}")
+        base = Path(expanded)
+        if not base.is_absolute():
+            base = project / base
+    else:
+        base = user
+    origin = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=project,
+        capture_output=True, text=True, check=False,
+    )
+    key = origin.stdout.strip() if origin.returncode == 0 else str(project)
+    name = f"{project.name}-{hashlib.sha256(key.encode()).hexdigest()[:6]}"
+    print((base / ".treehouse" / name).resolve())
+except (OSError, RuntimeError, ValueError, ImportError) as error:
+    print(f"error: could not resolve Treehouse pool before allocation: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+  ) || return 1
+  for label in 'Firstmate home' 'project clone'; do
+    case "$label" in
+      'Firstmate home') boundary=$home ;;
+      *) boundary=$project ;;
+    esac
+    if _fm_treehouse_path_inside "$pool" "$boundary"; then
+      printf 'error: treehouse pool %s is inside %s %s; refusing allocation\n' \
+        "$pool" "$label" "$boundary" >&2
+      return 1
+    fi
+  done
+}
+
 # Treehouse keys its default pool by directory name plus origin, so two homes
 # that clone one origin can be offered the same copy. A home handed another
 # clone's copy attempts a lease using a per-home folder under the user state

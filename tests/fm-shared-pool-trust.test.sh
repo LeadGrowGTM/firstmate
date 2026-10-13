@@ -298,16 +298,17 @@ test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home() {
 prepare_spawn_home() {  # <case> <id>
   local case_dir=$1 id=$2
   CASE_HOME=$case_dir/home
+  CASE_USER_HOME=$case_dir/user-home
   CASE_FAKEBIN=$(make_pool_fakebin "$case_dir/fake")
   CASE_STATE=$case_dir/xdg-state
   fm_test_spawn_home "$CASE_HOME" codex
   fm_test_spawn_brief "$CASE_HOME" "$id" "Launch widget from this home's own clone."
-  mkdir -p "$case_dir/other/projects" "$CASE_HOME/projects" "$CASE_HOME/user-home"
+  mkdir -p "$case_dir/other/projects" "$CASE_HOME/projects" "$CASE_USER_HOME"
   git clone -q "$CASE_URL" "$case_dir/other/projects/widget"
   git clone -q "$CASE_URL" "$CASE_HOME/projects/widget"
-  git config --file "$CASE_HOME/user-home/.gitconfig" fm.marker operator
+  git config --file "$CASE_USER_HOME/.gitconfig" fm.marker operator
   printf 'treehouse.toml\n' >> "$CASE_HOME/projects/widget/.git/info/exclude"
-  CASE_POOL=$(FM_TEST_XDG_STATE="$CASE_STATE" lib "$CASE_HOME" "$CASE_HOME/user-home" \
+  CASE_POOL=$(FM_TEST_XDG_STATE="$CASE_STATE" lib "$CASE_HOME" "$CASE_USER_HOME" \
     fm_treehouse_home_pool "$CASE_HOME") || fail "the case's pool could not be resolved"
 }
 
@@ -317,7 +318,7 @@ run_spawn() {
   shift 2
   (
     unset GIT_CONFIG_GLOBAL
-    XDG_STATE_HOME="$CASE_STATE" \
+    XDG_STATE_HOME="$CASE_STATE" FM_TEST_SPAWN_USER_HOME="$CASE_USER_HOME" \
       fm_test_run_spawn "$CASE_HOME" "$pane" "$CASE_FAKEBIN" "$id" "$CASE_HOME/projects/widget" \
       --mode no-mistakes --yolo off "$@"
   )
@@ -716,14 +717,12 @@ test_shasum_only_path_names_the_pool_from_the_home() {
 
 test_initial_get_checks_returned_worktree() {
   local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return complete_on_sleep out status
-  for variant in inside inside-tilde outside unconfirmed pending; do
+  for variant in inside outside unconfirmed pending; do
     id="pool-placement-initial-$variant"
     case_dir=$TMP_ROOT/$id
     CASE_URL=$(make_same_origin_clones "$case_dir/origin")
     prepare_spawn_home "$case_dir" "$id"
-    if [ "$variant" = inside-tilde ]; then
-      allocated=$CASE_HOME/user-home/.treehouse/1/widget
-    elif [ "$variant" != outside ]; then
+    if [ "$variant" != outside ]; then
       allocated=$CASE_HOME/worktrees/1/widget
     else
       allocated=$case_dir/external-pool/1/widget
@@ -741,7 +740,7 @@ test_initial_get_checks_returned_worktree() {
     hold_return=
     [ "$variant" != pending ] || hold_return=1
     complete_on_sleep=
-    case "$variant" in inside|inside-tilde) complete_on_sleep=1 ;; esac
+    case "$variant" in inside) complete_on_sleep=1 ;; esac
     : > "$pane_log"
     : > "$tree_log"
     status=0
@@ -755,7 +754,7 @@ test_initial_get_checks_returned_worktree() {
       run_spawn "$reported" "$id") || status=$?
     assert_exact_line 'treehouse get' "$pane_log" "$variant: initial get was not sent"
     [ -d "$allocated" ] || fail "$variant: fake Treehouse did not allocate a worktree"
-    if [ "$variant" = inside ] || [ "$variant" = inside-tilde ]; then
+    if [ "$variant" = inside ]; then
       [ "$status" -ne 0 ] || fail "inside: spawn accepted the allocated worktree"$'\n'"$out"
       assert_contains "$out" "allocated worktree $allocated is inside Firstmate home" \
         "$variant: refusal did not resolve the allocated path"
@@ -797,6 +796,78 @@ test_initial_get_checks_returned_worktree() {
   pass "initial get releases refused copies and reports unconfirmed returns"
 }
 
+test_pool_preflight_refuses_initial_get() {
+  local variant id case_dir pane_log tree_log pool out status
+  for variant in user-config linked-default repo-config repo-relative; do
+    id="pool-preflight-initial-$variant"
+    case_dir=$TMP_ROOT/$id
+    CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+    prepare_spawn_home "$case_dir" "$id"
+    pool=$CASE_HOME/unsafe-pool
+    case "$variant" in
+      user-config)
+        mkdir -p "$CASE_USER_HOME/.config/treehouse"
+        printf 'root = "%s"\n' "$pool" > "$CASE_USER_HOME/.config/treehouse/config.toml"
+        ;;
+      linked-default)
+        mkdir -p "$pool"
+        ln -s "$pool" "$CASE_USER_HOME/.treehouse"
+        ;;
+      repo-config)
+        mkdir -p "$CASE_USER_HOME/.config/treehouse"
+        printf 'root = "%s"\n' "$case_dir/safe-pool" > "$CASE_USER_HOME/.config/treehouse/config.toml"
+        printf 'root = "%s"\n' "$pool" > "$CASE_HOME/projects/widget/treehouse.toml"
+        ;;
+      repo-relative)
+        printf 'root = "."\n' > "$CASE_HOME/projects/widget/treehouse.toml"
+        ;;
+    esac
+    pane_log=$case_dir/pane.log
+    tree_log=$case_dir/treehouse.log
+    : > "$pane_log"
+    : > "$tree_log"
+    status=0
+    out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+      run_spawn "$CASE_HOME/projects/widget" "$id") || status=$?
+    [ "$status" -ne 0 ] || fail "$variant: unsafe pool was accepted"$'\n'"$out"
+    assert_contains "$out" 'treehouse pool ' "$variant: refusal did not name the pool"
+    assert_contains "$out" 'is inside Firstmate home' "$variant: refusal did not name the boundary"
+    assert_no_exact_line 'treehouse get' "$pane_log" "$variant: initial get was called"
+    [ ! -s "$tree_log" ] || fail "$variant: Treehouse was called before pool refusal"
+    [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "$variant: refusal published a task"
+  done
+  pass "initial pool preflight uses user and repository config and resolves links"
+}
+
+test_pool_preflight_refuses_fallback_get() {
+  local id=pool-preflight-fallback case_dir=$TMP_ROOT/pool-preflight-fallback
+  local foreign pane_log tree_log initial_lease out status=0
+  CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+  prepare_spawn_home "$case_dir" "$id"
+  CASE_STATE=$CASE_HOME/state/unsafe-pool
+  foreign=$case_dir/shared-pool/1/widget
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  initial_lease=$case_dir/initial-lease
+  : > "$pane_log"
+  : > "$tree_log"
+  out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    FM_FAKE_TREEHOUSE_INITIAL_PATH="$foreign" \
+    FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$case_dir/other/projects/widget" \
+    FM_FAKE_TREEHOUSE_INITIAL_LEASE="$initial_lease" \
+    FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" \
+    FM_FAKE_EXIT_FLAG="$case_dir/exited" run_spawn "$foreign" "$id") || status=$?
+  [ "$status" -ne 0 ] || fail "unsafe fallback pool was accepted"$'\n'"$out"
+  assert_contains "$out" 'treehouse pool ' "fallback refusal did not name the pool"
+  assert_contains "$out" 'is inside Firstmate home' "fallback refusal did not name the boundary"
+  assert_exact_line 'treehouse get' "$pane_log" "initial get was skipped"
+  assert_exact_line 'exit' "$pane_log" "foreign copy was not exited"
+  assert_no_exact_line "args=get --lease --lease-holder $id" "$tree_log" \
+    "fallback get was called for an unsafe pool"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "fallback refusal published a task"
+  pass "fallback pool preflight refuses before leasing"
+}
+
 test_fake_treehouse_return_requires_submission_and_completion() {
   local id=pool-fake-return-state case_dir=$TMP_ROOT/fake-return-state
   local allocated lease pane_log tree_log exit_flag output
@@ -810,7 +881,7 @@ test_fake_treehouse_return_requires_submission_and_completion() {
   exit_flag=$case_dir/exited
   : > "$pane_log"
   : > "$tree_log"
-  fake=(env HOME="$CASE_HOME/user-home" PATH="$CASE_FAKEBIN:$PATH" \
+  fake=(env HOME="$CASE_USER_HOME" PATH="$CASE_FAKEBIN:$PATH" \
     FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
     FM_FAKE_TREEHOUSE_INITIAL_PATH="$allocated" \
     FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
@@ -894,6 +965,8 @@ test_fallback_lease_checks_returned_worktree() {
 }
 
 test_initial_get_checks_returned_worktree
+test_pool_preflight_refuses_initial_get
+test_pool_preflight_refuses_fallback_get
 test_fake_treehouse_return_requires_submission_and_completion
 test_fallback_lease_checks_returned_worktree
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own

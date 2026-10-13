@@ -1293,11 +1293,10 @@ The optional pool sweep's extra per-home prune and size checks use the pool path
 
 ### Pool-selection limits
 
-The guard does not retain the pool root selected by an earlier launch.
-After the initial get or fallback lease, crewmate spawn resolves the allocated worktree and refuses it when it sits inside the spawning home or project clone, before worker launch; [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns the path check.
+The guard resolves the active Treehouse pool using the real user HOME for the initial get and the lease HOME for a fallback, and refuses a pool inside the spawning home or project clone before either allocation.
+It also resolves the allocated worktree after either get and refuses it when it sits inside either boundary, before worker launch; [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns both path checks.
 Firstmate confirms that the interactive pane left the refused copy and that plain `treehouse status` reports that exact copy available; otherwise the spawn reports an unconfirmed return for Treehouse prune.
 An untouched same-clone fallback lease is returned by the existing abort cleanup.
-Pool state can still sit inside a home when Treehouse places its worktree elsewhere.
 If a clone-local `treehouse.toml` root is added after a per-home pool already exists, the guard's extra per-home prune follows the new root and can prune that configured pool twice while leaving the earlier pool unpruned.
 The per-home size check still measures the computed folder and can miss an external configured root.
 If a launch sets `XDG_STATE_HOME` only for that command and the armed watcher runs without it, the watcher computes a different per-home folder and misses the launch's pool during prune and size checks.
