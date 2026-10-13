@@ -16,6 +16,13 @@ fm_test_tmux_cleanup() {
       [ -S "$socket" ] || continue
       "$FM_TEST_TMUX_REAL" -S "$socket" kill-server >/dev/null 2>&1 || true
     done
+    if [ -f "$FM_TEST_TMUX_ROOT/explicit-sockets" ]; then
+      while IFS= read -r socket; do
+        case "$socket" in /*) ;; *) continue ;; esac
+        [ "${socket##*/}" != default ] && [ ! -L "$socket" ] && [ -S "$socket" ] || continue
+        "$FM_TEST_TMUX_REAL" -S "$socket" kill-server >/dev/null 2>&1 || true
+      done < "$FM_TEST_TMUX_ROOT/explicit-sockets"
+    fi
   fi
   rm -rf "${FM_TEST_TMUX_ROOT:?}"
 }
@@ -42,10 +49,12 @@ fi
 chmod 700 "$FM_TEST_TMUX_ROOT" || return 1
 FM_TEST_TMUX_OWNER=$$
 mkdir -m 700 "$FM_TEST_TMUX_ROOT/bin" "$FM_TEST_TMUX_ROOT/s" || return 1
+: > "$FM_TEST_TMUX_ROOT/explicit-sockets" || return 1
 if [ -n "$FM_TEST_TMUX_REAL" ]; then
   {
-    printf '#!/usr/bin/env bash\nreal=%q\nfixture_dir=%q\nfixture_owner=%q\n' \
-      "$FM_TEST_TMUX_REAL" "$(cd -P -- "$FM_TEST_TMUX_ROOT/s" && pwd -P)" "$$"
+    printf '#!/usr/bin/env bash\nreal=%q\nfixture_dir=%q\nfixture_owner=%q\nsocket_registry=%q\n' \
+      "$FM_TEST_TMUX_REAL" "$(cd -P -- "$FM_TEST_TMUX_ROOT/s" && pwd -P)" "$$" \
+      "$FM_TEST_TMUX_ROOT/explicit-sockets"
     cat <<'SH'
 set -eu
 refuse() { echo "test tmux: $*" >&2; exit 2; }
@@ -90,6 +99,7 @@ recorded_dir "$dir" || refuse 'private TMUX_TMPDIR is missing or unsafe'
 [ ! -L "$dir/tmux-$(id -u)" ] || refuse 'unsafe socket parent'
 args=("$@")
 explicit=0
+explicit_sockets=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -L|-S)
@@ -108,10 +118,16 @@ while [ "$#" -gt 0 ]; do
   else
     [ -n "$value" ] || refuse 'missing socket selector'
     case "$value" in /*) socket_path=$value ;; *) socket_path="$(pwd -P)/$value" ;; esac
+    case "$socket_path" in *$'\n'*) refuse 'invalid socket path' ;; esac
     [ "${value##*/}" != default ] && recorded_socket "$socket_path" || refuse 'default or non-private or unrecorded socket path'
+    socket_parent=$(cd -P -- "$(dirname "$socket_path")" && pwd -P) || refuse 'unsafe socket parent'
+    explicit_sockets+=("$socket_parent/${socket_path##*/}")
   fi
   explicit=1
   shift
+done
+for socket_path in "${explicit_sockets[@]+"${explicit_sockets[@]}"}"; do
+  printf '%s\n' "$socket_path" >> "$socket_registry" || refuse 'cannot record explicit socket'
 done
 selector=(-L fm-test)
 if [ "$explicit" -eq 0 ] && [ -n "${TMUX:-}" ]; then

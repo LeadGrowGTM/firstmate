@@ -501,6 +501,10 @@ test_timed_suite_reaps_child_tmux() (
 printf '%s\n' "$FM_TEST_TMUX_ROOT" > "$FM_TEST_CHILD_ROOT_FILE"
 tmux new-session -d -s disposable 'exec sleep 600' || exit 1
 tmux display-message -p '#{pid}' > "$FM_TEST_CHILD_SERVER_PID_FILE"
+mkdir -m 700 "$FM_TEST_TMUX_ROOT/recorded" || exit 1
+printf '%s\n' "$$" > "$FM_TEST_TMUX_ROOT/recorded/.fm-test-fixture"
+tmux -S "$FM_TEST_TMUX_ROOT/recorded/dedicated.sock" new-session -d -s explicit 'exec sleep 600' || exit 1
+tmux -S "$FM_TEST_TMUX_ROOT/recorded/dedicated.sock" display-message -p '#{pid}' >> "$FM_TEST_CHILD_SERVER_PID_FILE"
 trap '' TERM
 sleep 600
 SH
@@ -523,20 +527,21 @@ SH
       tests/fm-test-run.test.sh ) > "$dir/$mode.out" 2>&1 || rc=$?
     [ "$rc" -eq 1 ] || fail "$mode timed runner returned $rc: $(cat "$dir/$mode.out")"
     assert_grep 'exit=124' "$dir/$mode.out" "$mode suite did not time out"
-    [ -s "$dir/root.$mode" ] && [ -s "$dir/pid.$mode" ] \
-      || fail "$mode suite did not start a named disposable server"
+    [ -s "$dir/root.$mode" ] && [ "$(wc -l < "$dir/pid.$mode")" -eq 2 ] \
+      || fail "$mode suite did not start both disposable servers"
     root=$(cat "$dir/root.$mode")
-    server_pid=$(cat "$dir/pid.$mode")
     [ ! -e "$root" ] || fail "$mode runner left the child socket root"
-    for i in $(seq 1 50); do
-      status=$(ps -p "$server_pid" -o stat= 2>/dev/null || true)
-      status=${status//[[:space:]]/}
-      case "$status" in ''|Z*) break ;; esac
-      sleep 0.1
-    done
-    case "$status" in ''|Z*) ;; *) fail "$mode runner left the detached named server running" ;; esac
+    while IFS= read -r server_pid; do
+      for i in $(seq 1 50); do
+        status=$(ps -p "$server_pid" -o stat= 2>/dev/null || true)
+        status=${status//[[:space:]]/}
+        case "$status" in ''|Z*) break ;; esac
+        sleep 0.1
+      done
+      case "$status" in ''|Z*) ;; *) fail "$mode runner left server $server_pid running" ;; esac
+    done < "$dir/pid.$mode"
   done
-  pass 'streamed and captured timeouts reap recorded child tmux servers'
+  pass 'streamed and captured timeouts reap named and explicit child tmux servers'
 )
 
 test_standalone_afk_avoids_operator_socket() (
