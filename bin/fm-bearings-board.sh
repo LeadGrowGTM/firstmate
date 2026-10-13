@@ -187,7 +187,8 @@ validate_payload() {  # <data.json>
       and (.state | nonempty_string) and (.doing | nonempty_string) and (.kind | nonempty_string);
     def landed_item:
       type == "object" and repo_marker and (.id | nonempty_string)
-      and (.what | nonempty_string) and (.owner | nonempty_string)
+      and (.what | nonempty_string) and (.home | nonempty_string)
+      and (.owner | nonempty_string)
       and optional_https_url("pr_url")
       and optional_subject;
     def charted_item:
@@ -329,7 +330,7 @@ effective_payload() {  # <data.json> <dest.json>
     | .stale_reason = (.stale_reason // (
         if .pr_state? == "MERGED" or .pr_state? == "CLOSED" then "Linked PR " + (.pr_state | ascii_downcase)
         elif ($payload.landed | any(.id == $card.key
-          and (($card.owner? == null or $card.owner == "(main)") or .owner == $card.owner)))
+          and .home == ($card.owner // "(main)")))
           or (($card.pr_url? != null) and ($payload.landed | any(.pr_url? == $card.pr_url)))
           or (($card.subject? != null) and ($payload.landed | any(
             (.subject? != null) and .subject.artifact == $card.subject.artifact

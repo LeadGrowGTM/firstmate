@@ -678,6 +678,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
                            priority:null, origin:null, hold_set:null,
                            bucket:.hold_bucket, until:.hold_until, pr_url:null, stale_reason:null} ])
                    | group_by(.id) | map(max_by(if .repo != null and .repo != "" then 1 else 0 end))
+                   | map(select(.id | type == "string" and test("^[A-Za-z0-9._-]{1,128}$")))
               end)[]
            | . + {owner:$m.id, key:.id, id:($m.id + "/" + .id)}]
         | sort_by([.owner, (if .priority == "critical" or .priority == "P0" then 0

@@ -3417,7 +3417,7 @@ test_projection_and_toon_fail_closed
 
 # Detail mode must not inherit the compact digest's per-home decision cap.
 test_complete_structured_decision_layout() {
-  local home fakebin json toon mate
+  local home fakebin json toon mate long_id record_filter
   home=$(make_home decision-layout)
   write_fixture "$home"
   mate=$(fixture_mate_home "$home")
@@ -3443,8 +3443,11 @@ test_complete_structured_decision_layout() {
 EOF
   mkdir -p "$home/data/finished"
   printf 'Should we invent another decision from this report?\n' > "$home/data/finished/report.md"
+  long_id=$(printf 'x%.0s' {1..125})
   {
     printf '## In flight\n\n## Queued\n'
+    printf -- '- [ ] %s - Long identity choice (repo: sample) (kind: captain) (hold: Pick an option) (hold-kind: captain)\n' "$long_id"
+    printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
     for i in {1..25}; do
       if [ "$i" -eq 1 ]; then
         printf -- '- [ ] remote-%s - SAME  subject (repo: firstmate) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i"
@@ -3458,7 +3461,7 @@ EOF
   fakebin=$(make_fakebin "$home")
   json=$(run "$home" "$fakebin" --json --fields decisions)
   printf '%s' "$json" | jq -e '
-    (.decision_layout | length) == 30
+    (.decision_layout | length) == 31
     and (.decision_layout_unavailable | length) == 0
     and .decision_layout[0].key == "major"
     and (.decision_layout[0].reason | endswith("before rollout"))
@@ -3471,22 +3474,34 @@ EOF
       and .stale_reason == "Duplicate open captain hold for the same repo and title"))
     and (.decision_layout | any(.key == "merged-call" and .pr_url == "https://github.com/acme/sample/pull/5"
       and .stale_reason == null))
-    and ([.decision_layout[] | select(.owner == "mate")] | length) == 25
+    and ([.decision_layout[] | select(.owner == "mate")] | length) == 26
     and ([.decision_layout[] | select(.reason | contains("invent another"))] | length) == 0
   ' >/dev/null || fail "detailed decision inventory lost structured calls or inferred prose: $json"
   toon=$(run "$home" "$fakebin" --fields decisions)
-  assert_contains "$toon" 'decision_layout[30]' "TOON omitted the detailed inventory"
+  assert_contains "$toon" 'decision_layout[31]' "TOON omitted the detailed inventory"
   assert_contains "$toon" 'before rollout' "TOON truncated the known decision reason"
   [ ! -s "$home/net.log" ] || fail "detail mode fetched GitHub without opting in"
+  cp "$mate/state/home-summary.json" "$mate/state/valid-summary.json"
   jq 'del(.decision_records)' "$mate/state/home-summary.json" > "$mate/state/legacy-summary.json"
   mv "$mate/state/legacy-summary.json" "$mate/state/home-summary.json"
   # Read the published legacy ledger directly, without republishing a new one.
   json=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_BEARINGS_NOW=2026-07-11T18:00:00Z \
     NET_LOG="$home/net.log" "$BEARINGS" --json --fields decisions)
-  printf '%s' "$json" | jq -e '
+  printf '%s' "$json" | jq -e --arg long_id "$long_id" '
     (.decision_layout | any(.owner == "mate" and .key == "remote-1" and .repo == "firstmate"))
+    and ([.decision_layout[] | select(.owner == "mate" and .key == $long_id)] | length) == 1
+    and ([.decision_layout[] | select(.owner == "mate" and (.key | endswith("…")))] | length) == 0
     and .decision_layout_unavailable == [{owner:"mate",reason:"Detailed decision inventory unavailable; inspect owner home"}]
   ' >/dev/null || fail "legacy detail omitted known calls or claimed complete coverage: $json"
+  for record_filter in '.decision_records = {}' '.decision_records[0].repo = {}' 'del(.decision_records[0].id)'; do
+    jq "$record_filter" "$mate/state/valid-summary.json" > "$mate/state/home-summary.json"
+    json=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_BEARINGS_NOW=2026-07-11T18:00:00Z \
+      NET_LOG="$home/net.log" "$BEARINGS" --json --fields decisions)
+    printf '%s' "$json" | jq -e '
+      ([.decision_layout[] | select(.owner == "mate")] | length) == 0
+      and .decision_layout_unavailable == [{owner:"mate",reason:"Detailed decision inventory unavailable; inspect owner home"}]
+    ' >/dev/null || fail "malformed decision records were accepted as complete coverage: $record_filter"
+  done
   pass "decision layout preserves all structured owner calls and flags exact stale identities without prose inference"
 }
 test_complete_structured_decision_layout

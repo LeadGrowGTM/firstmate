@@ -1392,6 +1392,14 @@ length == 1 and (.[0] |
   and (.valid | type) == "boolean" and (.state | type) == "string"
   and (.invalidity | type) == "object" and (.invalidity.ids | type) == "array"
   and (.active_children | type) == "array" and (.decisions_open | type) == "array"
+  and ((has("decision_records") | not) or (.decision_records |
+    type == "array" and all(.[];
+      type == "object"
+      and ((["id","title","repo","reason","priority","origin","hold_set","bucket","until","pr_url","stale_reason"] - keys) | length == 0)
+      and (.id | type == "string" and test("^[A-Za-z0-9._-]{1,128}$"))
+      and (.title | type == "string" and length > 0)
+      and (.bucket | type == "string" and length > 0)
+      and all([.repo,.reason,.priority,.origin,.hold_set,.until,.pr_url,.stale_reason][]; . == null or type == "string"))))
   and (.holds | type) == "array" and (.queued | type) == "array"
   and (.landed | type) == "array" and (.endpoints | type) == "array"
   and (.counts | type) == "object" and (.omitted | type) == "array"

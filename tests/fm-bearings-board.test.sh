@@ -304,6 +304,7 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
     "id": "sample-landed",
     "repo": "sample",
     "what": "Landed work",
+    "home": "(main)",
     "owner": "firstmate",
     "pr_url": "data:text/html,unsafe"
   }]' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
@@ -646,12 +647,12 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
          "options":[{"value":"yes","label":"Yes"}]}
       ]
       | .landed = [
-        {"id":"landed-by-task","repo":"sample","what":"shipped it","owner":"crew"},
-        {"id":"some-other-task","repo":"sample","what":"merged timeout reattach","owner":"crew",
+        {"id":"landed-by-task","repo":"sample","what":"shipped it","home":"(main)","owner":"crew"},
+        {"id":"some-other-task","repo":"sample","what":"merged timeout reattach","home":"(main)","owner":"crew",
          "pr_url":"https://github.com/sample/sample/pull/7"},
-        {"id":"quota-release","repo":"sample","what":"published quota-axi","owner":"crew",
+        {"id":"quota-release","repo":"sample","what":"published quota-axi","home":"(main)","owner":"crew",
          "subject":{"artifact":"quota-axi","version":"0.1.38"}},
-        {"id":"unrelated\nstill-open","repo":"sample","what":"unrelated multiline identity","owner":"crew"}
+        {"id":"unrelated\nstill-open","repo":"sample","what":"unrelated multiline identity","home":"(main)","owner":"crew"}
       ]' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
 
   out=$(run_board "$home" build "$data" 2>&1) || fail "the hygiene build failed: $out"
@@ -668,6 +669,36 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
   ' >/dev/null \
     || fail "the board dropped an open card or kept one whose subject already landed"
   pass "build drops decision cards whose subject already landed and keeps open ones"
+}
+
+test_landed_task_matches_home_not_contributor() {
+  local home data board out
+  home=$(make_home landed-home-identity)
+  data="$home/payload.json"
+  board="$home/.lavish/bearings-board.html"
+  write_valid_payload "$data"
+  jq '.captains_call = [
+        {"key":"choice","owner":"(main)","type":"decision","repo":"sample","title":"Main choice",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"choice","owner":"mate","type":"decision","repo":"sample","title":"Mate choice",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"contributor-collision","owner":"(main)","type":"decision","repo":"sample","title":"Main landed choice",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"contributor-collision","owner":"mate","type":"decision","repo":"sample","title":"Mate open choice",
+         "options":[{"value":"yes","label":"Yes"}]}
+      ]
+      | .landed = [
+        {"id":"choice","repo":"sample","what":"Mate shipped","home":"mate","owner":"crew"},
+        {"id":"contributor-collision","repo":"sample","what":"Main shipped","home":"(main)","owner":"mate"}
+      ]' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  out=$(run_board "$home" build "$data" 2>&1) || fail "the home-identity build failed: $out"
+  extract_payload "$board" | jq -e '
+    ([.captains_call[] | [.owner // "(main)", .key]] | sort)
+      == [["(main)","choice"],["mate","contributor-collision"]]
+    and ([.stale_candidates[] | [.owner // "(main)", .key]] | sort)
+      == [["(main)","contributor-collision"],["mate","choice"]]
+  ' >/dev/null || fail "landed task identity was inferred from the contributor label: $out"
+  pass "landed task ids match their home even when contributor labels collide"
 }
 
 test_build_keeps_a_decision_absent_from_the_main_backlog() {
@@ -793,6 +824,7 @@ test_build_reopens_when_an_opened_session_ends_before_listing
 test_build_refuses_to_arm_when_the_session_stays_ended
 test_build_starts_a_listener_for_an_already_armed_board
 test_build_drops_decision_cards_whose_subject_already_landed
+test_landed_task_matches_home_not_contributor
 test_build_keeps_a_decision_absent_from_the_main_backlog
 test_build_fails_when_reconcile_cannot_establish_a_listener
 test_every_decision_card_carries_the_reconcile_choice

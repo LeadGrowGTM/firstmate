@@ -135,6 +135,7 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Every Captain's Call item and every Underway, Recently Landed, and Charted Next row carries an explicit `repo` field.
   Fill it from the snapshot and task records wherever known; use null or an empty string only as the deliberate genuinely-no-repo marker, in which case the template may show the internal id.
   Owner-qualified task ids appear only when needed to route a foreign-home answer or stale-candidate check, and composed reasons name blockers in plain words.
+- Every Recently Landed row copies the snapshot row's home `owner` into the board row's `home`; its board `owner` names the contributor, not the home.
 
 Run `build` once after composing the payload.
 Its serve-first sequence publishes the board, establishes and verifies its Lavish session with `lavish-axi`, reopens an ended session when necessary, and only then binds the answer source and proves a live polling listener; use the session URL it prints in the chat digest.
