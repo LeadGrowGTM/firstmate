@@ -3441,6 +3441,16 @@ test_complete_structured_decision_layout() {
 - [ ] merged-call - Post-merge rollout for https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: Choose the rollout) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
   Captain options: {"about":"Rollout","decide":"Pick","options":true}
+- [ ] current-copy - Repeated call (repo: firstmate) (kind: captain) (hold: Pick again) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+  Captain options for hold 1: {"about":"Old route","decide":"Pick","options":[{"value":"old","label":"Old"}]}
+  Resolution recorded by fm-captain-hold.
+  Captain options: historical answer text
+  Captain options for hold 2: {"about":"New route","decide":"Pick","options":[{"value":"new","label":"New"}]}
+- [ ] stale-copy - Repeated call without new choices (repo: firstmate) (kind: captain) (hold: Pick again) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+  Captain options for hold 1: {"about":"Old route","decide":"Pick","options":[{"value":"old","label":"Old"}]}
+  Resolution recorded by fm-captain-hold.
 
 ## Done
 - [x] finished - Investigation data/finished/report.md (repo: firstmate) (kind: scout) (reported 2026-07-10)
@@ -3478,7 +3488,7 @@ EOF
   fakebin=$(make_fakebin "$home")
   json=$(run "$home" "$fakebin" --json --fields decisions)
   printf '%s' "$json" | jq -e '
-    (.decision_layout | length) == 31
+    (.decision_layout | length) == 33
     and (.decision_layout_unavailable | length) == 0
     and .decision_layout[0].key == "major"
     and (.decision_layout[0].reason | endswith("before rollout"))
@@ -3495,6 +3505,9 @@ EOF
     and (.decision_layout | any(.key == "newer" and .options == [] and .about == "Same subject"))
     and (.decision_layout | any(.key == "minor" and .options == null and .about == null))
     and (.decision_layout | any(.key == "older" and .options == null and .about == null))
+    and (.decision_layout | any(.key == "current-copy" and .about == "New route"
+      and [.options[].value] == ["new"]))
+    and (.decision_layout | any(.key == "stale-copy" and .options == null and .about == null))
     and (.decision_layout | any(.key == "merged-call" and .options == null and .about == null
       and .pr_url == "https://github.com/acme/sample/pull/5"))
     and (.decision_layout | any(.owner == "mate" and .key == "remote-1"
@@ -3512,7 +3525,7 @@ EOF
     and ([.decision_layout[] | select(.reason | contains("invent another"))] | length) == 0
   ' >/dev/null || fail "detailed decision inventory lost structured calls or inferred prose: $json"
   toon=$(run "$home" "$fakebin" --fields decisions)
-  assert_contains "$toon" 'decision_layout[31]' "TOON omitted the detailed inventory"
+  assert_contains "$toon" 'decision_layout[33]' "TOON omitted the detailed inventory"
   assert_contains "$toon" 'before rollout' "TOON truncated the known decision reason"
   [ ! -s "$home/net.log" ] || fail "detail mode fetched GitHub without opting in"
   cp "$mate/state/home-summary.json" "$mate/state/valid-summary.json"

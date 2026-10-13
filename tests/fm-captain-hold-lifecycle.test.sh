@@ -2500,7 +2500,7 @@ EOF
   run_captain "$home" hold choice --reason 'Choose route' --options-file "$home/options.json" >/dev/null || fail "could not store copy"
   before=$(tasks_in "$home" show choice --full)
   assert_contains "$before" 'Keep this note' "options erased existing notes"
-  assert_contains "$before" 'Captain options:' "decision copy is missing from task"
+  assert_contains "$before" 'Captain options for hold 1:' "decision copy is missing from task"
   run_captain "$home" hold choice --reason 'Choose route' --options-file "$home/options.json" >/dev/null || fail "retry failed"
   after=$(tasks_in "$home" show choice --full)
   [ "$before" = "$after" ] || fail "retry changed the held task"
@@ -2517,18 +2517,37 @@ EOF
   run_captain "$home" answer choice --decision-file "$home/answer.txt" >/dev/null || fail "option copy broke answers"
   out=$(tasks_in "$home" show choice --full)
   assert_contains "$out" 'state: done' "answer did not close the task"
-  assert_contains "$out" 'Captain options:' "answer erased option copy"
+  assert_contains "$out" 'Captain options for hold 1:' "answer erased option copy"
   cat "$home/options.json" "$home/options.json" > "$home/two-documents.json"
   if run_captain "$home" hold multi --title Multi --reason Choose --options-file "$home/two-documents.json" >/dev/null 2>&1; then
     fail "multiple JSON documents were accepted"
   fi
   tasks_in "$home" add workchoice "Gated work" --repo sample >/dev/null || fail "could not add gated work"
   run_captain "$home" hold workchoice --reason Choose --options-file "$home/options.json" >/dev/null || fail "could not hold work"
+  printf 'North please\nCaptain options: historical answer text\n' > "$home/answer.txt"
   run_captain "$home" answer workchoice --decision-file "$home/answer.txt" --release >/dev/null || fail "could not release work"
-  run_captain "$home" hold workchoice --reason Choose --options-file "$home/options.json" >/dev/null || fail "could not re-hold work"
+  run_captain "$home" hold workchoice --reason Choose >/dev/null || fail "could not re-hold work without copy"
+  before=$(tasks_in "$home" show workchoice --full)
+  assert_contains "$before" 'Captain options for hold 1:' "re-hold erased historical copy"
+  assert_contains "$before" 'Captain options: historical answer text' "re-hold erased literal answer text"
+  run_captain "$home" hold workchoice --reason Choose >/dev/null || fail "retry without copy failed"
+  after=$(tasks_in "$home" show workchoice --full)
+  [ "$before" = "$after" ] || fail "retry without copy changed the held task"
+  out=$(run_bearings "$home" --fields decisions) || fail "could not project the re-held task"
+  printf '%s' "$out" | jq -e '.decision_layout | any(.key == "workchoice" and .options == null)' >/dev/null \
+    || fail "new hold presented the prior call choices: $out"
+  jq '.about="New route" | .options=[{"value":"east","label":"East"}] | .recommended="east"' \
+    "$home/options.json" > "$home/new-options.json"
+  run_captain "$home" hold workchoice --reason Choose --options-file "$home/new-options.json" >/dev/null \
+    || fail "could not update active call copy"
   out=$(tasks_in "$home" show workchoice --full)
   assert_contains "$out" 'North please' "option copy erased the recorded human answer"
-  assert_contains "$out" 'Captain options:' "re-hold lost its option metadata"
+  assert_contains "$out" 'Captain options: historical answer text' "new copy erased literal answer text"
+  assert_contains "$out" 'Captain options for hold 1:' "new copy erased historical option copy"
+  assert_contains "$out" 'Captain options for hold 2:' "re-hold lost its current option copy"
+  out=$(run_bearings "$home" --fields decisions) || fail "could not project the updated call"
+  printf '%s' "$out" | jq -e '.decision_layout | any(.key == "workchoice" and .about == "New route" and [.options[].value] == ["east"])' >/dev/null \
+    || fail "board did not project only the current call choices: $out"
   pass "decision copy stays on the held task, survives answers, and retries without drift"
 }
 
@@ -2737,6 +2756,11 @@ EOF
   [ -f "$home/captain-decisions.json" ] || fail "migration deleted the source file"
   printf 'North\n' > "$home/answer.txt"
   run_captain "$home" answer route --decision-file "$home/answer.txt" >/dev/null || fail "could not close migrated task"
+  before=$(cat "$home/data/backlog.md")
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "closed migration preview failed"
+  assert_contains "$out" 'already-closed: route' "migration preview mislabeled the closed task"
+  assert_not_contains "$out" 'would-hold: route' "migration preview offered to hold a closed task"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "closed migration preview mutated backlog"
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) || fail "closed migration retry failed"
   assert_contains "$out" 'already-closed: route' "migration reopened an answered call"
   jq '.decisions += [{"key":"bad","title":"Bad","about":"Bad","decide":"Bad","options":[],"recommended":"missing"}]' \

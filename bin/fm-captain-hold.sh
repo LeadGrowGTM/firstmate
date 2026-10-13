@@ -61,7 +61,8 @@
 # --until`, so a "revisit later" answer is stored as a date instead of a live
 # card.
 # `--options-file` stores board copy in the task body as one compact JSON line
-# prefixed `Captain options: `. The object requires string about and decide,
+# prefixed `Captain options for hold N: `, where N is the number of recorded
+# resolutions plus one. The object requires string about and decide,
 # and options [{value,label,hint?}]; values are unique privacy-safe slugs (at most
 # 128 characters), excluding reconcile, and labels are nonempty. Optional
 # recommended names an option value; report is a path string and pr_url is HTTPS.
@@ -943,9 +944,11 @@ decision_copy() {  # <json-file>; validate and print canonical JSON before mutat
 }
 
 write_decision_copy() {  # <id> <decoded-body> <canonical-json>
-  local id=$1 body=$2 copy=$3 new_body tmp
-  new_body=$(printf '%s\n' "$body" | awk '!/^Captain options: /')
-  new_body=$(printf '%s\nCaptain options: %s' "$new_body" "$copy")
+  local id=$1 body=$2 copy=$3 new_body tmp prefix occurrence
+  occurrence=$(( $(resolution_record_count "$body") + 1 ))
+  prefix="Captain options for hold $occurrence: "
+  new_body=$(printf '%s\n' "$body" | awk -v prefix="$prefix" 'index($0, prefix) != 1')
+  new_body=$(printf '%s\n%s%s' "$new_body" "$prefix" "$copy")
   [ "$body" != "$new_body" ] || return 0
   tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-options.XXXXXX") || fail "could not create options scratch"
   if ! printf '%s\n' "$new_body" > "$tmp"; then
@@ -2049,10 +2052,6 @@ command_migrate_options() (
     i=$((i + 1))
     id=$(printf '%s' "$entry" | jq -r '.key')
     title=$(printf '%s' "$entry" | jq -r '.title')
-    if [ "$apply" = 0 ]; then
-      printf 'would-hold: %s %s\n' "$id" "$title"
-      continue
-    fi
     existing=0
     if task_show "$id"; then
       existing=1
@@ -2061,6 +2060,10 @@ command_migrate_options() (
         printf 'already-closed: %s\n' "$id"
         continue
       fi
+    fi
+    if [ "$apply" = 0 ]; then
+      printf 'would-hold: %s %s\n' "$id" "$title"
+      continue
     fi
     origin=$(printf '%s' "$entry" | jq -r '.origin // empty')
     repo=$(printf '%s' "$entry" | jq -r '.repo // "firstmate"')
