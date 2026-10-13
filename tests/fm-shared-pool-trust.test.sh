@@ -134,10 +134,13 @@ printf 'args=%s\n' "$*" >> "$log"
 printf 'call=%s\t%s\n' "$*" "$(pwd -P)" >> "$log"
 case "$*" in
   'status --json')
+    printf 'Error: unknown flag: --json\n' >&2
+    exit 1
+    ;;
+  status)
     lease=${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}
     path=${FM_FAKE_TREEHOUSE_INITIAL_PATH:-}
     if [ -z "$lease" ] || [ -z "$path" ]; then
-      printf '[]\n'
       exit 0
     fi
     state=available
@@ -153,7 +156,15 @@ case "$*" in
         fi
       fi
     fi
-    jq -n --arg path "$path" --arg status "$state" '[{path:$path,status:$status}]'
+    shown=$path
+    case "$path" in
+      "$HOME") shown='~' ;;
+      "$HOME"/*) shown="~${path#"$HOME"}" ;;
+    esac
+    printf '%-4s  %-11s  %s\n' 1 "$state" "$shown"
+    if [ -n "${FM_FAKE_TREEHOUSE_HOLD_RETURN:-}" ]; then
+      printf '%-4s  %-11s  %s\n' 2 available "$shown-other"
+    fi
     ;;
   'get --lease --lease-holder '*)
     printf 'gitmarker=%s\n' "$(git config --global --get fm.marker 2>/dev/null)" >> "$log"
@@ -687,12 +698,14 @@ test_shasum_only_path_names_the_pool_from_the_home() {
 
 test_initial_get_checks_returned_worktree() {
   local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return out status
-  for variant in inside outside unconfirmed pending; do
+  for variant in inside inside-tilde outside unconfirmed pending; do
     id="pool-placement-initial-$variant"
     case_dir=$TMP_ROOT/$id
     CASE_URL=$(make_same_origin_clones "$case_dir/origin")
     prepare_spawn_home "$case_dir" "$id"
-    if [ "$variant" != outside ]; then
+    if [ "$variant" = inside-tilde ]; then
+      allocated=$CASE_HOME/user-home/.treehouse/1/widget
+    elif [ "$variant" != outside ]; then
       allocated=$CASE_HOME/worktrees/1/widget
     else
       allocated=$case_dir/external-pool/1/widget
@@ -721,12 +734,12 @@ test_initial_get_checks_returned_worktree() {
       run_spawn "$reported" "$id") || status=$?
     assert_exact_line 'treehouse get' "$pane_log" "$variant: initial get was not sent"
     [ -d "$allocated" ] || fail "$variant: fake Treehouse did not allocate a worktree"
-    if [ "$variant" = inside ]; then
+    if [ "$variant" = inside ] || [ "$variant" = inside-tilde ]; then
       [ "$status" -ne 0 ] || fail "inside: spawn accepted the allocated worktree"$'\n'"$out"
       assert_contains "$out" "allocated worktree $allocated is inside Firstmate home" \
-        "inside: refusal did not resolve the allocated link"
+        "$variant: refusal did not resolve the allocated path"
       assert_exact_line 'exit' "$pane_log" "inside: allocated copy was not returned"
-      [ "$(grep -Fc 'args=status --json' "$tree_log")" -ge 2 ] \
+      [ "$(grep -Fxc 'args=status' "$tree_log")" -ge 2 ] \
         || fail "inside: return was accepted before Treehouse finished releasing the copy"
       [ ! -e "$lease" ] || fail "inside: fake Treehouse lease remained active"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "inside: refusal published a task"
@@ -735,7 +748,7 @@ test_initial_get_checks_returned_worktree() {
       assert_contains "$out" "worktree '$reported' was not confirmed returned" \
         "unconfirmed: missing return warning"
       assert_exact_line 'exit' "$pane_log" "unconfirmed: return was not attempted"
-      assert_no_exact_line 'args=status --json' "$tree_log" \
+      assert_no_exact_line 'args=status' "$tree_log" \
         "unconfirmed: queried status without evidence that the pane left"
       [ -f "$lease" ] || fail "unconfirmed: fake Treehouse lease was unexpectedly released"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "unconfirmed: refusal published a task"
@@ -744,7 +757,7 @@ test_initial_get_checks_returned_worktree() {
       assert_contains "$out" "worktree '$reported' was not confirmed returned" \
         "pending: missing warning while Treehouse still held the copy"
       assert_exact_line 'exit' "$pane_log" "pending: return was not attempted"
-      assert_exact_line 'args=status --json' "$tree_log" \
+      assert_exact_line 'args=status' "$tree_log" \
         "pending: Treehouse status was not checked"
       [ -f "$lease" ] || fail "pending: fake Treehouse lease was unexpectedly released"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "pending: refusal published a task"

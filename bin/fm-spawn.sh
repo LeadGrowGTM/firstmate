@@ -4627,14 +4627,22 @@ spawn_wait_left_path() {  # <path>
 }
 
 spawn_wait_treehouse_returned() {  # <path>
-  local path status _
+  local path status line listed _
   path=$(real_path_or_raw "$1")
   for _ in $(seq 1 10); do
-    status=$(cd "$PROJ_ABS" && fm_run_timed 2 treehouse status --json 2>/dev/null) || status=
-    if [ -n "$status" ] && printf '%s\n' "$status" | jq -e --arg path "$path" \
-      'type == "array" and ([.[] | select(.path == $path) | .status] == ["available"])' >/dev/null 2>&1; then
-      return 0
-    fi
+    status=$(cd "$PROJ_ABS" && fm_run_timed 2 env NO_COLOR=1 treehouse status 2>/dev/null) || status=
+    while IFS= read -r line; do
+      if [[ $line =~ ^[^[:space:]]+[[:space:]]{2,}available[[:space:]]{2,}(.+)$ ]]; then
+        listed=${BASH_REMATCH[1]}
+        case "$listed" in
+          '~') listed=$HOME ;;
+          '~/'*) listed=$HOME${listed#\~} ;;
+        esac
+        if [ "$(real_path_or_raw "$listed")" = "$path" ]; then
+          return 0
+        fi
+      fi
+    done <<< "$status"
     sleep 0.5
   done
   return 1
