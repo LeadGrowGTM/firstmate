@@ -39,6 +39,13 @@
 #   after scaffolding and the caller-supplied repo string cannot reliably
 #   identify this repo. Briefs made without it carry a loud declaration so an
 #   omitted contract cannot be silent.
+#   Every ship and scout brief includes a "# Sub-agents" section allowing its
+#   worker to delegate bounded pieces while owning the task and result. Each
+#   sub-agent gets a self-contained brief, writes only inside the worker's own
+#   copy and task material, touches no live system unless the task allows it,
+#   never addresses firstmate or the captain, and cannot nest. The worker checks
+#   every output and routes decisions through firstmate. Secondmate charters
+#   omit this section.
 # For ship tasks, --mode is REQUIRED and shapes the definition of done. Firstmate
 # resolves it per task at intake (AGENTS.md section 7); data/projects.md holds the
 # captain's standing posture as context, and this script never reads it:
@@ -621,6 +628,19 @@ if [ -n "$FM_TASK_TYPE_SECTION" ]; then
   TASK_SECTION="${TASK_SECTION}"$'\n\n'"${FM_TASK_TYPE_SECTION}"
 fi
 
+IFS= read -r -d '' SUB_AGENT_SECTION <<'EOF' || true
+# Sub-agents
+Firstmate allows you to spawn and supervise your own sub-agents (your harness's built-in sub-agent tool) for bounded pieces of this task, such as a file join, a site fetch, or a research question.
+This narrows the role contract's "do not delegate the task" to bounded pieces only: you stay the worker, you own the task and its result, and no sub-agent takes the task over as a whole.
+1. Give each sub-agent a self-contained brief with exact inputs, the output you expect, the files it may write, and what it must not touch.
+2. A sub-agent writes only inside your own copy and the task material directory your rules name, never outside them, and never to a status file, a steering inbox, a remote, or a pull request.
+3. A sub-agent touches no live system (service, database, account, outbound send, or logged-in browser session) unless the task text above explicitly allows that action; otherwise it works read-only.
+4. Check each sub-agent's output yourself before you rely on it; its success report is evidence, not proof, and you own the result.
+5. A sub-agent never addresses firstmate or the captain and never decides anything: every decision, blocker, and finding still routes through you to firstmate by the status protocol above, and firstmate takes it to the captain.
+6. Sub-agents follow this brief's isolation and shared-infrastructure limits and its project-memory limit where present; setup, status reporting, and delivery duties remain yours alone. Tell them not to spawn sub-agents of their own.
+EOF
+SUB_AGENT_BLOCK=${SUB_AGENT_SECTION%$'\n'}$'\n\n'
+
 # One shared string keeps the ship and scout infrastructure rule identical.
 # Rule 2 governs file edits, so it does not prohibit pool administration.
 # The secondmate charter deliberately omits this rule because a secondmate
@@ -699,7 +719,7 @@ $CREWMATE_PAUSE_INSTRUCTIONS
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.
 $SHARED_INFRA_RULE
 
-$WAIT_BLOCK$INBOX_SECTION
+$WAIT_BLOCK$SUB_AGENT_BLOCK$INBOX_SECTION
 
 # Definition of done
 Write your findings to \`$DATA/$ID/report.md\`.
@@ -779,7 +799,7 @@ $ASK_USER_BLOCK
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.
 $SHARED_INFRA_RULE
 
-$WAIT_BLOCK$INBOX_SECTION
+$WAIT_BLOCK$SUB_AGENT_BLOCK$INBOX_SECTION
 
 # Project memory
 A project's \`AGENTS.md\` or \`CLAUDE.md\` is loaded into every agent session in that project, so edit it only to correct information that is factually wrong - including information your own change made wrong - and never to add knowledge because it is missing.

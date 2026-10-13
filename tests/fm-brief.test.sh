@@ -1702,6 +1702,41 @@ test_task_type_list_and_example() {
   pass "fm-brief: --list-types lists the home types, including the tracked example"
 }
 
+test_ship_and_scout_briefs_grant_bounded_sub_agents() {
+  local home id brief
+  home="$TMP_ROOT/sub-agents-home"
+  mkdir -p "$home/data" "$home/config"
+  for id in no-mistakes direct-PR local-only; do
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "sa-ship-$id" some-proj --mode "$id" >/dev/null 2>&1 \
+      || fail "$id ship scaffold exited non-zero"
+  done
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" sa-scout some-proj --scout >/dev/null 2>&1 \
+    || fail "scout scaffold exited non-zero"
+  for id in sa-ship-no-mistakes sa-ship-direct-PR sa-ship-local-only sa-scout; do
+    brief="$home/data/$id/brief.md"
+    assert_equals 1 "$(grep -c '^# Sub-agents$' "$brief")" "$id: the default sub-agent section is missing or duplicated"
+    assert_grep "you own the task and its result" "$brief" "$id: the worker no longer owns the result"
+    assert_grep "self-contained brief with exact inputs" "$brief" "$id: sub-agent briefs are not required to be self-contained"
+    assert_grep "never outside them, and never to a status file" "$brief" "$id: sub-agent writes are not confined to the worker's own copy"
+    assert_grep "touches no live system" "$brief" "$id: live systems are not off limits by default"
+    assert_grep "Check each sub-agent's output yourself" "$brief" "$id: the worker is not told to check sub-agent output"
+    assert_grep "still routes through you to firstmate" "$brief" "$id: decisions do not route through firstmate"
+    assert_grep "Tell them not to spawn sub-agents of their own" "$brief" "$id: nesting is not forbidden"
+    assert_grep "isolation and shared-infrastructure limits" "$brief" "$id: child safety rules are missing"
+    assert_grep "project-memory limit where present" "$brief" "$id: child project-memory rule is missing"
+    assert_grep "setup, status reporting, and delivery duties remain yours alone" "$brief" "$id: parent-only duties are not reserved"
+    assert_grep "# Firstmate instruction inbox" "$brief" "$id: the inbox section was lost"
+  done
+  awk '/^# Sub-agents/{a=NR} /^# Firstmate instruction inbox/{b=NR} END{exit !(a && b && a < b)}' \
+    "$home/data/sa-ship-direct-PR/brief.md" || fail "the sub-agent section does not precede the inbox section"
+
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='Supervise.' "$ROOT/bin/fm-brief.sh" sa-sm --secondmate --no-projects >/dev/null 2>&1 \
+    || fail "secondmate charter scaffold exited non-zero"
+  assert_no_grep '^# Sub-agents$' "$home/data/sa-sm/brief.md" "secondmate charter received a sub-agent section"
+
+  pass "fm-brief: ship and scout grant bounded sub-agents by default; secondmate omits them"
+}
+
 test_script_parses
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
@@ -1743,3 +1778,4 @@ test_task_type_absent_leaves_scaffold_unchanged
 test_task_type_renders_and_surfaces_model_and_effort
 test_task_type_refuses_unknown_malformed_and_wrong_project
 test_task_type_list_and_example
+test_ship_and_scout_briefs_grant_bounded_sub_agents
