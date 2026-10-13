@@ -269,6 +269,14 @@ fm_test_cleanup() {
   fi
 }
 
+fm_test_signal_cleanup() {
+  local code=$1
+  shift
+  "$@"
+  fm_test_cleanup
+  exit "$code"
+}
+
 fm_test_tmproot() {
   local prefix=${1:-fm-test} root tmp_base
   tmp_base=$(fm_test_tmpdir)

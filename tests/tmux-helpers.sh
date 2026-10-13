@@ -38,7 +38,7 @@ mkdir -m 700 "$FM_TEST_TMUX_ROOT/bin" "$FM_TEST_TMUX_ROOT/s" || return 1
 if [ -n "$FM_TEST_TMUX_REAL" ]; then
   {
     printf '#!/usr/bin/env bash\nreal=%q\nfixture_dir=%q\nfixture_owner=%q\n' \
-      "$FM_TEST_TMUX_REAL" "$FM_TEST_TMUX_ROOT/s" "$$"
+      "$FM_TEST_TMUX_REAL" "$(cd -P -- "$FM_TEST_TMUX_ROOT/s" && pwd -P)" "$$"
     cat <<'SH'
 set -eu
 refuse() { echo "test tmux: $*" >&2; exit 2; }
@@ -67,6 +67,7 @@ recorded_dir() {
     [ -f "$lab_home/state/.fm-lab-tmux-dir" ] || return 1
   lab_dir=$(cat "$lab_home/state/.fm-lab-tmux-dir")
   private_dir "$lab_dir" || return 1
+  lab_dir=$(cd -P -- "$lab_dir" && pwd -P) || return 1
   case "$1" in "$lab_dir"|"$lab_dir/tmux-$(id -u)") return 0 ;; esac
   return 1
 }
@@ -91,8 +92,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     -L*|-S*) opt=${1:0:2}; value=${1:2} ;;
     -f|-T) shift; [ "$#" -gt 0 ] || refuse 'missing option value'; shift; continue ;;
-    --) break ;;
-    -*) shift; continue ;;
+    -*) refuse 'unsupported tmux global option' ;;
     *) break ;;
   esac
   if [ "$opt" = -L ]; then
@@ -109,11 +109,12 @@ done
 selector=(-L fm-test)
 if [ "$explicit" -eq 0 ] && [ -n "${TMUX:-}" ]; then
   socket=${TMUX%%,*}
-  case "$socket" in
+  socket_parent=$(cd -P -- "$(dirname "$socket")" 2>/dev/null && pwd -P) || socket_parent=
+  case "$socket_parent/${socket##*/}" in
     "$dir"/tmux-"$(id -u)"/*)
       [ "${socket##*/}" != default ] || refuse 'default inherited socket'
       recorded_socket "$socket" || refuse 'unsafe inherited socket'
-      selector=(-S "$socket")
+      selector=(-S "$socket_parent/${socket##*/}")
       ;;
   esac
 fi

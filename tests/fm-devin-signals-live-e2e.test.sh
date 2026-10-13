@@ -33,6 +33,10 @@ cleanup() {
   rm -rf "$LAB"
 }
 trap 'cleanup; fm_test_tmux_cleanup' EXIT
+trap 'fm_test_signal_cleanup 130 cleanup' INT
+trap 'fm_test_signal_cleanup 143 cleanup' TERM
+trap 'fm_test_signal_cleanup 129 cleanup' HUP
+trap 'fm_test_signal_cleanup 131 cleanup' QUIT
 fail() { printf 'not ok - %s: %s\n' "$VERSION" "$1" >&2; exit 1; }
 # shellcheck source=bin/fm-busy-lib.sh
 . "$ROOT/bin/fm-busy-lib.sh"

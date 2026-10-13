@@ -76,6 +76,15 @@ preserve_on_failure() {
 }
 trap preserve_on_failure EXIT
 
+stop_on_signal() {
+  [ -z "$ACTIVE_LAB" ] || "$REAL_TMUX" -S "$ACTIVE_LAB/dedicated.sock" kill-server >/dev/null 2>&1 || true
+  ACTIVE_LAB=
+}
+trap 'fm_test_signal_cleanup 130 stop_on_signal' INT
+trap 'fm_test_signal_cleanup 143 stop_on_signal' TERM
+trap 'fm_test_signal_cleanup 129 stop_on_signal' HUP
+trap 'fm_test_signal_cleanup 131 stop_on_signal' QUIT
+
 run_cell() {  # <native|legacy> <exact-binary>
   local kind=$1 binary=$2 lab tmp_base session target prompt i child_count payload_count unique_sessions
   local stop_values outer_turns outer_text

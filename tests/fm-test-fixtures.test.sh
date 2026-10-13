@@ -344,7 +344,15 @@ test_tmux_isolation() (
   child=$FM_TEST_TMUX_ROOT
   tmux new-session -d -s lab 'exec sleep 60' || fail 'isolated test server did not start'
   socket=$(tmux display-message -p '#{socket_path}')
-  [ "$socket" = "$TMUX_TMPDIR/tmux-$(id -u)/fm-test" ] || fail 'bare call did not select the named test server'
+  [ "$socket" = "$(cd -P -- "$TMUX_TMPDIR" && pwd -P)/tmux-$(id -u)/fm-test" ] \
+    || fail 'bare call did not select the named test server'
+  ln -s "$child" "$dir/alias"
+  TMUX_TMPDIR="$dir/alias/s" tmux -L fm-test has-session -t lab \
+    || fail 'named socket refused through a symlinked parent spelling'
+  TMUX_TMPDIR="$dir/alias/s" tmux -S "$dir/alias/s/tmux-$(id -u)/fm-test" has-session -t lab \
+    || fail 'explicit socket refused through a symlinked parent spelling'
+  TMUX_TMPDIR="$dir/alias/s" TMUX="$dir/alias/s/tmux-$(id -u)/fm-test,0,0" \
+    tmux has-session -t lab || fail 'inherited socket refused through a symlinked parent spelling'
   if tmux has-session -t protected 2>/dev/null; then fail 'test reached inherited operator server'; fi
   tmux kill-server || fail 'isolated kill-server failed'
   "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'lab killed operator sentinel'
@@ -377,6 +385,10 @@ SH
     . "$ROOT/tests/tmux-helpers.sh" || exit 1
     trap fm_test_tmux_cleanup EXIT
     if tmux -S "$sentinel" list-sessions >/dev/null 2>&1; then exit 1; fi
+    if tmux -vS "$sentinel" kill-server >/dev/null 2>&1; then exit 1; fi
+    if tmux -vS"$sentinel" kill-server >/dev/null 2>&1; then exit 1; fi
+    if tmux -vL default kill-server >/dev/null 2>&1; then exit 1; fi
+    if tmux -vLdefault kill-server >/dev/null 2>&1; then exit 1; fi
     if TMUX_TMPDIR="$sentinel_dir" tmux -L operator list-sessions >/dev/null 2>&1; then exit 1; fi
     [ ! -e "$FM_TEST_CONTACT_LOG" ]
   ) || fail 'foreign socket refusal contacted the real tmux command'
@@ -397,7 +409,7 @@ SH
 #!/usr/bin/env bash
 set -eu
 tmux new-session -d -s standalone 'exec sleep 60'
-[ "$(tmux display-message -p '#{socket_path}')" = "$TMUX_TMPDIR/tmux-$(id -u)/fm-test" ]
+[ "$(tmux display-message -p '#{socket_path}')" = "$(cd -P -- "$TMUX_TMPDIR" && pwd -P)/tmux-$(id -u)/fm-test" ]
 ! tmux has-session -t protected 2>/dev/null
 tmux kill-server
 SH
@@ -432,6 +444,44 @@ SH
   pass 'tmux fixture cleanup survives a suite replacing its EXIT trap'
 )
 
+test_tmux_signal_cleanup() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  local dir="$TMP_ROOT/tmux-signal" pid rc=0 i lab
+  mkdir -p "$dir"
+  cat > "$dir/child.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+. "$1/tests/lib.sh"
+OUTPUT_DIR=$2
+LAB=$(fm_test_tmproot signal)
+printf '%s\n' "$LAB" > "$OUTPUT_DIR/lab"
+tmux -S "$LAB/dedicated.sock" new-session -d -s disposable 'exec sleep 60' || exit 1
+stop_owned() {
+  [ -f "$LAB/.fm-test-fixture" ] || exit 3
+  tmux -S "$LAB/dedicated.sock" kill-server || exit 4
+  printf 'stopped\n' > "$OUTPUT_DIR/stopped"
+}
+trap 'fm_test_signal_cleanup 143 stop_owned' TERM
+printf 'ready\n' > "$OUTPUT_DIR/ready"
+while :; do sleep 0.1; done
+SH
+  bash "$dir/child.sh" "$ROOT" "$dir" > "$dir/child.log" 2>&1 &
+  pid=$!
+  for i in $(seq 1 50); do
+    [ -f "$dir/ready" ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [ -f "$dir/ready" ] || fail "signal fixture did not start: $(cat "$dir/child.log")"
+  lab=$(cat "$dir/lab")
+  kill -TERM "$pid" || fail 'could not signal disposable fixture'
+  wait "$pid" || rc=$?
+  [ "$rc" -eq 143 ] || fail "signal cleanup returned $rc: $(cat "$dir/child.log")"
+  [ -f "$dir/stopped" ] || fail 'signal cleanup did not stop the recorded server'
+  [ ! -e "$lab" ] || fail 'signal cleanup left the registered lab behind'
+  pass 'signal cleanup stops recorded server before removing its lab'
+)
+
 test_standalone_afk_avoids_operator_socket() (
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
   if command -v herdr >/dev/null 2>&1; then
@@ -462,6 +512,7 @@ test_standalone_afk_avoids_operator_socket() (
 
 test_tmux_isolation || fail 'tmux fixture isolation'
 test_tmux_cleanup_after_trap_override || fail 'tmux fixture trap cleanup'
+test_tmux_signal_cleanup || fail 'tmux fixture signal cleanup'
 test_standalone_afk_avoids_operator_socket || fail 'standalone AFK fixture isolation'
 test_git_config_isolation || fail "Git fixture config isolation"
 test_agent_standin_survives_a_multicall_sleep || fail "agent stand-in multicall case"
