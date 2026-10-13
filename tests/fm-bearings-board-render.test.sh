@@ -94,12 +94,12 @@ require_listener_reached_poll() {  # <home>
 
 # Build the board from <underway-json> plus <charted-json> and return what the
 # renderer produced.
-render_board() {  # <home> <underway-json> <charted-json> [charted_more] [charted_warning_more]
+render_board() {  # <home> <underway-json> <charted-json> [charted_more] [charted_warning_more] [calls-json]
   local home=$1 underway=$2 charted=$3 more=${4:-0} warning_more=${5:-0} data="$1/payload.json"
-  jq -n --argjson underway "$underway" --argjson charted "$charted" \
+  jq -n --argjson calls "${6:-[]}" --argjson underway "$underway" --argjson charted "$charted" \
     --argjson more "$more" --argjson warning_more "$warning_more" '{
     schema:"fm-bearings-board.v1", home:"render-home", generated:"2026-08-26T00:00Z",
-    prs_live:false, captains_call:[], underway:$underway, landed:[],
+    prs_live:false, captains_call:$calls, underway:$underway, landed:[],
     charted:$charted, charted_more:$more, charted_warning_more:$warning_more}' > "$data"
   PATH="$home/fakebin:$PATH" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
@@ -112,7 +112,7 @@ render_board() {  # <home> <underway-json> <charted-json> [charted_more] [charte
 }
 
 # Build the board from <charted-json> alone and return what the renderer produced.
-render() {  # <home> <charted-json> [charted_more] [charted_warning_more]
+render() {  # <home> <charted-json> [charted_more] [charted_warning_more] [calls-json]
   render_board "$1" '[]' "$2" "${3:-0}" "${4:-0}"
 }
 
@@ -275,3 +275,69 @@ test_warnings_are_excluded_from_the_charted_next_count
 test_a_board_of_only_warnings_still_reports_nothing_queued
 test_omitted_warnings_never_count_as_more_queued
 test_an_omitted_kind_keeps_the_existing_queued_rendering
+
+# Full inventory stays visible rather than dealing one hidden card at a time.
+test_owner_grouped_numbered_decisions() {
+  local home out
+  home=$(make_home decisions-layout)
+  out=$(render_board "$home" '[]' '[]' 0 0 '[
+    {"key":"remote","owner":"mate","impact":3,"type":"decision","repo":"sample","title":"Remote choice","decide":"Choose a route","options":[{"value":"a","label":"Route A","hint":"Ships sooner"}],"recommend_value":"a"},
+    {"key":"minor","owner":"(main)","impact":1,"type":"decision","repo":"sample","title":"Minor choice","gate":"until 2026-11-01","options":[{"value":"b","label":"Route B"}]},
+    {"key":"major","owner":"(main)","impact":9,"type":"decision","repo":"sample","title":"Major choice","options":[{"value":"a","label":"Route A","hint":"Keeps compatibility"}],"recommend_value":"a"},
+    {"key":"minor","owner":"mate","type":"merge","risk":"low","pr_state":"CLOSED","pr_url":"https://github.com/sample/sample/pull/8","repo":"sample","title":"Old choice","options":[{"value":"b","label":"Route B"}]}
+  ]')
+  printf '%s' "$out" | jq -e '
+    .error == "" and .owners == ["Main home","mate"]
+    and [.calls[].title] == ["D1 · Major choice","D2 · Minor choice","D3 · Remote choice"]
+    and all(.calls[]; .hidden == false)
+    and (.stats[] | select(.label == "need you") | .n) == 2
+    and .calls[0].submitDisabled == false and .calls[2].submitDisabled == true
+    and (.calls[1].text | contains("until 2026-11-01") and contains("Queue answer"))
+    and .calls[1].submitDisabled == false
+    and (.calls[0].text | contains("Keeps compatibility") and contains("recommendRoute A") and contains("Queue answer"))
+    and (.calls[1].text | contains("incomplete") and contains("Missing recommendation") and contains("Missing consequence")
+      and contains("ask firstmate to supply it"))
+    and (.calls[2].text | contains("mate/remote") and contains("owner home"))
+    and (.stale | contains("Old choice") and contains("Linked PR closed") and contains("does not resolve tasks"))
+  ' >/dev/null || fail "decision layout did not render its complete owner inventory: $out"
+  pass "decisions are numbered, grouped, ranked, visible and separate from stale candidates"
+}
+test_owner_grouped_numbered_decisions
+
+test_incomplete_decision_guidance_is_visible() {
+  local home out
+  home=$(make_home incomplete-decision)
+  out=$(render_board "$home" '[]' '[]' 0 0 '[
+    {"key":"missing","owner":"(main)","type":"decision","repo":"sample","title":"Undetailed choice","options":[],"allow_freeform":true}
+  ]')
+  printf '%s' "$out" | jq -e '
+    .error == "" and [.calls[].title] == ["D1 · Undetailed choice"]
+    and (.calls[0].text | contains("Missing options and consequences - ask firstmate to supply them")
+      and contains("Missing recommendation - ask firstmate to supply it"))
+    and .calls[0].submitDisabled == false
+  ' >/dev/null || fail "incomplete decision guidance was hidden or presented as complete: $out"
+  pass "incomplete decision guidance remains visible and plainly marked"
+}
+test_incomplete_decision_guidance_is_visible
+
+test_incomplete_guidance_is_shared_by_card_kinds() {
+  local home out
+  home=$(make_home incomplete-card-kinds)
+  out=$(render_board "$home" '[]' '[]' 0 0 '[
+    {"key":"merge-missing","type":"merge","risk":"low","repo":"sample","title":"Merge without guidance","options":[],"allow_freeform":true},
+    {"key":"credential-partial","type":"credential","repo":"sample","title":"Credential choice","options":[{"value":"a","label":"Route A"}],"recommend_value":"a"},
+    {"key":"merge-complete","type":"merge","risk":"low","repo":"sample","title":"Merge with guidance","options":[{"value":"yes","label":"Merge","hint":"Deploys the approved change"}],"recommend_value":"yes"}
+  ]')
+  printf '%s' "$out" | jq -e '
+    .error == "" and (.calls | length) == 3
+    and (.calls[0].text | contains("incomplete") and contains("Missing options and consequences")
+      and contains("Missing recommendation"))
+    and (.calls[1].text | contains("incomplete") and contains("Missing consequence")
+      and contains("recommendRoute A"))
+    and .calls[1].freeform == true and .calls[1].submitDisabled == false
+    and (.calls[2].text | contains("incomplete") | not)
+    and .calls[2].freeform == false
+  ' >/dev/null || fail "card kinds did not share incomplete-guidance rendering: $out"
+  pass "merge and credential cards share decision completeness guidance"
+}
+test_incomplete_guidance_is_shared_by_card_kinds

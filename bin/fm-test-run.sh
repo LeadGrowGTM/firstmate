@@ -1644,7 +1644,7 @@ families_for_changed_path() {
       printf '%s\n' watcher-wake-lock
       printf '%s\n' live-harness-optin
       ;;
-    bin/fm-bearings-snapshot.sh|bin/fm-fleet-snapshot.sh|bin/fm-fleet-view.sh|bin/fm-contributions.sh|bin/fm-contributions.jq|\
+    bin/fm-bearings-snapshot.sh|bin/fm-bearings-decisions-lib.sh|bin/fm-fleet-snapshot.sh|bin/fm-fleet-view.sh|bin/fm-contributions.sh|bin/fm-contributions.jq|\
     bin/fm-home-summary-refresh.sh)
       printf '%s\n' snapshot-bearings
       ;;

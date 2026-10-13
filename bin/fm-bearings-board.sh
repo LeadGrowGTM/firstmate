@@ -11,8 +11,8 @@
 #   fm-bearings-board.sh build <data.json>
 #   fm-bearings-board.sh path
 #
-# build      Validate the payload, drop the Captain's Call cards whose subject
-#            already landed, give every surviving decision card the standard
+# build      Validate the payload, move identified stale Captain's Call cards
+#            into stale_candidates, give every active decision card the standard
 #            reconcile choice, and inject the result into a fresh copy of the
 #            shipped template at the stable board path. Establish the Lavish
 #            session on that board and PROVE it is live BEFORE binding and
@@ -30,9 +30,10 @@
 #              armed: <source-id>            (first registration)
 #              already-armed: <source-id>    (registration already present)
 #              listening: <owner>            (only when a replacement was needed)
-#            Every dropped card is named on stderr as a `dropped-landed-card:`
-#            line, so a rebuild states what it removed instead of quietly
-#            shrinking Captain's Call.
+#            Every identified stale card is named on stderr as a
+#            `dropped-landed-card:` line, so a rebuild states what left active
+#            Captain's Call. Those cards remain in stale_candidates
+#            as observational rows; no hold is answered or resolved by build.
 # path       Print the stable board path for this home.
 #
 # A LIVE SESSION IS PROVED, NEVER ASSUMED. `lavish-axi <file>` exits 0 even
@@ -46,13 +47,11 @@
 # live owner also gets a replacement before build returns, because
 # `already-armed` is not the same fact as `listening`.
 #
-# CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
-# structured artifact/version subject appears among the payload's own landed
-# rows, or when `bin/fm-captain-hold.sh open` reports the task is no longer an
-# open captain call. A newer published version also supersedes a version card.
-# A task whose state cannot be established is kept, because a call wrongly
-# hidden is worse than a card wrongly shown. Cleanup is therefore a normal
-# rebuild effect rather than a committed migration or direct state mutation.
+# CAPTAIN'S CALL HYGIENE. An identified stale card leaves the active calls and
+# enters stale_candidates without mutating its task. Landed task matching uses
+# home plus id; PR and structured artifact/version subjects also match landed
+# evidence. Only main-home decision tasks are checked through
+# `bin/fm-captain-hold.sh open`; uncertain state keeps the call visible.
 #
 # THE RECONCILE CHOICE. Every decision card carries the standard `reconcile`
 # option, injected here so the guarantee does not depend on the composer's
@@ -71,6 +70,14 @@
 # only as the deliberate genuinely-no-repo marker. In that exceptional case
 # the template may display the routing id. Anything else refuses before the
 # existing board is touched.
+#
+# Optional call fields: owner is a non-empty home id (default "(main)"),
+# impact is a nonnegative integer, gate is presentation text, stale_reason is a
+# non-empty verified candidate reason, and pr_state is MERGED or CLOSED only
+# with a linked pr_url.
+# MERGED/CLOSED and stale_reason move a card to the candidate list.
+# Owner/task identities must be unique. Foreign calls are never checked against
+# the local backlog or submitted to the local answer intake by the template.
 #
 # Every Underway row likewise carries a non-empty `name`: the durable task name
 # when known, otherwise its durable identifier.
@@ -148,12 +155,17 @@ validate_payload() {  # <data.json>
       and repo_marker
       and (.title | nonempty_string)
       and (.options | type == "array")
-      and ((.options | length) > 0 or .allow_freeform == true)
       and ([.options[]
         | type == "object"
           and (.value | slug(128))
           and (.label | nonempty_string)
           and optional_string("hint")] | all)
+      and ((has("owner") | not) or (.owner | nonempty_string))
+      and optional_string("gate")
+      and ((has("stale_reason") | not) or (.stale_reason | nonempty_string))
+      and ((has("impact") | not) or (.impact | type == "number" and floor == . and . >= 0))
+      and ((has("pr_state") | not) or
+        ((.pr_state == "MERGED" or .pr_state == "CLOSED") and has("pr_url")))
       and (optional_string("about"))
       and (optional_string("decide"))
       and (optional_string("detail"))
@@ -174,7 +186,8 @@ validate_payload() {  # <data.json>
       and (.state | nonempty_string) and (.doing | nonempty_string) and (.kind | nonempty_string);
     def landed_item:
       type == "object" and repo_marker and (.id | nonempty_string)
-      and (.what | nonempty_string) and (.owner | nonempty_string)
+      and (.what | nonempty_string) and (.home | nonempty_string)
+      and (.owner | nonempty_string)
       and optional_https_url("pr_url")
       and optional_subject;
     def charted_item:
@@ -198,6 +211,8 @@ validate_payload() {  # <data.json>
     and ((has("charted_warning_more") | not)
       or ((.charted_warning_more | type == "number") and (.charted_warning_more >= 0) and (.charted_warning_more | floor == .)))
     and ([.captains_call[] | call_item] | all)
+    and ([.captains_call[] | [(.owner // "(main)"), .key]] as $keys
+         | ($keys | length) == ($keys | unique | length))
     and ([.underway[] | underway_item] | all)
     and ([.landed[] | landed_item] | all)
     and ([.charted[] | charted_item] | all)
@@ -289,52 +304,53 @@ decision_card_is_stale() {  # <task-id> <landed-0-or-1>
   return 1
 }
 
-# Drop every stale decision card, then give every surviving decision card the
+# Move every stale card into candidates, then give every surviving decision card the
 # standard reconcile choice. Injecting it here is what makes "every decision
 # card offers reconcile" a property of the board rather than of the composer's
 # memory; the validator prevents duplicate decision options.
 effective_payload() {  # <data.json> <dest.json>
-  local data=$1 dest=$2 landed_keys key reason drop='' tmp landed=0
-  landed_keys=$(jq -c '
+  local data=$1 dest=$2 row key owner reason dropped='[]' landed=0
+  while IFS= read -r row; do
+    key=$(jq -r '.key' <<< "$row")
+    owner=$(jq -r '.owner // "(main)"' <<< "$row")
+    reason=$(jq -r '.stale_reason // empty' <<< "$row")
+    landed=0
+    [ -z "$reason" ] || landed=1
+    if [ -z "$reason" ] && [ "$owner" = '(main)' ] && [ "$(jq -r .type <<< "$row")" = decision ]; then
+      reason=$(decision_card_is_stale "$key" "$landed") || continue
+    fi
+    [ -n "$reason" ] || continue
+    printf 'dropped-landed-card: %s (%s)\n' "$key" "$reason" >&2
+    dropped=$(jq --arg key "$key" --arg owner "$owner" --arg reason "$reason" \
+      '. + [{key:$key,owner:$owner,reason:$reason}]' <<< "$dropped") || return 1
+  done < <(jq -c '
     def version_parts: split(".") | map(tonumber);
-    . as $payload
-    | [$payload.captains_call[]
-      | select(.type == "decision")
-      | . as $card
-      | select(
-          ($payload.landed | any(.id == $card.key))
+    . as $payload | .captains_call[] | . as $card
+    | .stale_reason = (.stale_reason // (
+        if .pr_state? == "MERGED" or .pr_state? == "CLOSED" then "Linked PR " + (.pr_state | ascii_downcase)
+        elif ($payload.landed | any(.id == $card.key
+          and .home == ($card.owner // "(main)")))
           or (($card.pr_url? != null) and ($payload.landed | any(.pr_url? == $card.pr_url)))
           or (($card.subject? != null) and ($payload.landed | any(
-            (.subject? != null)
-            and (.subject.artifact == $card.subject.artifact)
+            (.subject? != null) and .subject.artifact == $card.subject.artifact
             and ((.subject.version | version_parts) >= ($card.subject.version | version_parts)))))
-        )
-      | .key]
-  ' "$data") || return 1
-  while IFS= read -r key; do
-    [ -n "$key" ] || continue
-    landed=0
-    if jq -e --arg key "$key" 'index($key) != null' <<< "$landed_keys" >/dev/null; then
-      landed=1
-    fi
-    reason=$(decision_card_is_stale "$key" "$landed") || continue
-    printf 'dropped-landed-card: %s (%s)\n' "$key" "$reason" >&2
-    drop=$drop$key$'\n'
-  done < <(jq -r '.captains_call[]? | select(.type == "decision") | .key' "$data")
-  tmp=$(printf '%s' "$drop" | jq -R -s 'split("\n") | map(select(length > 0))') || return 1
-  jq --argjson dropped "$tmp" '
-    .captains_call = [
-      .captains_call[]
-      | . as $card
-      | select($card.type != "decision" or (($dropped | index($card.key)) == null))
-      | if .type == "decision"
-        then .options += [{
-          value: "reconcile",
-          label: "Reconcile",
-          hint: "Re-check the latest state, then close this with evidence or keep it open with a note"
-        }]
-        else . end
-    ]' "$data" > "$dest" || return 1
+        then "Structured subject already landed or superseded"
+        else null end))' "$data")
+  jq --argjson dropped "$dropped" '
+    def stale_match($card):
+      select(.key == $card.key and .owner == ($card.owner // "(main)"));
+    . as $payload
+    | (if ($dropped | length) > 0 then
+        .stale_candidates = [$payload.captains_call[] as $card
+          | $dropped[] | stale_match($card) | $card + {stale_reason:.reason}]
+       else . end)
+    | .captains_call = [.captains_call[] | . as $card
+        | select(any($dropped[]; stale_match($card)) | not)
+        | if .type == "decision" then .options += [{
+            value:"reconcile", label:"Reconcile",
+            hint:"Re-check the latest state, then close this with evidence or keep it open with a note"
+          }] else . end]
+  ' "$data" > "$dest" || return 1
 }
 
 # The OWNER column bin/fm-procevent.sh already publishes: live, none,

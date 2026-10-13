@@ -98,6 +98,9 @@ FLEET="$SCRIPT_DIR/fm-fleet-snapshot.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-bearings-decisions-lib.sh
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/fm-bearings-decisions-lib.sh"
 # shellcheck source=bin/fm-landed-lib.sh
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/fm-landed-lib.sh"  # FM_LANDED_JQ_DEFS: the shared landed selector
@@ -163,10 +166,14 @@ For every registered secondmate, readable structured facts from its own home are
   Parent events and bounded terminal reads are labeled fallback or contradiction
   evidence and never become current work. The provenance and freshness fields
   distinguish live and cached ledgers; a home without either is explicitly unreadable.
-Opt-in surfaces: --fields bodies|paths|actions|endpoints, --all-in-flight,
+Opt-in surfaces: --fields bodies|paths|actions|endpoints|decisions, --all-in-flight,
   --all-decisions (all open decisions and captain holds in the bounded snapshot),
   --all-secondmates, --all-landed, --all-reports, --all-queued, --all-recorded-prs,
   --all-unhealthy, --all-pr-repos, --include-prs (adds candidate_prs).
+--fields decisions adds the owner-grouped decision_layout and unavailable
+  owner coverage. It includes deferred calls, preserves full hold reasons, and flags
+  stale candidates without resolving them or reading reports. Priority ranks
+  critical/P0, high/P1, normal/unknown, low/P3 within each owner.
 Raise FM_BEARINGS_PR_LIMIT to expand per-repository open-PR results.
 EOF
 }
@@ -229,6 +236,8 @@ if [ "$GUARD_RC" -eq 4 ]; then
   RETURN_CATCHUP=$(jq -n --argjson blockers "$CATCHUP_BLOCKERS" --arg reason "$CATCHUP_REASON" \
     '{pending:true,blockers:$blockers,reason:$reason}')
 fi
+
+case ",$(printf '%s' "$FIELDS" | tr -d '[:space:]')," in *,decisions,*) ALL_SECONDMATES=1 ;; esac
 
 NOW=${FM_BEARINGS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 if [ "$ALL_LANDED" = 1 ] || [ "$ALL_SECONDMATES" = 1 ]; then
@@ -380,7 +389,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   --argjson pr_rows_capped "$PR_ROWS_CAPPED" \
   --argjson pr_rows_min_total "$PR_ROWS_MIN_TOTAL" \
   --argjson return_catchup "$RETURN_CATCHUP" \
-  --argjson candidate_prs "$CANDIDATE_PRS" "$FM_LANDED_JQ_DEFS"'
+  --argjson candidate_prs "$CANDIDATE_PRS" "$FM_BEARINGS_DECISIONS_JQ_DEFS$FM_LANDED_JQ_DEFS"'
   def trunc($n): if . == null then null else
     (tostring | gsub("\\s+"; " ") | if (length > $n) then (.[:$n] + "…") else . end) end;
   def fit($n):
@@ -653,6 +662,33 @@ MODEL=$(printf '%s' "$SNAP" | jq \
            {unhealthy_endpoints:(if $all_unhealthy == 1 then $unhealthy_all else $unhealthy_all[:$unhealthy_n] end)}
          else {} end)
   | . + (if $include_prs == 1 then {candidate_prs:$candidate_prs} else {} end)
+  | . + (if ($fl | index("decisions")) != null then
+      {decision_layout: (
+        [($snap.backlog.records | bearings_decisions)[] | . + {owner:"(main)", key:.id}]
+        + [$snap.secondmate_current.records[]? as $m
+           | (if $m.decision_records != null then $m.decision_records
+              else ([ $m.decisions_open[]?
+                      | select(.source == "backlog" and .verb == "captain-hold")
+                      | {id, title:(.summary // .id), repo:null, reason:.reason,
+                         priority:null, origin:null, hold_set:null,
+                         bucket:.hold_bucket, until:.hold_until, pr_url:null, stale_reason:null} ]
+                    + [ $m.queued[]? | select(.hold_kind == "captain")
+                        | {id, title, repo, reason:.hold_reason,
+                           priority:null, origin:null, hold_set:null,
+                           bucket:.hold_bucket, until:.hold_until, pr_url:null, stale_reason:null} ])
+                   | group_by(.id) | map(max_by(if .repo != null and .repo != "" then 1 else 0 end))
+                   | map(select(.id | type == "string" and test("^[A-Za-z0-9._-]{1,128}$")))
+              end)[]
+           | . + {owner:$m.id, key:.id, id:($m.id + "/" + .id)}]
+        | sort_by([.owner, (if .priority == "critical" or .priority == "P0" then 0
+                           elif .priority == "high" or .priority == "P1" then 1
+                           elif .priority == "low" or .priority == "P3" then 3 else 2 end), .id])
+      ),
+       decision_layout_unavailable:([if $snap.backlog.present != true then
+         {owner:"(main)", reason:"Structured backlog unavailable"} else empty end]
+         + [$snap.secondmate_current.records[]?
+         | select(.decision_records == null) | {owner:.id, reason:"Detailed decision inventory unavailable; inspect owner home"}])}
+      else {} end)
   | . + (if $f_bodies then {bodies:[ $snap.backlog.records[] | select(.structured and (.state == "queued" or .state == "done")) | {id, body:((.body_excerpt // .raw // "-") | trunc(200))} ]} else {} end)
   | . + (if $f_paths then {paths:[ $snap.tasks[] | {id, worktree:(.paths.worktree.path // "-"), home:(.paths.home.path // "-"), status:.paths.status_log.path, report:.paths.report.path} ]} else {} end)
   | . + (if $f_actions then {actions:[ $snap.tasks[] | {id, watch:(.actions.watch // .actions.send // "-"), steer:(.actions.steer // .actions.send // "-")} ]} else {} end)
