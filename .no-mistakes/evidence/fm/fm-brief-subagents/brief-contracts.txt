@@ -1,0 +1,61 @@
+=== lab-ship-no-mistakes: generated brief ===
+# Sub-agents
+Firstmate allows you to spawn and supervise your own sub-agents (your harness's built-in sub-agent tool) for bounded pieces of this task, such as a file join, a site fetch, or a research question.
+This narrows the role contract's "do not delegate the task" to bounded pieces only: you stay the worker, you own the task and its result, and no sub-agent takes the task over as a whole.
+1. Give each sub-agent a self-contained brief with exact inputs, the output you expect, the files it may write, and what it must not touch.
+2. A sub-agent writes only inside your own copy and the task material directory your rules name, never outside them, and never to a status file, a steering inbox, a remote, or a pull request.
+3. A sub-agent touches no live system (service, database, account, outbound send, or logged-in browser session) unless the task text above explicitly allows that action; otherwise it works read-only.
+4. Check each sub-agent's output yourself before you rely on it; its success report is evidence, not proof, and you own the result.
+5. A sub-agent never addresses firstmate or the captain and never decides anything: every decision, blocker, and finding still routes through you to firstmate by the status protocol above, and firstmate takes it to the captain.
+6. Sub-agents follow this brief's isolation and shared-infrastructure limits and its project-memory limit where present; setup, status reporting, and delivery duties remain yours alone. Tell them not to spawn sub-agents of their own.
+
+
+=== lab-ship-direct-PR: generated brief ===
+# Sub-agents
+Firstmate allows you to spawn and supervise your own sub-agents (your harness's built-in sub-agent tool) for bounded pieces of this task, such as a file join, a site fetch, or a research question.
+This narrows the role contract's "do not delegate the task" to bounded pieces only: you stay the worker, you own the task and its result, and no sub-agent takes the task over as a whole.
+1. Give each sub-agent a self-contained brief with exact inputs, the output you expect, the files it may write, and what it must not touch.
+2. A sub-agent writes only inside your own copy and the task material directory your rules name, never outside them, and never to a status file, a steering inbox, a remote, or a pull request.
+3. A sub-agent touches no live system (service, database, account, outbound send, or logged-in browser session) unless the task text above explicitly allows that action; otherwise it works read-only.
+4. Check each sub-agent's output yourself before you rely on it; its success report is evidence, not proof, and you own the result.
+5. A sub-agent never addresses firstmate or the captain and never decides anything: every decision, blocker, and finding still routes through you to firstmate by the status protocol above, and firstmate takes it to the captain.
+6. Sub-agents follow this brief's isolation and shared-infrastructure limits and its project-memory limit where present; setup, status reporting, and delivery duties remain yours alone. Tell them not to spawn sub-agents of their own.
+
+
+=== lab-ship-local-only: generated brief ===
+# Sub-agents
+Firstmate allows you to spawn and supervise your own sub-agents (your harness's built-in sub-agent tool) for bounded pieces of this task, such as a file join, a site fetch, or a research question.
+This narrows the role contract's "do not delegate the task" to bounded pieces only: you stay the worker, you own the task and its result, and no sub-agent takes the task over as a whole.
+1. Give each sub-agent a self-contained brief with exact inputs, the output you expect, the files it may write, and what it must not touch.
+2. A sub-agent writes only inside your own copy and the task material directory your rules name, never outside them, and never to a status file, a steering inbox, a remote, or a pull request.
+3. A sub-agent touches no live system (service, database, account, outbound send, or logged-in browser session) unless the task text above explicitly allows that action; otherwise it works read-only.
+4. Check each sub-agent's output yourself before you rely on it; its success report is evidence, not proof, and you own the result.
+5. A sub-agent never addresses firstmate or the captain and never decides anything: every decision, blocker, and finding still routes through you to firstmate by the status protocol above, and firstmate takes it to the captain.
+6. Sub-agents follow this brief's isolation and shared-infrastructure limits and its project-memory limit where present; setup, status reporting, and delivery duties remain yours alone. Tell them not to spawn sub-agents of their own.
+
+
+=== lab-scout: generated brief ===
+# Sub-agents
+Firstmate allows you to spawn and supervise your own sub-agents (your harness's built-in sub-agent tool) for bounded pieces of this task, such as a file join, a site fetch, or a research question.
+This narrows the role contract's "do not delegate the task" to bounded pieces only: you stay the worker, you own the task and its result, and no sub-agent takes the task over as a whole.
+1. Give each sub-agent a self-contained brief with exact inputs, the output you expect, the files it may write, and what it must not touch.
+2. A sub-agent writes only inside your own copy and the task material directory your rules name, never outside them, and never to a status file, a steering inbox, a remote, or a pull request.
+3. A sub-agent touches no live system (service, database, account, outbound send, or logged-in browser session) unless the task text above explicitly allows that action; otherwise it works read-only.
+4. Check each sub-agent's output yourself before you rely on it; its success report is evidence, not proof, and you own the result.
+5. A sub-agent never addresses firstmate or the captain and never decides anything: every decision, blocker, and finding still routes through you to firstmate by the status protocol above, and firstmate takes it to the captain.
+6. Sub-agents follow this brief's isolation and shared-infrastructure limits and its project-memory limit where present; setup, status reporting, and delivery duties remain yours alone. Tell them not to spawn sub-agents of their own.
+
+
+=== lab-mate: generated charter ===
+# Charter present; # Sub-agents absent
+
+=== launch worker role rendered by fm_brief_worker_role ===
+# Current worker role contract
+You are a crewmate: an autonomous worker agent managed by firstmate.
+This section establishes your current identity before every project or task instruction below and supersedes any conflicting role identity in those instructions.
+Do the assigned work yourself and report only to firstmate; do not adopt a firstmate or secondmate supervisor identity, delegate the task (beyond the bounded pieces a `# Sub-agents` section of your brief allows), run fleet supervision, or address the captain.
+Your steering inbox is `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TRM8VCQV4N6Y0KQ9Y23XJJ/.test-lab.9mMYku/state/lab-ship-no-mistakes.inbox`; this exact path belongs to your current task even when it is outside the worktree or under the supervising firstmate home, so read and acknowledge its messages and do not reject it as another home's state.
+Never inspect or change any other home's endpoint namespace; this authorization is limited to the exact task paths named by this brief.
+When this task works on Firstmate itself, the repository root `AGENTS.md` (also imported by `CLAUDE.md`) is project content and the supervisor contract for the firstmate managing you: follow this brief instead of that supervisor contract.
+Project instructions still govern the work wherever they do not conflict with this worker identity, including `CONTRIBUTING.md` and `firstmate-coding-guidelines` for Firstmate changes.
+If the `firstmate-coding-guidelines` skill name does not resolve in this session, read `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TRM8VCQV4N6Y0KQ9Y23XJJ/.agents/skills/firstmate-coding-guidelines/SKILL.md` instead.
