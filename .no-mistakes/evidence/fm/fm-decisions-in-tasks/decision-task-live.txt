@@ -1,0 +1,36 @@
+SCENARIO: held option copy is task-owned and home-local
+choice
+{"key":"choice","reason":"Pick route","about":"Live choice","recommended":"north","options":[{"value":"north","label":"North"},{"value":"south","label":"South"}]}
+mate-choice
+home isolation: main sees choice; mate sees mate-choice
+SCENARIO: migration previews, applies, maps legacy recommendation, and retains source
+would-hold: route Legacy route
+would-hold: renamed Current title
+held: route
+held: renamed
+{"key":"renamed","title":"Current title","about":"Renamed","recommended":null,"options":[{"label":"Keep","value":"option-1"}]}
+{"key":"route","title":"Legacy route","about":"Routing","recommended":"option-2","options":[{"label":"Other","value":"option-1"},{"value":"option-2","label":"option-1"}]}
+skipped: route (already held)
+skipped: renamed (already held)
+SCENARIO: active holds are skipped identically by preview and apply
+preview:
+skipped: plain (already held)
+skipped: copied (already held)
+apply:
+skipped: plain (already held)
+skipped: copied (already held)
+SCENARIO: released and answered imported call is not resurrected
+released: route
+preview:
+already-closed: route
+skipped: renamed (already held)
+apply:
+already-closed: route
+skipped: renamed (already held)
+SCENARIO: invalid source refuses partial import
+invalid source rejected; no new-good task; source retained
+SCENARIO: orphan guard distinguishes missing, owned, and foreign held calls
+worker	missing
+owner-b	owned
+OPEN DECISIONS: orphan needs-decision task=worker key=missing; no matching captain-held task in this home
+ALL LIVE SCENARIOS PASSED
