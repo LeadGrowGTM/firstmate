@@ -2806,6 +2806,73 @@ SH
   pass "migration rechecks concurrent held and released calls under the mutation lock"
 }
 
+test_migration_skips_aliases_and_preserves_concurrent_canonical_hold() {
+  local home pid before out
+  home=$(make_home migration-alias)
+  tasks_in "$home" add fm-call 'Canonical task' --repo sample >/dev/null \
+    || fail "could not create the canonical migration target"
+  cat > "$home/captain-decisions.json" <<'EOF'
+[{"key":"call","title":"Legacy task","about":"Legacy","decide":"Old call","options":[{"label":"Old"}]}]
+EOF
+  cat > "$home/current-options.json" <<'EOF'
+{"about":"Current","decide":"New call","options":[{"value":"current","label":"Current"}]}
+EOF
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "$#" -ge 2 ] && [ "$2" = call ]; then
+  set -- "$1" fm-call "${@:3}"
+fi
+if [ "${FM_TEST_MIGRATION_PROBE:-}" = 1 ]; then
+  case "${1:-}" in
+    add|edit|hold|unhold|done) : > "$FM_HOME/import-mutated" ;;
+  esac
+  if [ "${1:-}" = show ] && [ "${2:-}" = fm-call ] \
+      && [ ! -e "$FM_HOME/probe-ready" ]; then
+    "$REAL_TASKS_AXI" "$@" || exit $?
+    : > "$FM_HOME/probe-ready"
+    for ((i=0; i<500; i++)); do
+      [ ! -e "$FM_HOME/probe-resume" ] || exit 0
+      sleep 0.1
+    done
+    exit 75
+  fi
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  before=$(tasks_in "$home" show fm-call --full)
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "alias migration preview failed"
+  assert_contains "$out" 'skipped: call (alias of fm-call; needs manual hold under fm-call)' \
+    "preview did not name the canonical task requiring a manual hold"
+  [ "$before" = "$(tasks_in "$home" show fm-call --full)" ] \
+    || fail "alias preview changed the canonical task"
+  FM_TEST_MIGRATION_PROBE=1 FM_BACKLOG_ROW_TIMEOUT_SECS=60 run_captain "$home" migrate-options \
+    "$home/captain-decisions.json" --apply > "$home/migration.log" 2>&1 &
+  pid=$!
+  if ! wait_for_test_file "$home/probe-ready" "$pid"; then
+    : > "$home/probe-resume"
+    wait "$pid" || true
+    fail "alias migration never reached its backend identity read"
+  fi
+  if ! run_captain "$home" hold fm-call --reason 'New call' \
+      --options-file "$home/current-options.json" >/dev/null; then
+    : > "$home/probe-resume"
+    wait "$pid" || true
+    fail "concurrent canonical hold could not finish"
+  fi
+  before=$(tasks_in "$home" show fm-call --full)
+  : > "$home/probe-resume"
+  wait "$pid" || fail "alias migration failed: $(cat "$home/migration.log")"
+  out=$(cat "$home/migration.log")
+  assert_contains "$out" 'skipped: call (alias of fm-call; needs manual hold under fm-call)' \
+    "apply did not skip the aliased migration key"
+  assert_absent "$home/import-mutated" "alias import issued a backend mutation"
+  [ "$before" = "$(tasks_in "$home" show fm-call --full)" ] \
+    || fail "alias migration changed the concurrent canonical hold"
+  pass "migration skips aliases without writing and preserves a concurrent canonical hold"
+}
+
 test_migration_rejects_unreadable_target() {
   local home before out mode
   home=$(make_home migration-read-error)
@@ -5187,6 +5254,7 @@ test_legacy_option_migration_is_explicit_and_idempotent
 test_released_legacy_migration_stays_resolved
 test_migration_skips_already_held_tasks
 test_migration_rechecks_concurrent_calls_under_the_hold_lock
+test_migration_skips_aliases_and_preserves_concurrent_canonical_hold
 test_migration_rejects_unreadable_target
 test_migration_recommendation_prefers_unique_legacy_label
 test_open_status_orphans_reach_drain

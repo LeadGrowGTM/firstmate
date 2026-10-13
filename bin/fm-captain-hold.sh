@@ -71,6 +71,8 @@
 # a recommended label is converted to its unique value. Optional origin and repo
 # preserve ownership links. It previews by default; --apply holds tasks only in
 # this home, never removes the input, and skips already-held or resolved tasks.
+# An existing aliased key is skipped without writes and names the canonical id
+# needing a manual hold; preview and apply use the same backend identity check.
 # Import rechecks that preservation rule under the hold's per-task mutation
 # lock through an internal hold mode; ordinary direct reholds still replace copy.
 # orphans reports <origin> TAB <key> for each open needs-decision without a local
@@ -963,8 +965,12 @@ restore_hold_body() {
 }
 
 migration_skip_existing_task() {  # <task-id> <shown-task>; prints the skip outcome
-  local id=$1 show=$2
-  if [ "$(show_field "$show" state)" = "done" ]; then
+  local id=$1 show=$2 canonical
+  canonical=$(show_field_value "$show" id)
+  validate_slug backend-task-id "$canonical"
+  if [ "$canonical" != "$id" ]; then
+    printf 'skipped: %s (alias of %s; needs manual hold under %s)\n' "$id" "$canonical" "$canonical"
+  elif [ "$(show_field "$show" state)" = "done" ]; then
     printf 'already-closed: %s\n' "$id"
   elif [ -n "$(show_field_value "$show" hold_kind)" ] || [ "$(show_field_value "$show" held)" = yes ]; then
     printf 'skipped: %s (already held)\n' "$id"

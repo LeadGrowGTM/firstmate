@@ -61,7 +61,8 @@ Publishing the stamp first ensures a snapshot cannot observe a newly captain-hel
 Decision option copy lives in that task's active hold reason.
 The snapshot projects it into Bearings for markdown-backed homes; Beads-backed homes do not yet project that copy into decision cards.
 [`bin/fm-captain-hold.sh --help`](../bin/fm-captain-hold.sh) owns the option format and dry-run-first legacy import command; the import never deletes its source file.
-Legacy import checks under the hold mutation lock and skips every already-held task, including holds without option copy, and every closed or durably resolved call.
+Legacy import resolves each existing key to its backend identity and skips aliases without writing, naming the canonical id for a manual hold.
+For a key that matches its backend identity, import checks under the hold mutation lock and skips every already-held task, including holds without option copy, and every closed or durably resolved call.
 The drain flags an open local `needs-decision` task/key without a matching captain-held task in this home, excluding relay lines for holds owned by a secondmate home.
 It discloses an unavailable backlog check rather than claiming the home is clear.
 
