@@ -60,13 +60,12 @@
 # `--until` records the captain's own deferral date through `tasks-axi hold
 # --until`, so a "revisit later" answer is stored as a date instead of a live
 # card.
-# `--options-file` stores board copy in the task body as one compact JSON line
-# prefixed `Captain options for hold N: `, where N is the number of recorded
-# resolutions plus one. The object requires string about and decide,
+# `--options-file` stores board copy with the reason in one encoded hold value.
+# The object requires string about and decide,
 # and options [{value,label,hint?}]; values are unique privacy-safe slugs (at most
 # 128 characters), excluding reconcile, and labels are nonempty. Optional
 # recommended names an option value; report is a path string and pr_url is HTTPS.
-# Other task body content is preserved; repeating the same copy is a no-op.
+# Re-holding replaces both reason and copy; release clears both.
 # migrate-options imports an array (or {decisions:[...]}) of legacy entries with
 # key, title and that copy. Missing option values become option-1, option-2, etc.;
 # a recommended label is converted to its unique value. Optional origin and repo
@@ -943,28 +942,6 @@ decision_copy() {  # <json-file>; validate and print canonical JSON before mutat
   ' "$1" || fail "invalid decision copy in $1"
 }
 
-write_decision_copy() {  # <id> <decoded-body> <canonical-json>
-  local id=$1 body=$2 copy=$3 new_body tmp prefix occurrence
-  occurrence=$(( $(resolution_record_count "$body") + 1 ))
-  prefix="Captain options for hold $occurrence: "
-  new_body=$(printf '%s\n' "$body" | awk -v prefix="$prefix" 'index($0, prefix) != 1')
-  new_body=$(printf '%s\n%s%s' "$new_body" "$prefix" "$copy")
-  [ "$body" != "$new_body" ] || return 0
-  tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-options.XXXXXX") || fail "could not create options scratch"
-  if ! printf '%s\n' "$new_body" > "$tmp"; then
-    rm -f -- "$tmp"
-    fail "could not stage decision copy on $id"
-  fi
-  if ! tasks_axi update "$id" --body-file "$tmp" >/dev/null; then
-    rm -f -- "$tmp"
-    fail "could not store decision copy on $id"
-  fi
-  rm -f -- "$tmp"
-  task_show_or_fail "$id" "task $id disappeared after recording its decision copy"
-  [ "$(show_field_value "$show" body)" = "$new_body" ] \
-    || fail "task $id did not retain its decision copy"
-}
-
 restore_hold_body() {
   local id=$1 body=$2 tmp
   tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-restore.XXXXXX") \
@@ -1005,7 +982,11 @@ command_hold() {
   [ -z "$options_file" ] || copy=$(decision_copy "$options_file")
   [ -n "$reason" ] || fail "reason must not be empty"
   # bin/fm-hold-reason-lib.sh owns the storage constraint and reversible encoding.
-  stored_reason=$(fm_hold_reason_encode "$reason") || fail "could not encode the hold reason"
+  if [ -n "$copy" ]; then
+    stored_reason=$(fm_hold_reason_encode "$reason" "$copy") || fail "could not encode the hold reason"
+  else
+    stored_reason=$(fm_hold_reason_encode "$reason") || fail "could not encode the hold reason"
+  fi
   if [ -n "$origin" ]; then
     validate_slug origin-id "$origin"
   fi
@@ -1075,13 +1056,6 @@ command_hold() {
     origin=$(task_identity "$origin") || exit $?
     write_hold_origin "$id" "$(show_field "$show" body)" "$origin" || exit $?
   fi
-  if [ -n "$copy" ]; then
-    if ! (task_show_or_fail "$id" "task $id disappeared before recording its decision copy"
-          write_decision_copy "$id" "$(show_field_value "$show" body)" "$copy"); then
-      restore_hold_body "$id" "$prior_body"
-      fail "could not stage decision copy on $id"
-    fi
-  fi
   if [ -n "$until" ]; then
     tasks_axi hold "$id" --reason "$stored_reason" --kind captain --until "$until" >/dev/null \
       || hold_status=$?
@@ -1090,7 +1064,7 @@ command_hold() {
       || hold_status=$?
   fi
   if [ "$hold_status" -ne 0 ]; then
-    restore_hold_body "$id" "$prior_body"
+    [ -z "$origin" ] || restore_hold_body "$id" "$prior_body"
     fail "could not hold task $id for the captain"
   fi
   task_show "$id" || fail "task $id disappeared while holding it"

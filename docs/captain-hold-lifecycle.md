@@ -52,11 +52,11 @@ It works in this order:
 1. It uses an existing task, or creates one when nothing exists to hold.
 2. It records the task's UTC hold-set timestamp as the leading line of the task body.
 3. When `--origin` is supplied, it records the origin on the task, replacing any previous association.
-4. It invokes the underlying tasks-axi hold operation.
+4. It invokes the underlying tasks-axi hold operation with the reason and any option copy in one encoded hold value.
 5. It verifies the hold and timestamp.
 
 Publishing the stamp first ensures a snapshot cannot observe a newly captain-held task without the timestamp that defines its age.
-Decision option copy lives in that task's body and is projected into Bearings across owning homes.
+Decision option copy lives in that task's active hold reason and is projected into Bearings across owning homes.
 [`bin/fm-captain-hold.sh --help`](../bin/fm-captain-hold.sh) owns the option format and dry-run-first legacy import command; the import never deletes its source file.
 The drain flags an open `needs-decision` task/key without a matching local captain-held task, and discloses an unavailable backlog check rather than claiming the home is clear.
 

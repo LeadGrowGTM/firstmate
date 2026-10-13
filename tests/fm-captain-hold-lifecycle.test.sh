@@ -2490,69 +2490,61 @@ run_drain() {  # <home>
     "$ROOT/bin/fm-wake-drain.sh" 2>/dev/null
 }
 
-test_decision_copy_is_task_owned() {
-  local home before after out
-  home=$(make_home decision-copy)
-  tasks_in "$home" add choice "Choose the route" --repo sample --body 'Keep this note' >/dev/null || fail "could not create work"
+test_hold_options_share_atomic_reason() {
+  local home reason shown before after json
+  home=$(make_home atomic-hold-options)
+  reason=$'Choose (north)\nor south'
+  tasks_in "$home" add choice "Choose the route" --repo sample --body 'Keep this note
+Captain options for hold 2: retain this rationale' >/dev/null || fail "could not create work"
   cat > "$home/options.json" <<'EOF'
-{"about":"Route north","decide":"Which route?","options":[{"value":"north","label":"North","hint":"Fast\nwith ice"},{"value":"south","label":"South"}],"recommended":"north","report":"/tmp/route.md","pr_url":"https://github.com/example/repo/pull/1"}
+{"about":"Old route","decide":"Which route?","options":[{"value":"north","label":"North"},{"value":"south","label":"South"}],"recommended":"north"}
 EOF
-  run_captain "$home" hold choice --reason 'Choose route' --options-file "$home/options.json" >/dev/null || fail "could not store copy"
+  run_captain "$home" hold choice --reason "$reason" --options-file "$home/options.json" >/dev/null || fail "could not hold with options"
   before=$(tasks_in "$home" show choice --full)
-  assert_contains "$before" 'Keep this note' "options erased existing notes"
-  assert_contains "$before" 'Captain options for hold 1:' "decision copy is missing from task"
-  run_captain "$home" hold choice --reason 'Choose route' --options-file "$home/options.json" >/dev/null || fail "retry failed"
+  assert_contains "$before" 'fm-hold-v2:' "reason and options were not stored on the hold"
+  assert_contains "$before" 'Keep this note' "hold changed unrelated body text"
+  assert_contains "$before" 'Captain options for hold 2: retain this rationale' "hold changed literal body text"
+  assert_not_contains "$before" 'Captain options for hold 1:' "hold wrote body option copy"
+  shown=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
+    "$ROOT/bin/fm-tasks-axi.sh" show choice --full) || fail "could not read the held task"
+  assert_contains "$shown" 'Choose (north)' "task view did not decode the reason"
+  assert_not_contains "$shown" 'fm-hold-v2:' "task view exposed encoded option copy"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the held task"
+  printf '%s' "$json" | jq -e --arg reason "$reason" '
+    .decision_layout | any(.key == "choice" and .reason == $reason
+      and .about == "Old route" and [.options[].value] == ["north","south"])
+  ' >/dev/null || fail "snapshot did not decode the combined hold: $json"
+  run_captain "$home" hold choice --reason "$reason" --options-file "$home/options.json" >/dev/null || fail "retry failed"
   after=$(tasks_in "$home" show choice --full)
-  [ "$before" = "$after" ] || fail "retry changed the held task"
-  jq '.recommended="missing"' "$home/options.json" > "$home/invalid.json"
-  if run_captain "$home" hold absent --title Absent --reason Choose --options-file "$home/invalid.json" >/dev/null 2>&1; then
-    fail "invalid recommended option was accepted"
-  fi
-  if tasks_in "$home" show absent >/dev/null 2>&1; then fail "invalid copy created a task"; fi
-  jq '.pr_url="https:///missing-host"' "$home/options.json" > "$home/invalid-url.json"
-  if run_captain "$home" hold badurl --title Badurl --reason Choose --options-file "$home/invalid-url.json" >/dev/null 2>&1; then
-    fail "URL rejected by the board was accepted into its task copy"
-  fi
-  printf 'North please\n' > "$home/answer.txt"
-  run_captain "$home" answer choice --decision-file "$home/answer.txt" >/dev/null || fail "option copy broke answers"
-  out=$(tasks_in "$home" show choice --full)
-  assert_contains "$out" 'state: done' "answer did not close the task"
-  assert_contains "$out" 'Captain options for hold 1:' "answer erased option copy"
-  cat "$home/options.json" "$home/options.json" > "$home/two-documents.json"
-  if run_captain "$home" hold multi --title Multi --reason Choose --options-file "$home/two-documents.json" >/dev/null 2>&1; then
-    fail "multiple JSON documents were accepted"
-  fi
-  tasks_in "$home" add workchoice "Gated work" --repo sample >/dev/null || fail "could not add gated work"
-  run_captain "$home" hold workchoice --reason Choose --options-file "$home/options.json" >/dev/null || fail "could not hold work"
-  printf 'North please\nCaptain options: historical answer text\n' > "$home/answer.txt"
-  run_captain "$home" answer workchoice --decision-file "$home/answer.txt" --release >/dev/null || fail "could not release work"
-  run_captain "$home" hold workchoice --reason Choose >/dev/null || fail "could not re-hold work without copy"
-  before=$(tasks_in "$home" show workchoice --full)
-  assert_contains "$before" 'Captain options for hold 1:' "re-hold erased historical copy"
-  assert_contains "$before" 'Captain options: historical answer text' "re-hold erased literal answer text"
-  run_captain "$home" hold workchoice --reason Choose >/dev/null || fail "retry without copy failed"
-  after=$(tasks_in "$home" show workchoice --full)
-  [ "$before" = "$after" ] || fail "retry without copy changed the held task"
-  out=$(run_bearings "$home" --fields decisions) || fail "could not project the re-held task"
-  printf '%s' "$out" | jq -e '.decision_layout | any(.key == "workchoice" and .options == null)' >/dev/null \
-    || fail "new hold presented the prior call choices: $out"
+  [ "$before" = "$after" ] || fail "identical retry changed the held task"
+  printf 'North please\nCaptain options for hold 2: retain this answer\n' > "$home/answer.txt"
+  run_captain "$home" answer choice --decision-file "$home/answer.txt" --release >/dev/null || fail "release failed"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the release"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "choice") | not
+  ' >/dev/null || fail "release retained reason or options: $json"
   jq '.about="New route" | .options=[{"value":"east","label":"East"}] | .recommended="east"' \
     "$home/options.json" > "$home/new-options.json"
-  run_captain "$home" hold workchoice --reason Choose --options-file "$home/new-options.json" >/dev/null \
-    || fail "could not update active call copy"
-  out=$(tasks_in "$home" show workchoice --full)
-  assert_contains "$out" 'North please' "option copy erased the recorded human answer"
-  assert_contains "$out" 'Captain options: historical answer text' "new copy erased literal answer text"
-  assert_contains "$out" 'Captain options for hold 1:' "new copy erased historical option copy"
-  assert_contains "$out" 'Captain options for hold 2:' "re-hold lost its current option copy"
-  out=$(run_bearings "$home" --fields decisions) || fail "could not project the updated call"
-  printf '%s' "$out" | jq -e '.decision_layout | any(.key == "workchoice" and .about == "New route" and [.options[].value] == ["east"])' >/dev/null \
-    || fail "board did not project only the current call choices: $out"
-  pass "decision copy stays on the held task, survives answers, and retries without drift"
+  run_captain "$home" hold choice --reason 'Choose east' --options-file "$home/new-options.json" >/dev/null || fail "rehold failed"
+  shown=$(tasks_in "$home" show choice --full)
+  assert_contains "$shown" 'Captain options for hold 2: retain this rationale' "rehold erased literal note"
+  assert_contains "$shown" 'Captain options for hold 2: retain this answer' "rehold erased the answer"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the new hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "choice" and .reason == "Choose east"
+      and .about == "New route" and [.options[].value] == ["east"])
+  ' >/dev/null || fail "rehold did not replace options: $json"
+  run_captain "$home" hold choice --reason 'Choose freely' >/dev/null || fail "rehold without options failed"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the option-free hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "choice" and .reason == "Choose freely" and .options == null)
+  ' >/dev/null || fail "rehold retained stale options: $json"
+  pass "hold reason atomically owns current options and preserves task body history"
 }
 
-test_refused_hold_keeps_prior_decision_copy() {
-  local home shown before_body after_body
+test_refused_hold_keeps_prior_reason_and_options() {
+  local home before after json
   home=$(make_home refused-options)
   cat > "$home/old-options.json" <<'EOF'
 {"about":"Old route","decide":"Choose","options":[{"value":"old","label":"Old"}]}
@@ -2560,179 +2552,39 @@ EOF
   cat > "$home/new-options.json" <<'EOF'
 {"about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}
 EOF
-  run_captain "$home" hold existing --title Existing --reason Choose \
-    --options-file "$home/old-options.json" >/dev/null || fail "could not establish old copy"
-  before_body=$(tasks_in "$home" show existing --full | sed -n 's/^  body: //p')
+  run_captain "$home" hold existing --title Existing --reason 'Old choice' \
+    --options-file "$home/old-options.json" >/dev/null || fail "could not establish old hold"
+  before=$(tasks_in "$home" show existing --full)
   cat > "$home/fakebin/tasks-axi" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then
-  "$REAL_TASKS_AXI" show "$2" --full > "$FM_HOME/before-refused-hold"
-  exit 9
-fi
+if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then exit 9; fi
 exec "$REAL_TASKS_AXI" "$@"
 SH
   chmod +x "$home/fakebin/tasks-axi"
-  if run_captain "$home" hold existing --reason Choose \
+  if run_captain "$home" hold existing --reason 'New choice' \
     --options-file "$home/new-options.json" >/dev/null 2>&1; then
-    fail "re-hold succeeded despite backend refusal"
+    fail "rehold succeeded despite backend refusal"
   fi
-  shown=$(tasks_in "$home" show existing --full)
-  after_body=$(printf '%s\n' "$shown" | sed -n 's/^  body: //p')
-  [ "$before_body" = "$after_body" ] || fail "refused re-hold changed the prior body"
-  assert_contains "$(cat "$home/before-refused-hold")" 'New route' "new copy was not staged before the hold"
-  assert_contains "$shown" 'Old route' "refused re-hold replaced the prior copy"
-  assert_not_contains "$shown" 'New route' "refused re-hold stored the new copy"
-  if run_captain "$home" hold new-call --title New --reason Choose \
-    --options-file "$home/new-options.json" >/dev/null 2>&1; then
-    fail "new hold succeeded despite backend refusal"
-  fi
-  shown=$(tasks_in "$home" show new-call --full)
-  assert_not_contains "$shown" 'Captain options:' "refused new hold stored option copy"
-  assert_contains "$shown" 'Captain hold set:' "refused new hold lost its staged stamp"
+  after=$(tasks_in "$home" show existing --full)
+  [ "$before" = "$after" ] || fail "refused hold changed the previous reason or body"
   cat > "$home/captain-decisions.json" <<'EOF'
-{"decisions":[{"key":"existing","title":"Existing","about":"Migrated route","decide":"Choose","options":[{"value":"migrated","label":"Migrated"}]}]}
+{"decisions":[{"key":"existing","title":"Legacy title","about":"Migrated route","decide":"Choose","options":[{"value":"migrated","label":"Migrated"}]}]}
 EOF
   if run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null 2>&1; then
     fail "migration succeeded despite backend refusal"
   fi
-  shown=$(tasks_in "$home" show existing --full)
-  assert_contains "$shown" 'Old route' "refused migration replaced the prior copy"
-  assert_not_contains "$shown" 'Migrated route' "refused migration stored the new copy"
-  rm "$home/fakebin/tasks-axi"
-  run_captain "$home" hold existing --reason Choose \
-    --options-file "$home/new-options.json" >/dev/null || fail "retry could not store new copy"
-  shown=$(tasks_in "$home" show existing --full)
-  assert_contains "$shown" 'New route' "successful retry did not store the new copy"
-  pass "refused direct and migrated holds preserve existing option copy"
-}
-
-test_option_staging_failure_never_holds() {
-  local home shown
-  home=$(make_home option-staging-failure)
-  cat > "$home/options.json" <<'EOF'
-{"about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}
-EOF
-  cat > "$home/fakebin/mktemp" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  *fm-captain-options*) printf '%s\n' "$FM_HOME/missing-parent/options"; exit 0 ;;
-esac
-PATH=${PATH#*:} exec mktemp "$@"
-SH
-  chmod +x "$home/fakebin/mktemp"
-  if run_captain "$home" hold scratch-call --title Scratch --reason Choose \
-    --options-file "$home/options.json" >/dev/null 2>&1; then
-    fail "hold succeeded after decision copy scratch staging failed"
-  fi
-  shown=$(tasks_in "$home" show scratch-call --full)
-  assert_contains "$shown" 'held: no' "scratch staging failure still held the task"
-  rm "$home/fakebin/mktemp"
-  cat > "$home/fakebin/tasks-axi" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = update ]; then
-  previous=''
-  for arg in "$@"; do
-    if [ "$previous" = --body-file ] && grep -q 'New route' "$arg"; then
-      if [ -f "$FM_HOME/refuse-copy-update" ]; then exit 9; fi
-      exit 0
-    fi
-    previous=$arg
-  done
-fi
-if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then : > "$FM_HOME/backend-hold-called"; fi
-exec "$REAL_TASKS_AXI" "$@"
-SH
-  chmod +x "$home/fakebin/tasks-axi"
-  : > "$home/refuse-copy-update"
-  if run_captain "$home" hold refused-call --title Refused --reason Choose \
-    --options-file "$home/options.json" >/dev/null 2>&1; then
-    fail "hold succeeded after the backend refused the decision copy"
-  fi
-  assert_absent "$home/backend-hold-called" "body update failure reached the backend hold"
-  shown=$(tasks_in "$home" show refused-call --full)
-  assert_contains "$shown" 'held: no' "body update failure still held the task"
-  rm "$home/refuse-copy-update"
-  if run_captain "$home" hold ignored-call --title Ignored --reason Choose \
-    --options-file "$home/options.json" >/dev/null 2>&1; then
-    fail "hold succeeded after the backend ignored the decision copy"
-  fi
-  assert_absent "$home/backend-hold-called" "copy verification failure reached the backend hold"
-  shown=$(tasks_in "$home" show ignored-call --full)
-  assert_contains "$shown" 'held: no' "copy verification failure still held the task"
-  pass "failed scratch writes and body updates stop before the hold"
-}
-
-test_option_staging_failure_restores_held_origin() {
-  local path mode home before after shown
-  for path in direct migration; do
-    for mode in scratch update readback; do
-      home=$(make_home "staging-origin-$path-$mode")
-      cat > "$home/old-options.json" <<'EOF'
-{"about":"Old route","decide":"Choose","options":[{"value":"old","label":"Old"}]}
-EOF
-      cat > "$home/new-options.json" <<'EOF'
-{"about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}
-EOF
-      run_captain "$home" hold existing --title Existing --reason Choose --origin origin-a \
-        --options-file "$home/old-options.json" >/dev/null || fail "could not establish the original hold"
-      before=$(tasks_in "$home" show existing --full | sed -n 's/^  body: //p')
-      if [ "$mode" = scratch ]; then
-        cat > "$home/fakebin/mktemp" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  *fm-captain-options*) printf '%s\n' "$FM_HOME/missing-parent/options"; exit 0 ;;
-esac
-PATH=${PATH#*:} exec mktemp "$@"
-SH
-        chmod +x "$home/fakebin/mktemp"
-      else
-        cat > "$home/fakebin/tasks-axi" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = update ]; then
-  previous=''
-  for arg in "$@"; do
-    if [ "$previous" = --body-file ] && grep -q 'New route' "$arg"; then
-      [ -f "$FM_HOME/refuse-update" ] && exit 9
-      exit 0
-    fi
-    previous=$arg
-  done
-fi
-if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then : > "$FM_HOME/backend-hold-called"; fi
-exec "$REAL_TASKS_AXI" "$@"
-SH
-        chmod +x "$home/fakebin/tasks-axi"
-        [ "$mode" != update ] || : > "$home/refuse-update"
-      fi
-      if [ "$path" = direct ]; then
-        if run_captain "$home" hold existing --reason Choose --origin origin-b \
-          --options-file "$home/new-options.json" >/dev/null 2>&1; then
-          fail "$mode direct re-hold succeeded despite option staging failure"
-        fi
-      else
-        cat > "$home/captain-decisions.json" <<'EOF'
-{"decisions":[{"key":"existing","title":"Legacy title","origin":"origin-b","about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}]}
-EOF
-        if run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null 2>&1; then
-          fail "$mode migration succeeded despite option staging failure"
-        fi
-      fi
-      shown=$(tasks_in "$home" show existing --full)
-      after=$(printf '%s\n' "$shown" | sed -n 's/^  body: //p')
-      [ "$before" = "$after" ] || fail "$path $mode staging failure changed the prior held body"
-      assert_contains "$shown" 'held: yes' "$path $mode staging failure lifted the original hold"
-      assert_contains "$shown" 'Captain hold origin: origin-a' "$path $mode staging failure lost the original origin"
-      assert_contains "$shown" 'Old route' "$path $mode staging failure lost the original copy"
-      assert_not_contains "$shown" 'origin-b' "$path $mode staging failure retained the new origin"
-      assert_not_contains "$shown" 'New route' "$path $mode staging failure retained the new copy"
-      assert_absent "$home/backend-hold-called" "$path $mode staging failure reached the backend hold"
-    done
-  done
-  pass "direct and migrated copy failures restore the entire held body before any hold"
+  after=$(tasks_in "$home" show existing --full)
+  [ "$before" = "$after" ] || fail "refused migration changed the previous hold"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the refused hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "existing" and .reason == "Old choice"
+      and .about == "Old route" and [.options[].value] == ["old"])
+  ' >/dev/null || fail "refused hold replaced previous options: $json"
+  pass "refused direct and migrated holds preserve the previous reason and options"
 }
 
 test_legacy_option_migration_is_explicit_and_idempotent() {
-  local home before after out
+  local home before after out json
   home=$(make_home option-migration)
   tasks_in "$home" add renamed "Current task title" --repo sample >/dev/null \
     || fail "could not create the renamed task"
@@ -2746,10 +2598,17 @@ EOF
   run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration apply failed"
   before=$(tasks_in "$home" show route --full)
   assert_contains "$before" 'hold_kind: captain' "migration did not hold task"
-  assert_contains "$before" 'option-1' "label-only legacy options were not assigned values"
   out=$(tasks_in "$home" show renamed --full)
   assert_contains "$out" 'title: Current task title' "migration changed the existing task title"
-  assert_contains "$out" 'Renamed route' "migration did not copy options to the existing task"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project migrated holds"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "route" and .about == "Routing"
+      and [.options[].value] == ["option-1","option-2"])
+  ' >/dev/null || fail "migration did not assign option values: $json"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "renamed" and .title == "Current task title"
+      and .about == "Renamed route")
+  ' >/dev/null || fail "migration lost existing title or option copy: $json"
   run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration retry failed"
   after=$(tasks_in "$home" show route --full)
   [ "$before" = "$after" ] || fail "migration retry changed the task"
@@ -5058,10 +4917,8 @@ SH
   pass "marked hold reasons round-trip through public reads, fleet, startup, and return without changing other fields"
 }
 
-test_decision_copy_is_task_owned
-test_refused_hold_keeps_prior_decision_copy
-test_option_staging_failure_never_holds
-test_option_staging_failure_restores_held_origin
+test_hold_options_share_atomic_reason
+test_refused_hold_keeps_prior_reason_and_options
 test_legacy_option_migration_is_explicit_and_idempotent
 test_open_status_orphans_reach_drain
 test_secondmate_hold_relays_are_not_local_orphans

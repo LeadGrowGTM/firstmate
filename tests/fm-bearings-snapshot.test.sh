@@ -3416,40 +3416,48 @@ test_per_repository_pr_cap_is_disclosed
 test_projection_and_toon_fail_closed
 
 # Detail mode must not inherit the compact digest's per-home decision cap.
+fixture_encoded_hold() {
+  local payload
+  payload=$(jq -cn --arg reason "$1" --argjson decision "$2" '{reason:$reason,decision:$decision}') || return 1
+  printf 'fm-hold-v2:%s' "$(printf '%s' "$payload" | base64 | tr -d '\n')"
+}
+
 test_complete_structured_decision_layout() {
-  local home fakebin json toon mate long_id record_filter
+  local home fakebin json toon mate long_id record_filter major_hold newer_hold merged_hold current_hold
+  local remote_one remote_two remote_three remote_four remote_reason
   home=$(make_home decision-layout)
   write_fixture "$home"
   mate=$(fixture_mate_home "$home")
-  cat > "$home/data/backlog.md" <<'EOF'
+  major_hold=$(fixture_encoded_hold 'Choose whether to preserve the older format for existing consumers or retire it after the migration; preserving it costs maintenance while retiring it requires every consumer to upgrade before rollout' '{"about":"Format migration","decide":"Choose the compatibility route","options":[{"value":"preserve","label":"Preserve the format","hint":"Keeps older consumers working"},{"value":"retire","label":"Retire the format"}],"recommended":"preserve","report":"data/format/report.md","pr_url":"https://github.com/acme/sample/pull/17"}')
+  newer_hold=$(fixture_encoded_hold 'Newer options' '{"about":"Same subject","decide":"Give a freeform route","options":[]}')
+  merged_hold=$(fixture_encoded_hold 'Choose the rollout' '{"about":"Rollout","decide":"Pick","options":true}')
+  current_hold=$(fixture_encoded_hold 'Pick again' '{"about":"New route","decide":"Pick","options":[{"value":"new","label":"New"}]}')
+  remote_one=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Remote rollout","decide":"Pick the rollout route","options":[{"value":"stage","label":"Stage rollout"},{"value":"all","label":"Release to all"}],"recommended":"stage","report":"data/remote/report.md","pr_url":"https://github.com/acme/remote/pull/4"}')
+  remote_two=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Invalid hint","decide":"Pick","options":[{"value":"yes","label":"Yes","hint":2}]}')
+  remote_three=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Unknown option key","decide":"Pick","options":[{"value":"yes","label":"Yes","extra":true}]}')
+  remote_four=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Unknown object key","decide":"Pick","options":[],"extra":true}')
+  cat > "$home/data/backlog.md" <<EOF
 ## In flight
 
 ## Queued
 - [ ] minor - Minor choice (repo: firstmate) (kind: captain) (priority: low) (hold: Pick A for less work or B for compatibility) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-  Captain options: {not valid json}
-- [ ] major - Major choice (repo: firstmate) (kind: captain) (priority: high) (hold: Choose whether to preserve the older format for existing consumers or retire it after the migration; preserving it costs maintenance while retiring it requires every consumer to upgrade before rollout) (hold-kind: captain)
+- [ ] major - Major choice (repo: firstmate) (kind: captain) (priority: high) (hold: $major_hold) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-  Captain options: {"about":"Format migration","decide":"Choose the compatibility route","options":[{"value":"preserve","label":"Preserve the format","hint":"Keeps older consumers working"},{"value":"retire","label":"Retire the format"}],"recommended":"preserve","report":"data/format/report.md","pr_url":"https://github.com/acme/sample/pull/17"}
 - [ ] older - Same subject (repo: firstmate) (kind: captain) (hold: Earlier options remain recorded) (hold-kind: captain)
   Captain hold set: 2026-07-10T10:00:00Z
   Captain hold origin: finished
-  Captain options: {"about":null,"decide":"Pick","options":[]}
-- [ ] newer - Same subject (repo: firstmate) (kind: captain) (hold: Newer options) (hold-kind: captain)
+- [ ] newer - Same subject (repo: firstmate) (kind: captain) (hold: $newer_hold) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-  Captain options: {"about":"Same subject","decide":"Give a freeform route","options":[]}
-- [ ] merged-call - Post-merge rollout for https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: Choose the rollout) (hold-kind: captain)
+- [ ] merged-call - Post-merge rollout for https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: $merged_hold) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-  Captain options: {"about":"Rollout","decide":"Pick","options":true}
-- [ ] current-copy - Repeated call (repo: firstmate) (kind: captain) (hold: Pick again) (hold-kind: captain)
+- [ ] current-copy - Repeated call (repo: firstmate) (kind: captain) (hold: $current_hold) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-  Captain options for hold 1: {"about":"Old route","decide":"Pick","options":[{"value":"old","label":"Old"}]}
   Resolution recorded by fm-captain-hold.
   Captain options: historical answer text
-  Captain options for hold 2: {"about":"New route","decide":"Pick","options":[{"value":"new","label":"New"}]}
 - [ ] stale-copy - Repeated call without new choices (repo: firstmate) (kind: captain) (hold: Pick again) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-  Captain options for hold 1: {"about":"Old route","decide":"Pick","options":[{"value":"old","label":"Old"}]}
+  Captain options for hold 2: {"about":"Old route","decide":"Pick","options":[{"value":"old","label":"Old"}]}
   Resolution recorded by fm-captain-hold.
 
 ## Done
@@ -3467,21 +3475,19 @@ EOF
     printf -- '- [ ] %s - Long identity choice (repo: sample) (kind: captain) (hold: Pick an option) (hold-kind: captain)\n' "$long_id"
     printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
     for i in {1..25}; do
+      case "$i" in
+        1) remote_reason=$remote_one ;;
+        2) remote_reason=$remote_two ;;
+        3) remote_reason=$remote_three ;;
+        4) remote_reason=$remote_four ;;
+        *) remote_reason='Options A and B with their consequences' ;;
+      esac
       if [ "$i" -eq 1 ]; then
-        printf -- '- [ ] remote-%s - SAME  subject (repo: firstmate) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i"
+        printf -- '- [ ] remote-%s - SAME  subject (repo: firstmate) (kind: captain) (hold: %s) (hold-kind: captain)\n' "$i" "$remote_reason"
       else
-        printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i" "$i"
+        printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: %s) (hold-kind: captain)\n' "$i" "$i" "$remote_reason"
       fi
       printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
-      if [ "$i" -eq 1 ]; then
-        printf '  Captain options: {"about":"Remote rollout","decide":"Pick the rollout route","options":[{"value":"stage","label":"Stage rollout"},{"value":"all","label":"Release to all"}],"recommended":"stage","report":"data/remote/report.md","pr_url":"https://github.com/acme/remote/pull/4"}\n'
-      elif [ "$i" -eq 2 ]; then
-        printf '  Captain options: {"about":"Invalid hint","decide":"Pick","options":[{"value":"yes","label":"Yes","hint":2}]}\n'
-      elif [ "$i" -eq 3 ]; then
-        printf '  Captain options: {"about":"Unknown option key","decide":"Pick","options":[{"value":"yes","label":"Yes","extra":true}]}\n'
-      elif [ "$i" -eq 4 ]; then
-        printf '  Captain options: {"about":"Unknown object key","decide":"Pick","options":[],"extra":true}\n'
-      fi
     done
     printf '\n## Done\n'
   } > "$mate/data/backlog.md"
