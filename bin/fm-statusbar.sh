@@ -173,14 +173,25 @@ cmd_sync() {
 }
 
 cmd_apply() {
-  local ses fmt win group group_id sid member_group target_sid primary=0 left hook binding
+  local ses fmt win group group_id sid member_group target_sid primary=0 left hook binding peer_binding sessions
   if [ "${1:-}" = --primary ]; then primary=1; shift; fi
   ses=${1:-}
   [ "$#" -eq 1 ] && [ -n "$ses" ] || { echo 'usage: fm-statusbar.sh apply [--primary] <session>' >&2; return 2; }
   command -v tmux >/dev/null 2>&1 || return 0
-  binding=$(tmux show-options -qv -t "$ses" @fm_fleet_state 2>/dev/null) || binding=
-  # Startup in a secondmate pane must never claim its parent's session.
-  if [ -e "$FM_HOME/.fm-secondmate-home" ] || { [ -n "$binding" ] && [ "$binding" != "$STATE" ]; }; then
+  group=$(tmux display-message -p -t "$ses" '#{session_group}' 2>/dev/null) || return 0
+  [ -n "$group" ] || group=$ses
+  target_sid=$(tmux display-message -p -t "$ses" '#{session_id}' 2>/dev/null) || return 0
+  sessions=$(tmux list-sessions -F '#{session_id} #{session_group}' 2>/dev/null) || return 0
+  binding=
+  while read -r sid member_group; do
+    [ "$sid" = "$target_sid" ] || [ "$member_group" = "$group" ] || continue
+    peer_binding=$(tmux show-options -qv -t "$sid" @fm_fleet_state 2>/dev/null) || peer_binding=
+    [ -n "$peer_binding" ] || continue
+    # The group owner is write-once, including claims through late views.
+    [ "$peer_binding" = "$STATE" ] || return 0
+    binding=$peer_binding
+  done <<<"$sessions"
+  if [ -n "$binding" ] || [ -e "$FM_HOME/.fm-secondmate-home" ]; then
     primary=0
   fi
   fmt=$(fm_sb_format)
@@ -189,27 +200,24 @@ cmd_apply() {
     tmux set-window-option -t "$win" pane-border-status bottom 2>/dev/null || true
     tmux set-window-option -t "$win" pane-border-format "$fmt" 2>/dev/null || true
   done < <(tmux list-windows -t "$ses" -F '#{window_id}' 2>/dev/null)
-  group=$(tmux display-message -p -t "$ses" '#{session_group}' 2>/dev/null) || return 0
-  [ -n "$group" ] || group=$ses
-  target_sid=$(tmux display-message -p -t "$ses" '#{session_id}' 2>/dev/null) || return 0
   left="[#S] #(bash \"$SELF\" --socket \"#{socket_path}\" fleet id:${target_sid#\$}) "
   while read -r sid member_group; do
     [ "$sid" = "$target_sid" ] || [ "$member_group" = "$group" ] || continue
     tmux set-option -t "$sid" status-right-length 200 2>/dev/null || true
     tmux set-option -t "$sid" status-right '#{E:pane-border-format}' 2>/dev/null || true
     if [ "$primary" -eq 1 ]; then
-      tmux set-option -t "$sid" @fm_fleet_state "$STATE" 2>/dev/null || true
+      tmux set-option -o -t "$sid" @fm_fleet_state "$STATE" 2>/dev/null || true
       tmux set-option -t "$sid" status-left-length 40 2>/dev/null || true
       tmux set-option -t "$sid" status-left "$left" 2>/dev/null || true
     fi
-  done < <(tmux list-sessions -F '#{session_id} #{session_group}' 2>/dev/null)
+  done <<<"$sessions"
   # An ordinary apply must retain the primary's fleet job and hook verbatim.
   if [ "$primary" -eq 0 ] && [ -n "$binding" ]; then return 0; fi
   group_id=${target_sid#\$}
   hook='set-option status-right-length 200; set-option status-right "#{E:pane-border-format}"'
   if [ "$primary" -eq 1 ]; then
     # Keep the original session's state binding in future grouped view jobs.
-    hook="$hook; set-option status-left-length 40; set-option status-left \"${left//\"/\\\"}\""
+    hook="$hook; set-option -o @fm_fleet_state \"${STATE//\"/\\\"}\"; set-option status-left-length 40; set-option status-left \"${left//\"/\\\"}\""
   fi
   tmux set-hook -g "after-new-session[$((10000 + group_id))]" \
     "if-shell -F '#{==:#{session_group},$group}' '$hook'" 2>/dev/null || true

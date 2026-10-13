@@ -491,6 +491,22 @@ fleet_render=$(render fleet-later 100 'crew 1 | 2nd 1')
 case "$fleet_render" in *'crew 1 | 2nd 1'*) ;; *) fail "fleet job failed to render on its private socket" "$fleet_render" ;; esac
 case "$fleet_render" in *DO_NOT_DISPLAY*) fail "fleet exposed an unrelated metadata value" ;; esac
 pass "fleet count survives startup, ordinary spawn apply and a late view"
+[ "$(tmux show-options -qv -t fleet-later @fm_fleet_state)" = "$FLEET_STATE" ] || fail "late view did not copy its peer's binding"
+# Simulate a view created before binding inheritance was available.
+tmux set-option -u -t fleet-later @fm_fleet_state
+before_left=$(tmux show-options -qv -t firstmate status-left)
+before_right=$(tmux show-options -qv -t firstmate status-right)
+FM_STATE_OVERRIDE="$WORK/foreign-home/state" statusbar "$SB" "$SOCKET_PATH" apply --primary fleet-later
+[ "$(tmux show-options -qv -t firstmate @fm_fleet_state)" = "$FLEET_STATE" ] || fail "foreign home claimed group through an unbound view"
+[ "$(tmux show-options -qv -t firstmate status-left)" = "$before_left" ] || fail "foreign home changed primary left bar"
+[ "$(tmux show-options -qv -t firstmate status-right)" = "$before_right" ] || fail "foreign home changed primary right bar"
+[ "$(tmux show-hooks -g)" = "$hooks" ] || fail "foreign home replaced group hook"
+[ -z "$(tmux show-options -qv -t fleet-later @fm_fleet_state)" ] || fail "foreign home assigned a fleet binding"
+FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" apply --primary fleet-later
+[ "$(tmux show-options -qv -t firstmate @fm_fleet_state)" = "$FLEET_STATE" ] || fail "same-home reapply changed primary binding"
+[ "$(tmux show-hooks -g)" = "$hooks" ] || fail "same-home reapply replaced group hook"
+pass "group ownership is write-once even through an unbound late view"
+
 
 mkdir -p "$WORK/second-home/state"
 touch "$WORK/second-home/.fm-secondmate-home"

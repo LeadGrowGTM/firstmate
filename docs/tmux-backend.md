@@ -28,6 +28,7 @@ A locked `bin/fm-session-start.sh` labels the primary pane with its home and res
 Its model and effort use explicit `FM_PRIMARY_MODEL` and `FM_PRIMARY_EFFORT` values, or Claude's launch environment when the primary is Claude; unavailable values appear as `?`.
 The detail line uses shared window options, so Orca view sessions created afterward inherit it.
 The primary session's bar also shows `crew N | 2nd M`, the worker agents and second mates recorded in this home's task records (`bin/fm-statusbar.sh fleet`), recomputed at each status refresh from the record files and one tmux window listing.
+The fleet state binding is assigned once per session group, and later grouped views inherit that binding; another home cannot replace it through a view.
 Tmux records count only while their window exists; other backend records count while present, without a remote liveness probe.
 Plan usage (`u`) shows the cached account-wide `all_models` percentage used for the displayed provider and account; model and product quotas do not contribute.
 When the selected account has no account-wide measurement, usage is `u ?`; if that account is absent from quota output, the provider's default account may appear under its own label.
