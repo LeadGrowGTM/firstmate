@@ -145,9 +145,14 @@ SH
   : > "$home/gh-axi.log"
 }
 
+# Each merge runs under a recorded captain approval for the PR it names, so
+# these cases exercise the hold gate rather than the recorded-authority gate
+# (bin/fm-merge-ok.sh; pinned by tests/fm-pr-merge.test.sh).
 run_pr_merge() {  # <home> <id> <url>
   local home=$1
   shift
+  [ "$#" -lt 2 ] || FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    "$ROOT/bin/fm-merge-ok.sh" "$1" "$2" captain >/dev/null 2>&1 || true
   PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_CONFIG_OVERRIDE="$home/config" FM_TEST_GH_LOG="$home/gh.log" \

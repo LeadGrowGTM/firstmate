@@ -312,9 +312,19 @@ run_check_entry() {
     "$PR_CHECK" "$@"
 }
 
+# Merges here run under a recorded captain approval for the PR they name
+# (bin/fm-merge-ok.sh owns the record; tests/fm-pr-merge.test.sh pins its gate).
+# A malformed URL or absent task record is refused by the recorder itself and
+# leaves the task record untouched, which the refusal cases below rely on.
+record_captain_merge_ok() {  # <dir> <task-id> <url>
+  FM_HOME="$1/home" FM_STATE_OVERRIDE="$1/home/state" \
+    "$ROOT/bin/fm-merge-ok.sh" "$2" "$3" captain >/dev/null 2>&1 || true
+}
+
 run_merge_entry() {
   local dir=$1
   shift
+  [ "$#" -lt 2 ] || record_captain_merge_ok "$dir" "$1" "$2"
   FM_ROOT_OVERRIDE="$dir/root" FM_HOME="$dir/home" \
     FM_TEST_GUARD_LOG="$dir/guard.log" FM_TEST_GH_LOG="$dir/gh.log" \
     FM_TEST_GH_AXI_LOG="$dir/gh-axi.log" FM_TEST_GLAB_LOG="$dir/glab.log" \
@@ -3063,6 +3073,7 @@ test_authority_retirement_preserves_replacement() {
 #!/usr/bin/env bash
 export FM_ROOT_OVERRIDE="$dir/root" FM_TEST_GUARD_LOG="$dir/guard.log"
 "$PR_CHECK" task-a "$url_b" >/dev/null
+printf 'merge_ok=captain %s\\n' "$url_b" >> "$state/task-a.meta"
 (
   FM_TEST_GH_GRAPHQL_STATE=OPEN FM_TEST_GH_GRAPHQL_MERGED=false \\
   FM_TEST_GH_GRAPHQL_QUEUED=true \\
