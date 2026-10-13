@@ -198,7 +198,7 @@ Its `--json` output also lists per-project forge values and known stale row IDs.
 Missing forge or observation evidence remains unknown.
 Portable behavior fixtures live in `tests/fm-idle-sweep.test.sh`.
 
-An absent `config/idle-sweep.json` uses the default targets and considers every prepared queued task with a reversible brief and delivery contract.
+An absent `config/idle-sweep.json` enables the sweep with the limits from `config/targets.json`, or the defaults when that file is absent, and considers prepared queued tasks with a reversible brief and delivery contract.
 An indented `Idle target: red_default_branches`, `Idle target: open_prs`, or `Idle target: stale_backlog` line in a backlog row associates that task with one standing target; an untagged row remains ordinary backlog work.
 The file can switch the sweep off:
 
