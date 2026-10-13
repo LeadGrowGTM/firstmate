@@ -1977,7 +1977,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged submodules
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -1988,7 +1988,15 @@ validate_worktree_teardown_safety() {
   untracked=normal
   [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
-    if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored --ignore-submodules=none 2>/dev/null); then
+    if ! submodules=$(git -C "$WT" submodule status 2>/dev/null); then
+      echo "REFUSED: cannot inspect submodules in worktree $WT; needs a human look." >&2
+      return 1
+    fi
+    if [ -n "$submodules" ] && printf '%s\n' "$submodules" | grep -qv '^-'; then
+      echo "REFUSED: worktree $WT has an initialized submodule; needs a human look." >&2
+      return 1
+    fi
+    if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored 2>/dev/null); then
       echo "REFUSED: cannot inspect worktree $WT for uncommitted changes." >&2
       return 1
     fi

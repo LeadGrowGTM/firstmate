@@ -190,9 +190,12 @@ test_flagged_tracked_edits_kept() {
   pass 'sweep refuses copies with assume-unchanged or skip-worktree paths'
 }
 
-test_submodule_work_kept() {
-  local home out kind child
-  for kind in tracked untracked moved; do
+test_initialized_submodule_kept() {
+  local home out kind child role
+  for kind in clean-ship clean-scout tracked untracked moved; do
+    if [ "$kind" = clean-scout ] && ! command -v tasks-axi >/dev/null 2>&1; then
+      continue
+    fi
     home=$(make_home "submodule-$kind")
     git init -q "$home/submodule-source"
     printf 'baseline\n' > "$home/submodule-source/file"
@@ -201,11 +204,20 @@ test_submodule_work_kept() {
     git -C "$home/projects/project" -c protocol.file.allow=always submodule add -q "$home/submodule-source" child
     git -C "$home/projects/project" commit -qam submodule
     git -C "$home/projects/project" push -q origin main
-    add_worker "$home"
+    role=ship
+    if [ "$kind" = clean-scout ]; then role=scout; fi
+    add_worker "$home" "$role"
+    if [ "$role" = scout ]; then
+      mkdir -p "$home/data/task"
+      printf 'report\n' > "$home/data/task/report.md"
+      env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
+        "$ROOT/bin/fm-captain-hold.sh" complete task --none >/dev/null
+    fi
     git -C "$home/worker" -c protocol.file.allow=always submodule update --init -q
     git -C "$home/projects/project" config submodule.child.ignore all
     child="$home/worker/child"
     case "$kind" in
+      clean-*) ;;
       tracked) printf 'operator edit\n' >> "$child/file" ;;
       untracked) printf 'operator file\n' > "$child/new-file" ;;
       moved)
@@ -215,11 +227,11 @@ test_submodule_work_kept() {
         ;;
     esac
     out=$(sweep "$home")
-    assert_contains "$out" 'uncommitted changes' "$kind submodule work refused"
+    assert_contains "$out" 'initialized submodule; needs a human look' "$kind submodule refused"
     assert_present "$home/state/task.meta" "$kind submodule record kept"
     assert_present "$child/file" "$kind submodule copy kept"
   done
-  pass 'sweep preserves edits, untracked files, and moved commits in ignored submodules'
+  pass 'sweep keeps initialized submodules for ships and scouts'
 }
 
 # Spawn writes Claude wiring with or without its statusLine fallback.
@@ -232,9 +244,11 @@ render_claude_wiring() {  # <claude|claude-statusline> <state-real> <statusline-
 }
 
 test_generated_wiring_exact_and_edited() {
-  local harness home out path state_real statusline
+  local harness home out path state_real statusline settings
   statusline="'$ROOT/bin/fm-statusbar.sh' claude-line --task 'task'"
-  assert_contains "$(render_claude_wiring claude-statusline /state "$statusline")" '"statusLine":' 'statusLine variant differs'
+  settings=$(render_claude_wiring claude-statusline /state "$statusline")
+  assert_equals command "$(printf '%s\n' "$settings" | jq -r '.statusLine.type')" 'statusLine type'
+  assert_equals "$statusline" "$(printf '%s\n' "$settings" | jq -r '.statusLine.command')" 'statusLine command'
   for harness in claude claude-statusline opencode; do
     home=$(make_home "$harness-exact"); add_worker "$home"
     printf 'busy_gen=sweep-generation\n' >> "$home/state/task.meta"
@@ -636,7 +650,7 @@ test_clean_stopped_and_idempotence
 test_changes_kept
 test_ignored_work_kept
 test_flagged_tracked_edits_kept
-test_submodule_work_kept
+test_initialized_submodule_kept
 test_generated_wiring_exact_and_edited
 test_late_work_kept
 test_missing_copy_remote_branch_kept_until_merged
