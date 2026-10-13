@@ -3414,3 +3414,71 @@ test_revealed_deferred_holds_show_their_deferral_reason
 test_pr_repository_cap_and_expansion
 test_per_repository_pr_cap_is_disclosed
 test_projection_and_toon_fail_closed
+
+# Detail mode must not inherit the compact digest's per-home decision cap.
+test_complete_structured_decision_layout() {
+  local home fakebin json toon mate
+  home=$(make_home decision-layout)
+  write_fixture "$home"
+  mate=$(fixture_mate_home "$home")
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] minor - Minor choice (repo: firstmate) (kind: captain) (priority: low) (hold: Pick A for less work or B for compatibility) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+- [ ] major - Major choice (repo: firstmate) (kind: captain) (priority: high) (hold: Choose whether to preserve the older format for existing consumers or retire it after the migration; preserving it costs maintenance while retiring it requires every consumer to upgrade before rollout) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+- [ ] older - Same subject (repo: firstmate) (kind: captain) (hold: Earlier options remain recorded) (hold-kind: captain)
+  Captain hold set: 2026-07-10T10:00:00Z
+  Captain hold origin: finished
+- [ ] newer - Same subject (repo: firstmate) (kind: captain) (hold: Newer options) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+- [ ] merged-call - Review https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: Choose the rollout) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+
+## Done
+- [x] finished - Investigation data/finished/report.md (repo: firstmate) (kind: scout) (reported 2026-07-10)
+- [x] shipped - Delivery https://github.com/acme/sample/pull/5 (repo: sample) (kind: ship) (merged 2026-07-11)
+EOF
+  mkdir -p "$home/data/finished"
+  printf 'Should we invent another decision from this report?\n' > "$home/data/finished/report.md"
+  {
+    printf '## In flight\n\n## Queued\n'
+    for i in {1..25}; do
+      printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i" "$i"
+      printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
+    done
+    printf '\n## Done\n'
+  } > "$mate/data/backlog.md"
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json --fields decisions)
+  printf '%s' "$json" | jq -e '
+    (.decision_layout | length) == 30
+    and (.decision_layout_unavailable | length) == 0
+    and .decision_layout[0].number == "D1" and .decision_layout[0].key == "major"
+    and (.decision_layout[0].reason | endswith("before rollout"))
+    and (.decision_layout | any(.key == "older" and .origin == "finished"
+      and .stale_reason == "Origin completed with a newer hold on the same subject"))
+    and (.decision_layout | any(.key == "newer" and .stale_reason == null))
+    and (.decision_layout | any(.key == "merged-call" and .stale_reason == "Linked PR already merged"))
+    and ([.decision_layout[] | select(.owner == "mate")] | length) == 25
+    and ([.decision_layout[].number] | unique | length) == 30
+    and ([.decision_layout[] | select(.reason | contains("invent another"))] | length) == 0
+  ' >/dev/null || fail "detailed decision inventory lost structured calls or inferred prose: $json"
+  toon=$(run "$home" "$fakebin" --fields decisions)
+  assert_contains "$toon" 'decision_layout[30]' "TOON omitted the detailed inventory"
+  assert_contains "$toon" 'before rollout' "TOON truncated the known decision reason"
+  [ ! -s "$home/net.log" ] || fail "detail mode fetched GitHub without opting in"
+  jq 'del(.decision_records)' "$mate/state/home-summary.json" > "$mate/state/legacy-summary.json"
+  mv "$mate/state/legacy-summary.json" "$mate/state/home-summary.json"
+  # Read the published legacy ledger directly, without republishing a new one.
+  json=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_BEARINGS_NOW=2026-07-11T18:00:00Z \
+    NET_LOG="$home/net.log" "$BEARINGS" --json --fields decisions)
+  printf '%s' "$json" | jq -e '
+    (.decision_layout | any(.owner == "mate" and .key == "remote-1"))
+    and .decision_layout_unavailable == [{owner:"mate",reason:"Detailed decision inventory unavailable; inspect owner home"}]
+  ' >/dev/null || fail "legacy detail omitted known calls or claimed complete coverage: $json"
+  pass "decision layout preserves all structured owner calls and flags exact stale identities without prose inference"
+}
+test_complete_structured_decision_layout

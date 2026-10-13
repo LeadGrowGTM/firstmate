@@ -122,5 +122,14 @@ const errorText = [...byId.entries()]
 const empty = ch.children.filter((c) => c.className.includes("bb-empty")).map((c) => c.textContent);
 const more = ch.children.filter((c) => c.className.includes("bb-morechip")).map((c) => c.textContent);
 
+const calls = (byId.get("bb-call") || new Node("div")).children
+  .filter((c) => c.className.includes("bb-decision"))
+  .map((c) => ({text:c.textContent, hidden:c.hidden,
+    title:c.querySelectorAll(".bb-decision__title")[0]?.textContent,
+    submitDisabled:c.querySelectorAll(".fm-btn")[0]?.disabled,
+    question:c.children[0]?.children.find((n) => n.tagName === "form")?.attributes["data-lavish-question"]}));
+const owners = (byId.get("bb-call") || new Node("div")).children
+  .filter((c) => c.className.includes("bb-owner")).map((c) => c.textContent);
+const stale = (byId.get("bb-stale") || new Node("div")).textContent;
 process.stdout.write(
-  JSON.stringify({ stats, underway, charted, empty, more, error: errorText }) + "\n");
+  JSON.stringify({ stats, underway, charted, calls, owners, stale, empty, more, error: errorText }) + "\n");
