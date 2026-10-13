@@ -202,7 +202,7 @@ run_check() {
     age=$((now - activity))
     [ "$age" -ge "$DONE_SECS" ] || continue
     previous=$(record_outcome "$id" "$activity")
-    case "$previous" in stopped|already-stopped) continue ;; esac
+    case "$previous" in stopped|already-stopped|endpoint-gone) continue ;; esac
     state_line=$(crew_state "$id") || continue
     state=${state_line#state: }
     state=${state%% *}

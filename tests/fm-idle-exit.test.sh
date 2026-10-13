@@ -193,6 +193,23 @@ test_one_exit_per_run_and_records_stop_reprobing() {
   pass "fm-idle-exit: one exit per run, handled tasks are not re-probed, records are pruned"
 }
 
+test_endpoint_gone_is_not_reprobed_until_activity_changes() {
+  local home out
+  home=$(make_home endpoint-gone)
+  add_task "$home" gone done 7200
+  printf 'endpoint-gone\n' > "$home/fixtures/gone.out"
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "an already absent endpoint should be silent: $out"
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "a handled absent endpoint should remain silent: $out"
+  assert_equals 1 "$(log "$home" control | wc -l | tr -d ' ')" "an absent endpoint was reprobed without new activity"
+  fm_touch_epoch $((NOW - 900)) "$home/state/gone.status"
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "an absent endpoint after new activity should be silent: $out"
+  assert_equals 2 "$(log "$home" control | wc -l | tr -d ' ')" "new activity should permit a fresh probe"
+  pass "fm-idle-exit: an absent endpoint is handled until new activity"
+}
+
 test_busy_turn_is_left_and_failure_reported_once() {
   local home out
   home=$(make_home busy)
@@ -249,6 +266,7 @@ test_parked_gate_requires_human_decision
 test_new_activity_before_exit_keeps_worker_running
 test_other_states_and_kinds_are_never_exited
 test_one_exit_per_run_and_records_stop_reprobing
+test_endpoint_gone_is_not_reprobed_until_activity_changes
 test_busy_turn_is_left_and_failure_reported_once
 test_record_failure_is_reported
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it
