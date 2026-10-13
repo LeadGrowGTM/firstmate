@@ -5370,46 +5370,63 @@ if [ "$KIND" = secondmate ] && [ "$BACKEND" = tmux ]; then
 fi
 ORCA_VIEW_IDENTITY_FILE=
 ORCA_VIEW_EXPORT=
+orca_view_name_usable() {
+  local group
+  if ! tmux has-session -t "=$1" 2>/dev/null; then
+    return 0
+  fi
+  group=$(tmux display-message -p -t "=$1:" '#{session_group}' 2>/dev/null) || return 1
+  [ "$group" = "$SES" ]
+}
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
   ORCA_VIEW_NAME="orca-$ID"
-  if tmux has-session -t "=$ORCA_VIEW_NAME" 2>/dev/null; then
-    ORCA_VIEW_GROUP=$(tmux display-message -p -t "=$ORCA_VIEW_NAME:" '#{session_group}' 2>/dev/null) || ORCA_VIEW_GROUP=
-    if [ "$ORCA_VIEW_GROUP" != "$SES" ]; then
-      case "$SES" in
-        *[!A-Za-z0-9_-]*)
-          ORCA_VIEW_NAME="orca-$ID-h-$(printf '%s' "$SES" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]')" ;;
-        *) ORCA_VIEW_NAME="orca-$ID-s-$SES" ;;
-      esac
-    fi
-  fi
-  ORCA_VIEW_IDENTITY_FILE="$STATE/$ID.orca-view-identity"
-  if ORCA_VIEW_OUT=$("$SCRIPT_DIR/fm-orca-view.sh" open --target "$T" --view-session "$ORCA_VIEW_NAME" \
-    --title "$ID" --identity-file "$ORCA_VIEW_IDENTITY_FILE"); then
-    ORCA_VIEW_HANDLE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^handle=//p')
-    ORCA_VIEW_SESSION=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session=//p')
-    ORCA_VIEW_OWNED=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session_owned=//p')
-    ORCA_VIEW_CREATED=$ORCA_VIEW_OWNED
-    ORCA_VIEW_ABORT_CLOSE=1
-    # The previous tab's view session, reattached, stays this feature's to remove.
-    if [ "$ORCA_VIEW_OWNED" = 0 ] && [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] &&
-      [ "$ORCA_VIEW_SESSION" = "$ORCA_VIEW_PRIOR_SESSION" ]; then
-      ORCA_VIEW_OWNED=1
-    fi
-    if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE"); then
-      if [ "$ORCA_VIEW_CREATED" = 1 ]; then
-        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" || true
-      else
-        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
+  if ! orca_view_name_usable "$ORCA_VIEW_NAME"; then
+    case "$SES" in
+      *[!A-Za-z0-9_-]*)
+        ORCA_VIEW_DERIVED="orca-$ID-h-$(printf '%s' "$SES" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]')" ;;
+      *) ORCA_VIEW_DERIVED="orca-$ID-s-$SES" ;;
+    esac
+    ORCA_VIEW_NAME=
+    for ORCA_VIEW_SUFFIX in '' 1 2 3 4 5; do
+      ORCA_VIEW_CANDIDATE="$ORCA_VIEW_DERIVED${ORCA_VIEW_SUFFIX:+-$ORCA_VIEW_SUFFIX}"
+      if orca_view_name_usable "$ORCA_VIEW_CANDIDATE"; then
+        ORCA_VIEW_NAME=$ORCA_VIEW_CANDIDATE
+        break
       fi
-      ORCA_VIEW_HANDLE=
-      ORCA_VIEW_SESSION=
-      ORCA_VIEW_OWNED=
-      ORCA_VIEW_CREATED=0
-      ORCA_VIEW_ABORT_CLOSE=0
+    done
+  fi
+  if [ -z "$ORCA_VIEW_NAME" ]; then
+    echo "note: no available Orca view session name for $ID in $SES" >&2
+  else
+    ORCA_VIEW_IDENTITY_FILE="$STATE/$ID.orca-view-identity"
+    if ORCA_VIEW_OUT=$("$SCRIPT_DIR/fm-orca-view.sh" open --target "$T" --view-session "$ORCA_VIEW_NAME" \
+      --title "$ID" --identity-file "$ORCA_VIEW_IDENTITY_FILE"); then
+      ORCA_VIEW_HANDLE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^handle=//p')
+      ORCA_VIEW_SESSION=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session=//p')
+      ORCA_VIEW_OWNED=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session_owned=//p')
+      ORCA_VIEW_CREATED=$ORCA_VIEW_OWNED
+      ORCA_VIEW_ABORT_CLOSE=1
+      # The previous tab's view session, reattached, stays this feature's to remove.
+      if [ "$ORCA_VIEW_OWNED" = 0 ] && [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] &&
+        [ "$ORCA_VIEW_SESSION" = "$ORCA_VIEW_PRIOR_SESSION" ]; then
+        ORCA_VIEW_OWNED=1
+      fi
+      if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE"); then
+        if [ "$ORCA_VIEW_CREATED" = 1 ]; then
+          "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" || true
+        else
+          "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
+        fi
+        ORCA_VIEW_HANDLE=
+        ORCA_VIEW_SESSION=
+        ORCA_VIEW_OWNED=
+        ORCA_VIEW_CREATED=0
+        ORCA_VIEW_ABORT_CLOSE=0
+        ORCA_VIEW_IDENTITY_FILE=
+      fi
+    else
       ORCA_VIEW_IDENTITY_FILE=
     fi
-  else
-    ORCA_VIEW_IDENTITY_FILE=
   fi
 fi
 
