@@ -1,0 +1,20 @@
+# harness absent, not verified here: claude
+# harness absent, not verified here: codex
+# harness absent, not verified here: opencode
+# harness absent, not verified here: pi
+# harness absent, not verified here: grok
+# harness absent, not verified here: kimi
+# harness absent, not verified here: muse
+# omp pane tail at failure:
+#    Update Available
+#    New version 18.10.3 is available. Run: omp update
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    Connected to MCP server: nexus-mcp:nexus.
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#   ❯                                                                                                                                                                                              󰘶 󰌒 to change thinking effort
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    󰵗 · 󰪣 Opus 5.5 ·  5782b7185c5e/01M4TSXBJ68SN8DVAHGCGE2FPW ·  detached ?1 ·  3.9%/1M 󰁨 · 󰙺
+not ok - omp (omp/18.8.6): idle composer never classified empty (last verdict: pending)
+ok - strict posture live: a blank shell row classifies unknown and injection defers
+# harness absent, not verified here: zellij (false-positive regression not exercised)
+not ok - live composer-matrix guard observed failures above

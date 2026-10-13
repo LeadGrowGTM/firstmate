@@ -1,0 +1,27 @@
+# claude 2.1.296 (Claude Code): title='claude' foreground=[claude reg.exe reg.exe ]
+ok - harness liveness: claude 2.1.296 (Claude Code) classifies alive
+# claude 2.1.296 (Claude Code): ancestry verdicts=[comm claude]
+ok - harness detection: claude 2.1.296 (Claude Code) is identified by the ancestry walk at comm strength
+# codex codex-cli 0.159.3: title='node' foreground=[MainThread codex cmd.exe ]
+ok - harness liveness: codex codex-cli 0.159.3 classifies alive
+# codex codex-cli 0.159.3: ancestry verdicts=[comm codex]
+ok - harness detection: codex codex-cli 0.159.3 is identified by the ancestry walk at comm strength
+# skip: opencode is not installed on this machine, so its classification is unverified here
+# skip: pi is not installed on this machine, so its classification is unverified here
+# skip: pi-signed is not installed on this machine, so its classification is unverified here
+# grok grok 1.0.52 (0920c8169e27) [stable]: title='grok' foreground=[grok ]
+ok - harness liveness: grok grok 1.0.52 (0920c8169e27) [stable] classifies alive
+# grok grok 1.0.52 (0920c8169e27) [stable]: ancestry verdicts=[comm grok]
+ok - harness detection: grok grok 1.0.52 (0920c8169e27) [stable] is identified by the ancestry walk at comm strength
+# skip: kimi is not installed on this machine, so its classification is unverified here
+# skip: cursor is not installed on this machine, so its classification is unverified here
+# muse Muse Code 1.4.7 (1.4.7-R6101.1): title='muse-bin-1.4.7-R6101.1' foreground=[muse-bin-1.4.7- ]
+ok - harness liveness: muse Muse Code 1.4.7 (1.4.7-R6101.1) classifies alive
+# muse Muse Code 1.4.7 (1.4.7-R6101.1): ancestry verdicts=[comm muse]
+ok - harness detection: muse Muse Code 1.4.7 (1.4.7-R6101.1) is identified by the ancestry walk at comm strength
+# omp omp/18.8.6: title='omp' foreground=[omp ]
+ok - harness liveness: omp omp/18.8.6 classifies alive
+# omp omp/18.8.6: ancestry verdicts=[comm omp]
+ok - harness detection: omp omp/18.8.6 is identified by the ancestry walk at comm strength
+# unverified on this machine (not installed): opencode pi pi-signed kimi cursor
+# checked 5 installed harness(es)

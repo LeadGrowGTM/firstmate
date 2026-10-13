@@ -1,0 +1,12 @@
+# harness absent, not verified here: claude
+# harness absent, not verified here: codex
+# harness absent, not verified here: opencode
+# harness absent, not verified here: pi
+# harness absent, not verified here: grok
+# harness absent, not verified here: kimi
+# harness absent, not verified here: muse
+ok - omp (omp/18.8.6): real idle composer classifies empty
+ok - omp (omp/18.8.6): the same idle pane read cursorless is not pending (verdict: empty)
+ok - strict posture live: a blank shell row classifies unknown and injection defers
+# harness absent, not verified here: zellij (false-positive regression not exercised)
+ok - live composer-matrix guard verified 3 live surface(s)

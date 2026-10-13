@@ -1,0 +1,2 @@
+--reasoning-effort is not supported with --provider echo
+usage: muse exec [OPTIONS] [PROMPT] (run `muse exec --help` for options)
