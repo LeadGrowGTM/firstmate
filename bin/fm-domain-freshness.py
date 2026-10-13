@@ -13,7 +13,6 @@ import re
 import subprocess
 import sys
 import tempfile
-from urllib.parse import quote
 
 
 class CoverageError(Exception):
@@ -180,13 +179,6 @@ def instruction_excerpt(value):
             'content': excerpt[:4096], 'content_truncated': len(excerpt) > 4096}
 
 
-def pr_instruction(repo, path, revision):
-    value = api('/repos/%s/contents/%s?ref=%s' % (repo, quote(path, safe='/'), quote(revision, safe='')))
-    if not isinstance(value, dict) or value.get('type') != 'file':
-        raise CoverageError('invalid PR instruction content')
-    return instruction_excerpt(value)
-
-
 def pr_instruction_blob(repo, sha):
     if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
         raise CoverageError('missing PR instruction blob identity')
@@ -194,6 +186,48 @@ def pr_instruction_blob(repo, sha):
     if not isinstance(value, dict) or value.get('sha') != sha:
         raise CoverageError('inconsistent PR instruction blob')
     return instruction_excerpt(value)
+
+
+def merged_instruction_trees(prefix, detail):
+    merge_sha = detail.get('merge_commit_sha')
+    if not isinstance(merge_sha, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', merge_sha):
+        raise CoverageError('missing merged PR commit identity')
+    merged = api(prefix + '/git/commits/' + merge_sha)
+    if not isinstance(merged, dict) or merged.get('sha') != merge_sha or not isinstance(merged.get('parents'), list) or len(merged['parents']) not in (1, 2):
+        raise CoverageError('ambiguous merged PR history')
+    if len(merged['parents']) == 1 and detail.get('commits') != 1:
+        raise CoverageError('ambiguous single-parent merged PR history')
+    parent_sha = merged['parents'][0].get('sha') if isinstance(merged['parents'][0], dict) else None
+    if not isinstance(parent_sha, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', parent_sha):
+        raise CoverageError('invalid merged PR parent identity')
+    parent = api(prefix + '/git/commits/' + parent_sha)
+    if not isinstance(parent, dict) or parent.get('sha') != parent_sha:
+        raise CoverageError('invalid merged PR parent commit')
+    trees = []
+    for commit in (parent, merged):
+        tree_record = commit.get('tree')
+        tree_sha = tree_record.get('sha') if isinstance(tree_record, dict) else None
+        if not isinstance(tree_sha, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', tree_sha):
+            raise CoverageError('missing merged PR tree identity')
+        tree = api(prefix + '/git/trees/' + tree_sha + '?recursive=1')
+        if not isinstance(tree, dict) or tree.get('sha') != tree_sha or tree.get('truncated') is not False or not isinstance(tree.get('tree'), list):
+            raise CoverageError('incomplete merged PR tree')
+        entries = {}
+        for entry in tree['tree']:
+            if not isinstance(entry, dict) or not isinstance(entry.get('path'), str) or entry['path'] in entries:
+                raise CoverageError('invalid merged PR tree entry')
+            entries[entry['path']] = entry
+        trees.append(entries)
+    return trees
+
+
+def merged_instruction(repo, entries, path):
+    entry = entries.get(path)
+    if entry is None:
+        return None
+    if entry.get('type') != 'blob' or entry.get('mode') not in ('100644', '100755'):
+        raise CoverageError('invalid merged PR instruction entry')
+    return pr_instruction_blob(repo, entry.get('sha'))
 
 
 def forge(source, previous, now, contributions):
@@ -243,16 +277,22 @@ def forge(source, previous, now, contributions):
                             if not isinstance(item.get('filename'), str) or not isinstance(item.get('status'), str):
                                 raise CoverageError('malformed PR file metadata')
                             file = {key: item.get(key) for key in ['filename', 'previous_filename', 'status', 'sha', 'additions', 'deletions', 'changes', 'blob_url', 'raw_url']}
-                            old_path = item.get('previous_filename') if item['status'] == 'renamed' else item['filename']
-                            if instruction_file(item['filename']) or (isinstance(old_path, str) and instruction_file(old_path)):
-                                file['instruction'] = {
-                                    'before': None if item['status'] == 'added' else pr_instruction(base_repo, old_path, base['sha']),
-                                    'after': None if item['status'] == 'removed' else (
-                                        pr_instruction(head_repo, item['filename'], head['sha']) if head_repo else
-                                        pr_instruction_blob(base_repo, item.get('sha')))}
                             files.append(file)
                     if type(detail.get('changed_files')) is not int or len(files) != detail['changed_files']:
                         raise CoverageError('truncated PR changed-file set')
+                    trees = None
+                    for file in files:
+                        old_path = file['previous_filename'] if file['status'] == 'renamed' else file['filename']
+                        if instruction_file(file['filename']) or (isinstance(old_path, str) and instruction_file(old_path)):
+                            if trees is None:
+                                trees = merged_instruction_trees(prefix, detail)
+                            if not isinstance(old_path, str):
+                                raise CoverageError('missing renamed PR instruction path')
+                            before = merged_instruction(base_repo, trees[0], old_path)
+                            after = merged_instruction(base_repo, trees[1], file['filename'])
+                            if (before is None) != (file['status'] in ('added', 'copied')) or (after is None) != (file['status'] == 'removed'):
+                                raise CoverageError('inconsistent merged PR instruction status')
+                            file['instruction'] = {'before': before, 'after': after}
                     event.update(base={'repository': base_repo, 'ref': base['ref'], 'sha': base['sha']},
                                  head={'repository': head_repo, 'ref': head.get('ref'), 'sha': head['sha']},
                                  files=files)

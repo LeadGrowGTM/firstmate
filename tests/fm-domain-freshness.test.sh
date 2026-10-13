@@ -13,6 +13,10 @@ TMP_ROOT=$(fm_test_tmproot fm-domain-freshness)
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
 COLLECTOR="$ROOT/bin/fm-domain-freshness.sh"
 NOW=2026-10-13T12:00:00Z
+MERGE_SHA=1111111111111111111111111111111111111111
+PARENT_SHA=2222222222222222222222222222222222222222
+PARENT_TREE=3333333333333333333333333333333333333333
+MERGE_TREE=4444444444444444444444444444444444444444
 N=0
 cat > "$FAKEBIN/gh-axi" <<'SH'
 #!/usr/bin/env bash
@@ -45,6 +49,11 @@ case "$path" in
     file="$FM_FAKE_FEED/content-$revision-$name.json" ;;
   /repos/*/git/blobs/*)
     file="$FM_FAKE_FEED/blob-${path##*/}.json" ;;
+  /repos/*/git/commits/*)
+    file="$FM_FAKE_FEED/commit-${path##*/}.json" ;;
+  /repos/*/git/trees/*\?recursive=1)
+    name=${path##*/}; name=${name%%\?*}
+    file="$FM_FAKE_FEED/tree-$name.json" ;;
   /repos/*/pulls/*)
     number=${path##*/}
     file="$FM_FAKE_FEED/detail-$number.json" ;;
@@ -97,9 +106,25 @@ detail() { # number, merged time, changed count
   jq -n --argjson n "$1" --arg when "$2" --argjson count "$3" \
     '{html_url:("https://github.com/acme/widgets/pull/"+($n|tostring)),merged_at:$when,changed_files:$count,base:{ref:"main",sha:"base-sha",repo:{full_name:"acme/widgets"}},head:{ref:"topic",sha:"head-sha",repo:{full_name:"acme/widgets"}}}'
 }
-instruction_content() {
-  jq -n --arg content "$(printf '%s' "$3" | base64 | tr -d '\n')" \
-    '{type:"file",encoding:"base64",content:$content}' > "$FEED/content-$1-$2.json"
+merge_history() {
+  local number=$1 parents=${2:-2} scratch="$FEED/detail-history.json"
+  jq --arg merge "$MERGE_SHA" --argjson count "$parents" '.merge_commit_sha = $merge | .commits = $count' "$FEED/detail-$number.json" > "$scratch"
+  mv "$scratch" "$FEED/detail-$number.json"
+  jq -n --arg sha "$PARENT_SHA" --arg tree "$PARENT_TREE" '{sha:$sha,tree:{sha:$tree},parents:[]}' > "$FEED/commit-$PARENT_SHA.json"
+  if [ "$parents" -eq 2 ]; then
+    jq -n --arg sha "$MERGE_SHA" --arg tree "$MERGE_TREE" --arg parent "$PARENT_SHA" '{sha:$sha,tree:{sha:$tree},parents:[{sha:$parent},{sha:"5555555555555555555555555555555555555555"}]}' > "$FEED/commit-$MERGE_SHA.json"
+  else
+    jq -n --arg sha "$MERGE_SHA" --arg tree "$MERGE_TREE" --arg parent "$PARENT_SHA" '{sha:$sha,tree:{sha:$tree},parents:[{sha:$parent}]}' > "$FEED/commit-$MERGE_SHA.json"
+  fi
+  jq -n --arg sha "$PARENT_TREE" '{sha:$sha,truncated:false,tree:[]}' > "$FEED/tree-$PARENT_TREE.json"
+  jq -n --arg sha "$MERGE_TREE" '{sha:$sha,truncated:false,tree:[]}' > "$FEED/tree-$MERGE_TREE.json"
+}
+tree_content() {
+  local tree=$1 path=$2 content=$3 blob scratch="$FEED/tree-update.json"
+  blob=$(printf '%s' "$content" | git hash-object --stdin)
+  jq -n --arg sha "$blob" --arg content "$(printf '%s' "$content" | base64 | tr -d '\n')" '{sha:$sha,encoding:"base64",content:$content}' > "$FEED/blob-$blob.json"
+  jq --arg path "$path" --arg sha "$blob" '.tree += [{path:$path,sha:$sha,type:"blob",mode:"100644"}]' "$FEED/tree-$tree.json" > "$scratch"
+  mv "$scratch" "$FEED/tree-$tree.json"
 }
 issue() { # number, created time
   jq -n --argjson n "$1" --arg when "$2" \
@@ -333,18 +358,21 @@ printf '%s\n' '{"schema":"fm-contributions.v1","task":"owned","records":[{"url":
 pr 30 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 issue 31 2026-10-13T11:00:00Z | jq -s . > "$FEED/issues-1.json"
 detail 30 2026-10-13T11:00:00Z 4 > "$FEED/detail-30.json"
+merge_history 30
+jq '.base.sha = "1111111111111111111111111111111111111111"' "$FEED/detail-30.json" > "$FEED/detail-history.json"
+mv "$FEED/detail-history.json" "$FEED/detail-30.json"
 jq -n '[
   {filename:"AGENTS.md",status:"modified"},
   {filename:"skills/one/SKILL.md",status:"added"},
   {filename:"CLAUDE.md",status:"removed"},
   {filename:"skills/new.md",previous_filename:"skills/old.md",status:"renamed"}
 ]' > "$FEED/files-30-1.json"
-instruction_content base-sha AGENTS.md '# Before'
-instruction_content head-sha AGENTS.md '# After'
-instruction_content head-sha SKILL.md '# Added'
-instruction_content base-sha CLAUDE.md '# Removed'
-instruction_content base-sha old.md '# Old name'
-instruction_content head-sha new.md '# New name'
+tree_content "$PARENT_TREE" AGENTS.md '# Before'
+tree_content "$MERGE_TREE" AGENTS.md '# Resolved after'
+tree_content "$MERGE_TREE" skills/one/SKILL.md '# Added'
+tree_content "$PARENT_TREE" CLAUDE.md '# Removed'
+tree_content "$PARENT_TREE" skills/old.md '# Old name'
+tree_content "$MERGE_TREE" skills/new.md '# New name'
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'canonical forge casing and instruction revisions'
 bundle
@@ -352,7 +380,8 @@ jq -e '(.evidence | length) == 2 and
   (any(.evidence[]; .kind == "new-issue" and .repository == "acme/widgets")) and
   (any(.evidence[]; .kind == "merged-pr" and .repository == "acme/widgets" and .base.repository == "acme/widgets" and
     .linked_contributions[0].task == "owned" and
-    .files[0].instruction.before.content == "# Before" and .files[0].instruction.after.content == "# After" and
+    .base.sha == "1111111111111111111111111111111111111111" and .head.sha == "head-sha" and
+    .files[0].instruction.before.content == "# Before" and .files[0].instruction.after.content == "# Resolved after" and
     .files[1].instruction.before == null and .files[1].instruction.after.content == "# Added" and
     .files[2].instruction.before.content == "# Removed" and .files[2].instruction.after == null and
     .files[3].instruction.before.content == "# Old name" and .files[3].instruction.after.content == "# New name"))' "$OUT" >/dev/null || fail 'canonical casing or instruction content missing'
@@ -362,43 +391,73 @@ new_home
 config "$repo_sources"
 pr 40 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 40 2026-10-13T11:00:00Z 1 | jq '.head.repo.full_name = "contrib/widgets"' > "$FEED/detail-40.json"
+merge_history 40
 printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-40-1.json"
-instruction_content base-sha AGENTS.md '# Base revision'
-instruction_content head-sha AGENTS.md '# Fork revision'
+tree_content "$PARENT_TREE" AGENTS.md '# Base revision'
+tree_content "$MERGE_TREE" AGENTS.md '# Merged fork revision'
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'fork PR instruction content'
 bundle
-jq -e '.evidence[0].head.repository == "contrib/widgets" and .evidence[0].files[0].instruction.before.content == "# Base revision" and .evidence[0].files[0].instruction.after.content == "# Fork revision"' "$OUT" >/dev/null || fail 'fork instruction content was not captured'
-assert_grep '/repos/contrib/widgets/contents/AGENTS.md?ref=head-sha' "$FEED/requests" 'fork head repository was not queried'
-assert_no_grep '/repos/acme/widgets/contents/AGENTS.md?ref=head-sha' "$FEED/requests" 'fork head read used base repository'
-pass 'fork instruction after content comes from its head repository'
-
-deleted_blob_content='# Deleted fork revision'
-deleted_blob_sha=$(printf '%s' "$deleted_blob_content" | git hash-object --stdin)
-new_home
-config "$repo_sources"
-pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
-detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
-jq -n --arg sha "$deleted_blob_sha" '[{filename:"AGENTS.md",status:"added",sha:$sha}]' > "$FEED/files-41-1.json"
-jq -n --arg sha "$deleted_blob_sha" --arg content "$(printf '%s' "$deleted_blob_content" | base64 | tr -d '\n')" '{sha:$sha,encoding:"base64",content:$content}' > "$FEED/blob-$deleted_blob_sha.json"
-collect "$HOME_DIR" "$NOW"
-expect_code 0 "$STATUS" 'deleted fork blob content'
-bundle
-jq -e '.evidence[0].head.repository == null and .evidence[0].files[0].instruction.before == null and .evidence[0].files[0].instruction.after.content == "# Deleted fork revision"' "$OUT" >/dev/null || fail 'deleted fork instruction blob was not captured'
-assert_grep "/repos/acme/widgets/git/blobs/$deleted_blob_sha" "$FEED/requests" 'deleted fork blob was not queried'
-pass 'deleted fork uses PR file blob when available'
+jq -e '.evidence[0].head.repository == "contrib/widgets" and .evidence[0].files[0].instruction.before.content == "# Base revision" and .evidence[0].files[0].instruction.after.content == "# Merged fork revision"' "$OUT" >/dev/null || fail 'fork merged instruction content was not captured'
+assert_grep "/repos/acme/widgets/git/commits/$MERGE_SHA" "$FEED/requests" 'fork merged commit was not queried'
+assert_no_grep '/repos/contrib/widgets/' "$FEED/requests" 'fork head was used for effective content'
+pass 'fork instruction content comes from effective base merge history'
 
 new_home
 config "$repo_sources"
 pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
-jq -n --arg sha "$deleted_blob_sha" '[{filename:"AGENTS.md",status:"added",sha:$sha}]' > "$FEED/files-41-1.json"
+merge_history 41
+printf '[{"filename":"AGENTS.md","status":"added"}]\n' > "$FEED/files-41-1.json"
+tree_content "$MERGE_TREE" AGENTS.md '# Deleted fork merged revision'
 collect "$HOME_DIR" "$NOW"
-expect_code 2 "$STATUS" 'unavailable deleted fork blob'
+expect_code 0 "$STATUS" 'deleted fork merged content'
 bundle
-jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'unavailable deleted fork blob claimed complete coverage'
-jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'unavailable deleted fork blob advanced checkpoint'
-pass 'unavailable deleted fork blob leaves explicit incomplete coverage'
+jq -e '.evidence[0].head.repository == null and .evidence[0].files[0].instruction.before == null and .evidence[0].files[0].instruction.after.content == "# Deleted fork merged revision"' "$OUT" >/dev/null || fail 'deleted fork merged instruction was not captured'
+assert_no_grep '/repos/contrib/widgets/' "$FEED/requests" 'deleted fork head was queried'
+pass 'deleted fork uses effective base merge history'
+
+new_home
+config "$repo_sources"
+pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
+merge_history 41
+printf '[{"filename":"AGENTS.md","status":"added"}]\n' > "$FEED/files-41-1.json"
+tree_content "$MERGE_TREE" AGENTS.md '# Missing merged blob'
+rm "$FEED/blob-$(printf '%s' '# Missing merged blob' | git hash-object --stdin).json"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'unavailable merged blob'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'unavailable merged blob claimed complete coverage'
+jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'unavailable merged blob advanced checkpoint'
+pass 'unavailable merged blob leaves explicit incomplete coverage'
+
+new_home
+config "$repo_sources"
+pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 42 2026-10-13T11:00:00Z 1 > "$FEED/detail-42.json"
+merge_history 42 1
+printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-42-1.json"
+tree_content "$PARENT_TREE" AGENTS.md '# Before linear merge'
+tree_content "$MERGE_TREE" AGENTS.md '# After linear merge'
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'single-commit linear merge'
+bundle
+jq -e '.evidence[0].files[0].instruction.before.content == "# Before linear merge" and .evidence[0].files[0].instruction.after.content == "# After linear merge"' "$OUT" >/dev/null || fail 'single-commit linear merge evidence missing'
+new_home
+config "$repo_sources"
+pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 42 2026-10-13T11:00:00Z 1 > "$FEED/detail-42.json"
+merge_history 42 1
+printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-42-1.json"
+jq '.commits = 2' "$FEED/detail-42.json" > "$FEED/detail-history.json"
+mv "$FEED/detail-history.json" "$FEED/detail-42.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'ambiguous multi-commit linear merge'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("ambiguous")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'ambiguous merge history claimed complete coverage'
+jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'ambiguous merge history advanced checkpoint'
+pass 'single-parent history captures one commit and rejects ambiguous multi-commit PRs'
 
 new_home
 config "$repo_sources"

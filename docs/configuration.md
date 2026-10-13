@@ -1452,7 +1452,7 @@ This section owns the version 1 configuration schema:
 
 | Source kind | Required fields and coverage |
 | --- | --- |
-| `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head, changed-file metadata, and bounded before/after content for changed instruction files. |
+| `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head, changed-file metadata, and bounded before/after content from the effective merged commit and its first parent for changed instruction files. Ambiguous merge history leaves coverage incomplete. |
 | `skills` | Absolute `root`; discover instruction content and digest-only asset fingerprints beneath it, including additions and removals. |
 | `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest, enablement settings, version manifests, relevant instruction files, and effective assets. Missing manifest or enablement declarations leave coverage incomplete. |
 | `remote-inventory` | `route` is a registered remote secondmate id and `source` is a local inventory source id in that home's configuration. The parent requests its bounded read-only snapshot through `fm-on.sh`. |
