@@ -1747,8 +1747,8 @@ The updater uses `gh-axi`, `jq`, Git, and the installed no-mistakes read surface
 Pipeline-owned tasks are deferred pending a pipeline-native freshness feature; an unknown owner, unavailable read, or unsupported forge remains visibly incomplete.
 An accepted request records the PR, expected old head, and request time, then leaves the resulting head and its checks to the task delivery path and normal contribution observer.
 The updater never publishes `pr_head`, confirms a resulting SHA, or grants review or merge authority.
-Shared contribution readiness remains invalid until a later observation validates a changed head and the delivery owner records it.
-An uncertain request stays pending without a repeated write; the delivery owner must resolve that evidence.
+After an accepted request, shared contribution readiness remains invalid until the delivery owner records the changed head and a later normal observation validates it.
+An uncertain request stays pending and keeps readiness invalid without a repeated write; the delivery owner must resolve that evidence.
 
 Fixture regression: `bash bin/fm-test-run.sh tests/fm-pr-autoupdate.test.sh`.
 This regression exercises local doubles and does not prove live GitHub asynchronous update behavior.
