@@ -6,7 +6,7 @@
 #   fm-orca-view.sh command --target <session:window> --view-session <name> [--identity-file <path>]
 #   fm-orca-view.sh open --target <session:window> --view-session <name> [--title <text>] [--identity-file <path>]
 #   fm-orca-view.sh window <@N> [--title <text>]
-#   fm-orca-view.sh identity --file <path> [--wait <seconds>]
+#   fm-orca-view.sh identity --file <path>
 #   fm-orca-view.sh close --handle <terminal-handle> [--view-session <name>]
 #   fm-orca-view.sh follow --view-session <name> [--socket <path>]
 #
@@ -55,7 +55,7 @@
 #           close it with `close --handle <handle> --view-session orca-w<N>`.
 #           An unknown or malformed id is exit 1 or 2, and an unreachable
 #           Orca is exit 3 with a note saying why, as for every Orca step.
-# identity  waits up to <seconds> (default 15) for that file, then prints one
+# identity  waits up to 15 seconds for that file, then prints one
 #           `export NAME='value' ...` line carrying the tab's identity -
 #           ORCA_PANE_KEY, ORCA_TAB_ID, ORCA_WORKTREE_ID, the hook endpoint
 #           file path ORCA_AGENT_HOOK_ENDPOINT, ORCA_AGENT_HOOK_ENV, and
@@ -369,19 +369,17 @@ cmd_follow() {
 }
 
 cmd_identity() {
-  local file='' wait=15 deadline line name value out='' seen=' '
+  local file='' deadline line name value out='' seen=' '
   while [ $# -gt 0 ]; do
     case "$1" in
     --file) file=${2:-}; shift 2 || die_usage "--file needs a value" ;;
-    --wait) wait=${2:-}; shift 2 || die_usage "--wait needs a value" ;;
     *) die_usage "unknown argument: $1" ;;
     esac
   done
   [ -n "$file" ] || die_usage "--file is required"
-  case "$wait" in '' | *[!0-9]*) die_usage "--wait must be whole seconds" ;; esac
-  deadline=$(($(date +%s) + wait))
+  deadline=$(($(date +%s) + 15))
   while [ ! -s "$file" ]; do
-    [ "$(date +%s)" -lt "$deadline" ] || note "the Orca view tab did not report its identity within ${wait}s"
+    [ "$(date +%s)" -lt "$deadline" ] || note "the Orca view tab did not report its identity within 15s"
     sleep 0.2
   done
   while IFS= read -r line || [ -n "$line" ]; do
