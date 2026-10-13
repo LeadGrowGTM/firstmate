@@ -181,7 +181,14 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record]
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped]
+#   --only-if-stopped is the automatic sweep guard: under the lifecycle and
+#   metadata locks, accept only a positively dead or missing worker endpoint,
+#   with no open status decision or captain hold. Secondmates, remote records,
+#   live agents, and inconclusive endpoint reads exit 3 without cleanup.
+#   Active or gated pipelines are also retained. Scout copies additionally
+#   pass the ordinary dirty/landed checks instead of the scratch exemption.
+#   It cannot be combined with --force. All ordinary safety gates still apply.
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
 #   when the captain has explicitly said to discard the work.
@@ -392,11 +399,13 @@ fi
 ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
+ONLY_IF_STOPPED=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
+    --only-if-stopped) ONLY_IF_STOPPED=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -404,6 +413,10 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+[ "$ONLY_IF_STOPPED" = 0 ] || [ -z "$FORCE" ] || {
+  echo "error: --only-if-stopped cannot discard work with --force" >&2
+  exit 2
+}
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -540,6 +553,38 @@ fm_backlog_record_present "$META" "task record" "$STATE" || {
 }
 TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
+if [ "$ONLY_IF_STOPPED" = 1 ]; then
+  case "$TEARDOWN_META_KIND" in ship|scout) ;; *) exit 3 ;; esac
+  [ -z "$(fm_meta_get "$META" remote_host)" ] || exit 3
+  if [ -e "$STATE/$ID.status" ] || [ -L "$STATE/$ID.status" ]; then
+    [ -f "$STATE/$ID.status" ] && [ -r "$STATE/$ID.status" ] \
+      && [ ! -L "$STATE/$ID.status" ] || exit 3
+    [ -z "$(status_open_decisions "$STATE/$ID.status" "$TEARDOWN_META_KIND")" ] || exit 3
+  fi
+  SWEEP_HOLD_STATUS=0
+  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+    FM_CONFIG_OVERRIDE="$CONFIG" "$SCRIPT_DIR/fm-captain-hold.sh" open "$ID" >/dev/null \
+    || SWEEP_HOLD_STATUS=$?
+  case "$SWEEP_HOLD_STATUS" in
+    0) exit 3 ;;
+    1) ;;
+    *) echo "REFUSED: cannot read captain hold for $ID; nothing was changed" >&2; exit 1 ;;
+  esac
+  fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
+  case "$(fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET")" in
+    dead|missing) ;;
+    *) exit 3 ;;
+  esac
+  # A stopped agent can still own an executing or gated pipeline in another
+  # checkout. Preserve its records and continuation instead of orphaning it.
+  SWEEP_CREW_STATE=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+    FM_CONFIG_OVERRIDE="$CONFIG" FM_CREW_STATE_NO_FORGE=1 \
+    "$SCRIPT_DIR/fm-crew-state.sh" "$ID") || exit 1
+  case "$SWEEP_CREW_STATE" in
+    'state: working '*|'state: parked '*|'state: paused '*|'state: blocked '*) exit 3 ;;
+    'state: unknown '*'source: run-step'*) exit 3 ;;
+  esac
+fi
 # Retiring a persistent secondmate is main's alone in both postures; the kind
 # is read under the metadata lock (role partition: bin/fm-lease-lib.sh).
 [ "$TEARDOWN_META_KIND" != secondmate ] || fm_lease_forbid_branch "secondmate retirement (fm-teardown)"
@@ -1912,7 +1957,8 @@ validate_worktree_teardown_safety() {
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
-    secondmate|scout) return 0 ;;
+    secondmate) return 0 ;;
+    scout) [ "$ONLY_IF_STOPPED" = 1 ] || return 0 ;;
   esac
 
   if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
