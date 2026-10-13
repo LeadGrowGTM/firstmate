@@ -19,6 +19,8 @@
 # The entire auto-stop window is reserved
 # below $20/month, 60000 account seconds/day, and 43000 box seconds/day ($0.43).
 # Resume uses --no-env and an explicit timer (4 hours paid, 2 hours trial).
+# A receipt binds that no-env resume to the current box instance, so an
+# independently resumed instance cannot authorize a later dispatch.
 # A running box must already have a readable timer within that budget window;
 # this command never extends it. No box creation/deletion/sharing, billing,
 # plan, credit, environment injection, or merge command exists here.

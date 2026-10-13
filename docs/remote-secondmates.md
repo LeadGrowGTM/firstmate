@@ -5,7 +5,7 @@ It is for operators who run a remote second mate and for anyone checking its tra
 
 Remote second mates place a whole persistent Firstmate home on another SSH-reachable host.
 The primary still owns routing and supervision, while the remote home owns its own projects, backlog, and workers.
-Firstmate does not support placing an individual worker remotely or failing a remote route over to a local replacement.
+Ordinary remote routes do not place individual workers remotely or fail over to a local replacement; [Boat overflow](#code-only-boat-overflow) sends selected code-only workers to a dedicated remote home.
 
 ## Find a topic
 
@@ -485,7 +485,7 @@ A resume moves the sandbox to a new machine, so its SSH host key changes every t
 Until the alias is refreshed, a call to the host fails as an unreachable or refused SSH connection, which Firstmate treats like any other [unavailable transport](#ssh-exit-255-and-unavailable-homes): the remote home is unknown, and nothing is replaced locally.
 A stopped sandbox reads the same way.
 
-Run the helper on the primary after every `boat resume` and before any other Firstmate call to that host:
+For an ordinary remote second mate, run the helper on the primary after every `boat resume` and before any other Firstmate call to that host:
 
 ```sh
 boat resume <sandbox-id>
@@ -566,6 +566,7 @@ The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
 The approved box and SSH alias are pinned by the sender; `--prepare --code-only` performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
+Use the sender for each overflow resume: an independent `boat resume` does not establish the current instance's `--no-env` receipt, so later dispatch is refused.
 
 Send one JSON task envelope whose `intent` and `spec` contain only code-only task prose, with the concrete `harness`, `model`, and `effort` already resolved under the ordinary dispatch and quota rules:
 
@@ -575,7 +576,7 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < <request.json>
 
 The box generates its own normal worker brief and operational paths, allocates its own worktree, and calls the existing spawn command with merge authority off.
 The box-wide three-worker cap conservatively reserves retained worker records until ordinary teardown, including completed agents whose panes may still exist.
-`local-only` and unallowlisted projects are refused.
+Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
@@ -593,7 +594,8 @@ After the last Boat task has landed or its scout report has been accepted, tear 
 FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
 ```
 
-The command uses ordinary remote teardown and its landed-work checks. It stops the approved box when no Boat task records remain, meeting R2 at the last teardown; the existing four-hour auto-stop timer is the backstop if teardown cannot complete.
+The command uses ordinary remote teardown and its landed-work checks.
+It stops the approved box when no Boat task records remain, meeting R2 at the last teardown; the existing four-hour auto-stop timer is the backstop if teardown cannot complete.
 The sender refuses on unreadable spend state or a cap violation, stops a box it resumed when a later step fails, and preserves an uncertain remote launch for same-task reconciliation.
 It adds no automatic worker retry, merge path, or supervision loop.
 
@@ -788,7 +790,7 @@ Exit 0 means the record durably exists.
 
 ### Retries and safe resends
 
-Every remote transport attempt is bounded by `FM_SEND_REMOTE_BUDGET`.
+Every `fm-send.sh` routed-message transport attempt is bounded by `FM_SEND_REMOTE_BUDGET`; [Boat worker launch](#code-only-boat-overflow) uses a separate recovery contract.
 The `fm-send.sh` header owns the setting's default and validation contract.
 
 | Outcome | Retry behavior |
@@ -1032,6 +1034,7 @@ bin/fm-test-run.sh tests/fm-remote-job-launchagent.test.sh
 bin/fm-test-run.sh tests/fm-remote-transport-lanes.test.sh
 bin/fm-test-run.sh tests/fm-remote-doctor.test.sh
 bin/fm-test-run.sh tests/fm-boat-alias-refresh.test.sh
+bin/fm-test-run.sh tests/fm-boat-send.test.sh
 bin/fm-test-run.sh tests/fm-boat-claude-auto-compact.test.sh
 bin/fm-test-run.sh tests/fm-remote-herdr-guard.test.sh
 bin/fm-test-run.sh tests/fm-project-origin.test.sh
