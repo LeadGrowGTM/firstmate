@@ -1,0 +1,6 @@
+Attached viewer session: orca-view
+Untargeted tmux query from a client: orca-view
+Firstmate container selected from spawner pane: base
+Created task window id: @2
+Task window in base: fm-alexander-media
+Recorded target: base:fm-alexander-media
