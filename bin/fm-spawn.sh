@@ -279,15 +279,11 @@
 #   treehouse offers it from a pool keyed only by directory name and origin.
 #   When `treehouse get` hands the pane another clone's copy, the launch leaves
 #   that subshell, which returns the copy, and leases from this home's own pool
-#   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, outside the spawning
-#   home and project). The pool treehouse will use, after the clone's root
-#   setting and after links, is refused before the lease when it resolves
-#   inside the spawning home or the project clone, and no other location is
-#   chosen. A lease
-#   that is still another clone is returned and the launch
-#   stops. Relaunch resumes in the recorded worktree whichever clone it belongs
-#   to. Orca and secondmate launches do not use this pool.
-#   That placement is proven only at launch. Every ship or scout pane therefore
+#   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, under the user
+#   state directory). A lease that is still another clone is returned and the
+#   launch stops. Relaunch resumes in the recorded worktree whichever clone it
+#   belongs to. Orca and secondmate launches do not use this pool.
+#   That worktree isolation is proven only at launch. Every ship or scout pane therefore
 #   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
 #   the same channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
 #   behavior suite from the repository primary checkout while that marker is
@@ -4541,9 +4537,6 @@ spawn_wait_left_path() {  # <path>
 spawn_lease_clone_worktree() {
   local errfile leased rc=0 bound=${FM_SPAWN_TREEHOUSE_LEASE_SECS:-600}
   case "$bound" in ''|*[!0-9]*|0*) bound=600 ;; esac
-  # Before the redirect below, so a refusal stays a plain reason rather than
-  # a line labeled as treehouse's own output. Nothing is created on refusal.
-  fm_treehouse_home_pool "$FM_HOME" "$PROJ_ABS" >/dev/null || return 1
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
     {
@@ -4608,7 +4601,6 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  fm_treehouse_home_pool "$FM_HOME" "$PROJ_ABS" >/dev/null || exit 1
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
   if ! spawn_wait_isolated_worktree; then
     echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2

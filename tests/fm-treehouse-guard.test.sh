@@ -363,66 +363,51 @@ SH
     "$(calls "$world")" "a home pool holding no pool of this clone was still pruned"
 }
 
-test_sweep_sizes_a_configured_root_once_and_refuses_a_home_root() {
-  local world home project configured nested unsafe out rc=0
-  world=$(make_world configured-root)
+test_sweep_sizes_a_present_per_home_pool_once() {
+  local world home pool out
+  world=$(make_world per-home-size)
   home=$(make_home "$world" home alpha)
-  project=$home/projects/alpha
-  configured=$world/configured
-  unsafe=$home/state/unsafe
-  mkdir -p "$configured/.treehouse/alpha-0a1b2c"
-  printf 'root = "%s"\n' "$configured" > "$project/treehouse.toml"
-  printf '%s\n' "$configured/.treehouse" > "$world/fake/configured-root"
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$pool/.treehouse/alpha-0a1b2c"
+  printf '%s\n' "$pool/.treehouse" > "$world/fake/size-pool"
   cat > "$world/fakebin/du" <<'SH'
 #!/usr/bin/env bash
 dir=${FAKE_TREEHOUSE_DIR:?}
 target=${@: -1}
 printf '%s\n' "$target" >> "$dir/du-log"
-configured=$(cat "$dir/configured-root")
-case "$configured" in
+pool=$(cat "$dir/size-pool")
+case "$pool" in
   "$target"|"$target"/*) printf '%s\t%s\n' "$((6 * 1048576))" "$target" ;;
   *) printf '0\t%s\n' "$target" ;;
 esac
 SH
   chmod +x "$world/fakebin/du"
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "configured-root sweep failed: $out"
-  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $configured/.treehouse (limit 5 GB)" "$out" \
-    "the configured pool's size was not reported once"
-  assert_equals "$(printf '%s\t%s' "$project" 'prune --yes')" \
-    "$(calls "$world")" "the configured pool was pruned more than once"
-  assert_equals 1 "$(grep -Fxc -- "$configured/.treehouse" "$world/fake/du-log")" \
-    "the configured pool was measured more than once"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "per-home pool sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $pool/.treehouse (limit 5 GB)" "$out" \
+    "the per-home pool's size was not reported once"
 
-  nested=$world/user/.treehouse/custom
-  mkdir -p "$nested/.treehouse/alpha-0a1b2c"
-  printf 'root = "%s"\n' "$nested" > "$project/treehouse.toml"
-  printf '%s\n' "$nested/.treehouse" > "$world/fake/configured-root"
-  : > "$world/fake/log"
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/user/.treehouse/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$pool/.treehouse/alpha-0a1b2c"
+  printf '%s\n' "$pool/.treehouse" > "$world/fake/size-pool"
   : > "$world/fake/du-log"
-  out=$(guard "$world" "$home" sweep 2>&1) || fail "nested-root sweep failed: $out"
+  out=$(XDG_STATE_HOME="$world/user/.treehouse/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "nested per-home pool sweep failed: $out"
   assert_equals "treehouse-guard: worktree copies use 6.0 GB under $world/user/.treehouse (limit 5 GB)" "$out" \
-    "the nested pool's bytes were reported twice"
-  assert_equals "$(printf '%s\t%s' "$project" 'prune --yes')" \
-    "$(calls "$world")" "the nested configured pool was pruned more than once"
-  assert_equals 1 "$(grep -Fxc -- "$world/user/.treehouse" "$world/fake/du-log")" \
-    "the parent pool was not measured once"
-  assert_equals 0 "$(grep -Fxc -- "$nested/.treehouse" "$world/fake/du-log")" \
-    "the nested pool was measured again under its parent"
-
-  printf 'root = "%s"\n' "$unsafe" > "$project/treehouse.toml"
-  rc=0
-  out=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
-    XDG_STATE_HOME="$world/xdg-state" bash -c \
-    'set -u; . "$1"; fm_treehouse_home_pool "$2" "$3"' \
-    _ "$ROOT/bin/fm-wake-lib.sh" "$home" "$project" 2>&1) || rc=$?
-  expect_code 1 "$rc" "a configured root inside the home was accepted"
-  assert_contains "$out" "inside Firstmate home" "the unsafe root was not refused"
-  [ ! -e "$unsafe/.treehouse" ] || fail "the unsafe root created a pool inside the home"
+    "the nested per-home pool was reported twice"
+  assert_equals 0 "$(grep -Fxc -- "$pool/.treehouse" "$world/fake/du-log")" \
+    "the nested per-home pool was measured again under its parent"
 }
 
 test_prune_runs_only_the_safe_prune_from_the_project
 test_prune_also_prunes_a_present_per_home_pool
-test_sweep_sizes_a_configured_root_once_and_refuses_a_home_root
+test_sweep_sizes_a_present_per_home_pool_once
 test_prune_refuses_a_directory_that_is_not_a_clone_root
 test_prune_failure_warns_and_exits_nonzero
 test_prune_bound_is_reported_as_a_prune_that_did_not_finish

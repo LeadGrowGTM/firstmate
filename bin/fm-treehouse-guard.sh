@@ -39,7 +39,7 @@
 # directory name plus origin; a launch that is handed another clone's copy
 # from it leases from this home's own pool instead.
 # Git still refuses to remove a copy another clone owns.  The sweep then
-# measures the default, configured, and per-home pool roots, and
+# measures the operator's default and per-home folder roots, and
 # reports when one holds more than 5 GB.  One finding line is written to
 # state/.treehouse-guard.result and printed.  A missed prune or an unmeasured
 # size is a finding too, never read as "nothing to report".  docs/configuration.md owns the max_trees guidance.
@@ -163,21 +163,16 @@ prune_project() {  # <project-dir> <caller-holds-lock:0|1>
   return "$rc"
 }
 
-# Prune this home's own pool when it differs from the default pool and a slot
-# for this clone exists there. Treehouse names a pool after the clone's directory plus six
-# hex digits, so the directories already present say whether there is one.
+# Prune this home's own pool when a slot for this clone exists there.
 # Returns 0 when there is nothing to prune or the prune ran. On failure
 # PRUNE_HOME_NOTE says why.
 prune_home_pool() {  # <project-dir>
-  local project=$1 root effective default name pool found=0 out prc=0
+  local project=$1 root name pool found=0 out prc=0
   PRUNE_HOME_NOTE=
-  root=$(fm_treehouse_home_pool "$FM_HOME" "$project") || return 0
-  effective=$(_fm_treehouse_effective_pool "$root" "$project") || return 0
-  default=$(_fm_treehouse_effective_pool "${HOME:-}" "$project") || return 0
-  [ "$effective" != "$default" ] || return 0
+  root=$(fm_treehouse_home_pool "$FM_HOME") || return 0
   name=$(CDPATH='' cd -- "$project" 2>/dev/null && pwd -P) || return 0
   name=${name##*/}
-  for pool in "$effective/$name"-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]; do
+  for pool in "$root/.treehouse/$name"-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]; do
     if [ -d "$pool" ] && [ ! -L "$pool" ]; then
       found=1
     fi
@@ -248,41 +243,19 @@ measure_treehouse_root() {  # <root>
 }
 
 sweep_size() {
-  local project pool root prior roots=() measured=()
+  local pool default=
   if [ -n "${HOME:-}" ]; then
-    root=$(_fm_treehouse_resolve_dir "$HOME/.treehouse") || root=
-    [ -z "$root" ] || roots+=("$root")
+    default=$HOME/.treehouse
+    measure_treehouse_root "$default"
   fi
   pool=$(fm_treehouse_home_pool "$FM_HOME" 2>/dev/null || true)
-  if [ -n "$pool" ]; then
-    root=$(_fm_treehouse_effective_pool "$pool") || root=
-    [ -z "$root" ] || roots+=("$root")
+  [ -n "$pool" ] || return 0
+  if [ -n "$default" ]; then
+    case "$pool/.treehouse/" in
+      "$default/"*) return 0 ;;
+    esac
   fi
-  if [ -d "$PROJECTS" ]; then
-    for project in "$PROJECTS"/*/; do
-      project=${project%/}
-      project_is_clone_root "$project" || continue
-      pool=$(fm_treehouse_home_pool "$FM_HOME" "$project" 2>/dev/null) || continue
-      root=$(_fm_treehouse_effective_pool "$pool" "$project") || continue
-      roots+=("$root")
-      if [ -n "${HOME:-}" ]; then
-        root=$(_fm_treehouse_effective_pool "$HOME" "$project") || continue
-        roots+=("$root")
-      fi
-    done
-  fi
-  for root in "${roots[@]}"; do
-    for prior in "${roots[@]}"; do
-      if [ "$root" != "$prior" ] && _fm_treehouse_path_inside "$root" "$prior"; then
-        continue 2
-      fi
-    done
-    for prior in "${measured[@]}"; do
-      [ "$root" != "$prior" ] || continue 2
-    done
-    measured+=("$root")
-    measure_treehouse_root "$root"
-  done
+  measure_treehouse_root "$pool/.treehouse"
 }
 
 write_atomically() {  # <tmp> <destination>
