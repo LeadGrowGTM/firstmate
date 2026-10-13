@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fm-schedule-check.sh - opt-in, enqueue-only recurring work.
-# Usage: fm-schedule-check.sh [check|arm|disarm|pending]
+# Usage: fm-schedule-check.sh [check|arm|disarm]
 #
 # config/schedules.json is owned by docs/configuration.md. Nothing is armed
 # automatically. arm installs a private authenticated watcher shim; disarm
@@ -17,7 +17,6 @@
 # detected means frozen intent; enqueued means a verified ordinary backlog row;
 # dispatched and completed are observed from that same row's In flight and Done
 # states. Filing a task or publishing a wake never implies successful completion.
-# pending prints unfinished records as JSON, marking disabled/removed jobs off.
 # A due check files/reuses the deterministic task through fm-tasks-axi.sh, with
 # a frozen request brief and ownership digest in its body. Ordinary queued-task
 # intake owns routing, capacity, launch reconciliation and delivery authority.
@@ -56,7 +55,7 @@ fail() { printf 'fm-schedule-check: %s\n' "$*" >&2; exit 1; }
 
 case "${1:-check}" in
   -h|--help|help) usage; exit 0 ;;
-  check|arm|disarm|pending|--locked) ;;
+  check|arm|disarm|--locked) ;;
   *) usage >&2; exit 2 ;;
 esac
 # A missing config is OFF, including a fresh checkout without operational state.
@@ -152,6 +151,13 @@ def freeze(job):
         raise ValueError("frozen brief exceeds size bound")
     return content
 
+def slot_end(key, cadence):
+    slot = key.rsplit(":", 1)[1]
+    if cadence["kind"] == "interval":
+        return (int(slot) + 1) * cadence["seconds"]
+    next_day = dt.date.fromisoformat(slot) + dt.timedelta(days=1)
+    return int(dt.datetime.combine(next_day, dt.time(), ZoneInfo(cadence["timezone"])).timestamp())
+
 def body(record):
     return ("schedule-occurrence: " + record["key"] + "\n"
             + "brief: " + record["brief_path"] + "\n"
@@ -226,9 +232,21 @@ try:
             raise ValueError("invalid occurrence intent snapshot")
         if record.get("brief_path") != os.path.join(root, record["task_id"], "schedule-brief.md") or record.get("brief_sha256") != hashlib.sha256(record.get("brief_text", "").encode()).hexdigest():
             raise ValueError("invalid frozen brief identity")
+        completed_slots = record.get("completed_slots", {})
+        if not isinstance(completed_slots, dict) or any(
+            not isinstance(key, str) or not key.startswith(identity + ":") or type(end) is not int
+            for key, end in completed_slots.items()
+        ):
+            raise ValueError("invalid completed occurrence slots")
     if op == "poll":
         items = jobs()  # Validate the whole configuration before any publication.
         changed = False
+        for record in data["jobs"].values():
+            slots = record.get("completed_slots", {})
+            active = {key: end for key, end in slots.items() if end > now}
+            if active != slots:
+                record["completed_slots"] = active
+                changed = True
         pending = []
         for job in items:
             if not job["enabled"]:
@@ -249,6 +267,8 @@ try:
                 key = job["id"] + ":interval:" + slot
             if old and key == old["key"]:
                 continue
+            if old and key in old.get("completed_slots", {}):
+                continue
             # A backwards wall clock never resurrects an earlier successful slot.
             if old and old["intent"]["cadence"] == cadence:
                 old_slot = old["key"].rsplit(":", 1)[1]
@@ -256,11 +276,17 @@ try:
                     continue
             task = "sched-" + hashlib.sha256(key.encode()).hexdigest()[:24]
             brief = freeze(job)
+            completed_slots = dict(old.get("completed_slots", {})) if old else {}
+            if old and old["state"] == "completed":
+                end = slot_end(old["key"], old["intent"]["cadence"])
+                if end > now:
+                    completed_slots[old["key"]] = end
             data["jobs"][job["id"]] = {
                 "key": key, "task_id": task, "brief_text": brief,
                 "brief_sha256": hashlib.sha256(brief.encode()).hexdigest(),
                 "brief_path": os.path.join(root, task, "schedule-brief.md"),
-                "state": "detected", "detected_at": now, "intent": job}
+                "state": "detected", "detected_at": now, "intent": job,
+                "completed_slots": completed_slots}
             changed = True
             pending.append(key)
         selected = []
@@ -273,10 +299,6 @@ try:
             write(data)
         for key in selected:
             print(key)
-    elif op == "pending":
-        enabled = {job["id"] for job in jobs() if job["enabled"]}
-        print(json.dumps([dict(r, enabled=identity in enabled) for identity, r in data["jobs"].items()
-                          if r["state"] != "completed"], sort_keys=True))
     elif op == "validate":
         jobs()
     elif op in ("prepare", "observe", "attempt"):
@@ -320,7 +342,8 @@ try:
     else:
         raise ValueError("invalid operation")
 except (ValueError, TypeError, KeyError, OSError, StopIteration, subprocess.CalledProcessError) as error:
-    print("fm-schedule-check: " + str(error), file=sys.stderr)
+    detail = (error.stderr or "").strip() if isinstance(error, subprocess.CalledProcessError) else ""
+    print("fm-schedule-check: " + (detail or str(error)), file=sys.stderr)
     raise SystemExit(1)
 PY
 }
@@ -363,7 +386,6 @@ locked() {
         [ "$rc" -eq 0 ] || return 1
       done <<< "$keys"
       ;;
-    pending) engine pending ;;
     arm)
       engine validate || return 1
       fm_pr_regular_destination_on_device_or_absent "$CHECK_SHIM" "$DEVICE" || return 1

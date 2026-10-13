@@ -105,11 +105,12 @@ config
 bash "$CHECK" check
 jq '.schedules[0].enabled=false' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/off.json"
 mv "$FM_HOME/config/off.json" "$FM_HOME/config/schedules.json"
-[ "$(bash "$CHECK" pending | jq -r '.[0].enabled')" = false ] || fail 'disabled pending intent presented as enabled'
+bash "$CHECK" check
 [ "$(field state)" = enqueued ] || fail 'disable discarded pending intent'
 assert_contains "$(tasks show "$(field task_id)" --full)" 'state: queued' 'disable deleted already filed backlog work'
 rm "$FM_HOME/config/schedules.json"
-[ "$(bash "$CHECK" pending | jq -r '.[0].enabled')" = false ] || fail 'removed schedule granted intake'
+bash "$CHECK" check
+[ "$(field state)" = enqueued ] || fail 'removed schedule discarded pending intent'
 pass 'disable/remove retains filed work under ordinary task lifecycle'
 
 world concurrent
@@ -155,6 +156,34 @@ bash "$CHECK" check
 [ "$(queue_count)" -eq 0 ] || fail 'backward clock resurrected completed slot'
 pass 'interval gates and backward clock preserve successful receipt'
 
+world interval-edit
+config interval
+export FM_SCHEDULE_NOW=10800
+bash "$CHECK" check
+ORIGINAL=$(field task_id)
+receipt dispatched
+receipt completed
+tasks prune --keep 0 >/dev/null
+jq '.schedules[0].cadence.seconds=3600' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+bash "$CHECK" check
+[ "$(field key)" = freshness:interval:3 ] || fail 'one-hour edit did not create its current slot'
+receipt dispatched
+receipt completed
+tasks prune --keep 0 >/dev/null
+jq '.schedules[0].cadence.seconds=7200' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+: > "$FM_HOME/state/.wake-queue"
+bash "$CHECK" check
+[ "$(queue_count)" -eq 0 ] || fail 'two-hour restoration recreated completed slot'
+[ "$(field key)" = freshness:interval:3 ] || fail 'two-hour restoration replaced completed receipt'
+tasks show "$ORIGINAL" --full >/dev/null 2>&1 && fail 'completed archived slot was recreated'
+export FM_SCHEDULE_NOW=14400
+bash "$CHECK" check
+[ "$(field key)" = freshness:interval:2 ] || fail 'new two-hour slot did not fire'
+[ "$(jq '.jobs.freshness.completed_slots | length' "$FM_HOME/state/.schedule-occurrences.json")" -eq 0 ] || fail 'expired completed slots were retained'
+pass 'cadence edits retain completed active slots and prune expired identities'
+
 world edited-gate
 config
 bash "$CHECK" check
@@ -166,6 +195,31 @@ mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
 bash "$CHECK" check
 [ "$(queue_count)" -eq 0 ] || fail 'edited daily gate repeated completed identity'
 pass 'daily gate edits cannot repeat a completed local date'
+
+world timezone-edit
+config
+export FM_SCHEDULE_NOW=1791943200 # 2026-10-13 22:00 Toronto, 2026-10-14 11:00 Tokyo
+bash "$CHECK" check
+[ "$(field key)" = freshness:daily:2026-10-13 ] || fail 'Toronto fixture did not enter its expected date'
+ORIGINAL=$(field task_id)
+receipt dispatched
+receipt completed
+tasks prune --keep 0 >/dev/null
+jq '.schedules[0].cadence.timezone="Asia/Tokyo"' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+bash "$CHECK" check
+[ "$(field key)" = freshness:daily:2026-10-14 ] || fail 'timezone edit did not create Tokyo date'
+receipt dispatched
+receipt completed
+tasks prune --keep 0 >/dev/null
+jq '.schedules[0].cadence.timezone="America/Toronto"' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+: > "$FM_HOME/state/.wake-queue"
+bash "$CHECK" check
+[ "$(queue_count)" -eq 0 ] || fail 'timezone restoration recreated completed local date'
+[ "$(field key)" = freshness:daily:2026-10-14 ] || fail 'timezone restoration replaced completed receipt'
+tasks show "$ORIGINAL" --full >/dev/null 2>&1 && fail 'completed archived local date was recreated'
+pass 'timezone edits retain completed local-date identity while its slot is active'
 
 world dst
 config
@@ -254,6 +308,29 @@ BRIEF=$(cat "$FM_HOME/data/$(field task_id)/schedule-brief.md")
 assert_contains "$BRIEF" 'Name: observe' 'task-type owner render was not frozen'
 case "$BRIEF" in *fixture-model*|*type-profile:*) fail 'task-type worker subscription leaked into schedule request' ;; esac
 pass 'task-type request freezes owner section and leaves worker profile to current intake'
+
+world typed-missing
+config
+cat > "$FM_HOME/config/task-types.json" <<'JSON'
+{"types":[{"name":"observe","use":"Inspect freshness","hand_back":"A report","touch":"Evidence only","projects":["firstmate"]}]}
+JSON
+jq '.schedules[0] |= (del(.brief) + {task_type:"missing"})' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/typed.json"
+mv "$FM_HOME/config/typed.json" "$FM_HOME/config/schedules.json"
+OUT=$(bash "$CHECK" check 2>&1) && fail 'unknown task type was accepted'
+assert_contains "$OUT" "unknown task type 'missing'" 'unknown task type lacked exact diagnostic'
+[ "$(queue_count)" -eq 0 ] || fail 'unknown task type published work'
+
+world typed-project
+config
+cat > "$FM_HOME/config/task-types.json" <<'JSON'
+{"types":[{"name":"observe","use":"Inspect freshness","hand_back":"A report","touch":"Evidence only","projects":["other"]}]}
+JSON
+jq '.schedules[0] |= (del(.brief) + {task_type:"observe"})' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/typed.json"
+mv "$FM_HOME/config/typed.json" "$FM_HOME/config/schedules.json"
+OUT=$(bash "$CHECK" check 2>&1) && fail 'excluded project task type was accepted'
+assert_contains "$OUT" "task type 'observe' does not apply to project 'firstmate'" 'excluded project lacked exact diagnostic'
+[ "$(queue_count)" -eq 0 ] || fail 'excluded project published work'
+pass 'task-type renderer failures name the rejected type and project'
 
 world timeout
 config
