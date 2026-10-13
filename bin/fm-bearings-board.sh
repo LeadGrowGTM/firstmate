@@ -47,13 +47,11 @@
 # live owner also gets a replacement before build returns, because
 # `already-armed` is not the same fact as `listening`.
 #
-# CAPTAIN'S CALL HYGIENE. A decision card is dropped when its work item, PR, or
-# structured artifact/version subject appears among the payload's own landed
-# rows, or when `bin/fm-captain-hold.sh open` reports the task is no longer an
-# open captain call. A newer published version also supersedes a version card.
-# A task whose state cannot be established is kept, because a call wrongly
-# hidden is worse than a card wrongly shown. Cleanup is therefore a normal
-# rebuild effect rather than a committed migration or direct state mutation.
+# CAPTAIN'S CALL HYGIENE. An identified stale card leaves the active calls and
+# enters stale_candidates without mutating its task. Landed task matching uses
+# home plus id; PR and structured artifact/version subjects also match landed
+# evidence. Only main-home decision tasks are checked through
+# `bin/fm-captain-hold.sh open`; uncertain state keeps the call visible.
 #
 # THE RECONCILE CHOICE. Every decision card carries the standard `reconcile`
 # option, injected here so the guarantee does not depend on the composer's
@@ -305,7 +303,7 @@ decision_card_is_stale() {  # <task-id> <landed-0-or-1>
   return 1
 }
 
-# Drop every stale decision card, then give every surviving decision card the
+# Move every stale card into candidates, then give every surviving decision card the
 # standard reconcile choice. Injecting it here is what makes "every decision
 # card offers reconcile" a property of the board rather than of the composer's
 # memory; the validator prevents duplicate decision options.

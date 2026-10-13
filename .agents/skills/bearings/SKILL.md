@@ -93,11 +93,11 @@ For a contribution wake or linked-issue filing, go directly to Contribution foll
 
 ## Lavish board mode
 
-`/bearings lavish` adds one deliverable beside the unchanged chat digest: the interactive fleet board, a myfirstmate-styled Lavish page where the captain answers Captain's Call items directly instead of replying in chat.
+`/bearings lavish` adds one deliverable beside the unchanged chat digest: the interactive fleet board, a myfirstmate-styled Lavish page where the captain can answer main-home Captain's Call items directly instead of replying in chat.
 `bin/fm-bearings-board.sh` owns every board mechanic - the stable board path, fm-bearings-board.v1 payload validation, template injection, live Lavish session verification and ended-session reopening, the any-origin answer binding, and listener registration - so the per-invocation work is composing the payload and running its `build`.
 
 For the decisions layout, gather `bin/fm-bearings-snapshot.sh --json --fields decisions` alongside the compact snapshot.
-Its `decision_layout` inventories structured captain-held tasks across the registered homes, including deferred calls, with full hold reasons, owner-qualified identities, priority order, origin links, and stale-candidate reasons.
+Its `decision_layout` inventories structured captain-held tasks across the registered homes, including deferred calls, with full hold reasons, owner-qualified identities, priority order, and origin links.
 Keep every inventory row in the board, with exactly one card per owner/task identity; use `gate` to show a non-live bucket or deferral rather than implying immediate action.
 A deferred main-home card stays answerable before its date arrives; its `gate` changes the displayed timing and count, not the Queue answer control.
 Use the known hold reason and its linked origin report sections to explain that existing call's options, consequences, and recommendation; never discover additional calls by reading prose.
@@ -115,9 +115,9 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 
 - A Captain's Call decision key is the captain-held TASK ID from `decisions_open` (legacy `<origin>-decision-<key>` rows are already task ids); a merge card's key is `merge.<task-id>`; the Charted Next dispatch picker's key is `dispatch.charted`.
 - Before carding a hold, check its structured SUBJECT against current landed evidence and mark a stale candidate when it has landed.
-  `build` drops a card whose task or PR appears in the payload's own landed rows, and one whose task is no longer an open captain call.
+  `build` moves a card into stale candidates when its owner-qualified task or PR appears in the payload's own landed rows, and checks main-home decision tasks against the current captain-call state.
   When a hold waits on one specific PR, put that PR in the card's `pr_url`.
-  When it concerns a published version, put the artifact and numeric three-part version in the card's structured `subject`; landed rows for releases carry the same identity, and a matching or newer version drops the card.
+  When it concerns a published version, put the artifact and numeric three-part version in the card's structured `subject`; landed rows for releases carry the same identity, and a matching or newer version moves the card to stale candidates.
   Identity matching is structured only, so verify any subject without one of these identities against current reality before carding it.
 - Never author a `reconcile` option on any card. `build` gives every decision card the standard reconcile choice itself, and the payload validator reserves that value across all card types; recommendations must name an authored option.
 - Compose exactly one decision card per captain-held owner/task identity.
@@ -150,7 +150,7 @@ A current structured Reconcile selection closes nothing: the versioned board con
 The rollout-compatible old context still feeds ordinary non-reconcile answers, but its bare or separator-annotated reconcile values and every structurally uncertain choice feed neither intake and remain announced for deliberate handling.
 Verify the call's latest state, then retire the request through `bin/fm-captain-hold.sh reconcile close <id> --evidence-file <path>` when it turns out to be moot, or `reconcile note <id> --note-file <path>` when it is genuinely still open.
 Both outcomes refuse without that pending board-created request, and `bin/fm-captain-hold.sh reconcile list` names every request still outstanding.
-A remote-secondmate card whose task is absent from the main backlog remains on the board unchanged, but its reconcile request is refused in the main home until the separately tracked owner-aware routing follow-up can query and mutate the authoritative secondmate home; handle the announced capture without claiming that a request or reconciliation succeeded.
+Foreign-home cards cannot submit a board answer or Reconcile selection; take the captain's stated choice through firstmate in that owner's home.
 `captain-hold-lifecycle` owns why a reconcile may never be recorded as the captain's answer.
 Route the non-decision keys yourself:
 
