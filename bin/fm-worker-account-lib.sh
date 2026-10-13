@@ -264,7 +264,12 @@ fm_worker_account_select() {
       ;;
     esac
   fi
-  fm_worker_account_check "$harness" "$declared" "$root" "$executable" "$provider" || return 1
+  if ! fm_worker_account_check "$harness" "$declared" "$root" "$executable" "$provider"; then
+    # Internal typed spawn/control evidence: parsing/provider guards above keep
+    # their ordinary refusal; only the selected account check is unavailable.
+    [ "${FM_WORKER_ACCOUNT_TYPED:-0}" != 1 ] || return 10
+    return 1
+  fi
   printf '%s\t%s\t%s\n' "$declared" "$root" "$provider"
 }
 

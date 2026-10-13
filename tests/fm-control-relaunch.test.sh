@@ -2723,6 +2723,32 @@ SH
   pass "fm-control exit removes the dialog file before it releases the control lock"
 }
 
+
+test_scheduled_control_receipts() {
+  local dir out rc receipt
+  dir=$(new_case receipt-live rl-receipt-live)
+  add_ship_task "$dir" rl-receipt-live claude
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_control "$dir" rl-receipt-live relaunch --note "checkpoint for fallback"); rc=$?
+  expect_code 0 "$rc" "guarded continuation should confirm a live receipt: $out"
+  jq -e --arg gen "$(meta_field "$dir" rl-receipt-live spawn_gen)" \
+    '.outcome == "live-worker" and .exit_code == 0 and .spawn_gen == $gen and
+     .task == "rl-receipt-live" and .backend == "tmux" and .harness == "claude"' "$receipt" >/dev/null \
+    || fail "live receipt must bind the confirmed replacement generation"
+
+  dir=$(new_case receipt-late rl-receipt-late)
+  add_ship_task "$dir" rl-receipt-late claude
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START=1 \
+    run_control "$dir" rl-receipt-late relaunch --note "checkpoint preserved after transport failure"); rc=$?
+  expect_code 1 "$rc" "late continuation transport failure should fail: $out"
+  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == true' "$receipt" >/dev/null \
+    || fail "a started replacement cannot grant prepublication retry authority"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "late-failure fixture must have started the replacement"
+  pass "control receipts bind live confirmation and preserve late-launch uncertainty"
+}
+
+test_scheduled_control_receipts
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint

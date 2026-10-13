@@ -104,6 +104,10 @@
 #              state; it never leaves a half-transitioned task claiming to be
 #              running.
 #
+# Opt-in FM_SPAWN_OUTCOME_FILE uses bin/fm-launch-outcome-lib.sh receipts for
+# relaunch; live-worker is emitted only after its existing alive postcondition.
+# A failure once stopping begins stays uncertain even after metadata rollback.
+#
 # Teardown and discard are NOT verbs here and never will be. `exit` stops an
 # agent and preserves everything else; removing a worktree, killing an
 # endpoint, or discarding work stays with bin/fm-teardown.sh, which owns the
@@ -203,6 +207,12 @@ EXIT_WAIT=${FM_CONTROL_EXIT_WAIT:-30}
 LAUNCH_WAIT=${FM_CONTROL_LAUNCH_WAIT:-90}
 EXIT_RETRIES=${FM_CONTROL_EXIT_RETRIES:-3}
 
+# The same opt-in receipt as spawn also binds a guarded continuation.
+# shellcheck source=bin/fm-launch-outcome-lib.sh
+. "$SCRIPT_DIR/fm-launch-outcome-lib.sh"
+fm_launch_outcome_init "${1:-}" || { echo "error: unsafe or existing control outcome path" >&2; exit 1; }
+trap 'fm_launch_outcome_write "$?"' EXIT
+
 die() {  # <message>
   echo "error: $1" >&2
   exit 1
@@ -236,6 +246,7 @@ control_cleanup() {
   if declare -F fm_lease_guard_release >/dev/null 2>&1; then
     fm_lease_guard_release || true
   fi
+  fm_launch_outcome_write "$status" || status=1
   return "$status"
 }
 
@@ -312,6 +323,9 @@ if [ -n "$control_want_value" ]; then
   die "--$control_want_value requires a value"
 fi
 
+if [ -n "$FM_LAUNCH_OUTCOME_FILE" ] && [ "$VERB" != relaunch ]; then
+  die "scheduled worker receipts apply only to guarded relaunch"
+fi
 if [ "$VERB" != relaunch ]; then
   [ "$HARNESS_SET" = 0 ] && [ "$MODEL_SET" = 0 ] && [ "$EFFORT_SET" = 0 ] && [ "$NOTE_SET" = 0 ] \
     || die "--harness, --model, --effort, and --note apply to 'relaunch' only"
@@ -993,8 +1007,23 @@ resolve_relaunch_profile() {
   # signed out must refuse here, while nothing has changed yet.
   local account_model=$TARGET_MODEL
   [ "$account_model" != default ] || account_model=
-  fm_worker_account_select "$TARGET_HARNESS" "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" \
-    "$account_model" "$TARGET_HARNESS" >/dev/null || return 1
+  local account_status
+  if FM_WORKER_ACCOUNT_TYPED=1 fm_worker_account_select "$TARGET_HARNESS" "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" \
+    "$account_model" "$TARGET_HARNESS" >/dev/null; then
+    :
+  else
+    account_status=$?
+    if [ "$account_status" = 10 ]; then
+      FM_LAUNCH_OUTCOME=worker-unavailable
+      FM_LAUNCH_OUTCOME_REASON=selected-account-check-refused-before-stop
+      FM_OUTCOME_HARNESS=$TARGET_HARNESS
+      MODEL=$TARGET_MODEL
+      EFFORT=$TARGET_EFFORT
+      MODE=$(fm_meta_get "$META" mode)
+      YOLO=$(fm_meta_get "$META" yolo)
+    fi
+    return 1
+  fi
   # Likewise config/crew-exclude-tools: a malformed file, or a replacement
   # runtime that cannot hide the listed tools, refuses here, before the old
   # agent stops. Secondmate agents are not covered.
@@ -1108,6 +1137,11 @@ do_relaunch() {
 
   require_state_verified_backend relaunch
   resolve_relaunch_profile
+  FM_OUTCOME_HARNESS=$TARGET_HARNESS
+  MODEL=$TARGET_MODEL
+  EFFORT=$TARGET_EFFORT
+  MODE=$(fm_meta_get "$META" mode)
+  YOLO=$(fm_meta_get "$META" yolo)
 
   case "$KIND" in
     ship|scout)
@@ -1150,6 +1184,9 @@ do_relaunch() {
   record_note
   journal_write noted "${CHECKPOINT_LINES[@]}" "$note_line"
 
+  # Once stopping starts any failure requires reconciliation, even if a
+  # rollback restores the prior metadata.
+  SPAWN_LAUNCH_SENT=1
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
@@ -1161,7 +1198,7 @@ do_relaunch() {
   spawn_args=("$ID" --relaunch --harness "$TARGET_HARNESS")
   [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
   [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
-  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
+  if FM_SPAWN_OUTCOME_FILE='' FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
       "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
     RELAUNCH_META_PUBLISHED=1
     # $T was resolved from the record before the launch. When the recorded
@@ -1194,6 +1231,10 @@ do_relaunch() {
 
   journal_write complete "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
   RELAUNCH_ACTIVE=0
+  SPAWN_LAUNCH_SENT=0
+  SPAWN_GEN=$(fm_meta_get "$META" spawn_gen)
+  FM_LAUNCH_OUTCOME=live-worker
+  FM_LAUNCH_OUTCOME_REASON=replacement-agent-confirmed-alive
   echo "relaunched $ID harness=$TARGET_HARNESS from=$PRIOR_RECORDED_HARNESS model=$TARGET_MODEL effort=$TARGET_EFFORT backend=$BACKEND endpoint=$T worktree=$WT"
 }
 

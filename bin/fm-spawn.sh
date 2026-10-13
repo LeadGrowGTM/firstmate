@@ -511,6 +511,9 @@
 # keeps no data/backlog.md. A configured non-markdown adapter remains
 # active without a markdown file; any active automatic backend without
 # compatible tasks-axi refuses before creating lifecycle state.
+# Opt-in FM_SPAWN_OUTCOME_FILE writes an attempt-specific structured receipt;
+# bin/fm-launch-outcome-lib.sh owns its schema and publication safety contract.
+# No receipt means no new failover authority; legacy exit/output are unchanged.
 # On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> [mode=<mode> yolo=<on|off>] window=<backend-target> worktree=<path>
 # A ship task records the explicit mode/yolo it was passed; a secondmate spawn records
 # mode=secondmate, yolo=off, home=, and projects=; a scout records neither, and both the
@@ -585,6 +588,11 @@ fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+# Opt-in attempt receipt; ordinary spawns retain their output and exit codes.
+# shellcheck source=bin/fm-launch-outcome-lib.sh
+. "$SCRIPT_DIR/fm-launch-outcome-lib.sh"
+fm_launch_outcome_init "${1:-}" || { echo "error: unsafe or existing spawn outcome path" >&2; exit 1; }
+trap 'fm_launch_outcome_write "$?"' EXIT
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # shellcheck source=bin/fm-config-inherit-lib.sh
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
@@ -1498,6 +1506,7 @@ spawn_abort_cleanup() {
     fi
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
+  fm_launch_outcome_write "$status" || status=1
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
@@ -1587,6 +1596,10 @@ if [ "$RELAUNCH" -eq 1 ] && [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart"
   exit 1
 fi
 if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in */*) false ;; *) true ;; esac then
+  if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+    echo "error: an attempt receipt is single-task only; batch dispatch cannot share one receipt" >&2
+    exit 1
+  fi
   if [ "$KIND" != secondmate ] && [ -z "$HARNESS_ARG" ] && [ -f "$CONFIG/crew-dispatch.json" ]; then
     echo "error: config/crew-dispatch.json is active - pass an explicit harness resolved from the dispatch rules (the consultation backstop, so the rules are never silently skipped)." >&2
     exit 1
@@ -1634,6 +1647,10 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   exit "$rc"
 fi
 ID=${POS[0]}
+if [ "$KIND" = secondmate ] && [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+  echo "error: scheduled worker receipts do not authorize replacing a supervisor" >&2
+  exit 1
+fi
 fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
   exit 2
@@ -2468,12 +2485,16 @@ fi
 case "$HARNESS" in
 devin)
   DEVIN_BIN=$(command -v devin) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: devin executable not found on PATH" >&2
     exit 1
   }
   ;;
 pi | pi-signed)
   PI_BIN=$(resolve_pi_executable "$HARNESS") || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
     exit 1
   }
@@ -2514,6 +2535,8 @@ cursor)
   ;;
 omp)
   OMP_BIN=$(resolve_pi_executable omp) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: omp executable not found on PATH; install Oh My Pi or select a different verified harness" >&2
     exit 1
   }
@@ -2525,6 +2548,8 @@ omp)
   ;;
 agy)
   AGY_BIN=$(resolve_pi_executable agy) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: agy executable not found on PATH; install Antigravity CLI or select a different verified harness" >&2
     exit 1
   }
@@ -2567,13 +2592,38 @@ fi
 if [ "$HARNESS" = agy ]; then
   agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
 fi
+# Scheduled intake additionally proves canonical executables exist before
+# provisioning. A raw command is never an authorized fallback candidate.
+if [ -n "$FM_LAUNCH_OUTCOME_FILE" ] && [ "$RAW_LAUNCH" = 0 ]; then
+  case "$HARNESS" in
+    claude|codex|opencode|grok|gemini)
+      if ! command -v "$HARNESS" >/dev/null 2>&1; then
+        FM_LAUNCH_OUTCOME=worker-unavailable
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+        echo "error: selected $HARNESS executable is unavailable before provisioning" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
 # Worker account pin (header above): resolved before any endpoint, worktree, or
 # record exists. An absent pin selects nothing and leaves every later launch
 # step exactly as it was. A pinned Claude root is exported here as well, so the
 # trust registration below writes the store the worker will actually read.
 RAW_COMMAND=
 [ "$RAW_LAUNCH" = 0 ] || RAW_COMMAND=$ARG3
-WORKER_ACCOUNT=$(fm_worker_account_select "$HARNESS" "$CONFIG" "$MODEL" "${PI_BIN:-$HARNESS}" "$RAW_COMMAND") || exit 1
+if WORKER_ACCOUNT=$(FM_WORKER_ACCOUNT_TYPED=1 fm_worker_account_select "$HARNESS" "$CONFIG" "$MODEL" "${PI_BIN:-$HARNESS}" "$RAW_COMMAND"); then
+  :
+else
+  ACCOUNT_CHECK_STATUS=$?
+  if [ "$ACCOUNT_CHECK_STATUS" = 10 ]; then
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-account-check-refused
+  fi
+  exit 1
+fi
+FM_LAUNCH_OUTCOME=unsafe-refusal
+FM_LAUNCH_OUTCOME_REASON=guard-refusal
 WORKER_ACCOUNT_DECLARED=${WORKER_ACCOUNT%%$'\t'*}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT#*$'\t'}
 WORKER_ACCOUNT_PROVIDER=${WORKER_ACCOUNT_ROOT#*$'\t'}
@@ -2868,7 +2918,11 @@ effort_flag_for_harness() {
 
 case "$LAUNCH" in
 *__MUSEBIN__*)
-  MUSE_BIN=$(resolve_muse_binary) || exit 1
+  MUSE_BIN=$(resolve_muse_binary) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+    exit 1
+  }
   MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
   MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
   MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
@@ -2888,7 +2942,11 @@ esac
 
 case "$LAUNCH" in
 *__KIMIBIN__*)
-  KIMI_BIN=$(resolve_kimi_binary) || exit 1
+  KIMI_BIN=$(resolve_kimi_binary) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+    exit 1
+  }
   LAUNCH=${LAUNCH//__KIMIBIN__/$(shell_quote "$KIMI_BIN")}
   fm_backend_visible_capture_supported "$BACKEND" || {
     echo "error: refusing Kimi spawn because backend '$BACKEND' has no verified viewport-bounded capture; Kimi 2.0.0 gates a fresh worktree on a trust dialog that can only be answered and confirmed cleared from a scrollback-free read of the live pane" >&2
@@ -2905,7 +2963,11 @@ esac
 
 case "$LAUNCH" in
 *__ROVOBIN__*)
-  ROVO_BIN=$(resolve_rovo_binary) || exit 1
+  ROVO_BIN=$(resolve_rovo_binary) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+    exit 1
+  }
   LAUNCH=${LAUNCH//__ROVOBIN__/$(shell_quote "$ROVO_BIN")}
   ;;
 esac
@@ -3233,6 +3295,8 @@ if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
   fi
   if [ "$FM_PROJECT_CAPACITY_OCCUPANTS" -ge "$SPAWN_PROJECT_CAPACITY" ]; then
     echo "deferred: project $(basename "$PROJ_ABS") admits $SPAWN_PROJECT_CAPACITY worker(s) at once on this machine ($FM_PROJECT_CAPACITY_FILE) and $FM_PROJECT_CAPACITY_OCCUPANTS already hold a place ($FM_PROJECT_CAPACITY_OCCUPANT_IDS); task $ID was not launched and its backlog item stays queued - dispatch it again once one of them records its ready PR or is cleaned up" >&2
+    FM_LAUNCH_OUTCOME=capacity
+    FM_LAUNCH_OUTCOME_REASON=project-capacity
     exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
   fi
 fi
@@ -3750,6 +3814,7 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
   exit 1
 fi
 
+SPAWN_PROVISIONING_STARTED=1
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
@@ -5822,3 +5887,6 @@ SPAWN_ACCOUNT=
 # Opt-in fleet activity ledger (docs/fleet-ledger.md); off costs one file test.
 [ ! -e "$CONFIG/fleet-ledger" ] || [ "$RELAUNCH" -eq 1 ] || FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-fleet-ledger.sh" dispatched "$ID" "$KIND" "${PROJ_ABS##*/}" "$HARNESS" "$MODEL" || true
 echo "spawned $ID harness=$HARNESS kind=$KIND$SPAWN_DELIVERY window=$META_WINDOW worktree=$WT$SPAWN_ACCOUNT"
+
+FM_LAUNCH_OUTCOME=worker-published
+FM_LAUNCH_OUTCOME_REASON=launch-and-backlog-committed
