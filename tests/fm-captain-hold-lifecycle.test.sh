@@ -2740,6 +2740,72 @@ EOF
   pass "migration skips already-held tasks with and without option copy"
 }
 
+test_migration_rechecks_concurrent_calls_under_the_hold_lock() {
+  local home mode pid before after out
+  for mode in held released; do
+    home=$(make_home "migration-concurrent-$mode")
+    tasks_in "$home" add raced 'Raced task' --repo sample >/dev/null \
+      || fail "could not create the migration race target"
+    cat > "$home/captain-decisions.json" <<'EOF'
+[{"key":"raced","title":"Legacy task","about":"Legacy","decide":"Old call","options":[{"label":"Old"}]}]
+EOF
+    cat > "$home/current-options.json" <<'EOF'
+{"about":"Current","decide":"New call","options":[{"value":"current","label":"Current"}]}
+EOF
+    cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${FM_TEST_MIGRATION_PROBE:-}" = 1 ] \
+    && [ "${1:-}" = show ] && [ "${2:-}" = raced ] \
+    && [ ! -e "$FM_HOME/probe-ready" ]; then
+  "$REAL_TASKS_AXI" "$@" || exit $?
+  : > "$FM_HOME/probe-ready"
+  for ((i=0; i<500; i++)); do
+    [ ! -e "$FM_HOME/probe-resume" ] || exit 0
+    sleep 0.1
+  done
+  exit 75
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+    chmod +x "$home/fakebin/tasks-axi"
+    FM_TEST_MIGRATION_PROBE=1 FM_BACKLOG_ROW_TIMEOUT_SECS=60 run_captain "$home" migrate-options \
+      "$home/captain-decisions.json" --apply > "$home/migration.log" 2>&1 &
+    pid=$!
+    if ! wait_for_test_file "$home/probe-ready" "$pid"; then
+      : > "$home/probe-resume"
+      wait "$pid" || true
+      fail "migration never reached its initial unheld read"
+    fi
+    if ! run_captain "$home" hold raced --reason 'New call' \
+        --options-file "$home/current-options.json" >/dev/null; then
+      : > "$home/probe-resume"
+      wait "$pid" || true
+      fail "concurrent hold could not finish while migration was paused"
+    fi
+    if [ "$mode" = released ]; then
+      printf 'Current answer\n' > "$home/answer.txt"
+      if ! run_captain "$home" answer raced --decision-file "$home/answer.txt" --release >/dev/null; then
+        : > "$home/probe-resume"
+        wait "$pid" || true
+        fail "concurrent answer could not release the task"
+      fi
+    fi
+    before=$(tasks_in "$home" show raced --full)
+    : > "$home/probe-resume"
+    wait "$pid" || fail "migration race failed: $(cat "$home/migration.log")"
+    out=$(cat "$home/migration.log")
+    after=$(tasks_in "$home" show raced --full)
+    [ "$before" = "$after" ] || fail "migration changed the concurrent $mode call: $after"
+    if [ "$mode" = held ]; then
+      assert_contains "$out" 'skipped: raced (already held)' "migration did not skip the concurrent hold"
+    else
+      assert_contains "$out" 'already-closed: raced' "migration reopened the concurrent released call"
+    fi
+    assert_not_contains "$out" 'held: raced' "migration imported over a concurrent call"
+  done
+  pass "migration rechecks concurrent held and released calls under the mutation lock"
+}
+
 test_migration_rejects_unreadable_target() {
   local home before out mode
   home=$(make_home migration-read-error)
@@ -5120,6 +5186,7 @@ test_refused_hold_keeps_prior_reason_and_options
 test_legacy_option_migration_is_explicit_and_idempotent
 test_released_legacy_migration_stays_resolved
 test_migration_skips_already_held_tasks
+test_migration_rechecks_concurrent_calls_under_the_hold_lock
 test_migration_rejects_unreadable_target
 test_migration_recommendation_prefers_unique_legacy_label
 test_open_status_orphans_reach_drain

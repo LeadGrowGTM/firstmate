@@ -71,6 +71,8 @@
 # a recommended label is converted to its unique value. Optional origin and repo
 # preserve ownership links. It previews by default; --apply holds tasks only in
 # this home, never removes the input, and skips already-held or resolved tasks.
+# Import rechecks that preservation rule under the hold's per-task mutation
+# lock through an internal hold mode; ordinary direct reholds still replace copy.
 # orphans reports <origin> TAB <key> for each open needs-decision without a local
 # captain-held task: the key's exact/legacy task or the originating work task.
 # It is read-only and fails rather than calling an unreadable backlog empty.
@@ -960,7 +962,22 @@ restore_hold_body() {
     || fail "task $id did not retain its prior body"
 }
 
+migration_skip_existing_task() {  # <task-id> <shown-task>; prints the skip outcome
+  local id=$1 show=$2
+  if [ "$(show_field "$show" state)" = "done" ]; then
+    printf 'already-closed: %s\n' "$id"
+  elif [ -n "$(show_field_value "$show" hold_kind)" ] || [ "$(show_field_value "$show" held)" = yes ]; then
+    printf 'skipped: %s (already held)\n' "$id"
+  elif body_has_resolution_record "$(show_field "$show" body)"; then
+    printf 'already-closed: %s\n' "$id"
+  else
+    return 1
+  fi
+}
+
 command_hold() {
+  local import_only=$1
+  shift
   local id=${1:-} title='' reason='' repo='' origin='' until='' corr='' corr_given=0 show state existing_title body='' hold_kind hold_set occurrence
   local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' hold_status=0 options_file='' copy=''
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
@@ -1010,6 +1027,11 @@ command_hold() {
   if task_show "$id"; then
     show=$TASK_SHOW_OUTPUT
     state=$(show_field "$show" state)
+    if [ "$import_only" = 1 ]; then
+      migration_skip_existing_task "$id" "$show" && return 0
+      # A task created since the migration probe owns its existing title too.
+      title=''
+    fi
     [ "$state" != "done" ] \
       || fail "task $id is already closed; a new captain call needs its own task"
     existing_hold_kind=$(show_field_value "$show" hold_kind)
@@ -1022,6 +1044,9 @@ command_hold() {
       [ "$existing_title" = "$title" ] || fail "existing task $id has a different title"
     fi
   else
+    if [ "$import_only" = 1 ] && ! printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$'; then
+      fail "could not read migration target $id"
+    fi
     [ -n "$title" ] || fail "--title is required to create task $id"
     validate_one_line title "$title"
     if [ -z "$repo" ] && [ -n "$origin" ] && [ -f "$STATE/$origin.meta" ]; then
@@ -1075,7 +1100,11 @@ command_hold() {
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id lost its hold-set stamp while being held"
   publish_parent_hold "$id" "$occurrence" needs-decision "$reason" "$corr"
-  printf '%s\n' "$id"
+  if [ "$import_only" = 1 ]; then
+    printf 'held: %s\n' "$id"
+  else
+    printf '%s\n' "$id"
+  fi
 }
 
 # Record a resolution block beneath any leading active hold-set stamp,
@@ -1983,7 +2012,7 @@ list_has_line() {  # <newline-separated-list> <value>
 }
 
 command_migrate_options() (
-  local input=${1:-} apply=0 migration_dir entries entry id title origin repo reason copy i=0 state existing hold_kind
+  local input=${1:-} apply=0 migration_dir entries entry id title origin repo reason copy i=0 existing
   local -a args
   [ "$#" -ge 1 ] && [ "$#" -le 2 ] || { usage >&2; exit 2; }
   if [ "$#" -eq 2 ]; then
@@ -2031,20 +2060,7 @@ command_migrate_options() (
     if task_show "$id"; then
       existing=1
       title=$(show_field_value "$TASK_SHOW_OUTPUT" title)
-      state=$(show_field "$TASK_SHOW_OUTPUT" state)
-      if [ "$state" = "done" ]; then
-        printf 'already-closed: %s\n' "$id"
-        continue
-      fi
-      hold_kind=$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)
-      if [ -n "$hold_kind" ] || [ "$(show_field_value "$TASK_SHOW_OUTPUT" held)" = yes ]; then
-        printf 'skipped: %s (already held)\n' "$id"
-        continue
-      fi
-      if body_has_resolution_record "$(show_field "$TASK_SHOW_OUTPUT" body)"; then
-        printf 'already-closed: %s\n' "$id"
-        continue
-      fi
+      migration_skip_existing_task "$id" "$TASK_SHOW_OUTPUT" && continue
     elif ! printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$'; then
       fail "could not read migration target $id"
     fi
@@ -2055,11 +2071,10 @@ command_migrate_options() (
     origin=$(printf '%s' "$entry" | jq -r '.origin // empty')
     repo=$(printf '%s' "$entry" | jq -r '.repo // "firstmate"')
     reason=$(printf '%s' "$entry" | jq -r 'if .decide != "" then .decide else .title end')
-    args=(hold "$id" --reason "$reason" --repo "$repo" --options-file "$migration_dir/$i.copy")
+    args=(_migrate-options-hold "$id" --reason "$reason" --repo "$repo" --options-file "$migration_dir/$i.copy")
     [ "$existing" = 1 ] || args+=(--title "$title")
     [ -z "$origin" ] || args+=(--origin "$origin")
-    "$0" "${args[@]}" >/dev/null || fail "migration stopped at $id"
-    printf 'held: %s\n' "$id"
+    "$0" "${args[@]}" || fail "migration stopped at $id"
   done < <(printf '%s' "$entries" | jq -c '.[]')
 )
 
@@ -2239,7 +2254,8 @@ command_open() {  # <task-id> [--identity] [--distinguish-absent]
 }
 
 case "${1:-}" in
-  hold) shift; command_hold "$@" ;;
+  hold) shift; command_hold 0 "$@" ;;
+  _migrate-options-hold) shift; command_hold 1 "$@" ;;
   answer) shift; command_answer "$@" ;;
   answers) shift; command_answers "$@" ;;
   reconcile-requests) shift; command_reconcile_requests "$@" ;;
