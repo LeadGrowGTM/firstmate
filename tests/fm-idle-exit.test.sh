@@ -48,6 +48,7 @@ FAKE_CONTROL="$TMP_ROOT/control"
 cat > "$FAKE_CONTROL" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FIXTURES/control.log"
+[ ! -f "$FIXTURES/$1.preamble" ] || cat "$FIXTURES/$1.preamble" >&2
 rc=$(cat "$FIXTURES/$1.rc" 2>/dev/null) || rc=0
 case "$rc" in
   0) printf '%s %s harness=claude\n' "$(cat "$FIXTURES/$1.out" 2>/dev/null || echo stopped)" "$1" ;;
@@ -210,6 +211,17 @@ test_endpoint_gone_is_not_reprobed_until_activity_changes() {
   pass "fm-idle-exit: an absent endpoint is handled until new activity"
 }
 
+test_control_preamble_does_not_hide_exit_result() {
+  local home out
+  home=$(make_home preamble)
+  add_task "$home" t1 done 7200
+  printf 'fm-gate-refuse: gate agent lifecycle permitted only against lab home\n' > "$home/fixtures/t1.preamble"
+  out=$(run_check "$home")
+  assert_contains "$out" 'idle-exit: exited t1 (done' "a control preamble must not hide a successful exit"
+  assert_equals stopped "$(sed -n 2p "$home/state/.idle-exit/t1")" "the final control outcome is recorded"
+  pass "fm-idle-exit: a control preamble does not hide the exit result"
+}
+
 test_busy_turn_is_left_and_failure_reported_once() {
   local home out
   home=$(make_home busy)
@@ -267,6 +279,7 @@ test_new_activity_before_exit_keeps_worker_running
 test_other_states_and_kinds_are_never_exited
 test_one_exit_per_run_and_records_stop_reprobing
 test_endpoint_gone_is_not_reprobed_until_activity_changes
+test_control_preamble_does_not_hide_exit_result
 test_busy_turn_is_left_and_failure_reported_once
 test_record_failure_is_reported
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it

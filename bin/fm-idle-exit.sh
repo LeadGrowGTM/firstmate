@@ -224,6 +224,7 @@ run_check() {
     [ "$left" -le "$CONTROL_SECS" ] || left=$CONTROL_SECS
     rc=0
     out=$(FM_HOME="$FM_HOME" fm_run_timed "$left" "$CONTROL_BIN" "$id" exit --only-if-idle 2>&1 </dev/null) || rc=$?
+    out=${out##*$'\n'}
     case "$rc" in
       0)
         record_write "$id" "$activity" "${out%% *}" || { line="could not record exit of $id"; break; }
