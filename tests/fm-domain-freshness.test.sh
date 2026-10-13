@@ -33,6 +33,10 @@ if [ -f "$FM_FAKE_FEED/shift" ] && [[ "$path" == *'page=2' ]]; then
   fi
 fi
 case "$path" in
+  /repos/*/commits/*/pulls\?*)
+    name=${path#*/commits/}; name=${name%%/*}
+    page=${path##*page=}
+    file="$FM_FAKE_FEED/associated-$name-$page.json" ;;
   /repos/*/pulls\?*)
     page=${path##*page=}
     file="$FM_FAKE_FEED/pulls-$page.json" ;;
@@ -315,6 +319,24 @@ jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/de
 jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'broken optional parent advanced checkpoint'
 pass 'missing optional files remain optional only under available parents'
 
+for optional_kind in instruction plugin-version asset; do
+  new_home
+  mkdir -p "$HOME_DIR/plugins/optional"
+  printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+  printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
+  config "$(jq -nc --arg root "$HOME_DIR/plugins" --arg kind "$optional_kind" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/entry.txt",kind:$kind}]}]')"
+  collect "$HOME_DIR" "$NOW"
+  expect_code 0 "$STATUS" "$optional_kind absent under directory"
+  rmdir "$HOME_DIR/plugins/optional"
+  printf 'not a directory' > "$HOME_DIR/plugins/optional"
+  collect "$HOME_DIR" 2026-10-14T12:00:00Z
+  expect_code 2 "$STATUS" "$optional_kind parent became a file"
+  bundle
+  jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("parent unavailable")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail "$optional_kind regular-file parent claimed complete coverage"
+  jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$optional_kind regular-file parent advanced checkpoint"
+done
+pass 'optional instruction, version and asset absence requires a directory parent'
+
 new_home
 config "$repo_sources"
 collect "$HOME_DIR" "$NOW"
@@ -444,6 +466,34 @@ collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'single-commit linear merge'
 bundle
 jq -e '.evidence[0].files[0].instruction.before.content == "# Before linear merge" and .evidence[0].files[0].instruction.after.content == "# After linear merge"' "$OUT" >/dev/null || fail 'single-commit linear merge evidence missing'
+for head_case in same fork deleted; do
+  new_home
+  config "$repo_sources"
+  pr 43 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+  detail 43 2026-10-13T11:00:00Z 1 > "$FEED/detail-43.json"
+  merge_history 43 1
+  jq '.commits = 2' "$FEED/detail-43.json" > "$FEED/detail-history.json"
+  mv "$FEED/detail-history.json" "$FEED/detail-43.json"
+  case "$head_case" in
+    fork) jq '.head.repo.full_name = "contrib/widgets"' "$FEED/detail-43.json" > "$FEED/detail-history.json" ;;
+    deleted) jq '.head.repo = null' "$FEED/detail-43.json" > "$FEED/detail-history.json" ;;
+  esac
+  if [ "$head_case" != same ]; then
+    mv "$FEED/detail-history.json" "$FEED/detail-43.json"
+  fi
+  printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-43-1.json"
+  tree_content "$PARENT_TREE" AGENTS.md '# Before squash'
+  tree_content "$MERGE_TREE" AGENTS.md '# After squash'
+  pr 43 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/associated-$MERGE_SHA-1.json"
+  printf '[]\n' > "$FEED/associated-$PARENT_SHA-1.json"
+  collect "$HOME_DIR" "$NOW"
+  expect_code 0 "$STATUS" "$head_case multi-commit squash"
+  bundle
+  jq -e '.evidence[0].files[0].instruction.before.content == "# Before squash" and .evidence[0].files[0].instruction.after.content == "# After squash"' "$OUT" >/dev/null || fail "$head_case squash evidence missing"
+  assert_grep "/repos/acme/widgets/commits/$PARENT_SHA/pulls?per_page=100&page=1" "$FEED/requests" "$head_case squash parent association was not checked"
+done
+pass 'multi-commit squash history covers same-repository, fork and deleted-fork PRs'
+
 new_home
 config "$repo_sources"
 pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
@@ -452,12 +502,14 @@ merge_history 42 1
 printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-42-1.json"
 jq '.commits = 2' "$FEED/detail-42.json" > "$FEED/detail-history.json"
 mv "$FEED/detail-history.json" "$FEED/detail-42.json"
+pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/associated-$MERGE_SHA-1.json"
+pr 42 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/associated-$PARENT_SHA-1.json"
 collect "$HOME_DIR" "$NOW"
 expect_code 2 "$STATUS" 'ambiguous multi-commit linear merge'
 bundle
 jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("ambiguous")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'ambiguous merge history claimed complete coverage'
 jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'ambiguous merge history advanced checkpoint'
-pass 'single-parent history captures one commit and rejects ambiguous multi-commit PRs'
+pass 'single-parent history rejects ambiguous multi-commit rebases'
 
 new_home
 config "$repo_sources"
@@ -561,6 +613,20 @@ bundle
 jq -e '.complete == false and .coverage[0].complete == false and (.coverage[0].reason | test("symlink|root")) and (.evidence | length == 0)' "$OUT" >/dev/null || fail 'unsafe symlink was not failed coverage'
 pass 'unsafe inventory symlink fails coverage'
 
+for root_field in root symlink_roots; do
+  new_home
+  mkdir -p "$HOME_DIR/skills"
+  if [ "$root_field" = root ]; then
+    config '[{"id":"skills","kind":"skills","root":"/.."}]'
+  else
+    config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root,symlink_roots:["/.."]}]')"
+  fi
+  collect "$HOME_DIR" "$NOW"
+  expect_code 1 "$STATUS" "$root_field resolves to filesystem root"
+  assert_absent "$HOME_DIR/data/domain-freshness" "$root_field root-target configuration created collection state"
+done
+pass 'declared roots and symlink targets cannot resolve to filesystem root'
+
 new_home
 mkdir -p "$HOME_DIR/skills"
 for number in $(seq 1 2001); do
@@ -638,6 +704,13 @@ expect_code 0 "$STATUS" 'reconfigured remote file list'
 bundle
 jq -e '.coverage[0].baseline and all(.evidence[]; .kind == "inventory-baseline" and .before == null) and any(.evidence[]; .path | endswith("second.txt"))' "$OUT" >/dev/null || fail 'remote file-list reconfiguration reused old before state'
 pass 'fake parent transport returns bounded remote inventory and preserves failed cursor'
+jq -n '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"skills",root:"/.."}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-19T12:00:00Z
+expect_code 2 "$STATUS" 'remote root resolves to filesystem root'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("remote inventory transport")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'remote root-target inventory claimed complete coverage'
+jq -e '.sources.remote.checkpoint == "2026-10-18T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'remote root-target inventory advanced checkpoint'
+pass 'remote inventory rejects a root target before returning a snapshot'
 
 new_home
 config "$repo_sources"
@@ -716,6 +789,32 @@ bundle
 jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("cursor exceeds read limit"))' "$OUT" >/dev/null || fail 'oversized cursor did not fail source coverage'
 jq -e '.sources.large == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'oversized cursor was published'
 pass 'cursor read limit fails oversized source without unreadable state'
+
+new_home
+mkdir -p "$HOME_DIR/plugins"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
+head -c 4096 /dev/zero | tr '\0' x > "$HOME_DIR/plugins/preview.md"
+for number in $(seq 1 1200); do
+  cp "$HOME_DIR/plugins/preview.md" "$HOME_DIR/plugins/instruction-$number.md"
+done
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"old",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1201)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'large old source baseline'
+[ "$(wc -c < "$HOME_DIR/data/domain-freshness/cursors.json")" -gt 5000000 ] || fail 'old source cursor did not reach roughly 5 MiB'
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"new",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1201)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 0 "$STATUS" 'replacement of large source'
+bundle
+jq -e '.coverage[0].id == "new" and .coverage[0].baseline and (.evidence | length) == 1202' "$OUT" >/dev/null || fail 'replacement source did not complete its baseline'
+jq -e '.sources.old == null and .sources.new.checkpoint == "2026-10-14T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'inactive large cursor prevented replacement checkpoint'
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"old",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1201)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+collect "$HOME_DIR" 2026-10-15T12:00:00Z
+expect_code 0 "$STATUS" 're-added large source'
+bundle
+jq -e '.coverage[0].id == "old" and .coverage[0].baseline and (.evidence | length) == 1202' "$OUT" >/dev/null || fail 're-added source reused a pruned cursor'
+jq -e '.sources.old.checkpoint == "2026-10-15T12:00:00Z" and .sources.new == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 're-added source did not replace inactive cursor'
+pass 'inactive large cursors are pruned before replacement checkpoints'
 
 new_home
 mkdir -p "$HOME_DIR/skills/one"

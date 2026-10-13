@@ -195,11 +195,26 @@ def merged_instruction_trees(prefix, detail):
     merged = api(prefix + '/git/commits/' + merge_sha)
     if not isinstance(merged, dict) or merged.get('sha') != merge_sha or not isinstance(merged.get('parents'), list) or len(merged['parents']) not in (1, 2):
         raise CoverageError('ambiguous merged PR history')
-    if len(merged['parents']) == 1 and detail.get('commits') != 1:
-        raise CoverageError('ambiguous single-parent merged PR history')
     parent_sha = merged['parents'][0].get('sha') if isinstance(merged['parents'][0], dict) else None
     if not isinstance(parent_sha, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', parent_sha):
         raise CoverageError('invalid merged PR parent identity')
+    if len(merged['parents']) == 1:
+        commits = detail.get('commits')
+        if type(commits) is not int or commits < 1:
+            raise CoverageError('ambiguous single-parent merged PR history')
+        if commits > 1:
+            def associated(sha):
+                found = False
+                for rows in pages(prefix + '/commits/' + sha + '/pulls'):
+                    for row in rows:
+                        url = row.get('html_url')
+                        if not isinstance(url, str) or not re.fullmatch(r'https://github\.com/[^/]+/[^/]+/pull/[1-9]\d*', url):
+                            raise CoverageError('invalid merged PR association')
+                        found |= url.casefold() == detail['html_url'].casefold()
+                return found
+
+            if not associated(merge_sha) or associated(parent_sha):
+                raise CoverageError('ambiguous single-parent merged PR history')
     parent = api(prefix + '/git/commits/' + parent_sha)
     if not isinstance(parent, dict) or parent.get('sha') != parent_sha:
         raise CoverageError('invalid merged PR parent commit')
@@ -382,7 +397,8 @@ def inventory_snapshot(source):
     records = {}
     for path, kind in paths:
         if source['kind'] == 'plugin-files' and kind in ('instruction', 'plugin-version', 'asset') and not path.exists() and not path.is_symlink():
-            inventory_path(path.parent, roots)
+            if not inventory_path(path.parent, roots).is_dir():
+                raise CoverageError('optional inventory parent unavailable')
             continue
         resolved = inventory_path(path, roots)
         if not resolved.is_file() or resolved.stat().st_size > 1048576:
@@ -457,7 +473,7 @@ def validate_config(config):
                 raise ValueError('invalid repository')
         elif kind in ('skills', 'plugin-files'):
             for path in [source.get('root', ''), *source.get('symlink_roots', [])]:
-                if not isinstance(path, str) or not Path(path).is_absolute() or path == '/':
+                if not isinstance(path, str) or not Path(path).is_absolute() or Path(path).resolve() == Path('/'):
                     raise ValueError('inventory roots must be specific absolute paths')
             if kind == 'plugin-files':
                 files = source.get('files')
@@ -524,6 +540,8 @@ def main():
         cursor = load(cursor_path) if cursor_path.exists() else {'version': 1, 'sources': {}}
         if cursor.get('version') != 1 or not isinstance(cursor.get('sources'), dict):
             raise ValueError('invalid collector cursor')
+        active = {source['id'] for source in config['sources']}
+        cursor['sources'] = {key: saved for key, saved in cursor['sources'].items() if key in active}
         for saved in cursor['sources'].values():
             if not isinstance(saved, dict) or not isinstance(saved.get('binding'), str):
                 raise ValueError('invalid source cursor')
