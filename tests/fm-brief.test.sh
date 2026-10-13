@@ -523,6 +523,12 @@ test_herdr_lab_contract_is_explicit_and_complete() {
     "Herdr lab brief missing its hard safety contract"
   assert_grep "HERDR_LAB_HELPER='$ROOT/bin/fm-herdr-lab.sh'" "$brief" \
     "Herdr lab brief must bind the absolute Firstmate helper path"
+  assert_grep '"$LAB_HOME_HELPER" tmux "$FM_HOME" new-session' "$brief" \
+    "Herdr lab brief must start the primary on the named tmux socket"
+  assert_grep '"$LAB_HOME_HELPER" tmux "$FM_HOME" attach-session' "$brief" \
+    "Herdr lab brief must attach to the named tmux socket"
+  assert_grep '"$LAB_HOME_HELPER" tmux "$FM_HOME" kill-server' "$brief" \
+    "Herdr lab brief must stop only the named tmux server"
   assert_grep "HERDR_LAB_SESSION=\$(\"\$HERDR_LAB_HELPER\" name $id)" "$brief" \
     "Herdr lab brief missing helper-owned session naming"
   assert_grep "\"\$HERDR_LAB_HELPER\" provision \"\$HERDR_LAB_SESSION\"" "$brief" \
