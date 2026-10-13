@@ -216,6 +216,21 @@ test_open_views_the_window_and_writes_identity() {
   pass "open: one tab per call on a grouped view of exactly that window, reused when it exists, identity without secrets"
 }
 
+test_open_refuses_a_foreign_view_session() {
+  local out before
+  "$SHIM/tmux" new-session -d -s otherbase -n fm-other
+  before=$(grep -c 'terminal create' "$ORCA_LOG")
+  out=$(run_view open --target otherbase:fm-other --view-session orca-dev 2>&1)
+  expect_code 3 "$?" "open must refuse a view grouped with another base session"
+  assert_contains "$out" "belongs to another tmux base session" \
+    "the foreign view's owner is reported"
+  assert_equals "$before" "$(grep -c 'terminal create' "$ORCA_LOG")" \
+    "Orca receives no new tab for the foreign view"
+  assert_equals "$DEV_ID" "$("$SHIM/tmux" display-message -p -t '=orca-dev:' '#{window_id}')" \
+    "the foreign view keeps its selected window"
+  pass "open refuses a view session belonging to another base without changing it"
+}
+
 test_identity_filters_input() {
   local f="$TMP_ROOT/raw.identity" ident missing name value mode
   {
@@ -505,6 +520,7 @@ test_view_follows_the_agent_window() {
 test_switch_values
 test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
+test_open_refuses_a_foreign_view_session
 test_view_follows_the_agent_window
 test_identity_filters_input
 test_failed_open_restores_existing_view

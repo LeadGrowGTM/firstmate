@@ -35,8 +35,6 @@ case "${1:-}" in
   -S) shift 2; exec "$0" "$@" ;;
 esac
 case "$*" in
-  *'#{session_name}'*)
-    [ "${FM_FAKE_VIEW_LOOKUP_FAIL:-}" != 1 ] || exit 1 ;;
   *'#{window_index}'*)
     n=0
     while IFS= read -r w; do
@@ -44,9 +42,32 @@ case "$*" in
       n=$((n + 1))
     done < "$D/windows"
     exit 0 ;;
-  *'#{session_name}'*) exec "$here/tmux.base" "$@" ;;
+  *'#{session_name}'*)
+    [ "${FM_FAKE_VIEW_LOOKUP_FAIL:-}" != 1 ] || exit 1
+    if [ -n "${FM_FAKE_BASE_SESSION:-}" ]; then
+      printf '%s\n' "$FM_FAKE_BASE_SESSION"
+      exit 0
+    fi
+    exec "$here/tmux.base" "$@" ;;
   *'#{session_grouped}'*)
-    case "$*" in *=orca-*) printf '1\tbase\n' ;; *) printf '0\t\n' ;; esac
+    case "$*" in
+      *=orca-*)
+        args=$*
+        view=${args#*=orca-}
+        view=orca-${view%%:*}
+        group=${FM_FAKE_BASE_SESSION:-firstmate}
+        [ ! -e "$D/group-$view" ] || group=$(cat "$D/group-$view")
+        printf '1\t%s\n' "$group" ;;
+      *) printf '0\t\n' ;;
+    esac
+    exit 0 ;;
+  *'#{session_group}'*)
+    args=$*
+    view=${args#*=orca-}
+    view=orca-${view%%:*}
+    group=${FM_FAKE_BASE_SESSION:-firstmate}
+    [ ! -e "$D/group-$view" ] || group=$(cat "$D/group-$view")
+    printf '%s\n' "$group"
     exit 0 ;;
   *'#{session_id}'*) printf '$1\n'; exit 0 ;;
   *'#{socket_path}'*) printf '/tmp/fm-fake-socket\n'; exit 0 ;;
@@ -65,7 +86,7 @@ case "${1:-}" in
       prev=$a
     done
     case "$s" in
-      orca-*) : > "$D/session-$s"; exit 0 ;;
+      orca-*) : > "$D/session-$s"; printf '%s\n' "${FM_FAKE_BASE_SESSION:-firstmate}" > "$D/group-$s"; exit 0 ;;
     esac ;;
   kill-session) printf '%s\n' "$*" >> "$D/killed"; exit 0 ;;
 esac
@@ -149,7 +170,7 @@ make_secondmate_home() {  # <dir> <id>
 # HOME_DIR, FAKEBIN, VIEW_DIR, PANE_LOG, LAUNCH_LOG, OUT, STATUS. A file at
 # $TMP_ROOT/<case>.prior-meta becomes the existing record a respawn replaces.
 spawn_secondmate() {
-  local name=$1 id=$2 switch=$3 allowlist=${4:-} identity_mode=${5:-}
+  local name=$1 id=$2 switch=$3 allowlist=${4:-} identity_mode=${5:-} base_session=${6:-}
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
   VIEW_DIR="$CASE_DIR/view"
@@ -168,6 +189,7 @@ spawn_secondmate() {
   : > "$PANE_LOG"
   : > "$LAUNCH_LOG"
   OUT=$(FM_FAKE_LAUNCH_LOG="$LAUNCH_LOG" FM_FAKE_PANE_LOG="$PANE_LOG" FM_FAKE_VIEW_DIR="$VIEW_DIR" \
+    FM_FAKE_BASE_SESSION="$base_session" \
     FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
     fm_test_run_spawn "$HOME_DIR" "$CASE_DIR/sm" "$FAKEBIN" "$id" "$CASE_DIR/sm" --secondmate)
   STATUS=$?
@@ -317,6 +339,16 @@ relaunch_secondmate() {
   [ "$switch" = absent ] || printf '%s\n' "$switch" > "$HOME_DIR/config/orca-view-tabs"
   make_relaunch_stub "$FAKEBIN"
   install_view_fakes "$FAKEBIN" "$VIEW_DIR"
+  if [ "${FM_FAKE_STAGE_FAIL:-}" = 1 ]; then
+    cat > "$FAKEBIN/mkdir" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  /tmp/fm-*+*) exit 1 ;;
+esac
+exec /bin/mkdir "$@"
+SH
+    chmod +x "$FAKEBIN/mkdir"
+  fi
   [ -z "$identity_mode" ] || : > "$VIEW_DIR/identity-$identity_mode"
   make_secondmate_home "$sm" "$id"
   mkdir -p "$sm/state"
@@ -326,6 +358,7 @@ relaunch_secondmate() {
   printf 'fm-%s\n' "$id" > "$VIEW_DIR/windows"
   printf '%s' "$sm" > "$VIEW_DIR/cwd"
   : > "$VIEW_DIR/session-orca-$id"
+  printf 'fmses\n' > "$VIEW_DIR/group-orca-$id"
   {
     echo "window=fmses:fm-$id"
     echo "endpoint_task_id=$id"
@@ -346,6 +379,7 @@ relaunch_secondmate() {
   } > "$HOME_DIR/state/$id.meta"
   mkdir -p "$CASE_DIR/user-home"
   OUT=$(env PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_DIR="$VIEW_DIR" FM_FAKE_VIEW_DIR="$VIEW_DIR" \
+    FM_FAKE_BASE_SESSION=fmses \
     FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
     HOME="$CASE_DIR/user-home" CLAUDE_CONFIG_DIR='' FM_SPAWN_NO_GUARD=1 \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
@@ -371,6 +405,54 @@ test_relaunch_replaces_the_tab() {
     || fail "the replacement launch failed to run: $seen"
   assert_contains "$seen" "pane=tab-1:leaf" "the replacement agent badges the fresh tab"
   pass "relaunch: opens a fresh tab, forwards its identity, then closes the previous tab and keeps the view session"
+}
+
+test_aborted_relaunch_keeps_prior_tab_record() {
+  FM_FAKE_STAGE_FAIL=1 relaunch_secondmate relaunch-abort sm-abort on
+  [ "$STATUS" -ne 0 ] || fail "launch staging failure must abort the relaunch"
+  assert_contains "$OUT" "refusing to stage the launch command" \
+    "the relaunch reached staging after opening and publishing the new tab"
+  assert_equals term-0 "$(meta sm-abort orca_view_handle)" "the surviving tab is recorded"
+  assert_equals orca-sm-abort "$(meta sm-abort orca_view_session)" "the surviving view is recorded"
+  assert_equals 1 "$(meta sm-abort orca_view_owned)" "the surviving view keeps its ownership"
+  assert_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
+    "abort closes the replacement tab"
+  assert_no_grep "terminal close --terminal term-0" "$VIEW_DIR/orca.log" \
+    "abort keeps the prior tab open for teardown"
+  assert_no_grep 'tab-1:leaf' "$VIEW_DIR/literal" \
+    "launch staging failure does not replace the surviving pane's identity"
+  pass "aborted relaunch closes its new tab and restores the surviving tab record"
+}
+
+test_cross_home_view_name_collision() {
+  spawn_secondmate cross-first sm-cross on
+  expect_code 0 "$STATUS" "the first home's secondmate should open its view: $OUT"
+  assert_equals orca-sm-cross "$(meta sm-cross orca_view_session)" \
+    "the first home's default view name is preserved"
+  mkdir -p "$TMP_ROOT/cross-second/view"
+  : > "$TMP_ROOT/cross-second/view/session-orca-sm-cross"
+  printf 'firstmate\n' > "$TMP_ROOT/cross-second/view/group-orca-sm-cross"
+  spawn_secondmate cross-second sm-cross on '' '' otherbase
+  expect_code 0 "$STATUS" "the second home's secondmate should open a distinct view: $OUT"
+  assert_equals orca-sm-cross-s-otherbase "$(meta sm-cross orca_view_session)" \
+    "a foreign view is replaced by a deterministic name containing this base session"
+  assert_present "$VIEW_DIR/session-orca-sm-cross-s-otherbase" \
+    "the second home creates its own grouped view"
+  assert_present "$VIEW_DIR/session-orca-sm-cross" \
+    "the first home's view remains untouched"
+  assert_equals term-1 "$(meta sm-cross orca_view_handle)" \
+    "the second home records the tab it opened"
+  assert_absent "$VIEW_DIR/killed" "no foreign view is removed"
+  mkdir -p "$TMP_ROOT/cross-dotted/view"
+  : > "$TMP_ROOT/cross-dotted/view/session-orca-sm-cross"
+  printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-orca-sm-cross"
+  spawn_secondmate cross-dotted sm-cross on '' '' other.base
+  expect_code 0 "$STATUS" "a dotted base session should also open a distinct view: $OUT"
+  assert_equals orca-sm-cross-h-6f746865722e62617365 "$(meta sm-cross orca_view_session)" \
+    "a dotted base session has a deterministic valid view name"
+  assert_present "$VIEW_DIR/session-orca-sm-cross-h-6f746865722e62617365" \
+    "the dotted home creates its own grouped view"
+  pass "same secondmate id in different base sessions gets a distinct Orca view"
 }
 
 test_incomplete_identity_keeps_prior_tab() {
@@ -444,6 +526,8 @@ test_unavailable_orca_steps_aside
 test_missing_identity_keeps_fresh_spawn_unbadged
 test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
+test_aborted_relaunch_keeps_prior_tab_record
+test_cross_home_view_name_collision
 test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab
