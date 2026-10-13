@@ -329,6 +329,45 @@ render_claude_wiring() {  # <claude|claude-statusline> <state-real> <statusline-
   fi
 }
 
+test_ignored_wiring_directories() {
+  local harness case_name home out path operator state_real
+  for harness in claude opencode; do
+    for case_name in exact operator; do
+      home=$(make_home "ignored-directory-$harness-$case_name"); add_worker "$home"
+      printf 'busy_gen=sweep-generation\n' >> "$home/state/task.meta"
+      state_real=$(cd "$home/state" && pwd -P)
+      if [ "$harness" = claude ]; then
+        path=.claude/settings.local.json
+        operator=.claude/operator.txt
+        mkdir -p "$home/worker/.claude"
+        render_claude_wiring claude "$state_real" '' > "$home/worker/$path"
+        printf '.claude/\n' >> "$home/projects/project/.git/info/exclude"
+      else
+        path=.opencode/plugins/fm-busy-state.js
+        operator=.opencode/plugins/operator.js
+        mkdir -p "$home/worker/.opencode/plugins"
+        fm_control_render_opencode_plugin "$ROOT" "$state_real" task sweep-generation true > "$home/worker/$path"
+        printf '.opencode/\n' >> "$home/projects/project/.git/info/exclude"
+      fi
+      if [ "$case_name" = operator ]; then
+        printf 'operator file\n' > "$home/worker/$operator"
+      fi
+      out=$(sweep "$home")
+      if [ "$case_name" = exact ]; then
+        assert_contains "$out" 'swept: 1 workers, 1 copies' "$harness ignored generated wiring swept"
+        assert_absent "$home/state/task.meta" "$harness exact record removed"
+        assert_absent "$home/worker" "$harness exact copy removed"
+      else
+        assert_contains "$out" 'uncommitted changes' "$harness ignored operator file refused"
+        assert_present "$home/state/task.meta" "$harness operator record kept"
+        assert_present "$home/worker/$path" "$harness generated wiring kept with operator file"
+        assert_present "$home/worker/$operator" "$harness operator file kept"
+      fi
+    done
+  done
+  pass 'sweep accepts exact wiring inside ignored directories and keeps operator files'
+}
+
 test_generated_wiring_exact_and_edited() {
   local harness home out path state_real statusline settings
   statusline="'$ROOT/bin/fm-statusbar.sh' claude-line --task 'task'"
@@ -798,6 +837,7 @@ test_ignored_work_kept
 test_flagged_tracked_edits_kept
 test_flagged_guard_under_pipefail
 test_initialized_submodule_kept
+test_ignored_wiring_directories
 test_generated_wiring_exact_and_edited
 test_late_work_kept
 test_missing_copy_remote_branch_kept_until_merged
