@@ -89,6 +89,11 @@ render() {  # <session> <width> <expected>
 bash "$SB" label firstmate:fm-demo-task fm-demo-task claude 'claude-opus-5-5[1m]' high \
   /home/u/.treehouse/firstmate-840e8b/17/firstmate
 [ "$(tmux show-options -wqv -t firstmate:fm-demo-task @fm_wt)" = firstmate/17 ] || fail "Treehouse direct label lost its slot"
+mkdir -p "$WORK/slots"
+: >"$WORK/slots/treehouse-state.json"
+tmux new-window -d -t firstmate: -n custom-pool 'sleep 600'
+bash "$SB" label firstmate:custom-pool custom-pool claude opus high "$WORK/slots/1/project"
+[ "$(tmux show-options -wqv -t firstmate:custom-pool @fm_wt)" = project/1 ] || fail "custom Treehouse direct label lost its slot"
 tmux new-window -d -t firstmate: -n numeric-home 'sleep 600'
 bash "$SB" label firstmate:numeric-home numeric-home claude opus high /home/u/homes/2026/firstmate
 [ "$(tmux show-options -wqv -t firstmate:numeric-home @fm_wt)" = firstmate ] || fail "ordinary numeric-parent home gained a slot"
@@ -401,6 +406,16 @@ bash "$SB" sync
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_task)" = sync-task ] || fail "sync did not label the recorded window"
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_wt)" = proj/4 ] || fail "sync worktree label" "$(tmux show-options -wqv -t firstmate:bare @fm_wt)"
 pass "sync labels recorded windows from state metadata"
+
+cat >"$WORK/state/sync-custom.meta" <<META
+window=firstmate:custom-pool
+harness=claude
+model=opus
+effort=high
+worktree=$WORK/slots/2/project
+META
+bash "$SB" sync
+[ "$(tmux show-options -wqv -t firstmate:custom-pool @fm_wt)" = project/2 ] || fail "sync custom Treehouse worktree label"
 
 cat >"$WORK/state/sync-home.meta" <<META
 window=firstmate:numeric-home

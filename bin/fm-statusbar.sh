@@ -81,10 +81,14 @@ fm_sb_wt_label() {  # <path>
   '' | *[!0-9]*) printf '%s' "$base" ;;
   *)
     pool=${parent%/*}
-    case "${pool%/*}" in
-      */.treehouse) printf '%s/%s' "$base" "$slot" ;;
-      *) printf '%s' "$base" ;;
-    esac
+    if [ -f "$pool/treehouse-state.json" ] && [ ! -L "$pool/treehouse-state.json" ]; then
+      printf '%s/%s' "$base" "$slot"
+    else
+      case "${pool%/*}" in
+        */.treehouse) printf '%s/%s' "$base" "$slot" ;;
+        *) printf '%s' "$base" ;;
+      esac
+    fi
     ;;
   esac
 }
