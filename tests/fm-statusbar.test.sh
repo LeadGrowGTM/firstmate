@@ -119,15 +119,15 @@ selected=$(bash "$SB" usage firstmate:fm-demo-task)
 [ "$selected" = 'u cl:default32%' ] || fail "Claude pane did not select its quota row" "$selected"
 tmux new-window -d -t firstmate: -n fable "sleep 600"
 bash "$SB" label firstmate:fable fable claude fable high /home/u/fable
-[ "$(bash "$SB" usage firstmate:fable)" = 'u cl:default88%' ] || fail "model limit did not bind the Fable pane"
+[ "$(bash "$SB" usage firstmate:fable)" = 'u cl:default32%' ] || fail "Fable pane showed a model quota as account usage"
 tmux new-window -d -t firstmate: -n sonnet "sleep 600"
 bash "$SB" label firstmate:sonnet sonnet claude claude-3-5-sonnet high /home/u/sonnet
 [ "$(tmux show-options -wqv -t firstmate:sonnet @fm_model)" = '3-5-sonnet' ] || fail "quota identity changed the short model label"
-[ "$(bash "$SB" usage firstmate:sonnet)" = 'u cl:default91%' ] || fail "full model identity missed its quota scope"
+[ "$(bash "$SB" usage firstmate:sonnet)" = 'u cl:default32%' ] || fail "Sonnet pane showed a model quota as account usage"
 tmux new-window -d -t firstmate: -n product "sleep 600"
 bash "$SB" label firstmate:product product claude special-product high /home/u/product
-[ "$(bash "$SB" usage firstmate:product)" = 'u cl:default82%' ] || fail "product limit did not bind its model"
-pass "each pane uses its tighter account or model limit"
+[ "$(bash "$SB" usage firstmate:product)" = 'u cl:default32%' ] || fail "product quota appeared as account usage"
+pass "model and product quotas do not change account-wide usage"
 bash "$SB" apply firstmate
 
 tmux select-window -t orca-view:fm-demo-task
@@ -211,7 +211,7 @@ bash "$SB" label firstmate:opencode-usage opencode-usage opencode openai/gpt-5.6
 [ "$(bash "$SB" usage firstmate:opencode-usage)" = 'u cx:default32%' ] || fail "OpenCode missed its Codex quota"
 tmux new-window -d -t firstmate: -n opencode-claude "sleep 600"
 bash "$SB" label firstmate:opencode-claude opencode-claude opencode anthropic/claude-3-5-sonnet high /home/u/opencode
-[ "$(bash "$SB" usage firstmate:opencode-claude)" = 'u cl:default91%' ] || fail "OpenCode borrowed the Codex quota for an Anthropic model"
+[ "$(bash "$SB" usage firstmate:opencode-claude)" = 'u cl:default32%' ] || fail "OpenCode borrowed another provider or model quota"
 tmux new-window -d -t firstmate: -n opencode-unknown "sleep 600"
 bash "$SB" label firstmate:opencode-unknown opencode-unknown opencode google/gemini high /home/u/opencode
 [ "$(bash "$SB" usage firstmate:opencode-unknown)" = 'u ?' ] || fail "OpenCode borrowed quota for an unknown provider"
@@ -273,8 +273,8 @@ tmux new-window -d -t firstmate: -n pi-scoped "sleep 600"
 bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-sol high /home/u/pi
 [ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u ?' ] || fail "an unrelated model scope borrowed default account usage"
 bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-astra high /home/u/pi
-[ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u cx:openai~-scoped98%' ] || fail "exact account model scope was not used"
-pass "exact account selection precedes model scope filtering"
+[ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u ?' ] || fail "matching model scope appeared as account usage"
+pass "model-only accounts stay unknown without account-wide usage"
 
 tmux new-window -d -t firstmate: -n pi-unknown-account "sleep 600"
 bash "$SB" label firstmate:pi-unknown-account pi-unknown-account pi openai-codex-unknown/gpt-6-sol high /home/u/pi
@@ -329,7 +329,7 @@ rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "
 [ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "first usage read should be unknown before the cache exists"
 i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-awk -F '\t' '$1 == "claude" && $2 == "default" && $3 == 32 && $4 == "all_models" { found=1 } END { exit !found }' "$WORK/state/statusbar-usage.txt" || fail "usage cache content"
+awk -F '\t' '$1 == "claude" && $2 == "default" && $3 == 32 && NF == 3 { found=1 } END { exit !found }' "$WORK/state/statusbar-usage.txt" || fail "account-wide usage cache content"
 [ "$(bash "$SB" usage firstmate:fm-demo-task)" = "u cl:default32%" ] || fail "usage did not serve the selected account"
 bash "$SB" usage >/dev/null 2>&1 && fail "usage accepted an implicit target"
 bash "$SB" usage firstmate:fm-demo-task >/dev/null
@@ -441,9 +441,9 @@ while "$REAL_TMUX" -L "$SOCKET" has-session 2>/dev/null && [ "$i" -lt 50 ]; do s
 [ "$(tmux show-options -gqv status-right)" = '#{E:pane-border-format}' ] || fail "restart lost the status format"
 [ "$(tmux show-options -gqv status-left)" = '' ] || fail "restart kept the stock session bar"
 bash "$WORK/installed repo/bin/fm-statusbar.sh" label restarted persist codex gpt-6-sol high /home/u/project
-printf 'codex\tdefault\t32\tall_models\n' >"$WORK/state/statusbar-usage.txt"
+printf 'codex\tdefault\t32\n' >"$WORK/state/statusbar-usage.txt"
 # The fixture uses codex-home; seed the account that labeling actually chose.
-printf 'codex\tcodex-home\t32\tall_models\n' >>"$WORK/state/statusbar-usage.txt"
+printf 'codex\tcodex-home\t32\n' >>"$WORK/state/statusbar-usage.txt"
 # @fm_state binds jobs to the window's home, even if the command is launched
 # from another home's environment.
 other=$(FM_STATE_OVERRIDE="$WORK/other" bash "$SB" usage restarted)

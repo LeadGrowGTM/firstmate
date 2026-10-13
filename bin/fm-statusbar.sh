@@ -94,7 +94,7 @@ fm_sb_model_label() {  # <model-id>
 
 cmd_label() {
   local target=${1:-} id=${2:-} harness=${3:-} model=${4:-} effort=${5:-} wt=${6:-}
-  local provider='' account usage_model
+  local provider='' account
   [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 0
   provider=$(fm_quota_provider_for_harness "$harness" "$model") || provider=
   case "$harness" in
@@ -111,13 +111,10 @@ cmd_label() {
   account=$(jq -nr --arg harness "$harness" --arg model "$model" \
     "$FM_QUOTA_ROW_JQ quota_lane(\$harness; \$model)") || account=
   [ -n "$account" ] || account=default
-  usage_model=${model##*/}
-  [ "$usage_model" != default ] || usage_model=
   [ "$effort" != default ] || effort=
   tmux set-window-option -t "$target" @fm_state "$STATE" 2>/dev/null || true
-  tmux set-window-option -t "$target" @fm_task "$(fm_sb_clean "$id" 40)" 2>/dev/null || return 0
+  tmux set-window-option -t "$target" @fm_task "$(fm_sb_clean "$id" 64)" 2>/dev/null || return 0
   tmux set-window-option -t "$target" @fm_model "$(fm_sb_clean "$(fm_sb_model_label "$model")")" 2>/dev/null || true
-  tmux set-window-option -t "$target" @fm_model_id "$(fm_sb_clean "$usage_model")" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_effort "$(fm_sb_clean "$effort" 8)" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_wt "$(fm_sb_clean "$(fm_sb_wt_label "$wt")" 28)" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_provider "$(fm_sb_clean "$provider" 16)" 2>/dev/null || true
@@ -187,7 +184,7 @@ fm_sb_mtime() {  # <file>
   stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
 }
 
-# Percent used per provider from schema 5 and 6 quota rows.
+# Account-wide percent used per provider from schema 5 and 6 quota rows.
 fm_sb_usage_refresh() {
   local out tmp rows
   out=$(fm_run_timed 10 quota-axi 2>/dev/null </dev/null) || return 1
@@ -202,12 +199,12 @@ fm_sb_usage_refresh() {
       sub(/^  /, ""); n = split($0, row, ","); scope = row[2 + keyed]; rem = row[3 + keyed]
       if (scope ~ /^".*"$/) scope = substr(scope, 2, length(scope) - 2)
       if (n < 3 + keyed || (scope != "all_models" && scope != "all_products" && scope !~ /^model:.+/ && scope !~ /^product:.+/)) next
-      used = rem ~ /^[0-9]+(\.[0-9]+)?$/ && rem + 0 <= 100 ? sprintf("%.15g", 100 - rem) : "?"
-      printf "%s\t%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", used, scope
+      used = scope == "all_models" && rem ~ /^[0-9]+(\.[0-9]+)?$/ && rem + 0 <= 100 ? sprintf("%.15g", 100 - rem) : "?"
+      printf "%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", used
     }
     in_attention && /^  / {
       sub(/^  /, ""); n = split($0, row, ",")
-      if (n >= 3 && row[1] != "" && row[2] != "") printf "%s\t%s\t?\tall_models\n", row[1], row[2]
+      if (n >= 3 && row[1] != "" && row[2] != "") printf "%s\t%s\t?\n", row[1], row[2]
     }
   ')
   [ -n "$rows" ] || return 1
@@ -216,14 +213,13 @@ fm_sb_usage_refresh() {
 }
 
 fm_sb_usage_display() {  # <window>
-  local provider account model
+  local provider account
   provider=$(tmux show-options -wqv -t "$1" @fm_provider 2>/dev/null) || provider=
   account=$(tmux show-options -wqv -t "$1" @fm_account 2>/dev/null) || account=
-  model=$(tmux show-options -wqv -t "$1" @fm_model_id 2>/dev/null) || model=
   [ -n "$provider" ] && [ -f "$USAGE_CACHE" ] || { printf 'u ?\n'; return 0; }
-  awk -F '\t' -v provider="$provider" -v account="$account" -v model="$model" '
+  awk -F '\t' -v provider="$provider" -v account="$account" '
     $1 == provider && ($2 == account || $2 == "*") { exact_exists = 1 }
-    $1 == provider && $3 ~ /^[0-9]+(\.[0-9]+)?$/ && ($4 == "all_models" || $4 == "all_products" || (model != "" && ($4 == "model:" model || $4 == "product:" model))) {
+    $1 == provider && $3 ~ /^[0-9]+(\.[0-9]+)?$/ {
       if ($2 == account || $2 == "*") {
         if (!matched || $3 + 0 > used) { used = $3 + 0; key = $2 }
         matched = 1

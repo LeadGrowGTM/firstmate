@@ -27,7 +27,9 @@ Crew tasks become windows in that session.
 A locked `bin/fm-session-start.sh` labels the primary pane with its home and resolved harness, then enables the detail line on the session's windows.
 Its model and effort use explicit `FM_PRIMARY_MODEL` and `FM_PRIMARY_EFFORT` values, or Claude's launch environment when the primary is Claude; unavailable values appear as `?`.
 The detail line uses shared window options, so Orca view sessions created afterward inherit it.
-Plan usage shows account keys of at most 14 characters whole; longer keys show their first six characters, `~`, and last seven.
+Plan usage (`u`) shows the cached account-wide `all_models` percentage used for the displayed provider and account; model and product quotas do not contribute.
+When the selected account has no account-wide measurement, usage is `u ?`; if that account is absent from quota output, the provider's default account may appear under its own label.
+Account keys of at most 14 characters appear whole; longer keys show their first six characters, `~`, and last seven.
 Two long keys with the same displayed ends can still share a label.
 The optional persistent dark theme lives in [`../bin/fm-statusbar.tmux`](../bin/fm-statusbar.tmux).
 Use `bin/fm-statusbar.sh source-line` from a stable installed checkout to preview its exact `source-file` line, `bin/fm-statusbar.sh check` to check `~/.tmux.conf`, and `bin/fm-statusbar.sh install` to append it once while preserving existing settings.
