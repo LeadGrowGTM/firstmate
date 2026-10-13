@@ -1,0 +1,13 @@
+socket_dir_mode=700
+live_socket=/tmp/fml.4aPVae/tmux-1000/fm-lab
+fm-lab-home: lab private named tmux socket is not selected
+selection=missing result=refused
+fm-lab-home: lab private named tmux socket is not selected
+selection=default result=refused
+fm-lab-home: lab private named tmux socket is not selected
+selection=foreign result=refused
+selection=valid result=accepted
+generated_recipe:
+Use `LAB_HOME_HELPER='/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VBK9P5M1QP04SJVS7Z79TC/bin/fm-lab-home.sh'`, then `"$LAB_HOME_HELPER" tmux-dir "$FM_HOME"` and start and attach to the primary with `"$LAB_HOME_HELPER" tmux "$FM_HOME" new-session ...` and `"$LAB_HOME_HELPER" tmux "$FM_HOME" attach-session ...`.
+Your single EXIT cleanup trap must run `"$LAB_HOME_HELPER" tmux "$FM_HOME" kill-server >/dev/null 2>&1 || true`, call `"$LAB_HOME_HELPER" teardown "$FM_HOME"`, and call the Herdr teardown below; do not install a second trap that replaces either cleanup.
+lab_server_stopped_and_socket_directory_removed=yes
