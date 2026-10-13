@@ -2533,7 +2533,7 @@ EOF
 }
 
 test_refused_hold_keeps_prior_decision_copy() {
-  local home shown
+  local home shown before_body after_body
   home=$(make_home refused-options)
   cat > "$home/old-options.json" <<'EOF'
 {"about":"Old route","decide":"Choose","options":[{"value":"old","label":"Old"}]}
@@ -2543,9 +2543,13 @@ EOF
 EOF
   run_captain "$home" hold existing --title Existing --reason Choose \
     --options-file "$home/old-options.json" >/dev/null || fail "could not establish old copy"
+  before_body=$(tasks_in "$home" show existing --full | sed -n 's/^  body: //p')
   cat > "$home/fakebin/tasks-axi" <<'SH'
 #!/usr/bin/env bash
-if [ "${1:-}" = hold ]; then exit 9; fi
+if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then
+  "$REAL_TASKS_AXI" show "$2" --full > "$FM_HOME/before-refused-hold"
+  exit 9
+fi
 exec "$REAL_TASKS_AXI" "$@"
 SH
   chmod +x "$home/fakebin/tasks-axi"
@@ -2554,6 +2558,9 @@ SH
     fail "re-hold succeeded despite backend refusal"
   fi
   shown=$(tasks_in "$home" show existing --full)
+  after_body=$(printf '%s\n' "$shown" | sed -n 's/^  body: //p')
+  [ "$before_body" = "$after_body" ] || fail "refused re-hold changed the prior body"
+  assert_contains "$(cat "$home/before-refused-hold")" 'New route' "new copy was not staged before the hold"
   assert_contains "$shown" 'Old route' "refused re-hold replaced the prior copy"
   assert_not_contains "$shown" 'New route' "refused re-hold stored the new copy"
   if run_captain "$home" hold new-call --title New --reason Choose \
@@ -2562,6 +2569,7 @@ SH
   fi
   shown=$(tasks_in "$home" show new-call --full)
   assert_not_contains "$shown" 'Captain options:' "refused new hold stored option copy"
+  assert_contains "$shown" 'Captain hold set:' "refused new hold lost its staged stamp"
   cat > "$home/captain-decisions.json" <<'EOF'
 {"decisions":[{"key":"existing","title":"Existing","about":"Migrated route","decide":"Choose","options":[{"value":"migrated","label":"Migrated"}]}]}
 EOF
@@ -2579,11 +2587,69 @@ EOF
   pass "refused direct and migrated holds preserve existing option copy"
 }
 
+test_option_staging_failure_never_holds() {
+  local home shown
+  home=$(make_home option-staging-failure)
+  cat > "$home/options.json" <<'EOF'
+{"about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}
+EOF
+  cat > "$home/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *fm-captain-options*) printf '%s\n' "$FM_HOME/missing-parent/options"; exit 0 ;;
+esac
+PATH=${PATH#*:} exec mktemp "$@"
+SH
+  chmod +x "$home/fakebin/mktemp"
+  if run_captain "$home" hold scratch-call --title Scratch --reason Choose \
+    --options-file "$home/options.json" >/dev/null 2>&1; then
+    fail "hold succeeded after decision copy scratch staging failed"
+  fi
+  shown=$(tasks_in "$home" show scratch-call --full)
+  assert_contains "$shown" 'held: no' "scratch staging failure still held the task"
+  rm "$home/fakebin/mktemp"
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = update ]; then
+  previous=''
+  for arg in "$@"; do
+    if [ "$previous" = --body-file ] && grep -q 'New route' "$arg"; then
+      if [ -f "$FM_HOME/refuse-copy-update" ]; then exit 9; fi
+      exit 0
+    fi
+    previous=$arg
+  done
+fi
+if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then : > "$FM_HOME/backend-hold-called"; fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  : > "$home/refuse-copy-update"
+  if run_captain "$home" hold refused-call --title Refused --reason Choose \
+    --options-file "$home/options.json" >/dev/null 2>&1; then
+    fail "hold succeeded after the backend refused the decision copy"
+  fi
+  assert_absent "$home/backend-hold-called" "body update failure reached the backend hold"
+  shown=$(tasks_in "$home" show refused-call --full)
+  assert_contains "$shown" 'held: no' "body update failure still held the task"
+  rm "$home/refuse-copy-update"
+  if run_captain "$home" hold ignored-call --title Ignored --reason Choose \
+    --options-file "$home/options.json" >/dev/null 2>&1; then
+    fail "hold succeeded after the backend ignored the decision copy"
+  fi
+  assert_absent "$home/backend-hold-called" "copy verification failure reached the backend hold"
+  shown=$(tasks_in "$home" show ignored-call --full)
+  assert_contains "$shown" 'held: no' "copy verification failure still held the task"
+  pass "failed scratch writes and body updates stop before the hold"
+}
+
 test_legacy_option_migration_is_explicit_and_idempotent() {
   local home before after out
   home=$(make_home option-migration)
+  tasks_in "$home" add renamed "Current task title" --repo sample >/dev/null \
+    || fail "could not create the renamed task"
   cat > "$home/captain-decisions.json" <<'EOF'
-{"decisions":[{"key":"route","title":"Choose route","about":"Routing","decide":"Choose a route","options":[{"label":"North","hint":"Fast"},{"label":"South","hint":"Warm"}],"recommended":"North","report":"/tmp/report.md"}]}
+{"decisions":[{"key":"route","title":"Choose route","about":"Routing","decide":"Choose a route","options":[{"label":"North","hint":"Fast"},{"label":"South","hint":"Warm"}],"recommended":"North","report":"/tmp/report.md"},{"key":"renamed","title":"Legacy task title","about":"Renamed route","decide":"Choose the renamed route","options":[{"label":"Keep current"}]}]}
 EOF
   before=$(cat "$home/data/backlog.md")
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "migration preview failed"
@@ -2593,6 +2659,9 @@ EOF
   before=$(tasks_in "$home" show route --full)
   assert_contains "$before" 'hold_kind: captain' "migration did not hold task"
   assert_contains "$before" 'option-1' "label-only legacy options were not assigned values"
+  out=$(tasks_in "$home" show renamed --full)
+  assert_contains "$out" 'title: Current task title' "migration changed the existing task title"
+  assert_contains "$out" 'Renamed route' "migration did not copy options to the existing task"
   run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration retry failed"
   after=$(tasks_in "$home" show route --full)
   [ "$before" = "$after" ] || fail "migration retry changed the task"
@@ -2611,9 +2680,12 @@ EOF
 test_open_status_orphans_reach_drain() {
   local home out
   home=$(make_home status-orphans)
-  run_captain "$home" hold exact --title Exact --reason Choose >/dev/null || fail "exact hold setup failed"
-  run_captain "$home" hold legacy-decision-choice --title Legacy --reason Choose >/dev/null || fail "legacy hold setup failed"
+  run_captain "$home" hold exact --title Exact --reason Choose --origin worker >/dev/null || fail "exact hold setup failed"
+  run_captain "$home" hold legacy-decision-choice --title Legacy --reason Choose --origin legacy >/dev/null || fail "legacy hold setup failed"
   run_captain "$home" hold ownwork --title Work --reason Choose >/dev/null || fail "work hold setup failed"
+  run_captain "$home" hold originless-exact --title Originless --reason Choose >/dev/null || fail "originless hold setup failed"
+  run_captain "$home" hold owner-b-decision-originless-legacy --title OriginlessLegacy --reason Choose >/dev/null \
+    || fail "originless legacy hold setup failed"
   run_captain "$home" hold shared-call --title Shared --reason Choose --origin owner-a >/dev/null \
     || fail "owned exact hold setup failed"
   run_captain "$home" hold owner-b-decision-cross --title Cross --reason Choose --origin owner-a >/dev/null \
@@ -2629,11 +2701,13 @@ EOF
   printf 'needs-decision [key=choice]: Choose\n' > "$home/state/legacy.status"
   printf 'needs-decision [key=question]: Choose\n' > "$home/state/ownwork.status"
   printf 'needs-decision [key=shared-call]: Choose\n' > "$home/state/owner-a.status"
-  printf 'needs-decision [key=shared-call]: Choose\nneeds-decision [key=cross]: Choose\n' > "$home/state/owner-b.status"
+  printf 'needs-decision [key=shared-call]: Choose\nneeds-decision [key=cross]: Choose\nneeds-decision [key=originless-exact]: Choose\nneeds-decision [key=originless-legacy]: Choose\n' > "$home/state/owner-b.status"
   out=$(run_drain "$home") || fail "orphan drain failed"
   assert_contains "$out" 'orphan needs-decision task=worker key=lost' "buried orphan was not flagged"
   assert_contains "$out" 'orphan needs-decision task=owner-b key=shared-call' "foreign exact hold hid an orphan"
   assert_contains "$out" 'orphan needs-decision task=owner-b key=cross' "foreign legacy hold hid an orphan"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=originless-exact' "originless exact hold hid an orphan"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=originless-legacy' "originless legacy hold hid an orphan"
   if printf '%s' "$out" | grep -F 'orphan needs-decision task=owner-a key=shared-call' >/dev/null; then
     fail "a locally owned hold was called an orphan: $out"
   fi
@@ -4848,6 +4922,7 @@ SH
 
 test_decision_copy_is_task_owned
 test_refused_hold_keeps_prior_decision_copy
+test_option_staging_failure_never_holds
 test_legacy_option_migration_is_explicit_and_idempotent
 test_open_status_orphans_reach_drain
 test_hold_reason_round_trips_awkward_characters
