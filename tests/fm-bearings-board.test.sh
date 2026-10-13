@@ -631,7 +631,9 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
   board="$home/.lavish/bearings-board.html"
   write_valid_payload "$data"
   jq '.captains_call = [
-        {"key":"landed-by-task","type":"decision","repo":"sample","title":"Already shipped",
+        {"key":"landed-by-task","owner":"(main)","type":"decision","repo":"sample","title":"Already shipped",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"landed-by-task","owner":"mate","type":"decision","repo":"sample","title":"Foreign call with the same key",
          "options":[{"value":"yes","label":"Yes"}]},
         {"key":"timeout-reattach","type":"decision","repo":"sample","title":"Already merged",
          "pr_url":"https://github.com/sample/sample/pull/7",
@@ -659,7 +661,11 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
     "the build did not report dropping the merged timeout/reattach card: $out"
   assert_contains "$out" "dropped-landed-card: quota-version" \
     "the build did not report dropping the superseded quota-axi version card: $out"
-  extract_payload "$board" | jq -e '[.captains_call[].key] == ["still-open"]' >/dev/null \
+  extract_payload "$board" | jq -e '
+    [.captains_call[] | [.owner // "(main)", .key]]
+      == [["mate","landed-by-task"],["(main)","still-open"]]
+    and (.stale_candidates | any(.owner == "(main)" and .key == "landed-by-task"))
+  ' >/dev/null \
     || fail "the board dropped an open card or kept one whose subject already landed"
   pass "build drops decision cards whose subject already landed and keeps open ones"
 }

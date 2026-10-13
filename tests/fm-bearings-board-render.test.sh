@@ -293,7 +293,7 @@ test_owner_grouped_numbered_decisions() {
     and (.stats[] | select(.label == "need you") | .n) == 2
     and .calls[0].submitDisabled == false and .calls[2].submitDisabled == true
     and (.calls[0].text | contains("Keeps compatibility") and contains("recommendRoute A") and contains("Queue answer"))
-    and (.calls[1].text | contains("Missing recommendation") and contains("Missing consequence")
+    and (.calls[1].text | contains("incomplete") and contains("Missing recommendation") and contains("Missing consequence")
       and contains("ask firstmate to supply it"))
     and (.calls[2].text | contains("mate/remote") and contains("owner home"))
     and (.stale | contains("Old choice") and contains("Linked PR closed") and contains("does not resolve tasks"))
@@ -317,3 +317,23 @@ test_incomplete_decision_guidance_is_visible() {
   pass "incomplete decision guidance remains visible and plainly marked"
 }
 test_incomplete_decision_guidance_is_visible
+
+test_incomplete_guidance_is_shared_by_card_kinds() {
+  local home out
+  home=$(make_home incomplete-card-kinds)
+  out=$(render_board "$home" '[]' '[]' 0 0 '[
+    {"key":"merge-missing","type":"merge","risk":"low","repo":"sample","title":"Merge without guidance","options":[],"allow_freeform":true},
+    {"key":"credential-partial","type":"credential","repo":"sample","title":"Credential choice","options":[{"value":"a","label":"Route A"}],"recommend_value":"a"},
+    {"key":"merge-complete","type":"merge","risk":"low","repo":"sample","title":"Merge with guidance","options":[{"value":"yes","label":"Merge","hint":"Deploys the approved change"}],"recommend_value":"yes"}
+  ]')
+  printf '%s' "$out" | jq -e '
+    .error == "" and (.calls | length) == 3
+    and (.calls[0].text | contains("incomplete") and contains("Missing options and consequences")
+      and contains("Missing recommendation"))
+    and (.calls[1].text | contains("incomplete") and contains("Missing consequence")
+      and contains("recommendRoute A"))
+    and (.calls[2].text | contains("incomplete") | not)
+  ' >/dev/null || fail "card kinds did not share incomplete-guidance rendering: $out"
+  pass "merge and credential cards share decision completeness guidance"
+}
+test_incomplete_guidance_is_shared_by_card_kinds

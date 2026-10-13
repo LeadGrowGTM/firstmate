@@ -328,7 +328,8 @@ effective_payload() {  # <data.json> <dest.json>
     . as $payload | .captains_call[] | . as $card
     | .stale_reason = (.stale_reason // (
         if .pr_state? == "MERGED" or .pr_state? == "CLOSED" then "Linked PR " + (.pr_state | ascii_downcase)
-        elif ($payload.landed | any(.id == $card.key and ($card.owner? == null or .owner == $card.owner)))
+        elif ($payload.landed | any(.id == $card.key
+          and (($card.owner? == null or $card.owner == "(main)") or .owner == $card.owner)))
           or (($card.pr_url? != null) and ($payload.landed | any(.pr_url? == $card.pr_url)))
           or (($card.subject? != null) and ($payload.landed | any(
             (.subject? != null) and .subject.artifact == $card.subject.artifact

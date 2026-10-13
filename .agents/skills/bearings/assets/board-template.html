@@ -465,6 +465,9 @@ __FM_BEARINGS_BOARD_DATA__
     }
     var card = el("div", "fm-card fm-card--poster bb-decision");
     var pad = el("div", "bb-decision__pad");
+    var authoredOptions = item.options.filter(function (o) { return o.value !== "reconcile"; });
+    var recommended = authoredOptions.find(function (o) { return o.value === item.recommend_value; });
+    var incomplete = !authoredOptions.length || !recommended || authoredOptions.some(function (o) { return !o.hint || !o.hint.trim(); });
 
     var top = el("div", "bb-decision__top");
     if (item.type === "merge") {
@@ -474,6 +477,7 @@ __FM_BEARINGS_BOARD_DATA__
       top.appendChild(badge("solid", "decision"));
       top.appendChild(el("span", "bb-decision__repo", item.repo));
     }
+    if (incomplete) top.appendChild(badge("warn", "incomplete"));
     pad.appendChild(top);
 
     pad.appendChild(el("h3", "bb-decision__title", "D" + (index + 1) + " · " + item.title));
@@ -485,18 +489,15 @@ __FM_BEARINGS_BOARD_DATA__
         pr.href = item.pr_url; pr.target = "_blank"; pr.rel = "noopener";
         pad.appendChild(pr);
       }
-    } else {
-      /* the rec marker on the option itself carries the recommendation */
-      var ctx = el("div", "bb-ctx");
-      if (item.about) ctx.appendChild(ctxRow("about", item.about));
-      if (item.decide) ctx.appendChild(ctxRow("decide", item.decide));
-      if (item.detail) ctx.appendChild(ctxRow("context", item.detail));
-      var recommended = item.options.find(function (o) { return o.value === item.recommend_value; });
-      if (item.options.every(function (o) { return o.value === "reconcile"; }))
-        ctx.appendChild(ctxRow("options", "Missing options and consequences - ask firstmate to supply them"));
-      ctx.appendChild(ctxRow("recommend", recommended ? recommended.label : "Missing recommendation - ask firstmate to supply it"));
-      pad.appendChild(ctx);
     }
+    var ctx = el("div", "bb-ctx");
+    if (item.about) ctx.appendChild(ctxRow("about", item.about));
+    if (item.decide) ctx.appendChild(ctxRow("decide", item.decide));
+    if (item.type !== "merge" && item.detail) ctx.appendChild(ctxRow("context", item.detail));
+    if (!authoredOptions.length)
+      ctx.appendChild(ctxRow("options", "Missing options and consequences - ask firstmate to supply them"));
+    ctx.appendChild(ctxRow("recommend", recommended ? recommended.label : "Missing recommendation - ask firstmate to supply it"));
+    pad.appendChild(ctx);
 
     if (item.gate) pad.appendChild(ctxRow("gate", item.gate));
     var remoteOwner = owner !== "(main)";
