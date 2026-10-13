@@ -1397,7 +1397,7 @@ Regression coverage is in [`tests/fm-brief.test.sh`](../tests/fm-brief.test.sh).
 ## Recurring intake (config/schedules.json)
 
 The optional home-local, gitignored `config/schedules.json` declares enqueue-only recurring intent.
-It is not inherited, and an absent file or disabled entries enable no work.
+It is not inherited, and an absent file or disabled entries cause no new detections.
 Nothing in a checkout automatically writes this file, arms a check, or enables a host timer.
 [`bin/fm-schedule-check.sh`](../bin/fm-schedule-check.sh) owns due calculation, occurrence identity, journal receipts, bounded execution, replay, and explicit arm/disarm commands.
 The existing authenticated watcher check cadence supplies the poll; no vendor scheduler or new daemon is needed.
@@ -1445,7 +1445,8 @@ The owning supervisor uses current routing and quota evidence at intake rather t
 
 Due occurrences are filed or reused through [`bin/fm-tasks-axi.sh`](../bin/fm-tasks-axi.sh) as ordinary Queued items containing the frozen brief pointer and occurrence digest.
 The existing task lifecycle owns supervisor judgement, dispatch, capacity and completion; no new skill or always-loaded rule is needed.
-Disabling a schedule prevents new detections, while disarming removes its automatic watcher check; both preserve already filed tasks under that lifecycle.
+Disabling a schedule or removing the configuration stops new detections, but subsequent checks still observe dispatch and completion of occurrences in the journal.
+Disarming removes the automatic watcher check without deleting the journal or already filed tasks.
 An attempted task that disappears from the active backlog is retained pending for ordinary custody reconciliation, including a task completed and archived between polls, rather than recreated.
 Activation requires a separate approved home-local configuration and explicit check arming; this feature supplies no branch-write or operational-update authority.
 Enqueue-only intake does not implement worker failover, PR updates, or domain collection.
