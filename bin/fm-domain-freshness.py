@@ -411,7 +411,8 @@ def inventory_snapshot(source):
                 raise CoverageError('duplicate or cyclic skill symlink')
             visited.add(actual)
             remaining = 2000 - entries
-            items = list(itertools.islice(directory.iterdir(), remaining + 1))
+            with os.scandir(directory) as listing:
+                items = [Path(item.path) for item in itertools.islice(listing, remaining + 1)]
             if len(items) > remaining:
                 raise CoverageError('skill inventory limit reached')
             entries += len(items)
