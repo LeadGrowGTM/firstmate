@@ -31,6 +31,9 @@
 # next poll takes the next candidate. A handled task is recorded in
 # state/.idle-exit/<id> against its activity stamp, so it is not probed again
 # until it shows new activity; a record whose task record is gone is pruned.
+# Eligibility and activity are read again just before the exit call. An answer
+# can still arrive after that read; it remains in the inbox and the worker can
+# be relaunched with all work and records intact.
 #
 # Output follows the watcher's custom state-check contract: one line when an
 # agent was stopped or an exit failed, nothing otherwise. `arm` writes
@@ -176,7 +179,7 @@ parked_on_decision() {  # <state-line> <status-file>
 }
 
 run_check() {
-  local meta id kind activity now started age state state_line limit out rc left line=
+  local meta id kind activity fresh_activity now started age state state_line fresh_state_line limit out rc left line=
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || return 0
   prune_records
   now=$(now_epoch)
@@ -204,6 +207,13 @@ run_check() {
       *) continue ;;
     esac
     [ "$age" -ge "$limit" ] || continue
+    fresh_state_line=$(crew_state "$id") || continue
+    [ "$fresh_state_line" = "$state_line" ] || continue
+    if [ "$state" = parked ]; then
+      parked_on_decision "$fresh_state_line" "$STATE/$id.status" || continue
+    fi
+    fresh_activity=$(activity_epoch "$id")
+    [ "$fresh_activity" = "$activity" ] || continue
     left=$((27 - (SECONDS - started)))
     [ "$left" -ge 1 ] || break
     [ "$left" -le "$CONTROL_SECS" ] || left=$CONTROL_SECS

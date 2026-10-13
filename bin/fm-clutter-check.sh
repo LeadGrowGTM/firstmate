@@ -135,7 +135,7 @@ replace_file() {  # <file> <content>
 due_since() {  # <now>
   local now=$1 last
   if [ -f "$RECORD" ] && [ ! -L "$RECORD" ] \
-    && [ "$(sed -n 1p "$RECORD" 2>/dev/null)" = "schema	$RECORD_SCHEMA" ]; then
+    && [ "$(sed -n 1p "$RECORD" 2>/dev/null)" = $'schema\t'"$RECORD_SCHEMA" ]; then
     last=$(awk -F '\t' '$1 == "last_eval" { print $2; exit }' "$RECORD" 2>/dev/null)
     case "$last" in
       ''|*[!0-9]*) ;;
@@ -193,7 +193,7 @@ measure_copies() {  # <due> <now>
         continue
       fi
     fi
-    next="$next$name	$mb	$at"$'\n'
+    next="$next$name"$'\t'"$mb"$'\t'"$at"$'\n'
   done <<EOF
 $copies
 EOF

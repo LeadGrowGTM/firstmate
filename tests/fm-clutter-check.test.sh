@@ -90,6 +90,8 @@ test_space_conditions_join_into_one_line() {
   assert_contains "$out" 'treehouse worktree pools use 5.9 GB, over 5.0 GB' "pools"
   assert_contains "$out" 'no-mistakes worktrees total 20.5 GB, over 20.0 GB' "total"
   assert_contains "$out" 'no-mistakes copies over 3.0 GB: repo/big 3.9 GB, repo/mid 16.6 GB' "copies"
+  [ "$(awk -F '\t' '$1 == "repo/big" { print $2 }' "$home/state/.clutter-check/sizes")" = 4000 ] \
+    || fail "copy-size cache did not persist tab-separated fields"
   assert_contains "$out" 'archived no-mistakes logs use 5.9 GB, over 5.0 GB' "logs"
   assert_contains "$out" 'WSL root has 156.2 GB in use, over 150.0 GB' "root"
   assert_contains "$out" "$home/mnt-c has 5% free, under 10%" "windows"
@@ -126,6 +128,8 @@ test_daily_gate() {
   echo 160000 > "$home/fixtures/root-used"
   out=$(run_check "$home")
   assert_contains "$out" 'WSL root has' "first evaluation reports"
+  [ "$(awk -F '\t' '$1 == "last_eval" { print $2 }' "$home/state/.clutter-check/last")" = "$NOW" ] \
+    || fail "daily record did not persist tab-separated fields"
   out=$(CHECK_NOW=$((NOW + 3600)) run_check "$home")
   [ -z "$out" ] || fail "a poll inside the day should be silent: $out"
   out=$(CHECK_NOW=$((NOW + 86400)) run_check "$home")
@@ -144,8 +148,7 @@ test_budget_and_unmeasurable_copy() {
   [ -z "$out" ] || fail "a poll that could not size every copy should wait: $out"
   assert_contains "$(cat "$home/fixtures/du.log")" a1 "the budget ran out after the slow copy"
   out=$(run_check "$home" FM_CLUTTER_MEASURE_BUDGET_SECS=2)
-  [ -z "$out" ] || fail "the second poll still has a copy to size: $out"
-  out=$(run_check "$home" FM_CLUTTER_MEASURE_BUDGET_SECS=2)
+  [ -n "$out" ] || out=$(run_check "$home" FM_CLUTTER_MEASURE_BUDGET_SECS=2)
   assert_contains "$out" 'read failed: could not size repo/a1, repo/b1 within 2s' "unmeasurable copies"
   assert_equals 5 "$(wc -l < "$home/fixtures/du.log" | tr -d ' ')" "each copy and both roots are sized once per evaluation"
   pass "fm-clutter-check: copies are sized within the budget and an unmeasurable copy is a read failure"

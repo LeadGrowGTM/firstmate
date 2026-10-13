@@ -33,6 +33,11 @@ FAKE_STATE="$TMP_ROOT/crew-state"
 cat > "$FAKE_STATE" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$FIXTURES/state-reads.log"
+if [ -f "$FIXTURES/$1.answer-on-second-read" ] \
+  && [ "$(grep -c -x "$1" "$FIXTURES/state-reads.log")" -eq 2 ]; then
+  touch "$FM_HOME/state/$1.inbox"
+  printf 'resolved [key=review]: answer arrived\n' >> "$FM_HOME/state/$1.status"
+fi
 s=$(cat "$FIXTURES/$1.state" 2>/dev/null) || s=unknown
 detail=$(cat "$FIXTURES/$1.detail" 2>/dev/null) || detail='source: pane · fixture'
 printf 'state: %s · %s\n' "$s" "$detail"
@@ -128,6 +133,26 @@ test_parked_gate_requires_human_decision() {
   pass "fm-idle-exit: only a human-owned parked gate is exited"
 }
 
+test_new_activity_before_exit_keeps_worker_running() {
+  local home out
+  home=$(make_home answered-done)
+  add_task "$home" t1 done 7200
+  : > "$home/fixtures/t1.answer-on-second-read"
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "a newly answered done task should remain: $out"
+  assert_equals '' "$(log "$home" control)" "a newly answered done task was exited"
+  home=$(make_home answered-parked)
+  add_task "$home" p1 parked 7200
+  printf 'needs-decision [key=review]: waiting for Mitch\n' > "$home/state/p1.status"
+  echo 'source: status-log · waiting for Mitch' > "$home/fixtures/p1.detail"
+  fm_touch_epoch $((NOW - 7200)) "$home/state/p1.status"
+  : > "$home/fixtures/p1.answer-on-second-read"
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "an answered decision should remain: $out"
+  assert_equals '' "$(log "$home" control)" "an answered parked task was exited"
+  pass "fm-idle-exit: activity and decision changes before exit keep the worker running"
+}
+
 test_other_states_and_kinds_are_never_exited() {
   local home out s
   home=$(make_home others)
@@ -214,6 +239,7 @@ test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
 test_done_task_is_exited_after_ten_minutes
 test_parked_task_waits_an_hour
 test_parked_gate_requires_human_decision
+test_new_activity_before_exit_keeps_worker_running
 test_other_states_and_kinds_are_never_exited
 test_one_exit_per_run_and_records_stop_reprobing
 test_busy_turn_is_left_and_failure_reported_once

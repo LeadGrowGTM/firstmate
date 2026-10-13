@@ -140,7 +140,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-startup-growth-check.sh` | Daily metadata-only growth check for startup memory and tracked startup/instruction surfaces |
 | `fm-boat-spend-check.sh` | Optional: daily read-only Boat spend check that reports only when spend, running sandboxes, or billing settings are outside `config/boat-spend.json` ([configuration.md](configuration.md#boat-spend-check-configboat-spendjson)) |
 | `fm-idle-exit.sh` | Exit the agent session of a done or parked worker through `fm-control.sh exit --only-if-idle`, keeping its endpoint, worktree, and work ([configuration.md](configuration.md#idle-session-exit)) |
-| `fm-clutter-check.sh` | Daily read-only machine clutter check: orphaned helpers, no-mistakes pipeline copy size, root use, and Windows free space ([configuration.md](configuration.md#clutter-check)) |
+| `fm-clutter-check.sh` | Daily read-only machine clutter check: worktree pools, no-mistakes pipeline copies, archived logs, root use, and Windows free space ([configuration.md](configuration.md#clutter-check)) |
 | `fm-treehouse-guard.sh` | Run treehouse's safe prune after cleanup and daily for this home's own pools, and report pool size |
 | `fm-pr-lib.sh`           | Own canonical task and PR validation plus private atomic PR-poll publication, merge-notification identity, and retirement |
 | `fm-pr-poll.sh`          | Provide the byte-static watcher program for validated pull-request, merge-request, and Gerrit-change poll sidecars |
