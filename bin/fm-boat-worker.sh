@@ -14,13 +14,16 @@
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project
 # clones. It generates a normal remote brief and uses fm-spawn.sh, forcing yolo
-# off and a three-worker box-wide cap under one lock. An id without a spawn
+# off and a three-worker box-wide cap under one lock. Boat uses the configured
+# tmux backend and its firstmate session; other runtimes refuse dispatch.
+# Capacity is the larger of retained worker records and live fm-* windows from
+# one backend inventory read; unreadable inventory refuses. Stop is allowed
+# only when both counts are zero. An id without a spawn
 # record may be retried; unknown transport completion must be reconciled.
-# Failed post-launch backlog commits retain boat_launch_unreconciled=1 in
-# metadata; it reserves capacity and refuses teardown. Reconcile the endpoint
-# and backlog by hand, then clear that field before ordinary teardown.
 # A failed spawn preflight emits boat-launch: refused-before-spawn on stdout.
-# idle reports whether any task records remain under the same worker lock.
+# idle reports whether any worker records or endpoints remain under that lock.
+# Before spawn, intake adds a missing backlog item through fm-tasks-axi.sh;
+# an existing item is reused and ordinary spawn owns its In flight transition.
 # no-mistakes requires the operator's config/boat-no-mistakes-proven receipt:
 # one successful proof PR URL after a real box pipeline, plus an installed CLI.
 # Neither validation nor dispatch manufactures that proof or downgrades a mode.
@@ -33,6 +36,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+boat_runtime() {
+  # shellcheck source=bin/fm-backend.sh
+  . "$SCRIPT_DIR/fm-backend.sh"
+  [ "$(fm_backend_name)" = tmux ] || die 'Boat worker inventory requires the tmux backend'
+  fm_backend_source tmux || die 'Boat tmux adapter unavailable'
+}
+boat_worker_count() {
+  local meta records=0 live windows status=0
+  for meta in "$FM_HOME/state/"*.meta; do
+    [ -e "$meta" ] || [ -L "$meta" ] || continue
+    [ -f "$meta" ] && [ ! -L "$meta" ] || die 'unsafe worker metadata'
+    [ "$(sed -n 's/^kind=//p' "$meta")" = secondmate ] || records=$((records + 1))
+  done
+  windows=$(fm_backend_tmux_window_inventory '=firstmate') || status=$?
+  case "$status" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
+  live=$(printf '%s\n' "$windows" | awk '/^fm-/ { n++ } END { print n+0 }')
+  if [ "$live" -gt "$records" ]; then printf '%s\n' "$live"; else printf '%s\n' "$records"; fi
+}
 case "${1:-}" in
   --help) sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
   validate|spawn) [ "$#" -eq 1 ] || die 'one operation required' ;;
@@ -45,6 +66,7 @@ if [ "$1" = teardown ] || [ "$1" = idle ]; then
   [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
     [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] || die 'not the purpose-built boat-eng home'
   [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] || die 'unsafe overflow state directory'
+  boat_runtime
   fm_lock_acquire_wait "$FM_HOME/state/.boat-worker.lock" || die 'overflow teardown lock unavailable'
   trap 'fm_lock_release "$FM_HOME/state/.boat-worker.lock" || true' EXIT
   if [ "$1" = teardown ]; then
@@ -55,14 +77,14 @@ if [ "$1" = teardown ] || [ "$1" = idle ]; then
     project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
     case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
-    [ "$(sed -n 's/^boat_launch_unreconciled=//p' "$FM_HOME/state/$ID.meta")" != 1 ] || die 'failed Boat launch needs manual reconciliation before teardown'
+    [ "$(fm_backend_of_meta "$FM_HOME/state/$ID.meta")" = tmux ] || die 'Boat teardown requires a tmux worker'
     "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
   fi
-  for meta in "$FM_HOME/state/"*.meta; do
-    [ -e "$meta" ] || [ -L "$meta" ] || continue
+  COUNT=$(boat_worker_count) || exit 1
+  if [ "$COUNT" -ne 0 ]; then
     printf 'boat-tasks-remaining: yes\n'
     exit 0
-  done
+  fi
   printf 'boat-tasks-remaining: no\n'
   exit 0
 fi
@@ -101,6 +123,7 @@ FM_HOME=${FM_HOME:?FM_HOME is required}
 for dir in data state config projects; do
   [ -d "$FM_HOME/$dir" ] && [ ! -L "$FM_HOME/$dir" ] || die "unsafe overflow $dir directory"
 done
+boat_runtime
 fm_lock_acquire_wait "$FM_HOME/state/.boat-worker.lock" || die 'overflow dispatch lock unavailable'
 LOCK="$FM_HOME/state/.boat-worker.lock"
 ID=$(jq -r .id "$TMP/request")
@@ -118,16 +141,7 @@ if [ "$MODE" = no-mistakes ]; then
     die 'no-mistakes has not been proven on this box'
   fi
 fi
-COUNT=0
-for meta in "$FM_HOME/state/"*.meta; do
-  [ -e "$meta" ] || continue
-  [ -f "$meta" ] && [ ! -L "$meta" ] || die 'unsafe worker metadata'
-  kind=$(sed -n 's/^kind=//p' "$meta")
-  [ "$kind" = secondmate ] && continue
-  # Retained records reserve a slot until ordinary teardown, including finished
-  # agents whose panes can still hold a process. Unknown state never frees one.
-  COUNT=$((COUNT + 1))
-done
+COUNT=$(boat_worker_count) || exit 1
 [ "$COUNT" -lt 3 ] || { printf 'error: Boat three-worker cap reached\n' >&2; exit 75; }
 REPO="$FM_HOME/projects/$PROJECT"
 [ -d "$REPO" ] && [ ! -L "$REPO" ] && [ "$(cd "$REPO" && pwd -P)" = "$REPO" ] || die 'project clone is unavailable or unsafe'
@@ -138,6 +152,18 @@ case "$origin" in
 esac
 [ -z "$(git -C "$REPO" ls-files -- 'clients' '.env' '**/.env')" ] || die 'project tracks client or secret files'
 [ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+if fm_backlog_row_probe "$FM_HOME/data" "$ID"; then
+  :
+elif [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
+  fm_run_timed 30 "$SCRIPT_DIR/fm-tasks-axi.sh" add "$ID" "Boat $PROJECT $ID" \
+    --kind "$(jq -r .kind "$TMP/request")" --repo "$PROJECT" --queue >/dev/null || die 'remote backlog intake failed'
+else
+  die "remote backlog intake unavailable: $FM_BACKLOG_ROW_ERROR"
+fi
 ARGS=()
 if [ "$MODE" = scout ]; then ARGS+=(--scout); else ARGS+=(--mode "$MODE"); fi
 FM_BOAT_REWRITE_BRIEF=boat-eng "$SCRIPT_DIR/fm-brief.sh" "$ID" "$PROJECT" "${ARGS[@]}" >/dev/null
@@ -160,7 +186,7 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
 ' "$BRIEF" > "$TMP/brief"
 cat "$TMP/brief" > "$BRIEF"
 if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
-ARGS+=(--harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
+ARGS+=(--backend tmux --harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
 LAUNCH_ATTEMPTED=1
 "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"

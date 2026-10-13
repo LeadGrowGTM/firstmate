@@ -575,7 +575,7 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < <request.json>
 ```
 
 The box generates its own normal worker brief and operational paths, allocates its own worktree, and calls the existing spawn command with merge authority off.
-The box-wide three-worker cap conservatively reserves retained worker records until ordinary teardown, including completed agents whose panes may still exist.
+The box-wide three-worker cap uses retained records and one live endpoint inventory from the configured tmux runtime; orphan windows remain counted after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 

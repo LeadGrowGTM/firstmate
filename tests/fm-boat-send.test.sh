@@ -6,7 +6,9 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-command -v jq >/dev/null 2>&1 || { printf 'skip: jq not found\n'; exit 0; }
+for tool in jq tasks-axi; do
+  command -v "$tool" >/dev/null 2>&1 || { printf 'skip: %s not found\n' "$tool"; exit 0; }
+done
 
 TMP_ROOT=$(fm_test_tmproot fm-boat-send)
 NOW=1791892800
@@ -14,9 +16,23 @@ BIN="$TMP_ROOT/bin"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
 mkdir -p "$BIN"
 for script in fm-boat-send.sh fm-boat-worker.sh fm-secondmate-registry-lib.sh \
-  fm-timeout-lib.sh fm-wake-lib.sh fm-path-lib.sh; do
+  fm-tasks-axi.sh; do
   cp "$ROOT/bin/$script" "$BIN/$script"
 done
+cp "$ROOT/bin/"*-lib.sh "$BIN/"
+cat > "$BIN/fm-backend.sh" <<'SH'
+#!/usr/bin/env bash
+fm_backend_name() { cat "$FM_HOME/config/backend"; }
+fm_backend_source() { [ "$1" = tmux ]; }
+fm_backend_of_meta() { sed -n 's/^backend=//p' "$1" | awk 'NR==1 { found=1; print } END { if (!found) print "tmux" }'; }
+fm_backend_tmux_window_inventory() {
+  printf 'inventory %s\n' "$1" >> "$FIXTURES/calls"
+  [ "$1" = '=firstmate' ] || return 1
+  [ ! -f "$FIXTURES/inventory.fail" ] || return 1
+  [ ! -f "$FIXTURES/inventory.absent" ] || return 2
+  cat "$FIXTURES/windows"
+}
+SH
 REAL_DATE=$(command -v date)
 REAL_TIMEOUT=$(command -v timeout || command -v gtimeout || true)
 if [ -n "$REAL_TIMEOUT" ]; then
@@ -120,6 +136,8 @@ cat > "$BIN/fm-teardown.sh" <<'SH'
 printf 'teardown %s\n' "$*" >> "$FIXTURES/calls"
 [ ! -e "$FIXTURES/teardown.fail" ] || exit 1
 rm "$FM_HOME/state/$1.meta"
+grep -Fxv "fm-$1" "$FIXTURES/windows" > "$FIXTURES/windows.new" || true
+mv "$FIXTURES/windows.new" "$FIXTURES/windows"
 SH
 # These guards make accidental fixture escape a failure instead of contacting
 # an ambient terminal server or endpoint.
@@ -142,6 +160,10 @@ new_case() {
   printf '%s\n' '- boat-eng - Code overflow (host: boat-prove; root: /home/user/firstmate; home: /home/user/boat-eng; scope: Code only; projects: firstmate, dev-loop; added 2026-10-13)' \
     > "$LOCAL_HOME/data/secondmates.md"
   printf 'boat-eng\n' > "$REMOTE_HOME/.fm-secondmate-home"
+  printf 'tmux\n' > "$REMOTE_HOME/config/backend"
+  printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$REMOTE_HOME/.tasks.toml"
+  printf '## In flight\n\n## Queued\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
+  : > "$FIXTURES/windows"
   printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium"}' \
     > "$FIXTURES/request.json"
   printf '%s\n' '{"billingStatus":"active","canStart":true,"creditSecondsPerDollar":100000,"creditUsedSeconds":1000,"last24hUsageSeconds":2000,"creditBalanceSeconds":100000,"activeStates":["ready","idle","running"]}' \
@@ -428,20 +450,15 @@ test_teardown_stop() {
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 0 "$CODE" 'teardown with another task'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'other task was stopped'
-  new_case unreconciled-task-remains
+  new_case orphan-endpoint-remains
   seed_receipt
   seed_worker task-one ship firstmate 'state: done complete'
-  seed_worker task-two ship firstmate 'state: working active'
-  printf 'boat_launch_unreconciled=1\n' >> "$REMOTE_HOME/state/task-two.meta"
+  printf 'fm-task-one\nfm-orphan\n' > "$FIXTURES/windows"
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
-  expect_code 0 "$CODE" 'teardown with unreconciled launch'
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unreconciled launch was stopped'
-  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-two
-  expect_code 1 "$CODE" 'unreconciled launch requires manual reconciliation'
-  if grep -Fx 'teardown task-two' "$FIXTURES/calls" >/dev/null; then
-    fail 'unreconciled launch reached ordinary teardown'
-  fi
-  assert_present "$REMOTE_HOME/state/task-two.meta" 'unreconciled launch lost its reservation'
+  expect_code 0 "$CODE" 'teardown with an orphan endpoint'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'orphan endpoint was stopped'
+  assert_absent "$REMOTE_HOME/state/task-one.meta" 'ordinary task record remained'
+  assert_equals 'fm-orphan' "$(cat "$FIXTURES/windows")" 'orphan endpoint was removed'
   new_case dev-loop-scout-teardown
   seed_receipt
   seed_worker task-one scout dev-loop 'state: done complete'
@@ -523,6 +540,27 @@ seed_worker() {
 }
 
 test_remote_cap_and_merge_authority() {
+  new_case orphan-endpoints-cap
+  seed_project firstmate
+  seed_worker worker-a ship firstmate 'state: working active'
+  seed_worker worker-b scout dev-loop 'state: working active'
+  printf 'fm-worker-a\nfm-worker-b\nfm-orphan\n' > "$FIXTURES/windows"
+  spawn_task
+  expect_code 75 "$CODE" 'orphan endpoint must reserve the third slot'
+  assert_equals 1 "$(grep -c '^inventory ' "$FIXTURES/calls")" 'capacity performed more than one endpoint inventory'
+  assert_no_grep 'spawn ' "$FIXTURES/calls" 'orphan endpoint bypassed capacity'
+  new_case unavailable-endpoints
+  seed_project firstmate
+  : > "$FIXTURES/inventory.fail"
+  spawn_task
+  expect_code 1 "$CODE" 'unreadable endpoint inventory must refuse'
+  assert_no_grep 'spawn ' "$FIXTURES/calls" 'unreadable inventory spawned a worker'
+  new_case unsupported-runtime
+  seed_project firstmate
+  printf 'orca\n' > "$REMOTE_HOME/config/backend"
+  spawn_task
+  expect_code 1 "$CODE" 'unsupported Boat runtime must refuse'
+  assert_no_grep 'inventory ' "$FIXTURES/calls" 'unsupported runtime attempted tmux inventory'
   new_case cross-project-cap
   seed_project firstmate
   seed_worker worker-a ship firstmate 'state: working active'
@@ -548,7 +586,7 @@ test_remote_cap_and_merge_authority() {
   spawn_task
   expect_code 0 "$CODE" "remote dispatch: $OUT"
   assert_equals "$(printf '%s\n' task-one "$REMOTE_HOME/projects/firstmate" \
-    --mode direct-PR --yolo off --harness codex --model gpt-6-sol --effort medium)" \
+    --mode direct-PR --yolo off --backend tmux --harness codex --model gpt-6-sol --effort medium)" \
     "$(cat "$FIXTURES/spawn.argv")" 'remote spawn forces merge authority off with selected profile'
   assert_grep 'Implement the requested fix' "$REMOTE_HOME/data/task-one/brief.md" 'intent omitted from remote brief'
   assert_grep 'Use existing helpers' "$REMOTE_HOME/data/task-one/brief.md" 'spec omitted from remote brief'

@@ -5969,14 +5969,7 @@ else
 fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
-    if [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
-      [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ]; then
-      # Delivery succeeded: retain the Boat endpoint's capacity reservation
-      # until manual reconciliation, even though its backlog commit failed.
-      SPAWN_FRESH_COMMIT_PENDING=0
-      printf 'boat_launch_unreconciled=1\n' >> "$STATE/$ID.meta"
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its Boat record is retained for manual reconciliation" >&2
-    elif spawn_fresh_commit_rollback; then
+    if spawn_fresh_commit_rollback; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
