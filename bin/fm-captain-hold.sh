@@ -948,17 +948,23 @@ write_decision_copy() {  # <id> <decoded-body> <canonical-json>
   new_body=$(printf '%s\nCaptain options: %s' "$new_body" "$copy")
   [ "$body" != "$new_body" ] || return 0
   tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-options.XXXXXX") || fail "could not create options scratch"
-  printf '%s\n' "$new_body" > "$tmp"
+  if ! printf '%s\n' "$new_body" > "$tmp"; then
+    rm -f -- "$tmp"
+    fail "could not stage decision copy on $id"
+  fi
   if ! tasks_axi update "$id" --body-file "$tmp" >/dev/null; then
     rm -f -- "$tmp"
     fail "could not store decision copy on $id"
   fi
   rm -f -- "$tmp"
+  task_show_or_fail "$id" "task $id disappeared after recording its decision copy"
+  [ "$(show_field_value "$show" body)" = "$new_body" ] \
+    || fail "task $id did not retain its decision copy"
 }
 
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' corr='' corr_given=0 show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason previous_origin='' hold_status=0 options_file='' copy=''
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' restore_tmp='' hold_status=0 options_file='' copy=''
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -1041,12 +1047,16 @@ command_hold() {
   task_show_or_fail "$id" "task $id disappeared before recording its hold-set stamp"
   write_hold_set_stamp "$id" "$(show_field "$show" body)" "$hold_set" "$preserve_hold_set"
   task_show_or_fail "$id" "task $id disappeared while recording its hold-set stamp"
+  prior_body=$(show_field_value "$show" body)
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id did not retain its hold-set stamp"
   if [ -n "$origin" ]; then
     origin=$(task_identity "$origin") || exit $?
-    previous_origin=$(body_hold_origin "$(show_field_value "$show" body)")
     write_hold_origin "$id" "$(show_field "$show" body)" "$origin" || exit $?
+  fi
+  if [ -n "$copy" ]; then
+    task_show_or_fail "$id" "task $id disappeared before recording its decision copy"
+    write_decision_copy "$id" "$(show_field_value "$show" body)" "$copy"
   fi
   if [ -n "$until" ]; then
     tasks_axi hold "$id" --reason "$stored_reason" --kind captain --until "$until" >/dev/null \
@@ -1056,16 +1066,21 @@ command_hold() {
       || hold_status=$?
   fi
   if [ "$hold_status" -ne 0 ]; then
-    # A refused re-hold must not associate the previous hold or answer with a
-    # new origin. Restore the old line verbatim, without resolving it again.
-    if [ -n "$origin" ]; then
-      write_hold_origin "$id" "$(show_field "$show" body)" "$previous_origin" || exit $?
+    restore_tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-restore.XXXXXX") \
+      || fail "could not stage the prior body for $id"
+    if ! printf '%s\n' "$prior_body" > "$restore_tmp"; then
+      rm -f -- "$restore_tmp"
+      fail "could not stage the prior body for $id"
     fi
+    if ! tasks_axi update "$id" --body-file "$restore_tmp" >/dev/null; then
+      rm -f -- "$restore_tmp"
+      fail "could not restore the prior body for $id"
+    fi
+    rm -f -- "$restore_tmp"
+    task_show_or_fail "$id" "task $id disappeared after restoring its prior body"
+    [ "$(show_field_value "$show" body)" = "$prior_body" ] \
+      || fail "task $id did not retain its prior body"
     fail "could not hold task $id for the captain"
-  fi
-  if [ -n "$copy" ]; then
-    task_show_or_fail "$id" "task $id disappeared before recording its decision copy"
-    write_decision_copy "$id" "$(show_field_value "$show" body)" "$copy"
   fi
   task_show "$id" || fail "task $id disappeared while holding it"
   show=$TASK_SHOW_OUTPUT
@@ -1983,7 +1998,7 @@ list_has_line() {  # <newline-separated-list> <value>
 }
 
 command_migrate_options() (
-  local input=${1:-} apply=0 migration_dir entries entry id title origin repo reason copy i=0 state
+  local input=${1:-} apply=0 migration_dir entries entry id title origin repo reason copy i=0 state existing
   local -a args
   [ "$#" -ge 1 ] && [ "$#" -le 2 ] || { usage >&2; exit 2; }
   if [ "$#" -eq 2 ]; then
@@ -2030,7 +2045,9 @@ command_migrate_options() (
       printf 'would-hold: %s %s\n' "$id" "$title"
       continue
     fi
+    existing=0
     if task_show "$id"; then
+      existing=1
       state=$(show_field "$TASK_SHOW_OUTPUT" state)
       if [ "$state" = "done" ]; then
         printf 'already-closed: %s\n' "$id"
@@ -2040,7 +2057,8 @@ command_migrate_options() (
     origin=$(printf '%s' "$entry" | jq -r '.origin // empty')
     repo=$(printf '%s' "$entry" | jq -r '.repo // "firstmate"')
     reason=$(printf '%s' "$entry" | jq -r 'if .decide != "" then .decide else .title end')
-    args=(hold "$id" --title "$title" --reason "$reason" --repo "$repo" --options-file "$migration_dir/$i.copy")
+    args=(hold "$id" --reason "$reason" --repo "$repo" --options-file "$migration_dir/$i.copy")
+    [ "$existing" = 1 ] || args+=(--title "$title")
     [ -z "$origin" ] || args+=(--origin "$origin")
     "$0" "${args[@]}" >/dev/null || fail "migration stopped at $id"
     printf 'held: %s\n' "$id"
@@ -2068,10 +2086,9 @@ command_orphans() {
           origin_id=$(task_identity "$origin") || exit $?
           if [ "$candidate_id" != "$origin_id" ]; then
             stored=$(body_hold_origin "$(show_field_value "$TASK_SHOW_OUTPUT" body)")
-            if [ -n "$stored" ]; then
-              stored_id=$(task_identity "$stored") || exit $?
-              [ "$stored_id" = "$origin_id" ] || continue
-            fi
+            [ -n "$stored" ] || continue
+            stored_id=$(task_identity "$stored") || exit $?
+            [ "$stored_id" = "$origin_id" ] || continue
           fi
           held=1
           break
