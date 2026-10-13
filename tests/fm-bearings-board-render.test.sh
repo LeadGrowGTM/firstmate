@@ -292,6 +292,8 @@ test_owner_grouped_numbered_decisions() {
     and all(.calls[]; .hidden == false)
     and (.stats[] | select(.label == "need you") | .n) == 2
     and .calls[0].submitDisabled == false and .calls[2].submitDisabled == true
+    and (.calls[1].text | contains("until 2026-11-01") and contains("Queue answer"))
+    and .calls[1].submitDisabled == false
     and (.calls[0].text | contains("Keeps compatibility") and contains("recommendRoute A") and contains("Queue answer"))
     and (.calls[1].text | contains("incomplete") and contains("Missing recommendation") and contains("Missing consequence")
       and contains("ask firstmate to supply it"))

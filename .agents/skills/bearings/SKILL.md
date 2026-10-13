@@ -99,6 +99,7 @@ For a contribution wake or linked-issue filing, go directly to Contribution foll
 For the decisions layout, gather `bin/fm-bearings-snapshot.sh --json --fields decisions` alongside the compact snapshot.
 Its `decision_layout` inventories structured captain-held tasks across the registered homes, including deferred calls, with full hold reasons, owner-qualified identities, priority order, origin links, and stale-candidate reasons.
 Keep every inventory row in the board, with exactly one card per owner/task identity; use `gate` to show a non-live bucket or deferral rather than implying immediate action.
+A deferred main-home card stays answerable before its date arrives; its `gate` changes the displayed timing and count, not the Queue answer control.
 Use the known hold reason and its linked origin report sections to explain that existing call's options, consequences, and recommendation; never discover additional calls by reading prose.
 If the record does not support options, their consequences, or a recommendation, mark each missing detail plainly on the card, ask firstmate to supply it, and allow a freeform answer instead of inventing guidance.
 Legacy summaries retain their available known held calls, with truncated detail and unmeasured remaining inventory explicitly disclosed.
