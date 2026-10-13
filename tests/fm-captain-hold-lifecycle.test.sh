@@ -2544,7 +2544,7 @@ EOF
 }
 
 test_refused_hold_keeps_prior_reason_and_options() {
-  local home before after json
+  local home before after out json
   home=$(make_home refused-options)
   cat > "$home/old-options.json" <<'EOF'
 {"about":"Old route","decide":"Choose","options":[{"value":"old","label":"Old"}]}
@@ -2570,17 +2570,22 @@ SH
   cat > "$home/captain-decisions.json" <<'EOF'
 {"decisions":[{"key":"existing","title":"Legacy title","about":"Migrated route","decide":"Choose","options":[{"value":"migrated","label":"Migrated"}]}]}
 EOF
-  if run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null 2>&1; then
-    fail "migration succeeded despite backend refusal"
-  fi
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "migration preview refused an already-held task"
+  assert_contains "$out" 'skipped: existing (already held)' "preview did not skip the existing hold"
   after=$(tasks_in "$home" show existing --full)
-  [ "$before" = "$after" ] || fail "refused migration changed the previous hold"
+  [ "$before" = "$after" ] || fail "migration preview changed the existing hold"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
+    || fail "migration apply refused an already-held task"
+  assert_contains "$out" 'skipped: existing (already held)' "apply did not skip the existing hold"
+  after=$(tasks_in "$home" show existing --full)
+  [ "$before" = "$after" ] || fail "migration apply changed the existing hold"
   json=$(run_bearings "$home" --fields decisions) || fail "could not project the refused hold"
   printf '%s' "$json" | jq -e '
     .decision_layout | any(.key == "existing" and .reason == "Old choice"
       and .about == "Old route" and [.options[].value] == ["old"])
   ' >/dev/null || fail "refused hold replaced previous options: $json"
-  pass "refused direct and migrated holds preserve the previous reason and options"
+  pass "refused direct holds and skipped migration preserve prior reason and options"
 }
 
 test_legacy_option_migration_is_explicit_and_idempotent() {
