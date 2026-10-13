@@ -41,12 +41,15 @@
 #   Claude: `claude auth status`, which exits 0 only when signed in.
 #   Pi:     `pi auth check --provider <p> --json --no-refresh`; status "ready"
 #           passes. `pi auth check` loads no extensions, so it answers
-#           not_ready/provider_not_found for an extension-registered provider,
-#           and a Pi without the command (before 0.84.1) prints no JSON. Both
-#           fall through to `pi --list-models <p>`, which lists only the models
+#           not_ready/provider_not_found for an extension-registered provider.
+#           An older Pi that lacks the command must report the exact known
+#           unsupported-command response; only those two proven cases use
+#           `pi --list-models <p>`, which lists only the models
 #           a root can authenticate; a row whose provider column is exactly
 #           <p> passes. --no-refresh keeps the check from rewriting a root's
 #           tokens while other workers use them.
+#           A timeout, empty response, or malformed JSON is inconclusive and
+#           cannot be turned into readiness by a model listing.
 # A pinned Claude launch also unsets the environment credentials Claude ranks
 # above the root's stored login, so an ambient API key or token cannot outrank
 # the pin. Pi ranks a root's stored credentials above environment variables,

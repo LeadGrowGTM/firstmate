@@ -197,7 +197,7 @@ The empirical basis for each adapter's value is the `harness-adapters` skill's v
 ## Scheduled worker continuation
 
 Scheduled fallback is opt-in and task-local; it never enables a schedule or changes a supervisor harness.
-[`bin/fm-scheduled-worker.sh`](../bin/fm-scheduled-worker.sh) owns the explicit authorization, fresh supervisor selection, bounded candidate ledger, occurrence replay barrier, and exhaustion-proof/checkpoint contract.
+[`bin/fm-scheduled-worker.sh`](../bin/fm-scheduled-worker.sh) validates explicit authorization and a recent supervisor-supplied selection, and owns the bounded candidate ledger, occurrence replay barrier, and exhaustion-proof/checkpoint contract.
 It delegates launch to spawn and continuation to this control plane in the existing worktree, preserving runtime backend, account pins, and delivery rigor.
 [`bin/fm-launch-outcome-lib.sh`](../bin/fm-launch-outcome-lib.sh) owns the attempt receipt schema; publication and live process confirmation are distinct outcomes.
 Current routing remains the selection authority, and uncertain launch results require reconciliation before another attempt.
