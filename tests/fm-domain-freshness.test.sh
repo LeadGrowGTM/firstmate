@@ -530,6 +530,26 @@ assert_equals '' "$OUT" 'overlap replay duplicated event'
 pass 'late overlap identity dedup keeps unchanged pass silent'
 
 new_home
+config "$repo_sources"
+pr 22 2026-10-13T11:59:00Z 2026-10-13T11:59:00Z | jq '.html_url = "https://github.com/ACME/WIDGETS/pull/22"' | jq -s . > "$FEED/pulls-1.json"
+issue 23 2026-10-13T11:59:00Z | jq '.html_url = "https://github.com/ACME/WIDGETS/issues/23"' | jq -s . > "$FEED/issues-1.json"
+detail 22 2026-10-13T11:59:00Z 0 > "$FEED/detail-22.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'case-varying forge detail'
+bundle
+jq -e '(.evidence | length) == 2 and all(.evidence[]; .url | startswith("https://github.com/ACME/WIDGETS/"))' "$OUT" >/dev/null || fail 'returned forge URL casing was not retained in evidence'
+jq -e '.sources.forge.seen | has("merged-pr:https://github.com/acme/widgets/pull/22") and has("new-issue:https://github.com/acme/widgets/issues/23")' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'new overlap identities were not case-stable'
+jq '.sources.forge.seen |= with_entries(.key |= gsub("acme/widgets"; "ACME/WIDGETS"))' "$HOME_DIR/data/domain-freshness/cursors.json" > "$HOME_DIR/data/domain-freshness/cursors-next.json"
+mv "$HOME_DIR/data/domain-freshness/cursors-next.json" "$HOME_DIR/data/domain-freshness/cursors.json"
+pr 22 2026-10-13T11:59:00Z 2026-10-13T11:59:00Z | jq -s . > "$FEED/pulls-1.json"
+issue 23 2026-10-13T11:59:00Z | jq -s . > "$FEED/issues-1.json"
+collect "$HOME_DIR" 2026-10-13T12:03:00Z
+expect_code 0 "$STATUS" 'case-varying overlap replay'
+assert_equals '' "$OUT" 'case-varying overlap replay duplicated an event'
+jq -e '.sources.forge.checkpoint == "2026-10-13T12:03:00Z" and (.sources.forge.seen | has("merged-pr:https://github.com/acme/widgets/pull/22") and has("new-issue:https://github.com/acme/widgets/issues/23"))' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'legacy overlap identities were not normalized without losing the checkpoint'
+pass 'PR and issue overlap dedup survives URL casing and legacy cursor keys'
+
+new_home
 mkdir -p "$HOME_DIR/skills"
 ln -s "$TMP_ROOT/outside" "$HOME_DIR/skills/escaped"
 mkdir -p "$TMP_ROOT/outside"

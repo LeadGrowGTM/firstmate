@@ -233,7 +233,7 @@ def merged_instruction(repo, entries, path):
 def forge(source, previous, now, contributions):
     start = instant(previous['checkpoint']) if previous else now - dt.timedelta(days=1)
     lower = start - dt.timedelta(seconds=300) if previous else start
-    seen = dict(previous.get('seen', {})) if previous else {}
+    seen = {key.casefold(): value for key, value in previous.get('seen', {}).items()} if previous else {}
     events = []
     repo = source['repo']
     prefix = '/repos/' + repo
@@ -255,14 +255,14 @@ def forge(source, previous, now, contributions):
                     raise CoverageError('invalid forge object number')
                 url = row.get('html_url')
                 actual_repo = forge_identity(url, repo, 'pull' if kind == 'merged-pr' else 'issues', number)
-                key = kind + ':' + url
+                key = kind + ':' + url.casefold()
                 if key in seen:
                     continue
                 event = {'kind': kind, 'url': url, 'repository': actual_repo, timestamp: when,
                          'title': row.get('title'), 'labels': row.get('labels', [])}
                 if kind == 'merged-pr':
                     detail = api(prefix + '/pulls/' + str(number))
-                    if not isinstance(detail, dict) or detail.get('merged_at') != when or detail.get('html_url') != url:
+                    if not isinstance(detail, dict) or detail.get('merged_at') != when or not isinstance(detail.get('html_url'), str) or detail['html_url'].casefold() != url.casefold():
                         raise CoverageError('inconsistent merged PR detail')
                     base, head = detail.get('base', {}), detail.get('head', {})
                     base_repo = (base.get('repo') or {}).get('full_name')
