@@ -53,6 +53,10 @@ make_pool_fakebin() {
 set -u
 case "$*" in
   *"#{pane_current_path}"*)
+    if [ -n "${FM_FAKE_CWD_FAIL_AFTER_EXIT:-}" ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ] \
+      && [ -f "$FM_FAKE_EXIT_FLAG" ]; then
+      exit 1
+    fi
     if [ -n "${FM_FAKE_PANE_AFTER_EXIT:-}" ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ] \
       && [ -f "$FM_FAKE_EXIT_FLAG" ]; then
       printf '%s\n' "$FM_FAKE_PANE_AFTER_EXIT"
@@ -90,6 +94,12 @@ case "${1:-}" in
           Enter|C-m) continue ;;
           *)
             [ -n "$literal" ] || printf '%s\n' "$a" >> "$FM_FAKE_PANE_LOG"
+            if [ "$a" = 'treehouse get' ] && [ -n "${FM_FAKE_TREEHOUSE_INITIAL_PATH:-}" ]; then
+              mkdir -p "$(dirname "$FM_FAKE_TREEHOUSE_INITIAL_PATH")"
+              git -C "${FM_FAKE_TREEHOUSE_INITIAL_PROJECT:?}" worktree add --quiet --detach \
+                "$FM_FAKE_TREEHOUSE_INITIAL_PATH" || exit 1
+              : > "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:?}"
+            fi
             if [ -n "$literal" ] && [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
               printf '%s\n' "$a" >> "$FM_FAKE_LAUNCH_LOG"
             fi
@@ -100,6 +110,10 @@ case "${1:-}" in
             fi
             if [ "$a" = exit ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ]; then
               : > "$FM_FAKE_EXIT_FLAG"
+              if [ -n "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}" ] \
+                && [ -z "${FM_FAKE_CWD_FAIL_AFTER_EXIT:-}" ]; then
+                rm -f "$FM_FAKE_TREEHOUSE_INITIAL_LEASE"
+              fi
             fi
             ;;
         esac
@@ -122,7 +136,18 @@ case "$*" in
     printf 'gitmarker=%s\n' "$(git config --global --get fm.marker 2>/dev/null)" >> "$log"
     echo "fake treehouse lease progress" >&2
     [ -z "${FM_FAKE_TREEHOUSE_LEASE_RC:-}" ] || exit "$FM_FAKE_TREEHOUSE_LEASE_RC"
+    if [ -n "${FM_FAKE_TREEHOUSE_FALLBACK_LEASE:-}" ]; then
+      mkdir -p "$(dirname "${FM_FAKE_TREEHOUSE_PRINT:?}")"
+      git worktree add --quiet --detach "$FM_FAKE_TREEHOUSE_PRINT" || exit 1
+      : > "$FM_FAKE_TREEHOUSE_FALLBACK_LEASE"
+    fi
     printf '%s\n' "${FM_FAKE_TREEHOUSE_PRINT:-}"
+    ;;
+  return\ --force\ *)
+    if [ -n "${FM_FAKE_TREEHOUSE_FALLBACK_LEASE:-}" ] \
+      && [ "${3:-}" = "${FM_FAKE_TREEHOUSE_PRINT:-}" ]; then
+      rm -f "$FM_FAKE_TREEHOUSE_FALLBACK_LEASE"
+    fi
     ;;
 esac
 exit 0
@@ -638,18 +663,17 @@ test_shasum_only_path_names_the_pool_from_the_home() {
 }
 
 test_initial_get_checks_returned_worktree() {
-  local variant id case_dir allocated reported pane_log tree_log out status
-  for variant in inside outside; do
+  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd out status
+  for variant in inside outside unconfirmed; do
     id="pool-placement-initial-$variant"
     case_dir=$TMP_ROOT/$id
     CASE_URL=$(make_same_origin_clones "$case_dir/origin")
     prepare_spawn_home "$case_dir" "$id"
-    if [ "$variant" = inside ]; then
+    if [ "$variant" != outside ]; then
       allocated=$CASE_HOME/worktrees/1/widget
     else
       allocated=$case_dir/external-pool/1/widget
     fi
-    add_worktree "$CASE_HOME/projects/widget" "$allocated"
     reported=$allocated
     if [ "$variant" = inside ]; then
       reported=$case_dir/allocated-link
@@ -657,39 +681,53 @@ test_initial_get_checks_returned_worktree() {
     fi
     pane_log=$case_dir/pane.log
     tree_log=$case_dir/treehouse.log
+    lease=$case_dir/initial-lease
+    fail_cwd=
+    [ "$variant" != unconfirmed ] || fail_cwd=1
     : > "$pane_log"
     : > "$tree_log"
     status=0
     out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+      FM_FAKE_TREEHOUSE_INITIAL_PATH="$allocated" \
+      FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
+      FM_FAKE_TREEHOUSE_INITIAL_LEASE="$lease" FM_FAKE_CWD_FAIL_AFTER_EXIT="$fail_cwd" \
       FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" FM_FAKE_EXIT_FLAG="$case_dir/exited" \
       run_spawn "$reported" "$id") || status=$?
     assert_exact_line 'treehouse get' "$pane_log" "$variant: initial get was not sent"
+    [ -d "$allocated" ] || fail "$variant: fake Treehouse did not allocate a worktree"
     if [ "$variant" = inside ]; then
       [ "$status" -ne 0 ] || fail "inside: spawn accepted the allocated worktree"$'\n'"$out"
       assert_contains "$out" "allocated worktree $allocated is inside Firstmate home" \
         "inside: refusal did not resolve the allocated link"
       assert_exact_line 'exit' "$pane_log" "inside: allocated copy was not returned"
-      [ -f "$case_dir/exited" ] || fail "inside: pane did not leave the allocated copy"
+      [ ! -e "$lease" ] || fail "inside: fake Treehouse lease remained active"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "inside: refusal published a task"
+    elif [ "$variant" = unconfirmed ]; then
+      [ "$status" -ne 0 ] || fail "unconfirmed: spawn accepted the allocated worktree"$'\n'"$out"
+      assert_contains "$out" "worktree '$reported' was not confirmed returned" \
+        "unconfirmed: missing return warning"
+      assert_exact_line 'exit' "$pane_log" "unconfirmed: return was not attempted"
+      [ -f "$lease" ] || fail "unconfirmed: fake Treehouse lease was unexpectedly released"
+      [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "unconfirmed: refusal published a task"
     else
       expect_code 0 "$status" "outside: safe allocation was refused"$'\n'"$out"
       assert_no_exact_line 'exit' "$pane_log" "outside: safe copy was returned"
+      [ -f "$lease" ] || fail "outside: fake Treehouse lease was not retained"
       assert_grep "worktree=$allocated" "$CASE_HOME/state/$id.meta" \
         "outside: spawn did not use the allocated copy"
     fi
   done
-  pass "initial get checks the returned real path and releases unsafe copies"
+  pass "initial get releases refused copies and reports unconfirmed returns"
 }
 
 test_fallback_lease_checks_returned_worktree() {
-  local variant id case_dir foreign allocated after_exit pane_log tree_log out status
+  local variant id case_dir foreign allocated after_exit pane_log tree_log initial_lease fallback_lease out status
   for variant in inside outside; do
     id="pool-placement-fallback-$variant"
     case_dir=$TMP_ROOT/$id
     CASE_URL=$(make_same_origin_clones "$case_dir/origin")
     prepare_spawn_home "$case_dir" "$id"
     foreign=$case_dir/shared-pool/1/widget
-    add_worktree "$case_dir/other/projects/widget" "$foreign"
     if [ "$variant" = inside ]; then
       allocated=$CASE_HOME/worktrees/1/widget
       after_exit=$CASE_HOME/projects/widget
@@ -697,15 +735,22 @@ test_fallback_lease_checks_returned_worktree() {
       allocated=$CASE_POOL/.treehouse/kept/1/widget
       after_exit=$allocated
     fi
-    add_worktree "$CASE_HOME/projects/widget" "$allocated" "kept-$id"
     pane_log=$case_dir/pane.log
     tree_log=$case_dir/treehouse.log
+    initial_lease=$case_dir/initial-lease
+    fallback_lease=$case_dir/fallback-lease
     : > "$pane_log"
     : > "$tree_log"
     status=0
     out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+      FM_FAKE_TREEHOUSE_INITIAL_PATH="$foreign" \
+      FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$case_dir/other/projects/widget" \
+      FM_FAKE_TREEHOUSE_INITIAL_LEASE="$initial_lease" \
+      FM_FAKE_TREEHOUSE_FALLBACK_LEASE="$fallback_lease" \
       FM_FAKE_TREEHOUSE_PRINT="$allocated" FM_FAKE_PANE_AFTER_EXIT="$after_exit" \
       FM_FAKE_EXIT_FLAG="$case_dir/exited" run_spawn "$foreign" "$id") || status=$?
+    [ -d "$foreign" ] && [ -d "$allocated" ] || fail "$variant: fake Treehouse did not allocate both copies"
+    [ ! -e "$initial_lease" ] || fail "$variant: foreign interactive lease was not released"
     assert_exact_line "args=get --lease --lease-holder $id" "$tree_log" \
       "$variant: fallback lease was not requested"
     if [ "$variant" = inside ]; then
@@ -714,12 +759,14 @@ test_fallback_lease_checks_returned_worktree() {
         "inside: fallback refusal did not name the allocated copy"
       assert_exact_line "args=return --force $allocated" "$tree_log" \
         "inside: untouched fallback lease was not returned"
+      [ ! -e "$fallback_lease" ] || fail "inside: fake Treehouse fallback lease remained active"
       assert_no_grep 'cd -- ' "$pane_log" "inside: pane entered the refused lease"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "inside: refusal published a task"
     else
       expect_code 0 "$status" "outside: safe fallback was refused"$'\n'"$out"
       assert_no_grep "args=return --force $allocated" "$tree_log" \
         "outside: safe fallback lease was returned"
+      [ -f "$fallback_lease" ] || fail "outside: fake Treehouse fallback lease was not retained"
       assert_grep "worktree=$allocated" "$CASE_HOME/state/$id.meta" \
         "outside: spawn did not use the fallback lease"
     fi

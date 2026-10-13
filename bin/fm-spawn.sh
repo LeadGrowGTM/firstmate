@@ -4618,7 +4618,7 @@ spawn_wait_left_path() {  # <path>
   real=$(real_path_or_raw "$path")
   for _ in $(seq 1 60); do
     seen=$(spawn_current_path "$WT_TARGET" || true)
-    if [ -z "$seen" ] || [ "$(real_path_or_raw "$seen")" != "$real" ]; then
+    if [ -n "$seen" ] && [ "$(real_path_or_raw "$seen")" != "$real" ]; then
       return 0
     fi
     sleep 1
@@ -4700,7 +4700,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fi
   if ! fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$WT"; then
     if ! spawn_send_text_line "$WT_TARGET" 'exit' || ! spawn_wait_left_path "$WT"; then
-      echo "error: could not return the refused Treehouse worktree '$WT'; inspect window $T" >&2
+      echo "error: Treehouse worktree '$WT' was not confirmed returned; leave it for treehouse prune and inspect window $T" >&2
     fi
     exit 1
   fi
