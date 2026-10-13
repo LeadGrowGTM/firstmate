@@ -199,7 +199,7 @@ test_open_views_the_window_and_writes_identity() {
   assert_equals "$DEV_ID" "$sel" "the view session shows exactly the target window"
   assert_equals "$CLAUDE_ID" "$("$SHIM/tmux" display-message -p -t '=firstmate:' '#{window_id}')" \
     "the base session's own current window is untouched"
-  ident=$(run_view identity --file "$idfile" --wait 10) || fail "identity was not reported"
+  ident=$(run_view identity --file "$idfile") || fail "identity was not reported"
   assert_absent "$idfile" "the identity file is removed once read"
   assert_not_contains "$ident" "TOKEN" "no hook token is carried into the pane"
   assert_not_contains "$ident" "PORT" "no hook port is carried into the pane"
@@ -243,7 +243,9 @@ test_identity_filters_input() {
     printf 'ORCA_AGENT_HOOK_TOKEN=secret\n'
     printf 'PATH=/evil\n'
   } > "$f"
-  ident=$(run_view identity --file "$f" --wait 0) || fail "identity refused valid input"
+  ident=$(run_view identity --file "$f") || fail "identity refused valid input"
+  expect_code 2 "$(run_view identity --file "$f" --wait 0 >/dev/null 2>&1; echo $?)" \
+    "identity refuses the removed wait override"
   assert_not_contains "$ident" "secret" "a token is never exported"
   assert_not_contains "$ident" "PATH" "only Orca identity names are exported"
   # shellcheck disable=SC2016
@@ -259,7 +261,7 @@ test_identity_filters_input() {
         [ "$name" != "$missing" ] || value=
         printf '%s=%s\n' "$name" "$value" >> "$f"
       done
-      expect_code 3 "$(run_view identity --file "$f" --wait 0 >/dev/null 2>&1; echo $?)" \
+      expect_code 3 "$(run_view identity --file "$f" >/dev/null 2>&1; echo $?)" \
         "$missing $mode must not yield a partial identity"
     done
   done
@@ -268,9 +270,9 @@ test_identity_filters_input() {
     printf 'ORCA_AGENT_HOOK_ENDPOINT=/e\nORCA_AGENT_HOOK_ENV=production\n'
     printf 'ORCA_AGENT_HOOK_VERSION=bad\033[2J\n'
   } > "$f"
-  expect_code 3 "$(run_view identity --file "$f" --wait 0 >/dev/null 2>&1; echo $?)" \
+  expect_code 3 "$(run_view identity --file "$f" >/dev/null 2>&1; echo $?)" \
     "a control byte makes the six-field identity incomplete"
-  expect_code 3 "$(run_view identity --file "$TMP_ROOT/never" --wait 0 >/dev/null 2>&1; echo $?)" \
+  expect_code 3 "$(run_view identity --file "$TMP_ROOT/never" >/dev/null 2>&1; echo $?)" \
     "an identity that never arrives steps aside"
   pass "identity: exports only six nonempty safe fields and refuses missing or incomplete delivery"
 }
