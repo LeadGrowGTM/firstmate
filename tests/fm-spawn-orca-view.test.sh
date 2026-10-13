@@ -71,6 +71,7 @@ case "$*" in
     printf '%s\n' "$group"
     exit 0 ;;
   *'#{session_id}'*) printf '$1\n'; exit 0 ;;
+  *'#{session_attached}'*) printf '0\n'; exit 0 ;;
   *'#{socket_path}'*) printf '/tmp/fm-fake-socket\n'; exit 0 ;;
 esac
 case "${1:-}" in
@@ -355,7 +356,7 @@ SH
 # `untracked` the record names no tab, as for a secondmate launched before the
 # switch, whose hand-opened tab made the view session.
 relaunch_secondmate() {
-  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} harness=${6:-} sm
+  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} harness=${6:-} prior_view=${7:-orca-$2} sm
   local -a harness_args=()
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
@@ -391,8 +392,8 @@ SH
   printf 'codex' > "$VIEW_DIR/command"
   printf 'fm-%s\n' "$id" > "$VIEW_DIR/windows"
   printf '%s' "$sm" > "$VIEW_DIR/cwd"
-  : > "$VIEW_DIR/session-orca-$id"
-  printf 'fmses\n' > "$VIEW_DIR/group-orca-$id"
+  : > "$VIEW_DIR/session-$prior_view"
+  printf 'fmses\n' > "$VIEW_DIR/group-$prior_view"
   {
     echo "window=fmses:fm-$id"
     echo "endpoint_task_id=$id"
@@ -407,7 +408,7 @@ SH
     echo "home=$sm"
     if [ -z "$untracked" ]; then
       echo "orca_view_handle=term-0"
-      echo "orca_view_session=orca-$id"
+      echo "orca_view_session=$prior_view"
       echo "orca_view_owned=1"
     fi
   } > "$HOME_DIR/state/$id.meta"
@@ -439,6 +440,20 @@ test_relaunch_replaces_the_tab() {
     || fail "the replacement launch failed to run: $seen"
   assert_contains "$seen" "pane=tab-1:leaf" "the replacement agent badges the fresh tab"
   pass "relaunch: opens a fresh tab, forwards its identity, then closes the previous tab and keeps the view session"
+}
+
+test_relaunch_closes_distinct_prior_view() {
+  relaunch_secondmate relaunch-distinct sm-distinct on '' '' '' orca-sm-distinct-s-other
+  expect_code 0 "$STATUS" "relaunch with a distinct prior view should succeed: $OUT"
+  assert_equals orca-sm-distinct "$(meta sm-distinct orca_view_session)" \
+    "the replacement tab records its new view"
+  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
+    "the replaced tab is closed"
+  assert_grep "kill-session -t =orca-sm-distinct-s-other" "$VIEW_DIR/killed" \
+    "the owned prior view is removed"
+  assert_no_grep "kill-session -t =orca-sm-distinct$" "$VIEW_DIR/killed" \
+    "the new view remains"
+  pass "relaunch removes its distinct owned prior view after closing the old tab"
 }
 
 test_aborted_relaunch_keeps_prior_tab_record() {
@@ -479,6 +494,27 @@ test_post_export_abort_keeps_replacement_tab() {
   assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" \
     "abort keeps the tab bound to the surviving pane"
   pass "post-export relaunch abort retains the new tab and closes the prior tab"
+}
+
+test_post_export_abort_closes_distinct_prior_view() {
+  FM_KIMI_READY_POLLS=1 FM_KIMI_POLL_INTERVAL=0 \
+    relaunch_secondmate relaunch-post-distinct sm-post-distinct on '' '' kimi orca-sm-post-distinct-s-other
+  [ "$STATUS" -ne 0 ] || fail "Kimi readiness failure must abort the relaunch"
+  assert_contains "$OUT" "kimi did not show a verified ready signal" \
+    "the relaunch reached readiness after sending the new identity"
+  assert_equals term-1 "$(meta sm-post-distinct orca_view_handle)" \
+    "the replacement tab remains recorded"
+  assert_equals orca-sm-post-distinct "$(meta sm-post-distinct orca_view_session)" \
+    "the replacement view remains recorded"
+  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
+    "the superseded tab is closed"
+  assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" \
+    "the replacement tab remains open"
+  assert_grep "kill-session -t =orca-sm-post-distinct-s-other" "$VIEW_DIR/killed" \
+    "the owned prior view is removed"
+  assert_no_grep "kill-session -t =orca-sm-post-distinct$" "$VIEW_DIR/killed" \
+    "the replacement view remains"
+  pass "post-export abort keeps the new tab and removes its distinct owned prior view"
 }
 
 test_post_export_fresh_abort_keeps_only_tab() {
@@ -662,8 +698,10 @@ test_unavailable_orca_steps_aside
 test_missing_identity_keeps_fresh_spawn_unbadged
 test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
+test_relaunch_closes_distinct_prior_view
 test_aborted_relaunch_keeps_prior_tab_record
 test_post_export_abort_keeps_replacement_tab
+test_post_export_abort_closes_distinct_prior_view
 test_post_export_fresh_abort_keeps_only_tab
 test_cross_home_view_name_collision
 test_derived_view_name_collision
