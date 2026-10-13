@@ -331,7 +331,7 @@ test_tmux_isolation() (
   child=
   cleanup_isolation() {
     "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
-    [ -z "$child" ] || rm -rf "$child"
+    [ -z "$child" ] || FM_TEST_TMUX_ROOT="$child" fm_test_tmux_cleanup
   }
   trap cleanup_isolation EXIT
   "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 60' \

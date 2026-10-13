@@ -496,14 +496,17 @@ run_teardown() {
 # Lab-home counterpart of run_teardown: FM_HOME=<case_dir>, no FM_*_OVERRIDE.
 run_teardown_lab() {
   local cwd=$1 case_dir=$2 socket_dir; shift 2
-  if [ -f "$case_dir/.fm-lab-home" ]; then
-    socket_dir=$("$LABHOME" tmux-dir "$case_dir") || return 1
-    set -- "TMUX_TMPDIR=$socket_dir" "TMUX=$socket_dir/tmux-$(id -u)/fm-lab,0,0" "$@"
-  fi
-  ( cd "$cwd" && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS \
+  (
+    if [ -f "$case_dir/.fm-lab-home" ]; then
+      socket_dir=$("$LABHOME" tmux-dir "$case_dir") || exit 1
+      trap '"$LABHOME" teardown "$case_dir" >/dev/null || exit 1' EXIT
+      set -- "TMUX_TMPDIR=$socket_dir" "TMUX=$socket_dir/tmux-$(id -u)/fm-lab,0,0" "$@"
+    fi
+    cd "$cwd" && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS \
       "FM_HOME=$case_dir" \
       "PATH=$case_dir/fakebin:$PATH" "$@" \
-      "$TEARDOWN" task-x1 ) 2>&1
+      "$TEARDOWN" task-x1
+  ) 2>&1
 }
 
 # make_teardown_lab_case <name> -> echoes a marked lab case dir holding the same
@@ -545,6 +548,7 @@ test_teardown_refuses_and_admits() {
   out=$(run_teardown_lab "$GATE_WT" "$case_dir"); rc=$?
   expect_code 0 "$rc" "teardown: gate + marked lab home must tear down landed work"
   assert_absent "$case_dir/state/task-x1.meta" "teardown: lab teardown should remove the task record"
+  assert_absent "$case_dir/state/.fm-lab-tmux-dir" "teardown: lab fixture should remove its socket directory record"
 
   # regression: a home reached through a symlinked spelling must not
   # self-collide in the slot-ownership scan - the canonical root home and the
