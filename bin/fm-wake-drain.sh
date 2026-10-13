@@ -490,14 +490,17 @@ OPEN_DECISION_PR_LOOKUP_SECONDS=4
 OPEN_DECISION_UNPARSED_CAP=5
 
 # Set OPEN_DECISION_PR_URL to the one distinct GitHub PR URL <note> names; fails
-# on zero or several. A global rather than output, so the per-entry call forks
-# nothing.
+# on zero or several. The PR number must end at a URL boundary (end of text, or
+# any character outside [A-Za-z0-9_-], such as /, #, ?, whitespace, or closing
+# punctuation), so /pull/24abc is not PR 24. A global rather than output, so the
+# per-entry call forks nothing.
 OPEN_DECISION_PR_URL=
 open_decision_pr_url() {  # <note>
-  local rest=$1 re='https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+' url
+  local rest=$1 re='https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+([^A-Za-z0-9_-]|$)' url
   OPEN_DECISION_PR_URL=
   while [[ $rest =~ $re ]]; do
     url=${BASH_REMATCH[0]}
+    url=${url%"${BASH_REMATCH[1]}"}
     [ -z "$OPEN_DECISION_PR_URL" ] || [ "$OPEN_DECISION_PR_URL" = "$url" ] \
       || { OPEN_DECISION_PR_URL=; return 1; }
     OPEN_DECISION_PR_URL=$url
@@ -507,12 +510,13 @@ open_decision_pr_url() {  # <note>
 }
 
 # 0 when <status-file> already records the merge of <url> as a
-# `done [key=merged-*]` line (bin/fm-merge-outcome-lib.sh writes it).
+# `done [key=merged-*]` line (bin/fm-merge-outcome-lib.sh writes it). The URL
+# must end at the same boundary open_decision_pr_url requires.
 open_decision_pr_merge_recorded() {  # <status-file> <url>
   local f=$1 url=$2 line verb key
   [ -f "$f" ] && [ ! -L "$f" ] || return 1
   while IFS= read -r line; do
-    case "$line" in *"$url"|*"$url"[!0-9]*) ;; *) continue ;; esac
+    case "$line" in *"$url"|*"$url"[!A-Za-z0-9_-]*) ;; *) continue ;; esac
     status_line_verb "$line" verb
     [ "$verb" = "done" ] || continue
     key=$(_fm_decision_key "$line" '') || continue

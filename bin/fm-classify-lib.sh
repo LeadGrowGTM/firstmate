@@ -2027,15 +2027,29 @@ status_line_is_unread_surface() {  # <status-line>
 }
 
 # 0 for a needs-decision or blocked line the decision fold cannot consume
-# (failed verb parse, invalid key, or malformed head). The wake drain warns once
-# at first presentation; this leaves the key grammar and open set unchanged.
+# because it lacks a parseable key: a failed verb parse, an invalid key, or a
+# malformed head. Colonless prose with no key= is continuation text, not a
+# decision line, and a well-formed reserved key refused for its namespace is
+# ordinary status by that namespace's rule, so neither is reported. The wake
+# drain warns once at first presentation; this leaves the key grammar and open
+# set unchanged.
 status_line_is_unparsed_decision() {  # <status-line>
-  local line=$1 first folded
+  local line=$1 first folded unstamped parsed
   first=${line#"${line%%[![:space:]]*}"}
   first=${first%%[[:space:]:[]*}
   case "$first" in needs-decision|blocked) ;; *) return 1 ;; esac
   folded=$(_fm_decision_fold_line '' "$line" "$FM_CLASSIFY_RESOLVE_VERB_DEFAULT" "$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT" ship)
-  [ -z "$folded" ]
+  [ -z "$folded" ] || return 1
+  _fm_status_unstamped "$line" unstamped
+  case "$unstamped" in
+    *:*|*key=*) ;;
+    *) return 1 ;;
+  esac
+  status_line_verb "$line" parsed
+  case "$parsed" in
+    needs-decision|blocked) ! _fm_decision_key "$line" >/dev/null ;;
+    *) return 0 ;;
+  esac
 }
 
 # Fleet-wide unread informational lines: one "<task>\t<status-line>" row per

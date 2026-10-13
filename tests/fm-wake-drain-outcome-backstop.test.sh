@@ -301,7 +301,7 @@ test_rejected_decision_line_surfaces_once_through_backstop() {
     || fail "rejected-decision drain failed"
   grep -F 'rejected blocked [key=bad/value]: credential missing' "$first_out" >/dev/null \
     || fail "captain-facing rejected decision was lost: $(cat "$first_out")"
-  if grep -F 'OPEN DECISIONS' "$first_out" >/dev/null; then
+  if grep -F -e 'OPEN DECISIONS (still open' -e 'rejected [key=bad/value]' "$first_out" >/dev/null; then
     fail "malformed decision key entered the open-decision fold: $(cat "$first_out")"
   fi
   FM_STATE_OVERRIDE="$state" "$DRAIN" > "$second_out" \

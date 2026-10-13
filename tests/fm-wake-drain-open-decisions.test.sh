@@ -294,6 +294,48 @@ test_pr_gated_decision_is_flagged_with_its_close_command() {
   pass "an open decision gated on one merged or closed PR is flagged with its exact close command"
 }
 
+# A PR number ends at a URL boundary: /pull/24abc is not PR 24, in the note and
+# in the offline merge record alike.
+test_pr_url_must_end_at_a_boundary() {
+  local dir state out map task
+  dir=$(make_case pr-url-boundary)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  {
+    printf 'https://github.com/o/r/pull/24 merged\n'
+    printf 'https://github.com/o/r/pull/80 fail\n'
+  } > "$map"
+  printf 'needs-decision [key=s1]: merge https://github.com/o/r/pull/24abc now?\n' > "$state/t-suffix.status"
+  printf 'needs-decision [key=b1]: merge https://github.com/o/r/pull/24\n' > "$state/t-bare.status"
+  printf 'needs-decision [key=p1]: see https://github.com/o/r/pull/24/files first\n' > "$state/t-path.status"
+  printf 'needs-decision [key=h1]: see https://github.com/o/r/pull/24#x first\n' > "$state/t-hash.status"
+  printf 'needs-decision [key=r1]: merge https://github.com/o/r/pull/80?\n' > "$state/t-record.status"
+  printf 'done [key=merged-t-record]: merged t-record https://github.com/o/r/pull/80abc\n' >> "$state/t-record.status"
+  printf 'needs-decision [key=r2]: merge https://github.com/o/r/pull/81?\n' > "$state/t-record2.status"
+  printf 'done [key=merged-t-record2]: merged t-record2 https://github.com/o/r/pull/81.\n' >> "$state/t-record2.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with suffixed PR URLs"
+
+  for task in t-suffix t-record; do
+    if grep -A1 -F "$task [key=" "$out" | grep -F '  ^ PR ' >/dev/null; then
+      fail "$task was flagged from a PR number with a trailing suffix: $(cat "$out")"
+    fi
+  done
+  grep -A1 -F 't-bare [key=b1]' "$out" | grep -F "bin/fm-send.sh t-bare --resolve-key b1 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a PR URL at the end of the note was not flagged: $(cat "$out")"
+  grep -A1 -F 't-path [key=p1]' "$out" | grep -F "bin/fm-send.sh t-path --resolve-key p1 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a PR URL followed by /files was not flagged as that PR: $(cat "$out")"
+  grep -A1 -F 't-hash [key=h1]' "$out" | grep -F "bin/fm-send.sh t-hash --resolve-key h1 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a PR URL followed by a fragment was not flagged as that PR: $(cat "$out")"
+  grep -A1 -F 't-record2 [key=r2]' "$out" | grep -F "bin/fm-send.sh t-record2 --resolve-key r2 'PR https://github.com/o/r/pull/81 merged'" >/dev/null \
+    || fail "a merge record ending in punctuation did not count: $(cat "$out")"
+  pass "a PR URL counts only when its number ends at a URL boundary"
+}
+
 test_captain_hold_pr_uses_owning_home_close_path() {
   local dir state out map
   dir=$(make_case captain-hold-pr)
@@ -485,6 +527,36 @@ test_unparsed_decision_line_is_warned_once() {
 
 # Past the warning cap the quoted text is dropped but every location is still
 # named: the presentation cursor advances, so no later drain names those lines.
+# The bracketed-key advice is only for a line with no parseable key. Colonless
+# prose is not a decision line at all, and a well-formed key refused for its
+# reserved namespace is ordinary status by that namespace's rule.
+test_unparsed_warning_matches_its_cause() {
+  local dir state out
+  dir=$(make_case unparsed-cause)
+  state="$dir/state"
+  out="$dir/drain.out"
+  {
+    printf 'working: started\n'
+    printf 'blocked waiting on the CI runner\n'
+    printf 'needs-decision about the rollout, more below\n'
+    printf 'blocked [key=pending-reply-abcdef0123456789]: shipping is blocked on infra\n'
+    printf 'needs-decision key=k1 waiting on a pick\n'
+  } > "$state/mate.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on mixed unparsed lines"
+  if grep -F -e 'mate.status:2,' -e 'mate.status:3,' "$out" >/dev/null; then
+    fail "colonless keyless prose was warned as an unparsed decision: $(cat "$out")"
+  fi
+  if grep -F 'mate.status:4,' "$out" >/dev/null; then
+    fail "a well-formed reserved key was told to add a bracketed key it already has: $(cat "$out")"
+  fi
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:5, not read as open; rewrite it with [key=<slug>]: needs-decision key=k1 waiting on a pick" "$out" >/dev/null \
+    || fail "an unbracketed key with no colon was not warned: $(cat "$out")"
+  [ "$(grep -c 'unparsed decision line' "$out")" = 1 ] \
+    || fail "an unexpected line was warned as unparsed: $(cat "$out")"
+  pass "the bracketed-key warning is given only to a decision line with no parseable key"
+}
+
 test_unparsed_lines_past_the_cap_are_each_located() {
   local dir state out i
   dir=$(make_case unparsed-over-cap)
@@ -550,6 +622,7 @@ test_open_decision_surfaces_even_with_an_unrelated_queued_wake
 test_buried_decision_surfaces_on_the_empty_queue_fast_path
 test_status_symlink_is_not_followed
 test_pr_gated_decision_is_flagged_with_its_close_command
+test_pr_url_must_end_at_a_boundary
 test_captain_hold_pr_uses_owning_home_close_path
 test_pr_lookups_are_capped_and_bounded
 test_pr_decisions_over_lookup_cap_are_counted
@@ -557,3 +630,4 @@ test_later_offline_merge_record_covers_shared_pr
 test_unparsed_decision_line_is_warned_once
 test_identical_unparsed_lines_keep_distinct_positions
 test_unparsed_lines_past_the_cap_are_each_located
+test_unparsed_warning_matches_its_cause
