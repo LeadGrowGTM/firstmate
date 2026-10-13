@@ -836,8 +836,9 @@ Any other content is treated as `off` with a one-line warning, so the file never
 The home that spawns the secondmate reads the switch, and secondmate homes do not inherit it.
 
 With the switch on, every secondmate spawn or relaunch opens one Orca terminal, titled with the secondmate id, on the Orca project registered for this Firstmate code root.
-The tab attaches a grouped tmux view session named `orca-<id>` that shows exactly that secondmate's window, so each tab follows its own window without moving any other viewer.
-An existing session of that name, such as one a hand-opened tab created, is reused rather than duplicated.
+The tab attaches a grouped tmux view session that shows exactly that secondmate's window, so each tab follows its own window without moving any other viewer.
+It prefers `orca-<id>` and chooses a distinct name when an occupied candidate belongs to another base session or identifies another task's window.
+An eligible existing session, such as one a hand-opened tab created, is reused rather than duplicated.
 The view session tracks the window by its stable tmux window id, never by index or name, and returns to it whenever it is moved off it, such as after a relaunch or another window closes.
 When the secondmate's window itself is gone, the view ends and the tab says so rather than showing another session.
 The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate as working, waiting on you, or done on that tab.
