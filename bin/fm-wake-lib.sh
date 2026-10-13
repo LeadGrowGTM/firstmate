@@ -1576,6 +1576,70 @@ fm_treehouse_pool_slot() {  # <project-dir> <worktree>
   [ "$project_common" = "$slot_common" ]
 }
 
+# True when both directories are checkouts of one clone. Common-dir equality is
+# the whole test: a plain linked worktree has no treehouse state file, and
+# requiring one would refuse every non-pool copy this home already launches.
+fm_treehouse_same_clone() {  # <project-dir> <worktree>
+  local project=$1 worktree=$2 project_common slot_common
+  [ -d "$project" ] && [ -d "$worktree" ] || return 1
+  project_common=$(git -C "$project" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  slot_common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  project_common=$(CDPATH='' cd -- "$project_common" 2>/dev/null && pwd -P) || return 1
+  slot_common=$(CDPATH='' cd -- "$slot_common" 2>/dev/null && pwd -P) || return 1
+  [ "$project_common" = "$slot_common" ]
+}
+
+# Treehouse keys its default pool by directory name plus origin, so two homes
+# that clone one origin can be offered the same copy. A home handed another
+# clone's copy attempts a lease using a per-home folder under the user state
+# directory; a clone-local root can redirect Treehouse elsewhere.
+# The folder is the home's name plus the first 6 hex digits of its physical
+# path's sha256, so two homes with one folder name stay apart.
+fm_treehouse_home_pool() {  # <fm-home>
+  local home state hex base
+  [ -n "${1:-}" ] || return 1
+  home=$(CDPATH='' cd -- "$1" 2>/dev/null && pwd -P) || return 1
+  state=${XDG_STATE_HOME:-}
+  if [ -z "$state" ]; then
+    [ -n "${HOME:-}" ] || return 1
+    state=$HOME/.local/state
+  fi
+  while [ "$state" != / ] && [ "${state%/}" != "$state" ]; do
+    state=${state%/}
+  done
+  [ -n "$state" ] || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    hex=$(printf '%s' "$home" | sha256sum | awk '{ print $1 }') || return 1
+  elif command -v shasum >/dev/null 2>&1; then
+    hex=$(printf '%s' "$home" | shasum -a 256 | awk '{ print $1 }') || return 1
+  else
+    return 1
+  fi
+  [ "${#hex}" -ge 6 ] || return 1
+  base=$(basename -- "$home") || return 1
+  printf '%s/firstmate/%s-%s\n' "${state%/}" "$base" "${hex:0:6}"
+}
+
+# Run treehouse from the caller's directory using this home's pool folder,
+# under a hard bound and with stdin detached. A clone-local root can override
+# the folder. Treehouse has no root flag and reads its default root from HOME,
+# so HOME names the pool folder for treehouse alone:
+# bin/treehouse-git/git leads PATH and hands every git process the operator's
+# HOME back, so a fetch still finds the operator's git config and credential
+# helpers. A fetch that would prompt fails instead of waiting on a terminal.
+fm_treehouse_home_pool_run() {  # <fm-home> <seconds> <treehouse-args...>
+  local pool seconds=$2 git
+  [ -n "${HOME:-}" ] || return 1
+  pool=$(fm_treehouse_home_pool "$1") || return 1
+  _fm_wake_require_timeout || return 1
+  shift 2
+  mkdir -p -- "$pool" || return 1
+  git=$(type -P git) || return 1
+  fm_run_timed "$seconds" env FM_TREEHOUSE_GIT="$git" FM_TREEHOUSE_GIT_HOME="$HOME" \
+    PATH="$FM_WAKE_LIB_DIR/treehouse-git:$PATH" GIT_TERMINAL_PROMPT=0 HOME="$pool" \
+    treehouse "$@" < /dev/null
+}
+
 # Slot-owner claim: which task a Treehouse pool slot currently belongs to.
 #
 # Treehouse can record ownership durably: `treehouse get --lease --lease-holder`
