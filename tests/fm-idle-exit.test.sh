@@ -137,7 +137,7 @@ test_parked_gate_requires_human_decision() {
 test_new_activity_before_exit_keeps_worker_running() {
   local home out
   home=$(make_home answered-done)
-  add_task "$home" t1 done 7200
+  add_task "$home" t1 'done' 7200
   : > "$home/fixtures/t1.answer-on-second-read"
   out=$(run_check "$home")
   [ -z "$out" ] || fail "a newly answered done task should remain: $out"
@@ -197,7 +197,7 @@ test_one_exit_per_run_and_records_stop_reprobing() {
 test_endpoint_gone_is_not_reprobed_until_activity_changes() {
   local home out
   home=$(make_home endpoint-gone)
-  add_task "$home" gone done 7200
+  add_task "$home" gone 'done' 7200
   printf 'endpoint-gone\n' > "$home/fixtures/gone.out"
   out=$(run_check "$home")
   [ -z "$out" ] || fail "an already absent endpoint should be silent: $out"
@@ -214,7 +214,7 @@ test_endpoint_gone_is_not_reprobed_until_activity_changes() {
 test_control_preamble_does_not_hide_exit_result() {
   local home out
   home=$(make_home preamble)
-  add_task "$home" t1 done 7200
+  add_task "$home" t1 'done' 7200
   printf 'fm-gate-refuse: gate agent lifecycle permitted only against lab home\n' > "$home/fixtures/t1.preamble"
   out=$(run_check "$home")
   assert_contains "$out" 'idle-exit: exited t1 (done' "a control preamble must not hide a successful exit"
@@ -247,7 +247,7 @@ test_busy_turn_is_left_and_failure_reported_once() {
 test_record_failure_is_reported() {
   local home out
   home=$(make_home record-failure)
-  add_task "$home" t1 done 7200
+  add_task "$home" t1 'done' 7200
   mkdir -p "$home/state/.idle-exit/t1"
   out=$(run_check "$home")
   assert_contains "$out" 'idle-exit: could not record exit of t1' "record failure must be visible"
