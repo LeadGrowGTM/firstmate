@@ -903,7 +903,7 @@ test_spawn_secondmate_harness_model_token() {
   [ "$(meta_field "$meta" model)" = opus ] || fail "model-token: meta model not opus (got '$(meta_field "$meta" model)')"
   [ "$(meta_field "$meta" effort)" = default ] || fail "model-token: meta effort not default (got '$(meta_field "$meta" effort)')"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
     "model-token: launch did not carry --model opus"
   assert_not_contains "$launch" "--effort" "model-token: launch must not carry an --effort flag"
   pass "C3 spawn: config/secondmate-harness's model token threads --model into the launch and meta"
@@ -925,7 +925,7 @@ test_spawn_secondmate_harness_model_and_effort_tokens() {
   [ "$(meta_field "$meta" model)" = opus ] || fail "model-effort-tokens: meta model not opus"
   [ "$(meta_field "$meta" effort)" = high ] || fail "model-effort-tokens: meta effort not high (got '$(meta_field "$meta" effort)')"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus' --effort 'high'" \
+  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus' --effort 'high'" \
     "model-effort-tokens: launch did not carry both --model opus and --effort high"
   pass "C4 spawn: config/secondmate-harness's model+effort tokens thread into the launch and meta"
 }
@@ -1569,7 +1569,7 @@ test_spawn_secondmate_claude_permission_mode_auto() {
   meta="$w/home/state/sm.meta"
   [ "$(meta_field "$meta" harness)" = claude ] || fail "permmode: meta harness not claude"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --permission-mode auto $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+  assert_contains "$launch" "claude --permission-mode auto $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
     "permmode: secondmate launch did not swap the permission flag while keeping --model"
   assert_not_contains "$launch" "--dangerously-skip-permissions" "permmode: secondmate launch must not request bypass mode"
   pass "C2b spawn: config/claude-permission-mode=auto reaches a Claude secondmate launch"
@@ -1678,10 +1678,10 @@ test_spawn_secondmate_claude_remote_control_switch() {
     launch=$(cat "$launchlog")
     if [ "$token" = off ]; then
       assert_not_contains "$launch" "--remote-control" "rc-off: the off switch must remove the Remote Control flag"
-      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
         "rc-off: the off switch must leave the rest of the launch unchanged"
     else
-      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings" \
+      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings" \
         "rc-on: an explicit on must launch exactly as an absent file does"
     fi
   done
