@@ -305,10 +305,23 @@ phase_teardown() {
   printf 'confirmed:%s\n' "$corr" > "$HOME_DIR/state/.backlog-handoff-design.wake-pending"
   printf '%s\tattempt\n' "$(date +%s)" > "$HOME_DIR/state/.secondmate-relaunch-design"
   printf '%s\tdead\n' "$(date +%s)" > "$HOME_DIR/state/.secondmate-relaunch-bound-design"
+  # The Orca view tab spawn recorded for this secondmate (config/orca-view-tabs).
+  printf 'orca_view_handle=term-5\norca_view_session=orca-design\norca_view_owned=1\n' \
+    >> "$HOME_DIR/state/design.meta"
+  cat > "$TMP_ROOT/orca-ide" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$FM_FAKE_ORCA_LOG"
+printf '{"ok":true,"result":{"closed":true}}\n'
+SH
+  chmod +x "$TMP_ROOT/orca-ide"
+  : > "$TMP_ROOT/orca.log"
   : > "$LOG"
   teardown_out=$(PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_TMUX_LOG="$LOG" FM_FAKE_TMUX_CAPTURE="$PANE" \
+    FM_ORCA_CLI="$TMP_ROOT/orca-ide" FM_FAKE_ORCA_LOG="$TMP_ROOT/orca.log" FM_WSL_INTEROP_DIR="$TMP_ROOT/no-wsl" \
     "$ROOT/bin/fm-teardown.sh" design 2>&1) \
     || fail "teardown failed for the empty secondmate home: $teardown_out"
+  assert_grep 'terminal close --terminal term-5 --tab --json' "$TMP_ROOT/orca.log" \
+    "teardown did not close the secondmate's recorded Orca view tab"
   printf '%s\n' "$teardown_out" | grep -F 'Backlog:' >/dev/null \
     && fail "secondmate teardown emitted a main-backlog completion reminder"
   assert_absent "$SUB" "teardown did not remove the retired secondmate home"

@@ -14,6 +14,8 @@
 # the one site where --force overrides it, and bin/fm-backend.sh's
 # fm_backend_kill owns what each backend can prove about its own close - an
 # already-exited endpoint is not a failure and stays silent.
+# A recorded Orca view tab (config/orca-view-tabs) is closed after the endpoint
+# through bin/fm-orca-view.sh; that close never refuses or fails the cleanup.
 # Removing state/<id>.meta and landing the backlog transition are one step, not
 # two: bin/fm-backlog-transition-lib.sh owns that invariant, and both halves run
 # under the task's own meta lock before this script reports success. Because the
@@ -3699,6 +3701,18 @@ elif [ "$BACKEND" = herdr ]; then
 elif [ "$BACKEND" != orca ] && [ "$TEARDOWN_WINDOWLESS" != 1 ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" \
     || endpoint_close_refusal "$ID" "$BACKEND" "$T" 1 || exit 1
+fi
+# The Orca view tab spawn opened for this task (config/orca-view-tabs), closed
+# by its recorded handle; its view session goes only when spawn created it.
+# Every Orca failure leaves a one-line note and the cleanup goes on.
+TEARDOWN_ORCA_VIEW_HANDLE=$(meta_value "$META" orca_view_handle)
+if [ -n "$TEARDOWN_ORCA_VIEW_HANDLE" ]; then
+  if [ "$(meta_value "$META" orca_view_owned)" = 1 ]; then
+    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$TEARDOWN_ORCA_VIEW_HANDLE" \
+      --view-session "$(meta_value "$META" orca_view_session)" || true
+  else
+    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$TEARDOWN_ORCA_VIEW_HANDLE" || true
+  fi
 fi
 if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   if [ "$(fm_backend_herdr_pane_agent_state "$HERDR_PRESENTATION_SESSION" "$HERDR_PRESENTATION_PANE")" = dead ]; then

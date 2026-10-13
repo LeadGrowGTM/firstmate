@@ -24,6 +24,8 @@
 . "$FM_BACKEND_LIB_DIR/fm-session-lock-lib.sh"
 # shellcheck source=bin/fm-agent-process-lib.sh
 . "$FM_BACKEND_LIB_DIR/fm-agent-process-lib.sh"
+# shellcheck source=bin/fm-wsl-interop-lib.sh
+. "$FM_BACKEND_LIB_DIR/fm-wsl-interop-lib.sh"
 
 # fm_backend_tmux_resolve_bare_selector: the live-window-listing fallback for a
 # selector that is neither an explicit target nor a task selector routed
@@ -76,10 +78,10 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
 # and a grouped session resolves to its group's base session. Without that,
 # tmux answers with the session of the most recently active client, so a viewer
 # attached through a grouped session (`tmux new-session -t <base> -s <view>`,
-# the shape an Orca view tab opens) would become the recorded container of
+# the shape bin/fm-orca-view.sh opens) would become the recorded container of
 # every later task. A group whose base session is gone keeps the pane's own.
 fm_backend_tmux_container_ensure() {
-  local fmt info ses grouped group
+  local fmt info ses grouped group live
   fmt=$'#{session_name}\t#{session_grouped}\t#{session_group}'
   if [ -n "${TMUX:-}" ]; then
     if [ -n "${TMUX_PANE:-}" ]; then
@@ -96,7 +98,10 @@ EOF
     fi
     printf '%s\n' "$ses"
   else
-    tmux has-session -t firstmate 2>/dev/null || tmux new-session -d -s firstmate
+    if ! tmux has-session -t firstmate 2>/dev/null; then
+      live=$(fm_wsl_live_interop) || live=
+      tmux new-session -d -s firstmate ${live:+-e} ${live:+"WSL_INTEROP=$live"}
+    fi
     printf 'firstmate'
   fi
 }
@@ -116,13 +121,21 @@ EOF
 #     treehouse cd's into the worktree, which would break name-based targeting.
 # The returned window id lets callers target the window even if its name is ever
 # lost, so worktree discovery cannot fall back to the active client's window.
+#
+# On WSL a new window or session is handed the live Windows-interop socket that
+# bin/fm-wsl-interop-lib.sh picks: a tmux server started by an earlier login
+# keeps that login's WSL_INTEROP, which dies with it, so without this no new
+# pane could start a Windows program. The running server and its existing panes
+# are never changed, and nothing is added off WSL.
 fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints window id
-  local ses=$1 wname=$2 proj_abs=$3 wid
+  local ses=$1 wname=$2 proj_abs=$3 wid live
   if tmux list-windows -t "$ses" -F '#{window_name}' | grep -qx "$wname"; then
     echo "error: window $ses:$wname already exists" >&2
     return 1
   fi
-  wid=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$wname" -c "$proj_abs") || return 1
+  live=$(fm_wsl_live_interop) || live=
+  wid=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$wname" -c "$proj_abs" \
+    ${live:+-e} ${live:+"WSL_INTEROP=$live"}) || return 1
   tmux set-window-option -t "$wid" automatic-rename off 2>/dev/null || true
   tmux set-window-option -t "$wid" allow-rename off 2>/dev/null || true
   printf '%s\n' "$wid"

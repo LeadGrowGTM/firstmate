@@ -200,5 +200,25 @@ got=$(TMUX=x TMUX_PANE='' fm_backend_tmux_container_ensure) \
 "$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
 pass "real tmux: container_ensure records the base session while a grouped viewer is attached"
 
+# --- a new window carries a live WSL interop socket ---------------------------
+INTEROP_DIR="$SHIM_DIR/run-wsl"
+mkdir -p "$INTEROP_DIR"
+: > "$INTEROP_DIR/1_interop"
+: > "$INTEROP_DIR/2_interop"
+cat > "$SHIM_DIR/interop-probe" <<'SH'
+#!/bin/sh
+case "$WSL_INTEROP" in */2_interop) exit 0 ;; esac
+exit 1
+SH
+chmod +x "$SHIM_DIR/interop-probe"
+WSL_WID=$(WSL_INTEROP=/dead/5345_interop FM_WSL_INTEROP_DIR="$INTEROP_DIR" \
+  FM_WSL_INTEROP_PROBE="$SHIM_DIR/interop-probe" \
+  fm_backend_tmux_create_task base fm-interop "$HOME") \
+  || fail "fm_backend_tmux_create_task failed with an interop directory"
+fm_backend_tmux_send_text_line "$WSL_WID" "printf 'interop=%s\\n' \"\$WSL_INTEROP\""
+wait_for_capture_text "$WSL_WID" "interop=$INTEROP_DIR/2_interop" \
+  || fail "the new window's shell did not receive the live interop socket"$'\n'"$(fm_backend_tmux_capture "$WSL_WID" 20)"
+pass "real tmux: a window created on WSL carries the live interop socket, not the inherited one"
+
 cleanup_all
 trap - EXIT
