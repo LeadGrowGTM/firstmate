@@ -1744,9 +1744,11 @@ The authenticated shim runs through the existing watcher; no cron, host timer, p
 
 Direct-PR ships need their canonical task metadata, recorded ready head, clean task copy, confirmed done worker, and positive absence of pipeline custody.
 The updater uses `gh-axi`, `jq`, Git, and the installed no-mistakes read surface to establish those preconditions.
-Pipeline-owned tasks are deferred pending a pipeline-native freshness feature; an unknown owner, unavailable read, partial check response, or unsupported forge remains visibly incomplete.
-Successful integration records the current head and its checks; it requires validation on that head and grants no review or merge authority.
-The existing contribution observer owns verdict freshness and the merge command reads current checks.
+Pipeline-owned tasks are deferred pending a pipeline-native freshness feature; an unknown owner, unavailable read, or unsupported forge remains visibly incomplete.
+An accepted request records the PR, expected old head, and request time, then leaves the resulting head and its checks to the task delivery path and normal contribution observer.
+The updater never publishes `pr_head`, confirms a resulting SHA, or grants review or merge authority.
+Shared contribution readiness remains invalid until a later observation validates a changed head and the delivery owner records it.
+An uncertain request stays pending without a repeated write; the delivery owner must resolve that evidence.
 
 Fixture regression: `bash bin/fm-test-run.sh tests/fm-pr-autoupdate.test.sh`.
 This regression exercises local doubles and does not prove live GitHub asynchronous update behavior.

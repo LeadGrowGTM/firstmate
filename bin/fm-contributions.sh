@@ -74,8 +74,8 @@
 # observation, with a stale error beside it cleared.
 # An open PR observation counts as checked only when its head matches the
 # recorded task head, if present; a final PR keeps its observed head if metadata differs.
-# The updater journal suppresses readiness during pending publication or after a
-# newer changed-head observation; an unreadable journal leaves readiness unverified.
+# The updater journal suppresses readiness after a request until the normal
+# observer validates a changed head; an unreadable journal leaves readiness unverified.
 # A genuine failure prints its unavailable line only when it starts an episode
 # (no prior owner has an error); a successful read ends the episode.
 # FM_CONTRIBUTIONS_NOW supplies an ISO UTC clock for tests, otherwise UTC now.
@@ -178,6 +178,8 @@ project() {
     if fm_pr_private_file_valid "$updates" 600 "$(fm_pr_file_device "$STATE")" \
       && jq -e '.schema == "fm-pr-autoupdate.v1" and (.receipts | type == "object")
         and all(.receipts[]; (.pending | type == "boolean") and (.checked_at | type == "number")
+          and (.requested_at == null or (.requested_at | type == "number"))
+          and (.accepted_at == null or (.accepted_at | type == "number"))
           and (.observed_head == "" or (.observed_head | type == "string" and test("^[a-fA-F0-9]{40}$"))))' "$updates" >/dev/null 2>&1; then
       jq '{receipts,unavailable:false}' "$updates" > "$TMP/updates.json"
     else

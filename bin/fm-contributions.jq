@@ -54,6 +54,9 @@ def projected($input; $saved; $now; $max_age; $updates):
     | (($record.checked_at // "") | try fromdateiso8601 catch null) as $checked
     | ($updates.receipts[$k.url] // {}) as $update
     | ($record.kind == "pr" and ($updates.unavailable or $update.pending == true
+        or (($update.requested_at | type) == "number" and $update.requested_at >= ($checked // 0))
+        or (($update.accepted_at | type) == "number" and
+          ($observed_head == $update.old_head or $update.accepted_at >= ($checked // 0)))
         or (($update.observed_head | sha) and $update.checked_at >= ($checked // 0)
           and $update.observed_head != $observed_head))) as $updating
     # A merged or closed observation is final; poll never re-reads it, so it never expires.

@@ -9,11 +9,11 @@
 # Each segment refreshes canonical contribution ownership, including saved links,
 # and publication rechecks the selected owner set. One URL is processed per poll,
 # shared owners together. The journal at
-# state/pr-autoupdate.json records the queue, coverage, and head-bound receipts.
+# state/pr-autoupdate.json records the queue, coverage, and request receipts.
 # A sweep starts at most once per 7200 seconds; unfinished coverage continues
 # on normal watcher polls. No repository-wide discovery or other-home reads.
 # Per-call bounds and a 24-second segment deadline leave watcher timeout margin.
-# Pending requests rotate behind other work and prevent a false complete sweep.
+# Uncertain requests rotate behind other work and prevent a false complete sweep.
 # Fatal read/config episodes persist in state/.pr-autoupdate-failed until a
 # later check reaches journal processing; unchanged fatal failures emit once.
 # Incomplete/deferred/conflict episodes emit once per unchanged URL/head/base
@@ -28,16 +28,12 @@
 # Compare immutable base...head SHAs: behind_by > 0 alone establishes behind.
 # Only mergeable=false is a conflict. Unknown mergeability/API failures are not.
 #
-# Persist the old head, captured base and pending receipt BEFORE the expected-head
-# guarded gh-axi API PUT. A timeout or error may have published: never repeat that
-# PUT blindly. A later GET plus compare must prove a changed head contains the
-# captured base. Final publication and confirmation recheck head-bound queue
-# membership. Confirmation stores checks bound to the new head, rereads the head
-# after checks, then updates pr_head under the metadata locks. Already-published
-# owner metadata can recover against the unchanged captured local head.
-# Confirmed local-head evidence survives subsequent request refusals. This
-# command never grants readiness, review, or merge authority.
-# Ambiguous requests remain pending for inspection even across disarm/re-arm.
+# Persist the expected old head, captured base, and request time BEFORE the
+# expected-head guarded gh-axi API PUT. A timeout or error may have published:
+# never repeat that PUT blindly. Acceptance records no resulting head and never
+# updates task metadata. The task delivery path and normal contribution observer
+# own subsequent head validation and readiness. An uncertain request remains
+# pending for inspection even across disarm/re-arm.
 # It never changes local Git refs, rebases, force-pushes, launches repair workers,
 # merges, or drives any endpoint lifecycle. Live forge-write proof is separately
 # authorized on a disposable PR; fixture proof is not live API proof.
@@ -165,7 +161,7 @@ if [ -e "$JOURNAL" ] || [ -L "$JOURNAL" ]; then
       and (.owners | type == "array" and length > 0 and all(.[]; type == "string")))
     and all(.receipts[]; (.pending | type == "boolean") and
       (if .pending then (.old_head | test("^[a-fA-F0-9]{40}$")) and (.base_sha | test("^[a-fA-F0-9]{40}$"))
-        and (.local_heads | type == "object") else true end))' "$JOURNAL" >/dev/null || fail 'invalid journal'
+        else true end))' "$JOURNAL" >/dev/null || fail 'invalid journal'
   cp "$JOURNAL" "$TMP/journal"
 else
   printf '%s\n' '{"schema":"fm-pr-autoupdate.v1","started":0,"queue":[],"sweep_urls":[],"receipts":{},"coverage_complete":false}' > "$TMP/journal"
@@ -281,7 +277,7 @@ queue_read() {
   [ "$(jq -r '.data.repository.pullRequest.mergeQueueEntry == null' "$TMP/queue")" = true ] || { RESULT=deferred; REASON='merge queued'; return 1; }
 }
 process_pr() {
-  local id old captured expected previous meta lock_path local_head proposed_receipt new_owners=''
+  local id expected previous meta lock_path local_head proposed_receipt
   fm_pr_url_parse "$URL" || { REASON='invalid owned PR identity'; return 0; }
   [ "$FM_PR_PROVIDER" = github ] || { RESULT=deferred; REASON='unsupported forge'; return 0; }
   PROJECT=$FM_PR_PATH; NUMBER=$FM_PR_NUMBER
@@ -293,88 +289,30 @@ process_pr() {
     lock_path=$(fm_meta_lock_path "$STATE/$id.meta")
     lock "$lock_path" || { REASON='task metadata busy'; return 0; }
   done
+  if [ "$PENDING" = true ]; then
+    HEAD=$(printf '%s' "$RECEIPT" | jq -r '.observed_head // .old_head')
+    BASE=$(printf '%s' "$RECEIPT" | jq -r '.observed_base // .base_sha')
+    REASON='request outcome uncertain; validation owner must resolve'; return 0
+  fi
   core_read || return 0
+  if [ "$(printf '%s' "$RECEIPT" | jq -r '.accepted_at != null')" = true ] \
+    && [ "$(printf '%s' "$RECEIPT" | jq -r '.old_head')" = "$HEAD" ]; then
+    RESULT=deferred; REASON='accepted update awaits validation owner'; return 0
+  fi
   if ! printf '%s' "$CFG" | jq -e --slurpfile core "$TMP/core" --arg url "$URL" \
     'any(.write_scope[]; .pr == $url and .head_repo == $core[0].head.repo.full_name and .head_ref == $core[0].head.ref)' >/dev/null; then
     RESULT=deferred; REASON='head branch write not authorized'; return 0
   fi
   [ "$(jq -r '.base.repo.full_name' "$TMP/core")" = "$PROJECT" ] || { REASON='base repository mismatch'; return 0; }
   custody || { RESULT=deferred; return 0; }
-  if [ "$PENDING" = true ]; then old=$(printf '%s' "$RECEIPT" | jq -r '.old_head'); fi
   for id in $OWNERS; do
     meta="$STATE/$id.meta"
     [ "$(meta_value "$meta" branch)" = "$(jq -r '.head.ref' "$TMP/core")" ] || { REASON='recorded branch does not match PR head'; return 0; }
     local_head=$(bounded git -C "$(meta_value "$meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
-    if [ "$PENDING" = true ]; then
-      if [ "$local_head" != "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] \
-        || { [ "$(meta_value "$meta" pr_head)" != "$old" ] \
-          && [ "$(meta_value "$meta" pr_head)" != "$HEAD" ]; }; then
-        if [ "$local_head" = "$HEAD" ] && [ "$(meta_value "$meta" pr_head)" = "$HEAD" ]; then
-          :
-        elif [ "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads | has($id)')" = false ] \
-          && [ "$local_head" = "$old" ] && [ "$(meta_value "$meta" pr_head)" = "$old" ]; then
-          new_owners="${new_owners:+$new_owners }$id"
-        else
-          REASON='local head changed since refresh'; return 0
-        fi
-      fi
-    else
-      [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] || { REASON='recorded ready head changed'; return 0; }
-      if [ "$local_head" != "$HEAD" ]; then
-        [ "$(printf '%s' "$RECEIPT" | jq -r '.confirmed.head // .result_head // ""')" = "$HEAD" ] \
-          && [ "$local_head" = "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.confirmed.local_heads[$id] // .local_heads[$id] // ""')" ] \
-          || { REASON='local head changed since refresh'; return 0; }
-      fi
-    fi
+    [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] || { REASON='recorded ready head changed'; return 0; }
+    [ "$local_head" = "$HEAD" ] || { REASON='local head changed since refresh'; return 0; }
   done
-  if [ "$PENDING" != true ]; then
-    for id in $OWNERS; do
-      [ "$(meta_value "$STATE/$id.meta" pr_head)" = "$HEAD" ] || { REASON='current head has no matching ready record'; return 0; }
-    done
-  fi
   queue_read || return 0
-  if [ "$(printf '%s' "$RECEIPT" | jq -r '.pending // false')" = true ]; then
-    captured=$(printf '%s' "$RECEIPT" | jq -r '.base_sha')
-    PENDING=true
-    compare "$captured" "$HEAD" || return 0
-    if [ "$HEAD" = "$old" ] || [ "$(jq '.behind_by' "$TMP/compare")" != 0 ]; then
-      if [ "$(jq -r '.mergeable' "$TMP/core")" = false ]; then
-        RESULT=conflict; REASON='forge positively reports conflict after request'; return 0
-      fi
-      REASON='update not yet confirmed; no repeated write'; return 0
-    fi
-    compare "$old" "$HEAD" || return 0
-    [ "$(jq '.behind_by' "$TMP/compare")" = 0 ] || { REASON='old head no longer reachable; concurrent rewrite'; return 0; }
-    api GET "/repos/$PROJECT/commits/$HEAD/check-runs?per_page=100" > "$TMP/checks" || { REASON='new-head checks unavailable'; return 0; }
-    jq -e --arg head "$HEAD" '(.total_count | type == "number") and (.check_runs | type == "array") and .total_count == (.check_runs | length)
-      and all(.check_runs[]; .head_sha == $head and (.status | type == "string"))' "$TMP/checks" >/dev/null || { REASON='new-head check coverage incomplete'; return 0; }
-    expected=$HEAD
-    core_read || return 0
-    [ "$HEAD" = "$expected" ] || { REASON='head changed while reading checks'; return 0; }
-    compare "$BASE" "$HEAD" || return 0
-    local closing_behind
-    closing_behind=$(jq '.behind_by' "$TMP/compare")
-    queue_read || return 0
-    read_owners || return 0
-    [ "$(jq -r --arg url "$URL" '.[] | select(.url == $url) | .owners[]' "$TMP/owners")" = "$OWNERS" ] \
-      || { REASON='canonical owners changed before confirmation'; return 0; }
-    for id in $new_owners; do
-      RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --arg id "$id" --arg head "$old" '.local_heads[$id]=$head')
-    done
-    for id in $OWNERS; do
-      meta="$STATE/$id.meta"
-      awk '!/^pr_head=/' "$meta" > "$TMP/meta"
-      printf 'pr_head=%s\n' "$HEAD" >> "$TMP/meta"
-      write_json "$meta" "$TMP/meta"
-    done
-    RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --slurpfile checks "$TMP/checks" --arg head "$HEAD" \
-      '. + {result_head:$head,confirmed:{head:$head,local_heads:.local_heads},checks:{head:$head,check_runs:$checks[0].check_runs},validation:"unconfirmed; no merge authority"}')
-    PENDING=false
-    if [ "$closing_behind" -gt 0 ]; then
-      RESULT=incomplete; REASON='captured base integrated but current base advanced'; return 0
-    fi
-    RESULT=updated; REASON='captured base integrated; new-head validation required'; return 0
-  fi
   compare "$BASE" "$HEAD" || return 0
   [ "$(jq '.behind_by' "$TMP/compare")" -gt 0 ] || { RESULT=current; REASON='base reachable from head'; return 0; }
   case "$(jq -r '.mergeable' "$TMP/core")" in
@@ -393,22 +331,23 @@ process_pr() {
   [ "$(jq -r --arg url "$URL" '.[] | select(.url == $url) | .owners[]' "$TMP/owners")" = "$OWNERS" ] \
     || { REASON='canonical owners changed before update'; return 0; }
   custody || { RESULT=deferred; return 0; }
-  proposed_receipt=$(jq -cn --arg head "$expected" --arg base "$previous" --argjson receipt "$RECEIPT" --slurpfile core "$TMP/core" \
-    '{old_head:$head,base_sha:$base,base_ref:$core[0].base.ref,head_ref:$core[0].head.ref,head_repo:$core[0].head.repo.full_name,pending:true,
-      confirmed:($receipt.confirmed // (if $receipt.result_head != null then {head:$receipt.result_head,local_heads:$receipt.local_heads} else null end))}')
+  proposed_receipt=$(jq -cn --arg head "$expected" --arg base "$previous" --argjson now "$NOW" --slurpfile core "$TMP/core" \
+    '{old_head:$head,base_sha:$base,base_ref:$core[0].base.ref,head_ref:$core[0].head.ref,head_repo:$core[0].head.repo.full_name,requested_at:$now,pending:true}')
   for id in $OWNERS; do
     local_head=$(bounded git -C "$(meta_value "$STATE/$id.meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
-    proposed_receipt=$(printf '%s' "$proposed_receipt" | jq -c --arg id "$id" --arg head "$local_head" '.local_heads[$id]=$head')
+    [ "$local_head" = "$expected" ] && [ "$(meta_value "$STATE/$id.meta" pr_head)" = "$expected" ] \
+      || { REASON='ready head changed before publication'; return 0; }
   done
   queue_read || return 0
   RECEIPT=$proposed_receipt
-  PENDING=true; RESULT=pending; REASON='request prepared; awaiting confirmed head'
+  PENDING=true; RESULT=pending; REASON='request prepared; outcome not yet known'
   record_result # Durable before the outward-facing side effect.
   jq -n --arg head "$expected" '{expected_head_sha:$head}' > "$TMP/request"
   local put_rc=0
   api PUT "/repos/$PROJECT/pulls/$NUMBER/update-branch" --input "$TMP/request" > "$TMP/put" || put_rc=$?
   if [ "$put_rc" -eq 0 ]; then
-    REASON='update accepted; awaiting confirmed head'
+    RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --argjson now "$NOW" '.accepted_at=$now')
+    PENDING=false; RESULT=accepted; REASON='update accepted; validation owner must observe resulting head'
   elif [ "$put_rc" -eq 22 ]; then
     PENDING=false; RESULT=incomplete; REASON='update refused with HTTP 422; re-observe PR before retry'
   else
@@ -432,5 +371,5 @@ process_pr
 record_result
 jq --argjson pending "$PENDING" --arg result "$RESULT" '.queue = (.queue[1:] + (if $pending or $result == "incomplete" then [.queue[0]] else [] end)) |
   . as $journal | .coverage_complete=((.queue | length) == 0 and
-    all(.sweep_urls[]; . as $url | $journal.receipts[$url].result | IN("current","terminal","updated")))' "$TMP/journal" > "$TMP/new"
+    all(.sweep_urls[]; . as $url | $journal.receipts[$url].result | IN("current","terminal")))' "$TMP/journal" > "$TMP/new"
 mv "$TMP/new" "$TMP/journal"; save
