@@ -524,7 +524,7 @@ __FM_BEARINGS_BOARD_DATA__
     });
     form.appendChild(opts);
 
-    if (item.allow_freeform) {
+    if (item.allow_freeform || incomplete) {
       var ff = document.createElement("input");
       ff.type = "text"; ff.name = "note"; ff.className = "bb-freeform";
       ff.placeholder = item.freeform_hint || "or answer in your own words…";

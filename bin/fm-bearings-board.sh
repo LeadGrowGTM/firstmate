@@ -156,7 +156,6 @@ validate_payload() {  # <data.json>
       and repo_marker
       and (.title | nonempty_string)
       and (.options | type == "array")
-      and ((.options | length) > 0 or .allow_freeform == true)
       and ([.options[]
         | type == "object"
           and (.value | slug(128))
@@ -166,7 +165,8 @@ validate_payload() {  # <data.json>
       and optional_string("gate")
       and ((has("stale_reason") | not) or (.stale_reason | nonempty_string))
       and ((has("impact") | not) or (.impact | type == "number" and floor == . and . >= 0))
-      and ((has("pr_state") | not) or (.pr_state == "MERGED" or .pr_state == "CLOSED"))
+      and ((has("pr_state") | not) or
+        ((.pr_state == "MERGED" or .pr_state == "CLOSED") and has("pr_url")))
       and (optional_string("about"))
       and (optional_string("decide"))
       and (optional_string("detail"))

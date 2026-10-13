@@ -126,6 +126,7 @@ const calls = (byId.get("bb-call") || new Node("div")).children
   .filter((c) => c.className.includes("bb-decision"))
   .map((c) => ({text:c.textContent, hidden:c.hidden,
     title:c.querySelectorAll(".bb-decision__title")[0]?.textContent,
+    freeform:c.querySelectorAll(".bb-freeform").length > 0,
     submitDisabled:c.querySelectorAll(".fm-btn")[0]?.disabled,
     question:c.children[0]?.children.find((n) => n.tagName === "form")?.attributes["data-lavish-question"]}));
 const owners = (byId.get("bb-call") || new Node("div")).children

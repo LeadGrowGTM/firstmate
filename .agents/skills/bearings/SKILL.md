@@ -105,8 +105,8 @@ If the record does not support options, their consequences, or a recommendation,
 Legacy summaries retain their available known held calls, with truncated detail and unmeasured remaining inventory explicitly disclosed.
 Disclose `decision_layout_unavailable` and the snapshot's omitted or cached coverage in Charted Next warning rows; an incomplete inventory is never proof that every home is clear.
 The board shows all cards together, numbered D1 onward, grouped by owner and ordered within each owner by descending `impact` (a nonnegative integer supplied by composing judgment); ties preserve payload order.
-Copy each row's `owner` into the card and carry its `stale_reason` when present.
-A confirmed linked PR state may be supplied as `pr_state: "MERGED"` or `"CLOSED"`; unknown PR state stays unclassified until verified.
+Copy each row's `owner` into the card and carry its verified `stale_reason` when present; matching repo and title alone does not establish a duplicate.
+A confirmed linked PR state may be supplied as `pr_state: "MERGED"` or `"CLOSED"` only with that PR's `pr_url`; unknown PR state stays unclassified until verified.
 Stale cards move into the board's separate candidate list without answering or resolving their tasks.
 Owner-aware captured-answer routing is not yet supported: cards outside `(main)` show the owner-qualified task and ask for the choice through firstmate rather than queueing it into the main backlog.
 Visual delivery uses this local HTML/Lavish surface, never claude.ai artifacts.

@@ -3467,11 +3467,10 @@ EOF
     and (.decision_layout[0].reason | endswith("before rollout"))
     and (.decision_layout | all(.[]; has("number") | not))
     and (.decision_layout | any(.key == "older" and .origin == "finished"
-      and .stale_reason == "Duplicate open captain hold for the same repo and title"))
-    and (.decision_layout | any(.key == "newer"
-      and .stale_reason == "Duplicate open captain hold for the same repo and title"))
+      and .stale_reason == null))
+    and (.decision_layout | any(.key == "newer" and .stale_reason == null))
     and (.decision_layout | any(.owner == "mate" and .key == "remote-1"
-      and .stale_reason == "Duplicate open captain hold for the same repo and title"))
+      and .stale_reason == null))
     and (.decision_layout | any(.key == "merged-call" and .pr_url == "https://github.com/acme/sample/pull/5"
       and .stale_reason == null))
     and ([.decision_layout[] | select(.owner == "mate")] | length) == 26
@@ -3488,7 +3487,7 @@ EOF
   json=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_BEARINGS_NOW=2026-07-11T18:00:00Z \
     NET_LOG="$home/net.log" "$BEARINGS" --json --fields decisions)
   printf '%s' "$json" | jq -e --arg long_id "$long_id" '
-    (.decision_layout | any(.owner == "mate" and .key == "remote-1" and .repo == "firstmate"))
+    (.decision_layout | any(.owner == "mate" and .key == "remote-1" and .repo == "firstmate" and .stale_reason == null))
     and ([.decision_layout[] | select(.owner == "mate" and .key == $long_id)] | length) == 1
     and ([.decision_layout[] | select(.owner == "mate" and (.key | endswith("…")))] | length) == 0
     and .decision_layout_unavailable == [{owner:"mate",reason:"Detailed decision inventory unavailable; inspect owner home"}]

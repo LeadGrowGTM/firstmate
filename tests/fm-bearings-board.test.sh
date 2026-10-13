@@ -289,10 +289,9 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
   [ "$rc" -ne 0 ] || fail "a non-boolean renderer field was accepted"
 
   write_valid_payload "$data"
-  jq '.captains_call[0].options = [] | .captains_call[0].allow_freeform = false' "$data" > "$data.tmp" \
-    && mv "$data.tmp" "$data"
+  jq '.captains_call[0].pr_state = "CLOSED"' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
   set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
-  [ "$rc" -ne 0 ] || fail "an unanswerable captains_call item was accepted"
+  [ "$rc" -ne 0 ] || fail "a closed PR state without a linked PR was accepted"
 
   write_valid_payload "$data"
   jq '.captains_call[1].pr_url = "javascript:alert(1)"' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
@@ -313,6 +312,23 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
 
   assert_absent "$board" "a refused payload still produced a board"
   pass "build refuses malformed payloads before touching the board"
+}
+
+test_build_accepts_an_incomplete_freeform_card() {
+  local home data board out
+  home=$(make_home incomplete-freeform-card)
+  data="$home/payload.json"
+  board="$home/.lavish/bearings-board.html"
+  write_valid_payload "$data"
+  jq '.captains_call[0].options = [] | .captains_call[0].allow_freeform = false' "$data" > "$data.tmp" \
+    && mv "$data.tmp" "$data"
+  out=$(run_board "$home" build "$data" 2>&1) || fail "an incomplete freeform card was rejected: $out"
+  extract_payload "$board" | jq -e '
+    .captains_call[0].key == "sample-instruction-layer-refinement-review-decision-perishable-first-admission-choice"
+    and ([.captains_call[0].options[].value] == ["reconcile"])
+  ' >/dev/null \
+    || fail "an incomplete card was not retained for answering"
+  pass "build retains an incomplete card for a freeform answer"
 }
 
 test_build_injects_binds_then_arms() {
@@ -639,6 +655,12 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
         {"key":"timeout-reattach","type":"decision","repo":"sample","title":"Already merged",
          "pr_url":"https://github.com/sample/sample/pull/7",
          "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"closed-linked-pr","type":"decision","repo":"sample","title":"Closed PR",
+         "pr_url":"https://github.com/sample/sample/pull/8","pr_state":"CLOSED",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"verified-duplicate","type":"decision","repo":"sample","title":"Verified duplicate",
+         "stale_reason":"Verified duplicate of another open call",
+         "options":[{"value":"yes","label":"Yes"}]},
         {"key":"quota-version","type":"decision","repo":"sample","title":"Old quota release",
          "subject":{"artifact":"quota-axi","version":"0.1.37"},
          "options":[{"value":"yes","label":"Yes"}]},
@@ -666,6 +688,8 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
     [.captains_call[] | [.owner // "(main)", .key]]
       == [["mate","landed-by-task"],["(main)","still-open"]]
     and (.stale_candidates | any(.owner == "(main)" and .key == "landed-by-task"))
+    and (.stale_candidates | any(.key == "closed-linked-pr" and .stale_reason == "Linked PR closed"))
+    and (.stale_candidates | any(.key == "verified-duplicate" and .stale_reason == "Verified duplicate of another open call"))
   ' >/dev/null \
     || fail "the board dropped an open card or kept one whose subject already landed"
   pass "build drops decision cards whose subject already landed and keeps open ones"
@@ -813,6 +837,7 @@ test_build_refuses_a_nondecision_reconcile_value() {
 
 test_path_is_stable_and_home_scoped
 test_build_refuses_malformed_payloads_before_touching_the_board
+test_build_accepts_an_incomplete_freeform_card
 test_charted_kind_is_optional_and_accepts_both_values
 test_build_injects_binds_then_arms
 test_registration_cannot_consume_before_any_origin_binding

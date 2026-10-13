@@ -284,7 +284,7 @@ test_owner_grouped_numbered_decisions() {
     {"key":"remote","owner":"mate","impact":3,"type":"decision","repo":"sample","title":"Remote choice","decide":"Choose a route","options":[{"value":"a","label":"Route A","hint":"Ships sooner"}],"recommend_value":"a"},
     {"key":"minor","owner":"(main)","impact":1,"type":"decision","repo":"sample","title":"Minor choice","gate":"until 2026-11-01","options":[{"value":"b","label":"Route B"}]},
     {"key":"major","owner":"(main)","impact":9,"type":"decision","repo":"sample","title":"Major choice","options":[{"value":"a","label":"Route A","hint":"Keeps compatibility"}],"recommend_value":"a"},
-    {"key":"minor","owner":"mate","type":"merge","risk":"low","pr_state":"CLOSED","repo":"sample","title":"Old choice","options":[{"value":"b","label":"Route B"}]}
+    {"key":"minor","owner":"mate","type":"merge","risk":"low","pr_state":"CLOSED","pr_url":"https://github.com/sample/sample/pull/8","repo":"sample","title":"Old choice","options":[{"value":"b","label":"Route B"}]}
   ]')
   printf '%s' "$out" | jq -e '
     .error == "" and .owners == ["Main home","mate"]
@@ -334,7 +334,9 @@ test_incomplete_guidance_is_shared_by_card_kinds() {
       and contains("Missing recommendation"))
     and (.calls[1].text | contains("incomplete") and contains("Missing consequence")
       and contains("recommendRoute A"))
+    and .calls[1].freeform == true and .calls[1].submitDisabled == false
     and (.calls[2].text | contains("incomplete") | not)
+    and .calls[2].freeform == false
   ' >/dev/null || fail "card kinds did not share incomplete-guidance rendering: $out"
   pass "merge and credential cards share decision completeness guidance"
 }

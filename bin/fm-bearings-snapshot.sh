@@ -397,7 +397,6 @@ MODEL=$(printf '%s' "$SNAP" | jq \
     | if $n <= 0 then ""
       elif length > $n then (if $n == 1 then "…" else (.[:($n - 1)] + "…") end)
       else . end;
-  def normalized_decision_title: ascii_downcase | gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
   def live_captain_call: .hold_bucket == "live";
   def projected_deferred_hold:
     .hold_bucket != null and .hold_bucket != "live";
@@ -684,13 +683,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
         | sort_by([.owner, (if .priority == "critical" or .priority == "P0" then 0
                            elif .priority == "high" or .priority == "P1" then 1
                            elif .priority == "low" or .priority == "P3" then 3 else 2 end), .id])
-        | . as $calls
-        | map(. as $call
-          | if (.repo != null and .repo != "") and any($calls[];
-              .id != $call.id and .repo == $call.repo
-              and (.title | normalized_decision_title) == ($call.title | normalized_decision_title))
-            then .stale_reason = (.stale_reason // "Duplicate open captain hold for the same repo and title")
-            else . end)),
+      ),
        decision_layout_unavailable:([if $snap.backlog.present != true then
          {owner:"(main)", reason:"Structured backlog unavailable"} else empty end]
          + [$snap.secondmate_current.records[]?
