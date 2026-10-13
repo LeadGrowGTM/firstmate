@@ -12,7 +12,8 @@
 # One unfinished occurrence per job suppresses new slots until completion.
 #
 # state/.schedule-occurrences.json retains each job's latest occurrence and a
-# snapshot of its intent. Keys are <id>:daily:<YYYY-MM-DD> or <id>:interval:<slot>.
+# snapshot of its intent. Keys are <id>:daily:<YYYY-MM-DD> or
+# <id>:interval:<UTC-start>-<UTC-end>.
 # A deterministic sched-<digest> task id survives replay and configuration edits.
 # detected means frozen intent; enqueued means a verified ordinary backlog row;
 # dispatched and completed are observed from that same row's In flight and Done
@@ -151,12 +152,12 @@ def freeze(job):
         raise ValueError("frozen brief exceeds size bound")
     return content
 
-def slot_end(key, cadence):
+def slot_end(key):
     slot = key.rsplit(":", 1)[1]
-    if cadence["kind"] == "interval":
-        return (int(slot) + 1) * cadence["seconds"]
+    if ":interval:" in key:
+        return int(slot.rsplit("-", 1)[1])
     next_day = dt.date.fromisoformat(slot) + dt.timedelta(days=1)
-    return int(dt.datetime.combine(next_day, dt.time(), ZoneInfo(cadence["timezone"])).timestamp())
+    return int(dt.datetime.combine(next_day, dt.time(), dt.timezone.utc).timestamp()) + 12 * 3600
 
 def body(record):
     return ("schedule-occurrence: " + record["key"] + "\n"
@@ -263,7 +264,8 @@ try:
                 slot = local.date().isoformat()
                 key = job["id"] + ":daily:" + slot
             else:
-                slot = str(now // cadence["seconds"])
+                start = (now // cadence["seconds"]) * cadence["seconds"]
+                slot = str(start) + "-" + str(start + cadence["seconds"])
                 key = job["id"] + ":interval:" + slot
             if old and key == old["key"]:
                 continue
@@ -272,13 +274,13 @@ try:
             # A backwards wall clock never resurrects an earlier successful slot.
             if old and old["intent"]["cadence"] == cadence:
                 old_slot = old["key"].rsplit(":", 1)[1]
-                if (slot <= old_slot if cadence["kind"] == "daily-local" else int(slot) <= int(old_slot)):
+                if (slot <= old_slot if cadence["kind"] == "daily-local" else int(slot.split("-", 1)[0]) <= int(old_slot.split("-", 1)[0])):
                     continue
             task = "sched-" + hashlib.sha256(key.encode()).hexdigest()[:24]
             brief = freeze(job)
             completed_slots = dict(old.get("completed_slots", {})) if old else {}
             if old and old["state"] == "completed":
-                end = slot_end(old["key"], old["intent"]["cadence"])
+                end = slot_end(old["key"])
                 if end > now:
                     completed_slots[old["key"]] = end
             data["jobs"][job["id"]] = {
@@ -293,7 +295,7 @@ try:
         if pending:
             start = data["cursor"] % len(pending)
             selected = (pending[start:] + pending[:start])[:5]
-            data["cursor"] = (start + len(selected)) % len(pending)
+            data["cursor"] = (start + 1) % len(pending)
             changed = True
         if changed:
             write(data)
@@ -301,6 +303,12 @@ try:
             print(key)
     elif op == "validate":
         jobs()
+    elif op == "advance":
+        step = int(args[0])
+        if not 0 <= step <= 4:
+            raise ValueError("invalid cursor advance")
+        data["cursor"] += step
+        write(data)
     elif op in ("prepare", "observe", "attempt"):
         record = next(r for r in data["jobs"].values() if r["key"] == args[0])
         if op == "attempt":
@@ -349,7 +357,7 @@ PY
 }
 
 locked() {
-  local op=${1:-check} keys key task tmp want prepared observed backlog_state project kind title note backup='' rc=0
+  local op=${1:-check} keys key task tmp want prepared observed backlog_state project kind title note backup='' rc=0 processed=0
   shift || true
   fm_lock_acquire_wait "$STATE/.schedule-check.lock" || return 1
   trap 'fm_lock_release "$STATE/.schedule-check.lock"' EXIT
@@ -364,6 +372,7 @@ locked() {
       fi
       while IFS= read -r key; do
         [ -n "$key" ] || continue
+        processed=$((processed + 1))
         prepared=$(engine prepare "$key") || return 1
         task=$(printf '%s' "$prepared" | jq -r '.task') || return 1
         project=$(printf '%s' "$prepared" | jq -r '.project') || return 1
@@ -385,6 +394,7 @@ locked() {
         fm_lock_release "$FM_WAKE_QUEUE_LOCK" || rc=1
         [ "$rc" -eq 0 ] || return 1
       done <<< "$keys"
+      engine advance "$((processed - 1))" || return 1
       ;;
     arm)
       engine validate || return 1

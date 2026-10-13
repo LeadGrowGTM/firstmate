@@ -137,17 +137,32 @@ bash "$CHECK" check
 [ "$(queue_count)" -eq 25 ] || fail 'finished publication batch duplicated work'
 pass 'bounded batch preserves remaining intent and continues past queued jobs'
 
+world batch-failure
+config interval
+export FM_SCHEDULE_NOW=7200
+jq '.schedules[0] as $job | .schedules=[range(0;5) | $job + {id:("job-"+tostring)}]' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/batch.json"
+mv "$FM_HOME/config/batch.json" "$FM_HOME/config/schedules.json"
+BLOCKED=$("$REAL_PYTHON" -c 'import hashlib; print("sched-" + hashlib.sha256(b"job-0:interval:7200-14400").hexdigest()[:24])')
+mkdir -p "$FM_HOME/data/$BLOCKED"
+printf 'wrong frozen content\n' > "$FM_HOME/data/$BLOCKED/schedule-brief.md"
+bash "$CHECK" check >/dev/null 2>&1 && fail 'broken first job unexpectedly prepared'
+[ "$(queue_count)" -eq 0 ] || fail 'first failure did not stop initial batch'
+bash "$CHECK" check >/dev/null 2>&1 && fail 'broken first job unexpectedly recovered'
+[ "$(queue_count)" -eq 4 ] || fail 'broken first job starved the other four jobs'
+[ "$(jq '[.jobs[] | select(.state=="enqueued")] | length' "$FM_HOME/state/.schedule-occurrences.json")" -eq 4 ] || fail 'healthy jobs lack enqueue receipts'
+pass 'five pending jobs advance past a repeatedly failing first job'
+
 world interval
 config interval
 export FM_SCHEDULE_NOW=7200
 bash "$CHECK" check
-[ "$(field key)" = freshness:interval:1 ] || fail 'incorrect interval slot'
+[ "$(field key)" = freshness:interval:7200-14400 ] || fail 'incorrect interval window'
 [ "$(field state)" = enqueued ] || fail 'enqueue was treated as completion'
 receipt dispatched
 receipt completed
 export FM_SCHEDULE_NOW=14400
 bash "$CHECK" check
-[ "$(field key)" = freshness:interval:2 ] || fail 'next interval not detected'
+[ "$(field key)" = freshness:interval:14400-21600 ] || fail 'next interval not detected'
 receipt dispatched
 receipt completed
 export FM_SCHEDULE_NOW=7200
@@ -167,7 +182,7 @@ tasks prune --keep 0 >/dev/null
 jq '.schedules[0].cadence.seconds=3600' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
 mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
 bash "$CHECK" check
-[ "$(field key)" = freshness:interval:3 ] || fail 'one-hour edit did not create its current slot'
+[ "$(field key)" = freshness:interval:10800-14400 ] || fail 'one-hour edit did not create its current slot'
 receipt dispatched
 receipt completed
 tasks prune --keep 0 >/dev/null
@@ -176,13 +191,30 @@ mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
 : > "$FM_HOME/state/.wake-queue"
 bash "$CHECK" check
 [ "$(queue_count)" -eq 0 ] || fail 'two-hour restoration recreated completed slot'
-[ "$(field key)" = freshness:interval:3 ] || fail 'two-hour restoration replaced completed receipt'
+[ "$(field key)" = freshness:interval:10800-14400 ] || fail 'two-hour restoration replaced completed receipt'
 tasks show "$ORIGINAL" --full >/dev/null 2>&1 && fail 'completed archived slot was recreated'
 export FM_SCHEDULE_NOW=14400
 bash "$CHECK" check
-[ "$(field key)" = freshness:interval:2 ] || fail 'new two-hour slot did not fire'
+[ "$(field key)" = freshness:interval:14400-21600 ] || fail 'new two-hour slot did not fire'
 [ "$(jq '.jobs.freshness.completed_slots | length' "$FM_HOME/state/.schedule-occurrences.json")" -eq 0 ] || fail 'expired completed slots were retained'
 pass 'cadence edits retain completed active slots and prune expired identities'
+
+world interval-window-edit
+config interval
+jq '.schedules[0].cadence.seconds=3600' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+export FM_SCHEDULE_NOW=5400
+bash "$CHECK" check
+[ "$(field key)" = freshness:interval:3600-7200 ] || fail 'one-hour fixture entered wrong window'
+receipt dispatched
+receipt completed
+jq '.schedules[0].cadence.seconds=7200' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+export FM_SCHEDULE_NOW=7200
+bash "$CHECK" check
+[ "$(field key)" = freshness:interval:7200-14400 ] || fail 'two-hour edit reused earlier slot identity'
+[ "$(queue_count)" -eq 2 ] || fail 'two-hour edit suppressed its distinct time window'
+pass 'interval identity follows the UTC window across cadence edits'
 
 world edited-gate
 config
@@ -220,6 +252,28 @@ bash "$CHECK" check
 [ "$(field key)" = freshness:daily:2026-10-14 ] || fail 'timezone restoration replaced completed receipt'
 tasks show "$ORIGINAL" --full >/dev/null 2>&1 && fail 'completed archived local date was recreated'
 pass 'timezone edits retain completed local-date identity while its slot is active'
+
+world timezone-late-date
+config
+jq '.schedules[0].cadence.timezone="Asia/Tokyo"' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+export FM_SCHEDULE_NOW=1791943200
+bash "$CHECK" check
+[ "$(field key)" = freshness:daily:2026-10-14 ] || fail 'Tokyo fixture entered wrong date'
+receipt dispatched
+receipt completed
+jq '.schedules[0].cadence.timezone="America/Los_Angeles"' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/edited.json"
+mv "$FM_HOME/config/edited.json" "$FM_HOME/config/schedules.json"
+bash "$CHECK" check
+[ "$(field key)" = freshness:daily:2026-10-13 ] || fail 'Los Angeles fixture entered wrong date'
+receipt dispatched
+receipt completed
+export FM_SCHEDULE_NOW=1791993600
+: > "$FM_HOME/state/.wake-queue"
+bash "$CHECK" check
+[ "$(queue_count)" -eq 0 ] || fail 'Tokyo date was republished after Tokyo midnight'
+[ "$(field key)" = freshness:daily:2026-10-13 ] || fail 'completed Tokyo date lost its receipt'
+pass 'completed local date survives until it ends in every possible zone'
 
 world dst
 config
