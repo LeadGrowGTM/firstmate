@@ -373,7 +373,7 @@ That aging is a projection safety net only.
 The durable deferral remains re-holding with `--until`.
 
 The fleet snapshot's secondmate-home summary classifies an actionable captain hold as `captain_decision`.
-It preserves every captain hold in the bounded queued inventory of the owning home.
+Its compact queued inventory is bounded; the detailed layout below uses `decision_records` for complete coverage of readable current-format home summaries.
 
 ### Bearings placement
 

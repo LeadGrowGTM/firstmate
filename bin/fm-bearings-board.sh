@@ -11,8 +11,8 @@
 #   fm-bearings-board.sh build <data.json>
 #   fm-bearings-board.sh path
 #
-# build      Validate the payload, drop the Captain's Call cards whose subject
-#            already landed, give every surviving decision card the standard
+# build      Validate the payload, move identified stale Captain's Call cards
+#            into stale_candidates, give every active decision card the standard
 #            reconcile choice, and inject the result into a fresh copy of the
 #            shipped template at the stable board path. Establish the Lavish
 #            session on that board and PROVE it is live BEFORE binding and
@@ -30,9 +30,9 @@
 #              armed: <source-id>            (first registration)
 #              already-armed: <source-id>    (registration already present)
 #              listening: <owner>            (only when a replacement was needed)
-#            Every dropped card is named on stderr as a `dropped-landed-card:`
-#            line, so a rebuild states what it removed instead of quietly
-#            shrinking Captain's Call. Removed cards remain in stale_candidates
+#            Every identified stale card is named on stderr as a
+#            `dropped-landed-card:` line, so a rebuild states what left active
+#            Captain's Call. Those cards remain in stale_candidates
 #            as observational rows; no hold is answered or resolved by build.
 # path       Print the stable board path for this home.
 #
@@ -73,8 +73,9 @@
 #
 # Optional call fields: owner is a non-empty home id (default "(main)"),
 # impact is a nonnegative integer, gate is presentation text, stale_reason is a
-# non-empty verified candidate reason, and pr_state is MERGED or CLOSED.
-# MERGED/CLOSED and stale_reason move a decision to the candidate list.
+# non-empty verified candidate reason, and pr_state is MERGED or CLOSED only
+# with a linked pr_url.
+# MERGED/CLOSED and stale_reason move a card to the candidate list.
 # Owner/task identities must be unique. Foreign calls are never checked against
 # the local backlog or submitted to the local answer intake by the template.
 #

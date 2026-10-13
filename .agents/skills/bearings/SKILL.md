@@ -113,7 +113,7 @@ Visual delivery uses this local HTML/Lavish surface, never claude.ai artifacts.
 
 Compose the payload from the same snapshot with the same ranking judgment as the chat digest, plus these board rules:
 
-- A Captain's Call decision key is the captain-held TASK ID from `decisions_open` (legacy `<origin>-decision-<key>` rows are already task ids); a merge card's key is `merge.<task-id>`; the Charted Next dispatch picker's key is `dispatch.charted`.
+- A Captain's Call decision key is the captain-held TASK ID from `decision_layout` (legacy `<origin>-decision-<key>` rows are already task ids); a merge card's key is `merge.<task-id>`; the Charted Next dispatch picker's key is `dispatch.charted`.
 - Before carding a hold, check its structured SUBJECT against current landed evidence and mark a stale candidate when it has landed.
   `build` moves a card into stale candidates when its owner-qualified task or PR appears in the payload's own landed rows, and checks main-home decision tasks against the current captain-call state.
   When a hold waits on one specific PR, put that PR in the card's `pr_url`.

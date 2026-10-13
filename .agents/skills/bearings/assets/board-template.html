@@ -155,7 +155,7 @@ a { color: inherit; text-decoration: none; }
 .bb-section__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .bb-cols { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 22px; }
 
-/* Owner groups show every call together, with stable numbered references. */
+/* Owner groups show every call together, with numbered references. */
 .bb-callwrap, .bb-call { display: flex; flex-direction: column; gap: 16px; }
 .bb-owner { margin: 8px 0 0; font-size: var(--fs-h4); }
 .bb-stale { border-top: 1px solid var(--border-default); padding-top: 16px; }
@@ -441,7 +441,7 @@ __FM_BEARINGS_BOARD_DATA__
   document.getElementById("bb-call-sub").textContent =
     callTotal ? callTotal + " recorded call" + (callTotal === 1 ? "" : "s") + " · " + actionableTotal + " actionable" : "no active calls recorded; check coverage";
 
-  /* Captain's Call deck: every item renders as the same full card */
+  /* Captain's Call list: every item renders as the same full card */
   var deck = document.getElementById("bb-call");
   function ctxRow(k, v, rec) {
     var row = el("div", "bb-ctx__row" + (rec ? " bb-ctx__row--rec" : ""));
