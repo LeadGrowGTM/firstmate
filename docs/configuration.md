@@ -166,6 +166,7 @@ This preference is local to each Firstmate home and is not part of secondmate in
 
 The idle sweep runs inside the existing watcher's supervision heartbeat, across all primary harnesses, without another daemon.
 It runs by default and reads only this home's backlog, prepared briefs, recorded worker endpoints, and project clones.
+A marked live-lab home requires its recorded private tmux socket; a caller inside tmux must also be in that lab's pane.
 Secondmate endpoints are supervisors and do not count as local workers; no child home is inspected.
 Runtime backends without the canonical recovery-grade agent classifier conservatively hold the sweep when they have a recorded worker.
 
@@ -230,7 +231,7 @@ Before targeted dispatch, the sweep rechecks the target's current gap and projec
 An open-PR step should prepare a review or fix, since meeting that target may still require a captain-approved merge.
 
 The sweep starts a batch only when no ordinary worker is live and all effective Codex account windows report known, fresh remaining quota strictly above 15 percent.
-It rechecks the quota, complete backlog row, brief boundary, and open decisions before each start, selects at most three steps, and orders red-branch work before other target work, then ready backlog work in backlog order.
+It rechecks home idleness, quota, complete backlog row, brief boundary, and open decisions before each start, selects at most three steps, and orders red-branch work before other target work, then ready backlog work in backlog order.
 Unmeasured red-branch evidence holds the batch rather than allowing backlog work to outrank an unknown failure.
 Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the prepared delivery mode, and yolo off; backend refusals stop the batch without a fallback.
 The sweep reads briefs without editing them and refuses work whose prepared brief lacks the reversible-work boundary above.
