@@ -12,7 +12,7 @@ Busy hooks verified 2026-07-28 on Claude Code 2.1.220.
 | Skill | `/<skill>`, for example `/no-mistakes`. |
 | Model | `--model <model>`; discover through the interactive `/model` picker, with alias or full-name shape documented by `claude --help`. |
 | Effort | `--effort <low\|medium\|high\|xhigh\|max>`, verified on 2.1.196. |
-| Permissions | `--dangerously-skip-permissions` by default, or `--permission-mode auto` when `config/claude-permission-mode` is `auto`; the `auto` shape verified on 2.1.269. See [`Claude permission mode`](../../../../../docs/configuration.md#claude-permission-mode-configclaude-permission-mode) for the launch grant and configuration. |
+| Permissions | `--allow-dangerously-skip-permissions --permission-mode auto` by default (auto mode on, bypass reachable through shift+tab), `--dangerously-skip-permissions` under `config/claude-permission-mode=bypass`, or `--permission-mode auto` alone under `auto`; the default shape [verified on 2.1.296](../../../../../docs/verification/runtime-backends.md#claude-permission-mode). See [`Claude permission mode`](../../../../../docs/configuration.md#claude-permission-mode-configclaude-permission-mode) for the launch grant and configuration. |
 | Remote Control | A secondmate launch or relaunch carries `--remote-control 'fm-<id>'` unless `config/claude-remote-control` is `off`; a ship or scout launch never does. See [Remote Control](#remote-control). |
 
 ## Workspace trust
@@ -46,6 +46,7 @@ Inspect the pane to identify which dialog is on screen, and report it rather tha
 A remote second-mate launch or relaunch reports it for you: `../../../bin/fm-remote-secondmate-control.sh` refuses while the new agent is parked there, naming this dialog and the Herdr session a person opens on that host to accept it, and leaves the waiting agent in place so the same command succeeds once it is accepted.
 A local launch has no such refusal, so there the shared classifier in `../../../bin/fm-busy-lib.sh` only stops the parked pane from reading as a working turn.
 A launch under `config/claude-permission-mode=auto` never meets the bypass confirmation, because it does not request bypass mode: on 2.1.269 `claude --permission-mode auto` reached the composer directly with the footer `⏵⏵ auto mode on (shift+tab to cycle)`, so a captain who refuses the bypass dialog selects `auto` there instead of accepting it.
+Whether the default `auto-allow-bypass` launch meets that confirmation on a never-accepted machine is not verified, because every verifying host had already accepted it; the shared classifier above still keeps a parked pane from reading as a working turn.
 The workspace-trust dialog is unaffected by the permission mode and still needs the pre-registration above.
 
 ## Remote Control

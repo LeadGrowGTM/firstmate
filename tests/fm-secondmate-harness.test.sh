@@ -903,7 +903,7 @@ test_spawn_secondmate_harness_model_token() {
   [ "$(meta_field "$meta" model)" = opus ] || fail "model-token: meta model not opus (got '$(meta_field "$meta" model)')"
   [ "$(meta_field "$meta" effort)" = default ] || fail "model-token: meta effort not default (got '$(meta_field "$meta" effort)')"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+  assert_contains "$launch" "claude --allow-dangerously-skip-permissions --permission-mode auto $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
     "model-token: launch did not carry --model opus"
   assert_not_contains "$launch" "--effort" "model-token: launch must not carry an --effort flag"
   pass "C3 spawn: config/secondmate-harness's model token threads --model into the launch and meta"
@@ -925,7 +925,7 @@ test_spawn_secondmate_harness_model_and_effort_tokens() {
   [ "$(meta_field "$meta" model)" = opus ] || fail "model-effort-tokens: meta model not opus"
   [ "$(meta_field "$meta" effort)" = high ] || fail "model-effort-tokens: meta effort not high (got '$(meta_field "$meta" effort)')"
   launch=$(cat "$launchlog")
-  assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus' --effort 'high'" \
+  assert_contains "$launch" "claude --allow-dangerously-skip-permissions --permission-mode auto $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus' --effort 'high'" \
     "model-effort-tokens: launch did not carry both --model opus and --effort high"
   pass "C4 spawn: config/secondmate-harness's model+effort tokens thread into the launch and meta"
 }
@@ -1585,7 +1585,7 @@ test_spawn_secondmate_claude_permission_mode_auto() {
 # modes: the parent inbox must resolve inside the pane cwd or an --add-dir.
 test_spawn_secondmate_claude_grants_parent_inbox_dir() {
   local w sm launchlog launch reqs fakebin out status eval_out eval_rc
-  for mode in auto bypass; do
+  for mode in auto-allow-bypass auto bypass; do
     w="$TMP_ROOT/spawn-claude-adddir-$mode"
     sm="$w/sm"
     launchlog="$w/launch.log"
@@ -1654,7 +1654,9 @@ test_spawn_secondmate_claude_remote_control_default_on() {
     doorbell=$(tail -n 1 "$argv")
     [ "$(printf '%s' "$doorbell" | "$ROOT/bin/fm-operational-input.sh" doorbell-kind)" = launch-brief ] \
       || fail "rc-default $label: the launch doorbell is no longer the final argument (got '$doorbell')"
-    [ "$(sed -n 2p "$argv")" = --remote-control ] \
+    [ "$(sed -n 1,3p "$argv" | tr '\n' ' ')" = "--allow-dangerously-skip-permissions --permission-mode auto " ] \
+      || fail "rc-default $label: the default permission flags must lead the argv"$'\n'"$(cat "$argv")"
+    [ "$(sed -n 4p "$argv")" = --remote-control ] \
       || fail "rc-default $label: --remote-control must directly follow the permission flag, never stand last before the prompt"$'\n'"$(cat "$argv")"
   done
   pass "C2c spawn: a Claude secondmate launches with --remote-control 'fm-<id>' by default and keeps its doorbell prompt"
@@ -1678,10 +1680,10 @@ test_spawn_secondmate_claude_remote_control_switch() {
     launch=$(cat "$launchlog")
     if [ "$token" = off ]; then
       assert_not_contains "$launch" "--remote-control" "rc-off: the off switch must remove the Remote Control flag"
-      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
+      assert_contains "$launch" "claude --allow-dangerously-skip-permissions --permission-mode auto $(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus'" \
         "rc-off: the off switch must leave the rest of the launch unchanged"
     else
-      assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings" \
+      assert_contains "$launch" "claude --allow-dangerously-skip-permissions --permission-mode auto $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings" \
         "rc-on: an explicit on must launch exactly as an absent file does"
     fi
   done

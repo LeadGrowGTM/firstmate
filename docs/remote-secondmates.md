@@ -697,7 +697,7 @@ Clear it once per host:
 The waiting agent is left in place, so it continues into its charter as soon as the dialog is answered and the rerun adopts it rather than starting a second one.
 A rerun before the dialog is answered fails the same way.
 A host set up with the [Boat recipe](#set-up-the-sandbox) accepts the dialog once during setup instead, so its first launch never meets it.
-A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog.
+A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog; whether the default `auto-allow-bypass` launch meets it is not verified.
 The same refusal covers any other launch prompt the shared classifier in [`bin/fm-busy-lib.sh`](../bin/fm-busy-lib.sh) recognizes for the selected harness.
 A relaunch refuses on the same prompts, and [Relaunch a live remote second mate](#relaunch-a-live-remote-second-mate) owns what differs there.
 

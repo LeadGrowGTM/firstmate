@@ -21,7 +21,7 @@
 # The primary passes its frozen home-session decision into a newly launched
 # Secondmate; see docs/trace-context.md.
 # Primary config/claude-permission-mode is a captain-wide safety preference
-# (bypass or auto for every claude launch), so it flows down too and a
+# (the permission flags for every claude launch), so it flows down too and a
 # secondmate's own claude crewmates launch on the same permission posture.
 # Primary config/claude-remote-control is the captain's choice of whether
 # Claude secondmates register for Remote Control, so it flows down too: a

@@ -845,23 +845,25 @@ For omp secondmate launches, `fm-spawn.sh` names only the per-task busy-state ex
 
 ## Claude permission mode (config/claude-permission-mode)
 
-The optional local, gitignored `config/claude-permission-mode` selects the permission flag for every Claude worker launch: crewmates, scouts, Claude secondmates, and control-plane relaunches.
+The optional local, gitignored `config/claude-permission-mode` selects the permission flags for every Claude worker launch: crewmates, scouts, Claude secondmates, and control-plane relaunches.
 
 ### Accepted values and refusals
 
 The token is the file's whitespace-trimmed content.
 
-| Token | Launch permission flag |
+| Token | Launch permission flags |
 | --- | --- |
-| `bypass` | `claude --dangerously-skip-permissions` |
+| `auto-allow-bypass` | `--allow-dangerously-skip-permissions --permission-mode auto` |
+| `bypass` | `--dangerously-skip-permissions` |
 | `auto` | `--permission-mode auto` |
 
-An absent file defaults to bypass, so an unconfigured home launches with the bypass permission flag.
-Auto is Claude Code's classifier-reviewed permission mode, for a captain who refuses to run workers in bypass mode.
-Only the permission flag changes between the two modes.
-The environment prefix, inline settings, model, effort flags, and the task-channel `--add-dir` grant below stay the same in both.
+An absent file defaults to `auto-allow-bypass`, so an unconfigured home launches every Claude worker in auto mode with bypass available but not active.
+Auto is Claude Code's classifier-reviewed permission mode; under `auto-allow-bypass` bypass stays reachable through the session's shift+tab mode cycle, while plain `auto` removes it from that cycle for a captain who refuses bypass mode entirely.
+`bypass` starts the worker with every permission check skipped.
+Only the permission flags change between the modes.
+The environment prefix, inline settings, model, effort flags, and the task-channel `--add-dir` grant below stay the same in every mode.
 
-Every Claude launch, in both modes, also passes `--add-dir` for exactly this task's Firstmate channel directories, resolved to real paths: a secondmate gets the parent home's `state/<id>.inbox` it reads its steers from; a ship or scout worker gets this home's `state/operational-inbox` (its launch record), `state/<id>.inbox` (its steers), `data/<id>` (its brief and report), and the code root's `.agents/skills`.
+Every Claude launch, in every mode, also passes `--add-dir` for exactly this task's Firstmate channel directories, resolved to real paths: a secondmate gets the parent home's `state/<id>.inbox` it reads its steers from; a ship or scout worker gets this home's `state/operational-inbox` (its launch record), `state/<id>.inbox` (its steers), `data/<id>` (its brief and report), and the code root's `.agents/skills`.
 The grant exists because Claude Code path-checks the Read/Glob/Grep file tools against cwd plus `--add-dir`, and since 2.1.257 the first outside read in `auto` mode parks the pane on a one-time interactive question, while a "Block" answer there writes `permissions.blockReadsOutsideWorkingDirectories` into user settings and then refuses the same reads under bypass too.
 It never covers the whole `state/` or anything wider.
 

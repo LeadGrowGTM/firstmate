@@ -346,12 +346,15 @@
 #   shell, credential files, same-user processes, or later shell initialization.
 #   See docs/configuration.md for provider/Git setup and supported limits.
 # Claude permission mode (config/claude-permission-mode):
-#   One token selecting the permission flag every claude launch (ship, scout,
-#   secondmate, and relaunch) carries. Absent or `bypass` keeps today's
-#   `--dangerously-skip-permissions`; `auto` launches with `--permission-mode
-#   auto` instead, Claude Code's classifier-reviewed mode, for a captain who
-#   refuses to run workers in bypass mode. Every other part of the claude launch
-#   is unchanged. The token is the file's whitespace-trimmed content; any other
+#   One token selecting the permission flags every claude launch (ship, scout,
+#   secondmate, and relaunch) carries. Absent or `auto-allow-bypass` launches
+#   with `--allow-dangerously-skip-permissions --permission-mode auto`: the
+#   worker runs in Claude Code's classifier-reviewed auto mode while bypass
+#   stays one shift+tab away. `bypass` keeps `--dangerously-skip-permissions`
+#   active from the start; `auto` launches with `--permission-mode auto` alone,
+#   leaving bypass unreachable, for a captain who refuses bypass mode entirely.
+#   Every other part of the claude launch is unchanged. The token is the
+#   file's whitespace-trimmed content; any other
 #   value, or an unreadable file, refuses the spawn before any endpoint,
 #   worktree, or record exists and names the accepted values. The file is read
 #   on every spawn and relaunch, so a change reaches the next launch without a
@@ -388,7 +391,7 @@
 #   bin/fm-worker-account-lib.sh owns parsing, the check, and the shed list.
 #   Launch templates live in launch_template() below; placeholders replaced before launch:
 #     __BRIEF__    absolute path to data/<task-id>/brief.md
-#     __CLAUDEPERMFLAG__ the claude permission flag selected by config/claude-permission-mode
+#     __CLAUDEPERMFLAG__ the claude permission flags selected by config/claude-permission-mode
 #     __CLAUDEREMOTECONTROL__ on a claude secondmate template only: the quoted
 #                  `--remote-control 'fm-<id>' ` flag, or empty when
 #                  config/claude-remote-control is `off` (supplies its own
@@ -614,24 +617,25 @@ fi
 if ! CLAUDE_PERM_PRESENT=$(fm_config_source_present "$CONFIG/claude-permission-mode"); then
   exit 1
 fi
-CLAUDE_PERMISSION_MODE=bypass
+CLAUDE_PERMISSION_MODE=auto-allow-bypass
 if [ "$CLAUDE_PERM_PRESENT" = 1 ]; then
   if [ ! -f "$CONFIG/claude-permission-mode" ] || [ ! -r "$CONFIG/claude-permission-mode" ]; then
-    echo "error: config/claude-permission-mode must be a readable regular file holding one of: bypass, auto" >&2
+    echo "error: config/claude-permission-mode must be a readable regular file holding one of: auto-allow-bypass, bypass, auto" >&2
     exit 1
   fi
   CLAUDE_PERMISSION_MODE=$(tr -d '[:space:]' <"$CONFIG/claude-permission-mode" || true)
   case "$CLAUDE_PERMISSION_MODE" in
-  bypass | auto) ;;
+  auto-allow-bypass | bypass | auto) ;;
   *)
-    echo "error: config/claude-permission-mode holds '$CLAUDE_PERMISSION_MODE'; accepted values are: bypass (--dangerously-skip-permissions, the default when the file is absent), auto (--permission-mode auto)" >&2
+    echo "error: config/claude-permission-mode holds '$CLAUDE_PERMISSION_MODE'; accepted values are: auto-allow-bypass (--allow-dangerously-skip-permissions --permission-mode auto, the default when the file is absent), bypass (--dangerously-skip-permissions), auto (--permission-mode auto)" >&2
     exit 1
     ;;
   esac
 fi
 case "$CLAUDE_PERMISSION_MODE" in
+bypass) CLAUDE_PERM_FLAG='--dangerously-skip-permissions' ;;
 auto) CLAUDE_PERM_FLAG='--permission-mode auto' ;;
-*) CLAUDE_PERM_FLAG='--dangerously-skip-permissions' ;;
+*) CLAUDE_PERM_FLAG='--allow-dangerously-skip-permissions --permission-mode auto' ;;
 esac
 # config/claude-remote-control (header above): resolved once per spawn or
 # relaunch, before any mutation, so a malformed file refuses instead of
@@ -2136,9 +2140,9 @@ launch_template() {
   # sources are not guaranteed to load that scope, so a worker would
   # otherwise run with attribution back on; carrying it per launch keeps the
   # policy in force regardless of which settings scopes end up loaded.
-  # __CLAUDEPERMFLAG__ is the permission flag config/claude-permission-mode
-  # selects (header above): --dangerously-skip-permissions by default, or
-  # --permission-mode auto for a captain who refuses bypass mode.
+  # __CLAUDEPERMFLAG__ is the permission flags config/claude-permission-mode
+  # selects (header above): auto mode with bypass available by default,
+  # bypass active, or auto alone.
   # __CLAUDEADDDIRS__ is the task-channel directory grant
   # claude_add_dirs_flag below builds: Claude path-checks Read/Glob/Grep (and
   # an Edit's mandatory prior Read) against cwd plus --add-dir, and since
@@ -2148,7 +2152,7 @@ launch_template() {
   # into user settings and refuses those reads under bypass too.
   # __CLAUDEREMOTECONTROL__ is emitted for a secondmate only, so a ship or
   # scout launch can never carry Remote Control. It sits directly after the
-  # permission flag and always names the session: `--remote-control` takes an
+  # permission flags and always names the session: `--remote-control` takes an
   # OPTIONAL name, so a bare flag standing last before the positional doorbell
   # would swallow the doorbell as the session name and launch with no prompt.
   # A Claude task worker receives the brief and later steering as file-shaped
@@ -2953,14 +2957,14 @@ rovo_config_override_flag() {
 # auto parks the pane on a one-time interactive question instead of reading,
 # and any "Block" answer on the machine lands
 # permissions.blockReadsOutsideWorkingDirectories in user settings, which
-# then refuses the same reads under --dangerously-skip-permissions too. A
+# then refuses the same reads in bypass mode too. A
 # Firstmate worker always reads outside its cwd - a secondmate's steers live
 # in the PARENT home's state/<id>.inbox, and a ship or scout worker's launch
 # record, steers, and brief live in this home's state/operational-inbox,
 # state/<id>.inbox, and data/<id>, plus the code root's .agents/skills so the
 # worker can read the skill file the launch role names as the fallback for a
 # session where the skill name does not resolve - so every Claude launch,
-# fresh spawn and relaunch, in both permission modes, grants exactly those
+# fresh spawn and relaunch, in every permission mode, grants exactly those
 # task-channel directories. The skills grant is that directory, not the
 # checkout root, so the grant does not open the whole checkout. Paths resolve
 # the way rovo_config_override_flag resolves them
