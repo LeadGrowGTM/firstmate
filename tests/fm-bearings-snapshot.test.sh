@@ -3434,7 +3434,7 @@ test_complete_structured_decision_layout() {
   Captain hold origin: finished
 - [ ] newer - Same subject (repo: firstmate) (kind: captain) (hold: Newer options) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-- [ ] merged-call - Review https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: Choose the rollout) (hold-kind: captain)
+- [ ] merged-call - Post-merge rollout for https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: Choose the rollout) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
 
 ## Done
@@ -3469,7 +3469,8 @@ EOF
       and .stale_reason == "Duplicate open captain hold for the same repo and title"))
     and (.decision_layout | any(.owner == "mate" and .key == "remote-1"
       and .stale_reason == "Duplicate open captain hold for the same repo and title"))
-    and (.decision_layout | any(.key == "merged-call" and .stale_reason == "Linked PR already merged"))
+    and (.decision_layout | any(.key == "merged-call" and .pr_url == "https://github.com/acme/sample/pull/5"
+      and .stale_reason == null))
     and ([.decision_layout[] | select(.owner == "mate")] | length) == 25
     and ([.decision_layout[] | select(.reason | contains("invent another"))] | length) == 0
   ' >/dev/null || fail "detailed decision inventory lost structured calls or inferred prose: $json"
@@ -3483,7 +3484,7 @@ EOF
   json=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_BEARINGS_NOW=2026-07-11T18:00:00Z \
     NET_LOG="$home/net.log" "$BEARINGS" --json --fields decisions)
   printf '%s' "$json" | jq -e '
-    (.decision_layout | any(.owner == "mate" and .key == "remote-1"))
+    (.decision_layout | any(.owner == "mate" and .key == "remote-1" and .repo == "firstmate"))
     and .decision_layout_unavailable == [{owner:"mate",reason:"Detailed decision inventory unavailable; inspect owner home"}]
   ' >/dev/null || fail "legacy detail omitted known calls or claimed complete coverage: $json"
   pass "decision layout preserves all structured owner calls and flags exact stale identities without prose inference"

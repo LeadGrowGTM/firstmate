@@ -293,7 +293,8 @@ test_owner_grouped_numbered_decisions() {
     and (.stats[] | select(.label == "need you") | .n) == 2
     and .calls[0].submitDisabled == false and .calls[2].submitDisabled == true
     and (.calls[0].text | contains("Keeps compatibility") and contains("recommendRoute A") and contains("Queue answer"))
-    and (.calls[1].text | contains("Missing recommendation") and contains("ask firstmate to supply it"))
+    and (.calls[1].text | contains("Missing recommendation") and contains("Missing consequence")
+      and contains("ask firstmate to supply it"))
     and (.calls[2].text | contains("mate/remote") and contains("owner home"))
     and (.stale | contains("Old choice") and contains("Linked PR closed") and contains("does not resolve tasks"))
   ' >/dev/null || fail "decision layout did not render its complete owner inventory: $out"

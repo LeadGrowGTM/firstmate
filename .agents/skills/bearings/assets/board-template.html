@@ -513,7 +513,8 @@ __FM_BEARINGS_BOARD_DATA__
       lab.appendChild(input);
       var body = el("span", "bb-opt__body");
       body.appendChild(el("span", "bb-opt__label", o.label));
-      if (o.hint) body.appendChild(el("span", "bb-opt__hint", o.hint));
+      if (o.hint && o.hint.trim()) body.appendChild(el("span", "bb-opt__hint", o.hint));
+      else if (o.value !== "reconcile") body.appendChild(el("span", "bb-opt__hint", "Missing consequence - ask firstmate to supply it"));
       lab.appendChild(body);
       if (item.recommend_value && o.value === item.recommend_value) {
         lab.appendChild(el("span", "bb-opt__rec", "rec"));

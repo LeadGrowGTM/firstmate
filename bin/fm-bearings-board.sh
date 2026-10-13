@@ -75,7 +75,7 @@
 #
 # Optional call fields: owner is a non-empty home id (default "(main)"),
 # impact is a nonnegative integer, gate is presentation text, stale_reason is a
-# non-empty verified candidate reason, and pr_state is OPEN, MERGED, or CLOSED.
+# non-empty verified candidate reason, and pr_state is MERGED or CLOSED.
 # MERGED/CLOSED and stale_reason move a decision to the candidate list.
 # Owner/task identities must be unique. Foreign calls are never checked against
 # the local backlog or submitted to the local answer intake by the template.
@@ -166,7 +166,7 @@ validate_payload() {  # <data.json>
       and optional_string("gate")
       and ((has("stale_reason") | not) or (.stale_reason | nonempty_string))
       and ((has("impact") | not) or (.impact | type == "number" and floor == . and . >= 0))
-      and ((has("pr_state") | not) or (.pr_state == "OPEN" or .pr_state == "MERGED" or .pr_state == "CLOSED"))
+      and ((has("pr_state") | not) or (.pr_state == "MERGED" or .pr_state == "CLOSED"))
       and (optional_string("about"))
       and (optional_string("decide"))
       and (optional_string("detail"))

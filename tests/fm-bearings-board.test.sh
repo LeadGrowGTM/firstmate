@@ -250,6 +250,11 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
   [ "$rc" -ne 0 ] || fail "an unknown captains_call type was accepted"
 
   write_valid_payload "$data"
+  jq '.captains_call[0].pr_state = "OPEN"' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
+  [ "$rc" -ne 0 ] || fail "an OPEN PR state with no distinct behavior was accepted"
+
+  write_valid_payload "$data"
   jq 'del(.captains_call[0].options[0].value)' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
   set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
   [ "$rc" -ne 0 ] || fail "a captains_call option without an answer value was accepted"

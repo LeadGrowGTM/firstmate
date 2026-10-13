@@ -100,7 +100,7 @@ For the decisions layout, gather `bin/fm-bearings-snapshot.sh --json --fields de
 Its `decision_layout` inventories structured captain-held tasks across the registered homes, including deferred calls, with full hold reasons, owner-qualified identities, priority order, origin links, and stale-candidate reasons.
 Keep every inventory row in the board, with exactly one card per owner/task identity; use `gate` to show a non-live bucket or deferral rather than implying immediate action.
 Use the known hold reason and its linked origin report sections to explain that existing call's options, consequences, and recommendation; never discover additional calls by reading prose.
-If the record does not support options or a recommendation, mark each missing detail plainly on the card, ask firstmate to supply it, and allow a freeform answer instead of inventing guidance.
+If the record does not support options, their consequences, or a recommendation, mark each missing detail plainly on the card, ask firstmate to supply it, and allow a freeform answer instead of inventing guidance.
 Legacy summaries retain their available known held calls, with truncated detail and unmeasured remaining inventory explicitly disclosed.
 Disclose `decision_layout_unavailable` and the snapshot's omitted or cached coverage in Charted Next warning rows; an incomplete inventory is never proof that every home is clear.
 The board shows all cards together, numbered D1 onward, grouped by owner and ordered within each owner by descending `impact` (a nonnegative integer supplied by composing judgment); ties preserve payload order.
@@ -121,7 +121,7 @@ Compose the payload from the same snapshot with the same ranking judgment as the
 - Never author a `reconcile` option on any card. `build` gives every decision card the standard reconcile choice itself, and the payload validator reserves that value across all card types; recommendations must name an authored option.
 - Compose exactly one decision card per captain-held owner/task identity.
   When one task carries multiple questions, consolidate all of them and their options into that card; never emit duplicate cards with the same owner/task key.
-- Decision cards carry agent-authored copy: a short noun-phrase title, one-line `about` and `decide` context rows, and option labels with hints, with the recommended option marked.
+- Decision cards carry agent-authored copy: a short noun-phrase title, one-line `about` and `decide` context rows, and option labels with hints stating each consequence, with the recommended option marked.
 - Card `type` (decision, merge, credential) is your composing judgment from the row's content; no backlog field types a card for you.
 - When the card's task is a captain-gated WORK item (the answer should free it to proceed rather than complete it), set the card's `close: "release"` so the answer lifts the hold instead of closing the task; question-shaped items omit it.
 - A Charted Next row's optional `kind` separates work from alarms: omit it (or set `"queued"`) for real queued work, and set `"warning"` on every action-free fleet-integrity notice - the `(main-inventory)` gate, the `(return-catchup)` gate, an unavailable secondmate home, and an inventory-mismatch repair notice. The board badges a warning row `needs repair` instead of `waiting` and leaves it out of the Charted Next count, so those rows never read as dispatchable queued work.
