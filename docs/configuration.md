@@ -1152,7 +1152,7 @@ Its header owns the exact treehouse flags, exit codes, record files, and time bo
 
 After a cleanup returns a copy to a pool, Firstmate runs treehouse's safe prune for that task's project pool only.
 A prune that fails, times out, or declines to run prints one warning and never fails the cleanup, which has already finished.
-A pool that another launch or cleanup is using at that moment is skipped silently and reclaimed by the next cleanup or daily sweep.
+A pool that another launch or cleanup is using at that moment is skipped silently and can be reclaimed by a later cleanup or daily sweep while it remains in the guard's selected location.
 Because a returned copy whose work has landed is exactly what treehouse prunes, the next launch on that project usually creates a fresh copy instead of reusing a returned one.
 
 ### Daily sweep
@@ -1164,7 +1164,7 @@ Use `bin/fm-treehouse-guard.sh disarm` to remove the check and its records.
 At most once a day the check starts a sweep in the background, and a later poll reports its result as one line.
 The sweep runs the same safe prune for each project clone under this home's `projects/`, then reports when:
 
-- the worktree copies under `~/.treehouse`, or under this home's own pool, use more than 5 GB;
+- the worktree copies under `~/.treehouse`, or under the per-home pool path computed in the sweep's environment, use more than 5 GB;
 - that size could not be measured;
 - a prune did not run, with the reason.
 
@@ -1174,8 +1174,8 @@ A reported finding is a recommendation, not cleanup authority.
 ### What the guard never does
 
 - It never asks treehouse to remove a copy that is unlanded, in use, or leased, and it never prunes by age.
-- It never prunes a pool that belongs to another home.
-  It prunes from this home's own project clones, and from this home's own pool when that pool exists.
+- It does not scan another home's project clones or per-home pool directories.
+  It invokes prune from this home's project clones and from a detected per-home pool; a clone-local root can redirect both invocations.
 - It never makes a machine-wide treehouse call: the only treehouse command it runs is `treehouse prune --yes` from one project clone.
   The size total is a machine-wide read-only measurement taken with `du`.
 
@@ -1192,43 +1192,14 @@ A launch that still cannot get a worktree of its own clone stops before the work
 If a clone-local `treehouse.toml` root redirects the fallback lease to another clone's copy, the launch refuses it and does not force-return that foreign copy; a stopped launch returns only a lease of its own clone.
 The attempted `get --lease` may already have marked that foreign copy leased, so the refusal leaves its Treehouse state for the pool owner to inspect.
 Git still refuses to remove a worktree from a clone that does not own it, so a shared pool is not cleared by the other home.
-The daily sweep prunes and sizes this home's own pool when it is under the per-home pool folder.
+The daily sweep's extra per-home prune and size checks use the pool path computed in its own environment.
 
-For the website-genie Legion clone, the immediate workaround is a clone-local root outside every Firstmate home; it has not been applied by this change.
-The supervisor can use these commands only after confirming that no `treehouse.toml` already exists at the clone root:
+### Pool-selection limits
 
-```sh
-clone=/home/mitch/fm-homes/website-genie/projects/legion
-root=/home/mitch/.local/state/firstmate/website-genie-a8edb5/legion-treehouse
-if [ -e "$clone/treehouse.toml" ] || [ -L "$clone/treehouse.toml" ]; then
-  printf '%s\n' 'treehouse.toml already exists; inspect it before changing this clone' >&2
-else
-  printf '%s\n' "root = \"$root\"" > "$clone/treehouse.toml"
-  grep -qxF 'treehouse.toml' "$clone/.git/info/exclude" || printf '%s\n' 'treehouse.toml' >> "$clone/.git/info/exclude"
-fi
-```
-
-This makes Treehouse use that root for this clone and leaves the other home's copy when the interactive subshell exits; tasks already running in another home's copy stay there and can still be relaunched there.
-The other home's pool keeps its copy, and Firstmate does not return or prune `/home/mitch/.treehouse/legion-3179a0`.
-Do not use `/home/mitch/fm-homes/website-genie/state/legion-treehouse` as the root because it sits inside the home.
-To undo the workaround after confirming that these commands created the file, run:
-
-```sh
-clone=/home/mitch/fm-homes/website-genie/projects/legion
-rm -- "$clone/treehouse.toml"
-```
-
-If the exclude line was newly added by the workaround, remove that exact line too:
-
-```sh
-python3 - "$clone/.git/info/exclude" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-path.write_text(''.join(line for line in path.read_text().splitlines(keepends=True) if line.rstrip('\r\n') != 'treehouse.toml'))
-PY
-```
+The guard does not retain the pool root selected by an earlier launch.
+If a clone-local `treehouse.toml` root is added after a per-home pool already exists, the guard's extra per-home prune follows the new root and can prune that configured pool twice while leaving the earlier pool unpruned.
+The per-home size check still measures the computed folder and can miss an external configured root.
+If a launch sets `XDG_STATE_HOME` only for that command and the armed watcher runs without it, the watcher computes a different per-home folder and misses the launch's pool during prune and size checks.
 
 ### Copies outside the guard
 
