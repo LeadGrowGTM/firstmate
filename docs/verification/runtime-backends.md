@@ -6,6 +6,31 @@ This record contains reusable version-scoped evidence for active runtime guarant
 The backend guides own current setup, safety boundaries, and limitations.
 Exact task chronology, branch names, temporary homes, local paths, process ids, thread ids, and delivery transcripts remain in private reports or PR evidence.
 
+## Claude worker external imports
+
+Verified on 2026-10-13 on Linux with Claude Code `2.1.296 (Claude Code)`.
+`bin/fm-claude-trust.sh` owns the worker pre-registration contract, and the Claude harness reference owns operator recovery.
+The live guard launches the real interactive CLI in a linked worktree at a scratch home's `projects/demo/.worktrees/.treehouse/worker`, with the home's `CLAUDE.md` importing its `AGENTS.md` outside the project.
+A trust-only control must render the external-import dialog and name that home file; after production pre-registration, a loopback Messages fixture must receive both the worker prompt and imported instructions, and Claude must render its response without the dialog.
+The fixture uses a synthetic API key and local response, accesses no operator credential store, and makes no remote model request.
+This proves the Claude launch and config behavior under tmux; it does not establish an unverified runtime's worktree shape.
+
+Refresh command:
+
+```sh
+FM_CLAUDE_IMPORTS_LIVE=1 bash bin/fm-test-run.sh tests/fm-claude-imports-live-e2e.test.sh
+```
+
+Observed output:
+
+```text
+ok - Claude 2.1.296 (Claude Code): nested home import reproduces the external-import dialog
+ok - Claude 2.1.296 (Claude Code): pre-registration clears the dialog and processes the prompt with home imports
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=12882
+```
+
+The portable regression `tests/fm-claude-trust.test.sh` covers both `.treehouse` and `.worktrees/.treehouse` pools under a scratch home, the canonical project entry, preservation of an explicit decline, and the actual spawn's registration call.
+
 ## Harness detection precedence
 
 Firstmate's own harness comes from two kinds of evidence, and `bin/fm-harness.sh` owns how they combine: an environment marker names its harness, and the nearest harness process in the parent chain proves who owns the process tree.

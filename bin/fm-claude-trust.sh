@@ -2,11 +2,9 @@
 # Pre-register Claude Code's workspace trust for the directory a claude spawn is
 # about to launch into - the isolated task worktree of a ship or scout crewmate,
 # or the seeded home of a secondmate - so the agent reaches its brief or charter
-# instead of wedging on the trust dialog. In worktree mode it also carries
-# forward the external-CLAUDE.md-import approval, but only when the primary
-# checkout already holds standing consent for it - see the consent-gating
-# block below for why that dialog is otherwise left for the worker to wedge
-# on rather than answered on the human's behalf.
+# instead of wedging on the trust dialog. Worktree mode also pre-approves
+# external CLAUDE.md imports for the authorized worker launch, unless the
+# canonical project entry already records an explicit decline.
 #
 # Usage: fm-claude-trust.sh <worktree> <project>
 #        fm-claude-trust.sh --secondmate-home <home> <id>
@@ -56,9 +54,8 @@
 # below. So the trust flag is registered on BOTH the worktree entry (for
 # trust's ancestor-walk fallback and defense in depth) and the project entry
 # (the trust check's first, canonical-shaped, look); the two external-imports
-# flags land on those same two entries only when the project entry already
-# carries standing consent (see the consent-gating block below) - the project
-# entry is the only place the external-imports check ever looks. Registering
+# flags land on those same two entries unless the project entry already
+# records an explicit decline - the project entry is the only place the external-imports check ever looks. Registering
 # the project entry is a write to the launching user's OWN Claude config
 # store, keyed by a project PATH the scope test below has already verified is
 # real - not a write to the project's tracked content, so hard rule 1 does not
@@ -73,12 +70,11 @@
 # rather than flipping it, because doing so would grant every future
 # interactive session in that checkout silent external-file inclusion the
 # human declined, permanently and without being asked. The worktree entry is
-# left unwritten too: the spawn wedges on the dialog, which is the honest
-# outcome given a standing decline, not registered trust with a stripped
-# consent record. Approved===false with WarningShown false or absent is NOT
-# that decision: Claude Code's default project entry carries both flags as
+# left unwritten too, and fm-spawn refuses before launch rather than
+# registering trust with a stripped consent record. Approved===false with
+# WarningShown false or absent is NOT that decision: Claude Code's default project entry carries both flags as
 # false before the dialog was ever shown, so that pair means "never asked" and
-# is treated like an absent flag - trust registered, no import consent.
+# is treated like an absent flag - trust and imports registered.
 #
 # THE SCOPE TEST IS THE SAFETY PROPERTY, and it is STRUCTURAL rather than a
 # path policy. Each mode has its own, because the two directories have entirely
@@ -100,7 +96,7 @@
 # requires elsewhere - and verified, never assumed: the candidate's own
 # resolved git dir must equal that common dir, the same primary-checkout
 # definition used throughout, or this refuses rather than guess. The
-# consent-gated external-imports flags land on that resolved canonical
+# external-imports flags land on that resolved canonical
 # checkout, never on the linked-worktree argument itself.
 #
 # The test is deliberately NOT a treehouse or orca path prefix. Treehouse's
@@ -434,24 +430,11 @@ fi
 # is fresh and the project entry stale, or the other way round. In
 # secondmate-home mode only the single home entry is written.
 #
-# The two external-imports flags (worktree mode only) are gated separately
-# from the trust flag, because they are a CONSENT grant, not a pre-approval
-# this script is allowed to manufacture. Claude Code only ever writes
-# hasClaudeMdExternalIncludesApproved===true itself, on an explicit interactive
-# answer; this script's own job is to keep a worker from wedging on a dialog,
-# never to answer that dialog on the human's behalf. So the import flags land
-# on the project entry - the only place the imports check ever reads (see the
-# disassembly note above) - only when that entry ALREADY carries
-# hasClaudeMdExternalIncludesApproved===true, i.e. the human already said yes
-# at some point and this write is a same-value refresh, not new consent from
-# an absent flag. When it is not already true (including plain absent, the
-# common case for a project claude has never asked about), the import flags
-# are left untouched on both entries: writing them to the worktree entry alone
-# would be a pure no-op (the imports check never reads it) that only obscures
-# the real state, so trust still registers normally but the import dialog is
-# left exactly as undecided as it already was - the worker wedges on it, the
-# same honest outcome as an explicit decline, rather than a spawn spending
-# consent the human was never asked for.
+# Worktree mode pre-approves both dialogs as part of the authorized worker
+# launch. Claude reads import approval only at the canonical project entry,
+# so this also affects later interactive sessions in that checkout. Preserve
+# an explicit prior decline by refusing the whole write, not reversing it.
+# Home modes remain trust-only.
 TRUST_FLAG='hasTrustDialogAccepted'
 IMPORT_FLAGS='["hasClaudeMdExternalIncludesApproved","hasClaudeMdExternalIncludesWarningShown"]'
 if [ "$MODE" = worktree ]; then
@@ -494,16 +477,11 @@ const flagsLanded = (projects, key, flags) =>
 // which means never asked, not declined); flipping it to true would grant every future
 // interactive session in that checkout silent external-file inclusion the
 // human declined. Refuse the whole registration instead of overriding it -
-// the worktree entry is not written either, so the spawn wedges on the
-// dialog rather than the human's consent being spent without being asked.
+// the worktree entry is not written either, and fm-spawn refuses before
+// launch rather than reversing the recorded decline.
 const declinedExternalImports = (projects, key) =>
   projects?.[key]?.hasClaudeMdExternalIncludesApproved === false &&
   projects?.[key]?.hasClaudeMdExternalIncludesWarningShown === true;
-// True only on an explicit prior "Yes, allow" answer - the sole state this
-// script may treat as standing consent to refresh. Absent, or any other
-// value, is NOT consent (see the block comment above this script's node call).
-const approvedExternalImports = (projects, key) =>
-  projects?.[key]?.hasClaudeMdExternalIncludesApproved === true;
 const attempt = () => {
   const original = readStore();
   const before = fingerprint(original);
@@ -529,9 +507,8 @@ const attempt = () => {
         `project entry for ${project} in ${store} already declined external CLAUDE.md imports; refusing to override that consent. To recover, remove hasClaudeMdExternalIncludesApproved and hasClaudeMdExternalIncludesWarningShown from that project entry and approve the imports dialog interactively once`,
       );
     }
-    const carryImportConsent = approvedExternalImports(projects, project);
-    const targetFlags = carryImportConsent ? [trustFlag, ...importFlags] : [trustFlag];
-    const projectFlags = carryImportConsent ? [trustFlag, ...importFlags] : [trustFlag];
+    const targetFlags = [trustFlag, ...importFlags];
+    const projectFlags = [trustFlag, ...importFlags];
     setFlags(projects, target, targetFlags);
     setFlags(projects, project, projectFlags);
     keys = [[target, targetFlags], [project, projectFlags]];
