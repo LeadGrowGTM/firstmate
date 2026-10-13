@@ -37,6 +37,7 @@ USAGE_LOCK="$STATE/.statusbar-usage.lock"
 USAGE_TTL=60
 SELF="$SCRIPT_DIR/fm-statusbar.sh"
 . "$SCRIPT_DIR/fm-quota-axi-lib.sh"
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 # One value, one line, no tmux style or format metacharacters, bounded length.
 fm_sb_clean() {  # <value> [max]
@@ -152,7 +153,7 @@ fm_sb_mtime() {  # <file>
 # Percent used per provider from schema 5 and 6 quota rows.
 fm_sb_usage_refresh() {
   local out tmp rows
-  out=$(quota-axi 2>/dev/null </dev/null) || return 1
+  out=$(fm_run_timed 10 quota-axi 2>/dev/null </dev/null) || return 1
   rows=$(printf '%s\n' "$out" | awk '
     /^quota\[[0-9]+\]\{provider,/ {
       keyed = index($0, "provider,accountKey,") > 0; in_quota = 1; next
@@ -178,6 +179,7 @@ fm_sb_usage_display() {  # <window>
   model=$(tmux show-options -wqv -t "$1" @fm_model_id 2>/dev/null) || model=
   [ -n "$provider" ] && [ -f "$USAGE_CACHE" ] || { printf 'u ?\n'; return 0; }
   awk -F '\t' -v provider="$provider" -v account="$account" -v model="$model" '
+    $1 == provider && ($2 == account || $2 == "*") { exact_exists = 1 }
     $1 == provider && ($4 == "all_models" || $4 == "all_products" || (model != "" && ($4 == "model:" model || $4 == "product:" model))) {
       if ($2 == account || $2 == "*") {
         if (!matched || $3 + 0 > used) { used = $3 + 0; key = $2 }
@@ -188,7 +190,7 @@ fm_sb_usage_display() {  # <window>
       }
     }
     END {
-      if (!matched && fallback) { used = fallback_used; key = "default"; matched = 1 }
+      if (!exact_exists && fallback) { used = fallback_used; key = "default"; matched = 1 }
       if (!matched) { print "u ?"; exit }
       code = provider == "claude" ? "cl" : provider == "codex" ? "cx" : provider == "grok" ? "gk" : substr(provider, 1, 2)
       label = length(key) <= 14 ? key : substr(key, 1, 6) "~" substr(key, length(key) - 6)

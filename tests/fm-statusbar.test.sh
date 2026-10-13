@@ -33,8 +33,9 @@ cat >"$WORK/bin/quota-axi" <<SH
 #!/usr/bin/env bash
 echo run >>"$WORK/quota-calls"
 [ ! -f "$WORK/quota-fail" ] || exit 1
+[ ! -f "$WORK/quota-hang" ] || sleep 15
 cat <<'X'
-quota[12]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[13]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,default,all_models,68,0.4,through_reset,high,none,none
   codex,default,all_models,68,0.4,through_reset,high,none,none
   codex,codex-home,all_models,0.5,-1.9,through_reset,high,none,none
@@ -43,6 +44,7 @@ quota[12]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runw
   codex,openai-codex-work2,all_models,0.5,-1.9,through_reset,high,none,none
   codex,openai-codex-hi,all_models,0.04,-1.9,through_reset,high,none,none
   codex,openai-codex-lo,all_models,99.9999,-1.9,through_reset,high,none,none
+  codex,openai-codex-scoped,"model:gpt-6-astra",2,-1.9,through_reset,high,none,none
   claude,default,"model:fable",12,0.8,through_reset,high,none,none
   claude,default,"model:claude-opus-5-5[1m]",90,0.8,through_reset,high,none,none
   claude,default,"model:claude-3-5-sonnet",9,0.8,through_reset,high,none,none
@@ -218,6 +220,13 @@ bash "$SB" sync
 [ "$(bash "$SB" usage firstmate:pi-fallback)" = 'u cx:openai~ex-work99.5%' ] || fail "synced Pi lane selected another account"
 pass "sync and direct labels use the same quota lane"
 
+tmux new-window -d -t firstmate: -n pi-scoped "sleep 600"
+bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-sol high /home/u/pi
+[ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u ?' ] || fail "an unrelated model scope borrowed default account usage"
+bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-astra high /home/u/pi
+[ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u cx:openai~-scoped98%' ] || fail "exact account model scope was not used"
+pass "exact account selection precedes model scope filtering"
+
 tmux new-window -d -t firstmate: -n primary "sleep 600"
 primary_pane=$(tmux display-message -p -t firstmate:primary '#{pane_id}')
 bash "$SB" label "$primary_pane" firstmate claude '' '' /home/u/firstmate
@@ -285,6 +294,16 @@ bash "$SB" usage firstmate:fm-demo-task >/dev/null
 [ "$(wc -l <"$WORK/quota-calls")" -eq 1 ] || fail "failed quota refresh repeated inside TTL"
 rm -f "$WORK/quota-fail"
 pass "failed quota refresh observes the same TTL"
+
+rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
+touch "$WORK/quota-hang"
+bash "$SB" usage firstmate:fm-demo-task >/dev/null
+i=0
+while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 135 ]; do sleep 0.1; i=$((i + 1)); done
+[ ! -d "$WORK/state/.statusbar-usage.lock" ] || fail "stalled quota refresh outlived its bound"
+[ ! -e "$WORK/state/statusbar-usage.txt" ] || fail "timed-out quota refresh updated the cache"
+rm -f "$WORK/quota-hang"
+pass "quota refresh terminates a stalled probe"
 
 # --- claude-line: whitelisted fields only ---
 json='{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_window":{"used_percentage":7.4},"rate_limits":{"five_hour":{"used_percentage":31},"seven_day":{"used_percentage":11}},"workspace":{"current_dir":"/x/y/firstmate","git_worktree":"firstmate2"},"transcript_path":"/home/u/SECRET-transcript.jsonl","session_id":"abc-123","cost":{"total_cost_usd":1.5}}'
