@@ -34,9 +34,10 @@ cat >"$WORK/bin/quota-axi" <<SH
 echo run >>"$WORK/quota-calls"
 [ ! -f "$WORK/quota-fail" ] || exit 1
 cat <<'X'
-quota[3]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[4]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,default,all_models,68,0.4,through_reset,high,none,none
-  codex,openai-codex,all_models,0.5,-1.9,through_reset,high,none,none
+  codex,codex-home,all_models,0.5,-1.9,through_reset,high,none,none
+  codex,openai-codex-work,all_models,11,-1.9,through_reset,high,none,none
   claude,default,"model:fable",12,0.8,through_reset,high,none,none
 X
 SH
@@ -69,7 +70,7 @@ render() {  # <session> <width> <expected>
 }
 
 # --- label + apply: grouped view sessions share window options ---
-bash "$SB" label firstmate:fm-demo-task fm-demo-task ship claude 'claude-opus-5-5[1m]' high \
+bash "$SB" label firstmate:fm-demo-task fm-demo-task claude 'claude-opus-5-5[1m]' high \
   /home/u/.treehouse/firstmate-840e8b/17/firstmate
 tmux set-option -t firstmate 'status-format[0]' 'CUSTOM #{window_name}'
 bash "$SB" apply firstmate
@@ -80,38 +81,53 @@ tmux new-session -d -t firstmate -s orca-later -x 150 -y 20
 [ "$(tmux show-options -wqv -t orca-later:fm-demo-task pane-border-status)" = bottom ] || fail "late view lost the detail line"
 pass "apply preserves status and covers current and later grouped views"
 
-bash "$SB" usage >/dev/null
+bash "$SB" usage firstmate:fm-demo-task >/dev/null
 i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+selected=$(bash "$SB" usage firstmate:fm-demo-task)
+[ "$selected" = 'u cl32%' ] || fail "Claude pane did not select its quota row" "$selected"
 
 tmux select-window -t orca-view:fm-demo-task
-wide=$(render orca-view 160 'u cl')
+wide=$(render orca-view 160 'u cl32%')
 case "$wide" in
-*"fm-demo-task"*"opus-5-5 high"*"firstmate/17"*"u cl32% cx99.5%"*) pass "wide client shows task, model, effort, worktree and usage" ;;
+*"fm-demo-task"*"opus-5-5[1m] high"*"firstmate/17"*"u cl32%"*) pass "wide client shows task, model, effort, worktree and usage" ;;
 *) fail "wide render missing fields" "$wide" ;;
 esac
 
-narrow=$(render orca-view 60 'u cl')
+narrow=$(render orca-view 60 'u cl32%')
 case "$narrow" in
-*"fm-demo"*"opus-5-5 high"*"firstmate/"*"u cl32%"*) ;;
+*"fm-demo"*"opus-5-5[1 high"*"firstmate/"*"u cl32%"*) ;;
 *) fail "narrow render lost a required field" "$narrow" ;;
 esac
 pass "narrow client keeps task, model, effort, worktree and usage"
 
-compact=$(render orca-view 40 'u cl')
+compact=$(render orca-view 40 'u cl32%')
 case "$compact" in
 *"fm-d"*"opus-5"*"hig"*"first"*"u cl32%"*) pass "compact client keeps all required fields" ;;
 *) fail "compact render lost a required field" "$compact" ;;
 esac
 
+tmux new-window -d -t firstmate: -n codex-home "sleep 600"
+bash "$SB" label firstmate:codex-home cx-home codex gpt-6-sol high /home/u/codex
+bash "$SB" apply firstmate
+tmux select-window -t orca-view:codex-home
+home_usage=$(render orca-view 40 'u cx:home99.5%')
+case "$home_usage" in *'u cx:home99.5%'*) ;; *) fail "native Codex selected another account" "$home_usage" ;; esac
+tmux new-window -d -t firstmate: -n pi-work "sleep 600"
+bash "$SB" label firstmate:pi-work pi-work pi openai-codex/gpt-6-sol high /home/u/pi '' openai-codex-work
+bash "$SB" apply firstmate
+tmux select-window -t orca-view:pi-work
+work_usage=$(render orca-view 40 'u cx:work89%')
+case "$work_usage" in *'u cx:work89%'*) pass "each pane shows its selected account usage" ;; *) fail "Pi selected another account" "$work_usage" ;; esac
+
 tmux new-window -d -t firstmate: -n primary "sleep 600"
 primary_pane=$(tmux display-message -p -t firstmate:primary '#{pane_id}')
-bash "$SB" label "$primary_pane" firstmate primary claude 'claude-opus-5-5' high /home/u/firstmate
+bash "$SB" label "$primary_pane" firstmate claude '' '' /home/u/firstmate
 bash "$SB" apply firstmate
 tmux select-window -t orca-view:primary
-primary=$(render orca-view 100 'u cl')
+primary=$(render orca-view 100 'u cl32%')
 case "$primary" in
-*firstmate*"opus-5-5 high"*"firstmate"*"u cl32%"*) pass "a primary pane can be labeled through its pane id" ;;
+*"firstmate | ? ? | firstmate|u cl32%"*) pass "a primary pane reports missing model and effort honestly" ;;
 *) fail "primary pane lost a required field" "$primary" ;;
 esac
 
@@ -124,10 +140,10 @@ case "$bare" in
 esac
 
 # --- no secrets, no injection through option values ---
-bash "$SB" label firstmate:bare 'x#(touch '"$WORK"'/pwned)#{pane_title}' ship claude 'm$(id)' high /tmp
+bash "$SB" label firstmate:bare 'x#(touch '"$WORK"'/pwned)#{pane_title}' claude 'm$(id)' high /tmp
 for opt in @fm_task @fm_model; do
   v=$(tmux show-options -wqv -t firstmate:bare "$opt")
-  case "$v" in *'#'* | *'$'* | *'{'* | *'['*) fail "option $opt kept format metacharacters" "$v" ;; esac
+  case "$v" in *'#'* | *'$'* | *'{'*) fail "option $opt kept format metacharacters" "$v" ;; esac
 done
 sleep 1
 [ ! -e "$WORK/pwned" ] || fail "an option value executed a command"
@@ -140,13 +156,13 @@ tmux kill-session -t orca-view 2>/dev/null || true
 i=0
 while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
-[ -z "$(bash "$SB" usage)" ] || fail "first usage read should be empty before the cache exists"
+[ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "first usage read should be unknown before the cache exists"
 i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-[ "$(cat "$WORK/state/statusbar-usage.txt")" = "u cl32% cx99.5%" ] || fail "usage cache content" "$(cat "$WORK/state/statusbar-usage.txt" 2>&1)"
-[ "$(bash "$SB" usage)" = "u cl32% cx99.5%" ] || fail "usage did not serve the cache"
-bash "$SB" usage >/dev/null
-bash "$SB" usage >/dev/null
+awk -F '\t' '$1 == "claude" && $2 == "default" && $3 == 32 { found=1 } END { exit !found }' "$WORK/state/statusbar-usage.txt" || fail "usage cache content"
+[ "$(bash "$SB" usage firstmate:fm-demo-task)" = "u cl32%" ] || fail "usage did not serve the selected account"
+bash "$SB" usage firstmate:fm-demo-task >/dev/null
+bash "$SB" usage firstmate:fm-demo-task >/dev/null
 sleep 0.5
 [ "$(wc -l <"$WORK/quota-calls")" -eq 1 ] || fail "usage refreshed more than once inside the TTL" "$(cat "$WORK/quota-calls")"
 grep -qi 'token\|secret\|key' "$WORK/state/statusbar-usage.txt" && fail "usage cache holds credential-like text"
@@ -154,10 +170,10 @@ pass "usage is a cached percentage figure refreshed at most once per TTL"
 
 rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
 touch "$WORK/quota-fail"
-bash "$SB" usage >/dev/null
+bash "$SB" usage firstmate:fm-demo-task >/dev/null
 i=0
 while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-bash "$SB" usage >/dev/null
+bash "$SB" usage firstmate:fm-demo-task >/dev/null
 [ "$(wc -l <"$WORK/quota-calls")" -eq 1 ] || fail "failed quota refresh repeated inside TTL"
 rm -f "$WORK/quota-fail"
 pass "failed quota refresh observes the same TTL"
@@ -175,15 +191,14 @@ empty=$(printf '' | bash "$SB" claude-line)
 [ -z "$empty" ] || fail "claude-line with empty input should print nothing useful" "$empty"
 pass "claude-line tolerates missing fields and empty input"
 
-optional=$(printf '%s' '{"model":{"display_name":"Haiku"},"context_window":{"used_percentage":7},"rate_limits":{"seven_day":{"used_percentage":13}}}' | bash "$SB" claude-line --task t1)
-[ "$optional" = 'Haiku | t1 | ctx 7% | 7d 13%' ] || fail "optional Claude fields shifted or disappeared" "$optional"
+optional=$(printf '%s' '{"model":{"display_name":"Haiku"},"context_window":{"used_percentage":7},"rate_limits":{"seven_day":{"used_percentage":13}},"workspace":{"current_dir":"/homes/secondmate/child","project_dir":"/homes/secondmate"}}' | bash "$SB" claude-line --task t1)
+[ "$optional" = 'Haiku | t1 | secondmate | ctx 7% | 7d 13%' ] || fail "optional Claude fields shifted or home changed after cd" "$optional"
 pass "Claude fields remain aligned when effort and a limit window are absent"
 
 # --- sync labels windows from recorded task metadata ---
 cat >"$WORK/state/sync-task.meta" <<META
 window=firstmate:bare
 harness=codex
-kind=scout
 model=gpt-6-sol
 effort=medium
 worktree=/home/u/.treehouse/proj-abc123/4/proj
@@ -192,5 +207,17 @@ bash "$SB" sync
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_task)" = sync-task ] || fail "sync did not label the recorded window"
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_wt)" = proj/4 ] || fail "sync worktree label" "$(tmux show-options -wqv -t firstmate:bare @fm_wt)"
 pass "sync labels recorded windows from state metadata"
+
+cat >"$WORK/state/sync-task.meta" <<META
+window=firstmate:bare
+harness=codex
+model=default
+effort=default
+worktree=/home/u/.treehouse/proj-abc123/4/proj
+META
+bash "$SB" sync
+tmux select-window -t orca-later:bare
+unknown=$(render orca-later 100 'u ?')
+case "$unknown" in *sync-task*'?'*'?'*proj/4*'u ?'*) pass "metadata defaults render as unknown facts" ;; *) fail "metadata default rendered as a fact" "$unknown" ;; esac
 
 echo "fm-statusbar: all passed"

@@ -5288,7 +5288,8 @@ fi
 # Operator status surfaces: record the task's facts on its tmux window and make
 # sure the window's session group shows the detail line. Best effort only.
 if [ "$BACKEND" = tmux ]; then
-  "$SCRIPT_DIR/fm-statusbar.sh" label "${WT_TARGET:-$T}" "$ID" "$KIND" "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$WT" >/dev/null 2>&1 || true
+  "$SCRIPT_DIR/fm-statusbar.sh" label "${WT_TARGET:-$T}" "$ID" "$HARNESS" "$MODEL" "$EFFORT" "$WT" \
+    "$WORKER_ACCOUNT_DECLARED" "$WORKER_ACCOUNT_PROVIDER" >/dev/null 2>&1 || true
   "$SCRIPT_DIR/fm-statusbar.sh" apply "$SES" >/dev/null 2>&1 || true
 fi
 

@@ -705,9 +705,16 @@ print_agents_refresh_if_required "$REBUILDING_SESSION_PID"
 
 if [ "$READ_ONLY" -eq 0 ]; then
   if [ -n "${TMUX_PANE:-}" ]; then
-    "$SCRIPT_DIR/fm-statusbar.sh" label "$TMUX_PANE" firstmate primary \
-      "${FM_PRIMARY_HARNESS:-claude}" "${FM_PRIMARY_MODEL:-${CLAUDE_MODEL:-Claude}}" \
-      "${FM_PRIMARY_EFFORT:-${CLAUDE_CODE_EFFORT_LEVEL:-default}}" "$FM_HOME" >/dev/null 2>&1 || true
+    PRIMARY_LABEL=${FM_HOME%/}
+    PRIMARY_LABEL=${PRIMARY_LABEL##*/}
+    PRIMARY_DISPLAY_MODEL=${FM_PRIMARY_MODEL:-}
+    PRIMARY_DISPLAY_EFFORT=${FM_PRIMARY_EFFORT:-}
+    if [ "$PRIMARY_HARNESS" = claude ]; then
+      PRIMARY_DISPLAY_MODEL=${PRIMARY_DISPLAY_MODEL:-${CLAUDE_MODEL:-}}
+      PRIMARY_DISPLAY_EFFORT=${PRIMARY_DISPLAY_EFFORT:-${CLAUDE_CODE_EFFORT_LEVEL:-}}
+    fi
+    "$SCRIPT_DIR/fm-statusbar.sh" label "$TMUX_PANE" "$PRIMARY_LABEL" "$PRIMARY_HARNESS" \
+      "$PRIMARY_DISPLAY_MODEL" "$PRIMARY_DISPLAY_EFFORT" "$FM_HOME" >/dev/null 2>&1 || true
     "$SCRIPT_DIR/fm-statusbar.sh" sync >/dev/null 2>&1 || true
     "$SCRIPT_DIR/fm-statusbar.sh" apply >/dev/null 2>&1 || true
   fi
