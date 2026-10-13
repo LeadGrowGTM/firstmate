@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validate or spawn a single code-only worker in the dedicated Boat overflow home.
-# Usage: fm-boat-worker.sh validate|spawn < request.json; idle takes no input.
+# Usage: fm-boat-worker.sh validate|spawn < request.json; teardown <task-id>.
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
 #   id: safe task id; project: firstmate|dev-loop; kind: ship|scout;
@@ -14,14 +14,14 @@
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project
 # clones. It generates a normal remote brief and uses fm-spawn.sh, forcing yolo
-# off and a three-worker box-wide cap under one lock. A proven prelaunch failure
-# may reuse its id; unknown transport completion must be reconciled.
+# off and a three-worker box-wide cap under one lock. An id without a spawn
+# record may be retried; unknown transport completion must be reconciled.
 # no-mistakes requires the operator's config/boat-no-mistakes-proven receipt:
 # one successful proof PR URL after a real box pipeline, plus an installed CLI.
 # Neither validation nor dispatch manufactures that proof or downgrades a mode.
 #
 # Inspect/steer/report through fm-on.sh boat-eng with existing fm-crew-state.sh,
-# fm-peek.sh, fm-send.sh, and fm-remote-file.sh; lifecycle belongs to fm-control.sh.
+# fm-peek.sh, fm-send.sh, and fm-remote-file.sh; task teardown uses fm-teardown.sh.
 # No merges, home transfer, secret injection, or new supervision loop is added.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,61 +31,35 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 case "${1:-}" in
   --help) sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
   validate|spawn) [ "$#" -eq 1 ] || die 'one operation required' ;;
-  idle) [ "$#" -eq 1 ] || die 'one operation required' ;;
-  *) die 'expected validate, spawn, or idle' ;;
+  teardown) [ "$#" -eq 2 ] || die 'task id required' ;;
+  *) die 'expected validate, spawn, or teardown' ;;
 esac
-if [ "$1" = idle ]; then
+if [ "$1" = teardown ]; then
   FM_HOME=${FM_HOME:?FM_HOME is required}
+  ID=$2
+  case "$ID" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) die 'invalid task id' ;; esac
   [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
     [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] || die 'not the purpose-built boat-eng home'
   [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] || die 'unsafe overflow state directory'
-  if [ -e "$FM_HOME/state/.boat-worker.lock" ]; then printf 'active\n'; exit 0; fi
+  fm_lock_acquire_wait "$FM_HOME/state/.boat-worker.lock" || die 'overflow teardown lock unavailable'
+  trap 'fm_lock_release "$FM_HOME/state/.boat-worker.lock" || true' EXIT
+  [ -f "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task has no safe spawn record; reconcile before teardown'
+  kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
+  project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
+  case "$kind:$project" in ship:firstmate|ship:dev-loop|scout:firstmate|scout:dev-loop) ;; *) die 'task is not an allowed Boat worker' ;; esac
+  "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
   for meta in "$FM_HOME/state/"*.meta; do
-    [ -e "$meta" ] || continue
-    [ -f "$meta" ] && [ ! -L "$meta" ] || { printf 'active\n'; exit 0; }
-    [ "$(sed -n 's/^kind=//p' "$meta")" != secondmate ] || continue
-    id=${meta##*/}
-    id=${id%.meta}
-    status=$(FM_CREW_STATE_NO_FORGE=1 "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null) || { printf 'active\n'; exit 0; }
-    case "$status" in 'state: done '*|'state: failed '*) ;; *) printf 'active\n'; exit 0 ;; esac
+    [ -e "$meta" ] || [ -L "$meta" ] || continue
+    printf 'boat-tasks-remaining: yes\n'
+    exit 0
   done
-  backlog="$FM_HOME/data/backlog.md"
-  [ -f "$backlog" ] && [ ! -L "$backlog" ] || { printf 'active\n'; exit 0; }
-  backlog_state=$(awk '
-    /^##[[:space:]]+/ {
-      section = $0
-      sub(/^##[[:space:]]+/, "", section)
-      sub(/[[:space:]]+$/, "", section)
-      if (section == "Queued") queued = 1
-      if (section == "In flight") in_flight = 1
-      next
-    }
-    (section == "Queued" || section == "In flight") && /^[-*][[:space:]]+/ { found = 1 }
-    END {
-      if (!queued || !in_flight) exit 1
-      if (found) print "active"
-      else print "empty"
-    }
-  ' "$backlog") || { printf 'active\n'; exit 0; }
-  printf '%s\n' "$backlog_state"
+  printf 'boat-tasks-remaining: no\n'
   exit 0
 fi
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-boat-worker.XXXXXX")
 LOCK=
-CREATED_BRIEF=0
-SPAWN_STARTED=0
 cleanup() {
-  local status=$?
   rm -rf -- "$TMP"
-  if [ "$status" -ne 0 ] && [ "$CREATED_BRIEF" -eq 1 ] &&
-    [ -d "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ] &&
-    [ ! -e "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] &&
-    { [ "$SPAWN_STARTED" -eq 0 ] ||
-      { [ -f "$FM_HOME/state/$ID.boat-prelaunch" ] && [ ! -L "$FM_HOME/state/$ID.boat-prelaunch" ] &&
-        [ "$(cat "$FM_HOME/state/$ID.boat-prelaunch")" = prelaunch ]; }; }; then
-    rm -rf -- "$FM_HOME/data/$ID"
-    rm -f -- "$FM_HOME/state/$ID.boat-prelaunch"
-  fi
   [ -z "$LOCK" ] || fm_lock_release "$LOCK" || true
 }
 trap cleanup EXIT
@@ -117,13 +91,7 @@ ID=$(jq -r .id "$TMP/request")
 PROJECT=$(jq -r .project "$TMP/request")
 MODE=$(jq -r .mode "$TMP/request")
 [ ! -e "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task id already exists; reconcile before retry'
-if [ -e "$FM_HOME/data/$ID" ] || [ -L "$FM_HOME/data/$ID" ]; then
-  [ -d "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ] &&
-    [ -f "$FM_HOME/state/$ID.boat-prelaunch" ] && [ ! -L "$FM_HOME/state/$ID.boat-prelaunch" ] &&
-    [ "$(cat "$FM_HOME/state/$ID.boat-prelaunch")" = prelaunch ] || die 'task id already exists; reconcile before retry'
-  rm -rf -- "$FM_HOME/data/$ID"
-fi
-rm -f -- "$FM_HOME/state/$ID.boat-prelaunch"
+[ ! -L "$FM_HOME/data/$ID" ] || die 'unsafe task data directory'
 if [ "$MODE" = no-mistakes ]; then
   PROOF="$FM_HOME/config/boat-no-mistakes-proven"
   if [ -f "$PROOF" ] && [ ! -L "$PROOF" ] &&
@@ -156,8 +124,7 @@ esac
 [ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
 ARGS=()
 if [ "$MODE" = scout ]; then ARGS+=(--scout); else ARGS+=(--mode "$MODE"); fi
-CREATED_BRIEF=1
-"$SCRIPT_DIR/fm-brief.sh" "$ID" "$PROJECT" "${ARGS[@]}" >/dev/null
+FM_BOAT_REWRITE_BRIEF=boat-eng "$SCRIPT_DIR/fm-brief.sh" "$ID" "$PROJECT" "${ARGS[@]}" >/dev/null
 BRIEF="$FM_HOME/data/$ID/brief.md"
 # Only code-only task prose crosses the wire. Generate operational paths here,
 # rather than accepting a PC brief that mentions or exposes another home.
@@ -178,7 +145,5 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
 cat "$TMP/brief" > "$BRIEF"
 if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
 ARGS+=(--harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
-SPAWN_STARTED=1
-FM_BOAT_PRELAUNCH_PROOF="$FM_HOME/state/$ID.boat-prelaunch" \
-  "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
+"$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"

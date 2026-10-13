@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Send one explicitly Boat-selected, code-only task through the boat-eng route.
 # Usage: fm-boat-send.sh [--prepare] --code-only < request.json
+#        fm-boat-send.sh --teardown <task-id>
 # --prepare performs the guarded resume/SSH refresh only, for initial seeding;
 # it does not dispatch a worker. The same valid, selected task is required.
 #
@@ -26,9 +27,8 @@
 # On transport failure, remote completion is unknown: reconcile the SAME task
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
 # Status, steering, and reports use existing fm-on.sh commands against boat-eng;
-# no PC worker endpoint or worktree is allocated. The registered idle check
-# stops the box after at least 20 idle minutes on the next watcher sweep.
-# Auto-stop is the hard upper bound if controller supervision disappears.
+# no PC worker endpoint or worktree is allocated. Last-task teardown stops the
+# box; its auto-stop timer is the hard upper bound if teardown cannot complete.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_HOME=${FM_HOME:?FM_HOME is required}
@@ -44,17 +44,27 @@ ROUTE=boat-eng
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 [ "${1:-}" != --help ] || { sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0; }
 PREPARE=0
+TEARDOWN_ID=
 if [ "${1:-}" = --prepare ]; then PREPARE=1; shift; fi
-[ "$#" -eq 1 ] && [ "$1" = --code-only ] || die 'explicit --code-only attestation required'
+if [ "${1:-}" = --teardown ]; then
+  [ "$PREPARE" -eq 0 ] || die 'prepare cannot teardown a task'
+  [ "$#" -eq 2 ] || die 'task id required for teardown'
+  TEARDOWN_ID=$2
+  case "$TEARDOWN_ID" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) die 'invalid task id' ;; esac
+else
+  [ "$#" -eq 1 ] && [ "$1" = --code-only ] || die 'explicit --code-only attestation required'
+fi
 for tool in jq "$BOAT_BIN"; do command -v "$tool" >/dev/null || die "$tool is required"; done
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-boat-send.XXXXXX")
 SEND_LOCK=
 cleanup() { rm -rf -- "$TMP"; [ -z "$SEND_LOCK" ] || fm_lock_release "$SEND_LOCK" || true; }
 trap cleanup EXIT
-head -c 65537 > "$TMP/request"
-[ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
-# Both ends use the same validator; no remote contact occurs before validation.
-"$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
+if [ -z "$TEARDOWN_ID" ]; then
+  head -c 65537 > "$TMP/request"
+  [ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
+  # Both ends use the same validator; no remote contact occurs before validation.
+  "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
+fi
 LOCK_PATH="$FM_HOME/state/.boat-send.lock"
 fm_lock_acquire_wait "$LOCK_PATH" || die 'Boat send lock unavailable'
 SEND_LOCK="$LOCK_PATH"
@@ -65,7 +75,20 @@ if [ "$PREPARE" -eq 0 ]; then
   case "$REMOTE_HOME" in /home/user/*) ;; *) die 'boat-eng must have a dedicated sandbox home' ;; esac
   [ "$REMOTE_HOME" != /home/user/fm-home ] || die 'the earlier proof mate home is not an overflow home'
 fi
-"$SCRIPT_DIR/fm-boat-idle-stop.sh" arm || die 'Boat idle stop check could not be armed'
+if [ -n "$TEARDOWN_ID" ]; then
+  receipt="$FM_HOME/state/.boat-no-env"
+  [ -f "$receipt" ] && [ ! -L "$receipt" ] && [ "$(cat "$receipt")" = "$BOX" ] || die 'approved box has no successful --no-env resume receipt'
+  remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh teardown "$TEARDOWN_ID") || die 'remote Boat teardown failed; reconcile before stopping'
+  case "$remaining" in
+    'boat-tasks-remaining: yes') printf 'teardown: %s; other Boat tasks remain\n' "$TEARDOWN_ID" ;;
+    'boat-tasks-remaining: no')
+      fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null || die 'last-task teardown completed but Boat stop failed'
+      printf 'teardown: %s; stopped %s\n' "$TEARDOWN_ID" "$BOX"
+      ;;
+    *) die 'remote Boat teardown result is invalid; reconcile before stopping' ;;
+  esac
+  exit 0
+fi
 STOP_ON_REFUSAL=0
 stop_refuse() {
   if [ "$STOP_ON_REFUSAL" -eq 1 ]; then
@@ -127,7 +150,6 @@ jq -e --argjson ttl "$TTL" --argjson now "$(date +%s)" '
   ((.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now <= $ttl)
 ' "$TMP/info" >/dev/null 2>&1 || stop_refuse 'box auto-stop timer is unavailable or exceeds the reserved budget'
 FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" boat-prove || stop_refuse 'SSH refresh or hydration failed'
-FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-idle-stop.sh" reset || stop_refuse 'Boat idle timer could not be reset'
 if [ "$PREPARE" -eq 1 ]; then
   printf 'prepared: %s route=%s (no worker dispatched)\n' "$BOX" "$ROUTE"
   exit 0

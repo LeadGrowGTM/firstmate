@@ -587,9 +587,15 @@ bin/fm-on.sh boat-eng fm-send.sh <task-id> '<steer>'
 bin/fm-on.sh boat-eng fm-remote-file.sh get data/<task-id>/report.md
 ```
 
-The sender arms the controller's registered idle check, which stops the approved box after at least twenty idle minutes on the next watcher sweep (normally within about twenty-five minutes), with no live worker or queued Boat task; auto-stop remains a hard bound if controller supervision disappears.
+After the last Boat task has landed or its scout report has been accepted, tear it down from the controller:
+
+```sh
+FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
+```
+
+The command uses ordinary remote teardown and its landed-work checks. It stops the approved box when no Boat task records remain, meeting R2 at the last teardown; the existing four-hour auto-stop timer is the backstop if teardown cannot complete.
 The sender refuses on unreadable spend state or a cap violation, stops a box it resumed when a later step fails, and preserves an uncertain remote launch for same-task reconciliation.
-It adds no worker retry, merge path, or supervision loop.
+It adds no automatic worker retry, merge path, or supervision loop.
 
 ## Provision a route
 

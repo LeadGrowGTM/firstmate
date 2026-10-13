@@ -13,7 +13,7 @@ NOW=1791892800
 BIN="$TMP_ROOT/bin"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
 mkdir -p "$BIN"
-for script in fm-boat-send.sh fm-boat-worker.sh fm-boat-idle-stop.sh fm-secondmate-registry-lib.sh \
+for script in fm-boat-send.sh fm-boat-worker.sh fm-secondmate-registry-lib.sh \
   fm-timeout-lib.sh fm-wake-lib.sh fm-path-lib.sh; do
   cp "$ROOT/bin/$script" "$BIN/$script"
 done
@@ -21,7 +21,7 @@ REAL_DATE=$(command -v date)
 cat > "$FAKEBIN/date" <<SH
 #!/usr/bin/env bash
 if [ "\$*" = +%s ]; then
-  if [ -f "\${FIXTURES:-}/time" ]; then cat "\$FIXTURES/time"; else printf '%s\n' '$NOW'; fi
+  printf '%s\n' '$NOW'
 else exec '$REAL_DATE' "\$@"; fi
 SH
 cat > "$FAKEBIN/boat" <<'SH'
@@ -57,20 +57,13 @@ SH
 cat > "$BIN/fm-on.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'on %s\n' "$*" >> "$FIXTURES/calls"
-[ "$*" != 'boat-eng fm-boat-worker.sh idle' ] || { cat "$FIXTURES/activity"; exit 0; }
+if [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = teardown ]; then
+  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" teardown "$4"
+  exit $?
+fi
 [ "$*" = '--stdin boat-eng fm-boat-worker.sh spawn' ] || exit 97
 cat > "$FIXTURES/transport.request"
 exit "$(cat "$FIXTURES/transport.code" 2>/dev/null || printf 0)"
-SH
-cat > "$BIN/fm-check-register.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'register %s\n' "$*" >> "$FIXTURES/calls"
-[ "$*" = boat-idle ] || exit 97
-exec "$REAL_CHECK_REGISTER" "$@"
-SH
-cat > "$BIN/fm-crew-state.sh" <<'SH'
-#!/usr/bin/env bash
-cat "$FIXTURES/crew-state"
 SH
 cat > "$BIN/fm-brief.sh" <<'SH'
 #!/usr/bin/env bash
@@ -82,16 +75,19 @@ SH
 cat > "$BIN/fm-spawn.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'spawn %s\n' "$*" >> "$FIXTURES/calls"
-if [ -e "$FIXTURES/spawn.fail" ]; then
-  printf 'prelaunch\n' > "$FM_BOAT_PRELAUNCH_PROOF"
-  exit 1
-fi
+if [ -e "$FIXTURES/spawn.fail" ]; then exit 1; fi
 if [ -e "$FIXTURES/spawn.postlaunch.fail" ]; then
   : > "$FIXTURES/endpoint-launched"
   exit 1
 fi
 printf '%s\n' "$@" > "$FIXTURES/spawn.argv"
 printf 'kind=ship\n' > "$FM_HOME/state/$1.meta"
+SH
+cat > "$BIN/fm-teardown.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'teardown %s\n' "$*" >> "$FIXTURES/calls"
+[ ! -e "$FIXTURES/teardown.fail" ] || exit 1
+rm "$FM_HOME/state/$1.meta"
 SH
 # These guards make accidental fixture escape a failure instead of contacting
 # an ambient terminal server or endpoint.
@@ -114,11 +110,8 @@ new_case() {
   printf '%s\n' '- boat-eng - Code overflow (host: boat-prove; root: /home/user/firstmate; home: /home/user/boat-eng; scope: Code only; projects: firstmate, dev-loop; added 2026-10-13)' \
     > "$LOCAL_HOME/data/secondmates.md"
   printf 'boat-eng\n' > "$REMOTE_HOME/.fm-secondmate-home"
-  printf '## In flight\n\n## Queued\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
   printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium"}' \
     > "$FIXTURES/request.json"
-  printf 'empty\n' > "$FIXTURES/activity"
-  printf 'state: working · source: pane · active\n' > "$FIXTURES/crew-state"
   printf '%s\n' '{"billingStatus":"active","canStart":true,"creditSecondsPerDollar":100000,"creditUsedSeconds":1000,"last24hUsageSeconds":2000,"creditBalanceSeconds":100000,"activeStates":["ready","idle","running"]}' \
     > "$FIXTURES/limits.json"
   printf '%s\n' '{"pageInfo":{"hasMore":false},"sandboxes":[{"id":"bx_ahnbu3qr","state":"stopped"}]}' \
@@ -147,8 +140,8 @@ run_entry() {
     -u FM_WAKE_QUEUE -u FM_WAKE_QUEUE_LOCK \
     FM_HOME="$home" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" \
     FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
-    FM_BOAT_BIN="$FAKEBIN/boat" REAL_CHECK_REGISTER="$ROOT/bin/fm-check-register.sh" \
-    FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
+    FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
+    BIN="$BIN" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
     "$BIN/$entry" "$@" < "$FIXTURES/request.json" 2>&1)
   CODE=$?
 }
@@ -286,7 +279,6 @@ test_sender_success_and_timer() {
       "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
     cmp -s "$FIXTURES/request.json" "$FIXTURES/transport.request" || fail 'transport changed the request bytes'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
-    assert_grep 'register boat-idle' "$FIXTURES/calls" 'successful dispatch did not arm idle stop'
     assert_equals bx_ahnbu3qr "$(cat "$LOCAL_HOME/state/.boat-no-env")" 'successful no-env resume receipt'
   done
   new_case already-running
@@ -361,7 +353,7 @@ test_prepare_before_route() {
   expect_code 0 "$CODE" "prepare before route registration: $OUT"
   assert_grep 'boat --no-update resume bx_ahnbu3qr --no-env' "$FIXTURES/calls" 'prepare did not safely resume'
   assert_grep 'alias bx_ahnbu3qr boat-prove' "$FIXTURES/calls" 'prepare did not refresh alias'
-  assert_no_grep '^on ' "$FIXTURES/calls" 'prepare dispatched without route'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'prepare dispatched without route'
   : > "$FIXTURES/calls"
   send_task
   expect_code 1 "$CODE" 'dispatch without registered route'
@@ -369,59 +361,43 @@ test_prepare_before_route() {
   pass 'prepare establishes access before route registration while dispatch still requires the route'
 }
 
-test_idle_stop() {
-  new_case idle-stop
-  : > "$FIXTURES/resumed"
+test_teardown_stop() {
+  new_case last-task-teardown
   printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
-  printf '1000\n' > "$FIXTURES/time"
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh arm
-  expect_code 0 "$CODE" 'idle check arms'
-  assert_grep 'register boat-idle' "$FIXTURES/calls" 'idle check registration'
-  [ -f "$LOCAL_HOME/state/boat-idle.check-trust" ] || fail 'watcher trust binding missing'
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
-  expect_code 0 "$CODE" 'first empty observation'
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'first empty observation stopped box'
-  printf '2199\n' > "$FIXTURES/time"
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
-  expect_code 0 "$CODE" 'before idle deadline'
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'box stopped early'
-  printf '2200\n' > "$FIXTURES/time"
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
-  expect_code 0 "$CODE" 'at idle deadline'
-  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'idle deadline did not stop box'
-  : > "$FIXTURES/calls"
-  printf '3000\n' > "$FIXTURES/time"
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
-  printf 'active\n' > "$FIXTURES/activity"
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
-  printf '4200\n' > "$FIXTURES/time"
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'live worker stopped at old idle deadline'
-  new_case missing-idle-receipt
-  : > "$FIXTURES/resumed"
-  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
-  expect_code 0 "$CODE" 'missing idle receipt check'
-  assert_contains "$OUT" 'blocked: Boat idle stop missing --no-env receipt' 'missing receipt was silent'
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'missing receipt stopped box'
-  new_case remote-idle
-  seed_worker worker-a ship firstmate 'state: working active'
-  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
-  expect_code 0 "$CODE" 'live remote worker state'
-  assert_equals active "$OUT" 'live remote worker must keep box on'
-  printf 'state: done · source: status-log · completed\n' > "$FIXTURES/crew-state"
-  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
-  expect_code 0 "$CODE" 'completed remote worker state'
-  assert_equals empty "$OUT" 'completed worker must release idle clock'
-  printf '## In flight\n\n## Queued\n- [ ] queued Boat task\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
-  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
-  assert_equals active "$OUT" 'queued Boat task must keep box on'
-  printf '## In flight\n- [ ] in-flight Boat task\n\n## Queued\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
-  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
-  assert_equals active "$OUT" 'in-flight Boat task must keep box on'
-  rm "$REMOTE_HOME/data/backlog.md"
-  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
-  assert_equals active "$OUT" 'missing backlog must not claim idle'
-  pass 'registered idle check stops only after 20 empty minutes and remote state clears timer'
+  seed_worker task-one ship firstmate 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" "last task teardown: $OUT"
+  assert_grep 'teardown task-one' "$FIXTURES/calls" 'ordinary remote teardown was not called'
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'last task did not stop approved box'
+  assert_absent "$REMOTE_HOME/state/task-one.meta" 'last task record remained'
+  new_case another-task-remains
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_worker task-one ship firstmate 'state: done complete'
+  seed_worker task-two scout dev-loop 'state: working active'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" 'teardown with another task'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'other task was stopped'
+  new_case teardown-refused
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_worker task-one ship firstmate 'state: working active'
+  : > "$FIXTURES/teardown.fail"
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'landed-work or report refusal'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'refused teardown stopped box'
+  [ -f "$REMOTE_HOME/state/task-one.meta" ] || fail 'refused teardown removed task record'
+  new_case teardown-other-home
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_worker task-one secondmate firstmate 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'teardown of non-worker record'
+  [ "$(grep -c '^teardown task-one$' "$FIXTURES/calls")" -eq 0 ] || fail 'non-worker record reached teardown'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-worker record stopped box'
+  new_case teardown-no-receipt
+  seed_worker task-one ship firstmate 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'teardown without no-env receipt'
+  assert_no_grep 'on boat-eng' "$FIXTURES/calls" 'teardown without receipt contacted remote'
+  pass 'last-task teardown stops only the approved box after ordinary cleanup succeeds'
 }
 
 seed_project() {
@@ -474,10 +450,12 @@ test_remote_cap_and_merge_authority() {
   : > "$FIXTURES/spawn.fail"
   spawn_task
   expect_code 1 "$CODE" 'failed spawn'
-  assert_absent "$REMOTE_HOME/data/task-one" 'failed prelaunch spawn stranded task id'
+  [ -f "$REMOTE_HOME/data/task-one/brief.md" ] || fail 'failed spawn deleted task material'
   rm "$FIXTURES/spawn.fail"
+  set_json request '.intent = "Retried intent"'
   spawn_task
   expect_code 0 "$CODE" 'same task id retry after prelaunch failure'
+  assert_grep 'Retried intent' "$REMOTE_HOME/data/task-one/brief.md" 'retry did not rewrite brief'
   new_case postlaunch-failure
   seed_project firstmate
   : > "$FIXTURES/spawn.postlaunch.fail"
@@ -485,11 +463,6 @@ test_remote_cap_and_merge_authority() {
   expect_code 1 "$CODE" 'postlaunch failure'
   [ -f "$FIXTURES/endpoint-launched" ] || fail 'postlaunch fixture did not launch'
   [ -f "$REMOTE_HOME/data/task-one/brief.md" ] || fail 'postlaunch failure deleted a live brief'
-  : > "$FIXTURES/calls"
-  rm "$FIXTURES/spawn.postlaunch.fail"
-  spawn_task
-  expect_code 1 "$CODE" 'postlaunch uncertainty refuses retry'
-  assert_no_grep '^spawn ' "$FIXTURES/calls" 'postlaunch uncertainty relaunched task'
   new_case no-mistakes-unproven
   set_json request '.mode = "no-mistakes"'
   seed_project firstmate
@@ -506,6 +479,6 @@ test_unreadable_caps
 test_sender_success_and_timer
 test_running_quota_and_route
 test_prepare_before_route
-test_idle_stop
+test_teardown_stop
 test_remote_cap_and_merge_authority
 pass 'fm-boat-send'

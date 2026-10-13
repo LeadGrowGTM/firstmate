@@ -605,15 +605,6 @@ PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 fm_launch_outcome_init "${1:-}" || { echo "error: unsafe or existing spawn outcome path" >&2; exit 1; }
 trap 'fm_launch_outcome_write "$?"' EXIT
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
-SPAWN_BOAT_ID=${1:-}
-SPAWN_ENDPOINT_ATTEMPTED=0
-spawn_boat_prelaunch_proof() {
-  [ "$1" -ne 0 ] && [ "$SPAWN_ENDPOINT_ATTEMPTED" = 0 ] &&
-    [ -n "$SPAWN_BOAT_ID" ] &&
-    [ "${FM_BOAT_PRELAUNCH_PROOF:-}" = "$STATE/$SPAWN_BOAT_ID.boat-prelaunch" ] || return 0
-  (set -C; printf 'prelaunch\n' > "$FM_BOAT_PRELAUNCH_PROOF") || true
-}
-trap 'spawn_boat_prelaunch_proof "$?"' EXIT
 # shellcheck source=bin/fm-config-inherit-lib.sh
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
 # shellcheck source=bin/fm-exclude-tools-lib.sh
@@ -1531,7 +1522,6 @@ spawn_abort_cleanup() {
     CONFIG_INHERIT_LOCK_HELD=0
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
   fi
-  spawn_boat_prelaunch_proof "$status"
   # The per-id spawn lock is retaken so a concurrent spawn of the same id, which
   # reinstalls this strip dir, is never undone. A launched agent whose endpoint
   # was not closed may still be committing, so it keeps its strip.
@@ -3877,7 +3867,6 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
 fi
 
 SPAWN_PROVISIONING_STARTED=1
-SPAWN_ENDPOINT_ATTEMPTED=1
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
