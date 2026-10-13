@@ -35,10 +35,11 @@
 #                    on Pi; none leaves the file absent; off writes the
 #                    inherited supervision-host-off opt-out instead, so the
 #                    mate spawn inherits it).
-#   tmux server      private, through the lab home's bin/fm-lab-home.sh
-#                    tmux-dir, with no user tmux config (its plugins never run
-#                    in a lab), started from an empty environment so no inherited
-#                    TMUX, Herdr, or Pi marker reaches a lab process.
+#   tmux server      private named fm-lab socket through bin/fm-lab-home.sh,
+#                    with no user tmux config (its plugins never run in a lab).
+#                    The lab starts from an empty environment, then selects its
+#                    recorded socket; no inherited TMUX, Herdr, or Pi marker
+#                    reaches a lab process.
 #                    The lab notes project configures its Treehouse root inside
 #                    <lab-root>, and DISABLE_AUTOUPDATER=1
 #                    keeps Claude Code from replacing the shared binary under

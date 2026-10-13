@@ -17,9 +17,9 @@
 # A lab home is the stock layout only - state/, data/, config/, projects/ - and
 # callers remove it with ordinary rm -rf when done. Drive it with plain
 # FM_HOME=<dir>; any FM_*_OVERRIDE relocation defeats the allowance.
-# tmux-dir is the single owner of the short private socket directory: callers
-# use TMUX_TMPDIR=<printed-dir> and call teardown from their cleanup trap after
-# killing only the server addressed through that directory.
+# tmux-dir records the short private socket directory; tmux runs commands on
+# its named fm-lab socket. Callers stop that server before teardown, which
+# refuses to remove a directory while any server there remains live.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
