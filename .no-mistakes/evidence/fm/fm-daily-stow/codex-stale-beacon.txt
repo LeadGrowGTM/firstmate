@@ -1,0 +1,13 @@
+No primary remains on the lab socket:
+server exited unexpectedly
+Inbox before timer:
+(inbox empty)
+Readiness after primary exit:
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.f7hyZ1","observed_at":"2026-10-13T22:06:02Z","lock":{"state":"unknown","pid":1,"live_harness":null},"wake_consumer":{"state":"unknown","reason":"supervision-model-unknown-for-home","beacon_age_seconds":1},"posture":{"state":"present"},"can_receive":"unknown"}
+Daily timer command after primary exit:
+queued 1791929162-chzirJ
+  Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/tmp/fm-lab.f7hyZ1
+  firstmate will pick this up at its next check.
+Inbox after timer:
+1791929162-chzirJ
+    Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/tmp/fm-lab.f7hyZ1 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/bin/fm-daily-stow.sh --eligible 1 cc66e7af87c6b33654f0167fb14541f2d9b0a6b03c156b6ca898328a18d75b54. If it exits 0, invoke /stow in this live session, including its existing secondmate cascade. If it skips, leave the scheduled pass undone. Never interrupt in-flight work or start a fresh worker for this request.

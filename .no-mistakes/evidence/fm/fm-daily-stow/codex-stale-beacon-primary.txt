@@ -1,0 +1,24 @@
+
+  Shall we give this cursor a purpose?
+
+
+› In this disposable lab only, run FM_HOME=/tmp/fm-lab.f7hyZ1 bash bin/fm-
+  lock.sh to acquire the primary lock, then stop. Do not edit project files.
+
+
+• Captain, I’ll run the lock command exactly as given and stop after reporting
+  its result.
+
+• Ran FM_HOME=/tmp/fm-lab.f7hyZ1 bash bin/fm-lock.sh
+  └ lock acquired: harness pid 1
+
+• Captain, the primary lock was acquired for FM_HOME=/tmp/fm-lab.f7hyZ1 (lock
+  acquired: harness pid 1). No project files were edited.
+
+  Worked for 5s • 18:05
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7P…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view

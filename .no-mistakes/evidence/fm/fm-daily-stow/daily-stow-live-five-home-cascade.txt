@@ -1,0 +1,39 @@
+role=primary
+
+secondmate=mate1
+placement=local
+home=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/.f/mate1
+budget_report=error
+transport=unavailable
+reason=secondmate home cannot be inside the firstmate repo
+
+secondmate=mate2
+placement=local
+home=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/.f/mate2
+budget_report=error
+transport=unavailable
+reason=secondmate home cannot be inside the firstmate repo
+
+secondmate=mate3
+placement=local
+home=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/.f/mate3
+budget_report=error
+transport=unavailable
+reason=secondmate home cannot be inside the firstmate repo
+
+secondmate=mate4
+placement=local
+home=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/.f/mate4
+budget_report=error
+transport=unavailable
+reason=secondmate home cannot be inside the firstmate repo
+
+secondmate=mate5
+placement=local
+home=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/.f/mate5
+budget_report=error
+transport=unavailable
+reason=secondmate home cannot be inside the firstmate repo
+
+secondmates=5
+exceptions=5

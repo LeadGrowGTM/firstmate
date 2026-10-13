@@ -1,0 +1,16 @@
+Same-day retry with unknown lock:
+replay 1791930471-DJk5af
+  Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/home/mitch/.no-mi
+  firstmate will pick this up at its next check.
+Record a primary pass through the cascade:
+role=primary
+secondmates=0
+exceptions=0
+reason=no secondmate registry in this home
+Scheduled command after primary pass:
+daily-stow: skipped (primary stow pass ran within the last 20 hours)
+Scheduled command during away posture:
+daily-stow: skipped (away or quiet mode is active)
+Inbox after retries and guards:
+1791930471-DJk5af
+    Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/.l /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/bin/fm-daily-stow.sh --eligible 1 1ac26b7518e21cd26d59e71c4f5569b269530b1a6a6346151033d80be62fe725. If it exits 0, invoke /stow in this live session, including its existing secondmate cascade. If it skips, leave the scheduled pass undone. Never interrupt in-flight work or start a fresh worker for this request.

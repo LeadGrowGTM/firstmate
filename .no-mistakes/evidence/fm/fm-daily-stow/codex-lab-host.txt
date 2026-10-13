@@ -1,0 +1,16 @@
+Live primary daily retry after completed stow:
+daily-stow: skipped (primary stow pass ran within the last 20 hours)
+Away guard:
+daily-stow: skipped (away or quiet mode is active)
+Primary pass stamp:
+1791928948
+Inbox receipts:
+{"schema":"fm-inbox-receipts.v1","home":"tmp/fm-lab.aemcyU","generated":"2026-10-13T22:03:13Z","pending":[],"handled":[{"id":"1791928806-Uxdv0W","at":"2026-10-13T22:00:06Z","source":"text","request_id":"daily-stow:2026-10-13","body":"Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/tmp/fm-lab.aemcyU /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/bin/fm-daily-stow.sh --eligible 1 fb2d49e7c87b843d0159a2df06cdd7fbdf7cd177cc754bddc897dadfea8e1c08. If it exits 0, invoke /stow in this live session, including its existing secondmate cascade. If it skips, leave the scheduled pass undone. Never interrupt in-flight work or start a fresh worker for this request.","acknowledged":true,"announced":true,"reply":null}],"replies":[],"reply_cursor":"","omitted":[]}
+After original primary exit:
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.aemcyU","observed_at":"2026-10-13T22:03:18Z","lock":{"state":"unknown","pid":1,"live_harness":null},"wake_consumer":{"state":"unknown","reason":"supervision-model-unknown-for-home","beacon_age_seconds":192},"posture":{"state":"present"},"can_receive":"unknown"}
+replay 1791928806-Uxdv0W
+  Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/tmp/fm-lab.aemcyU
+  firstmate will pick this up at its next check.
+
+Post-replacement host lock state:
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.aemcyU","observed_at":"2026-10-13T22:03:57Z","lock":{"state":"unknown","pid":1,"live_harness":null},"wake_consumer":{"state":"unknown","reason":"supervision-model-unknown-for-home","beacon_age_seconds":231},"posture":{"state":"present"},"can_receive":"unknown"}

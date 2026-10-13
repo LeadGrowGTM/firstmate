@@ -1,0 +1,7 @@
+Real Codex primary with real healthy watcher
+Host readiness:
+{"schema":"fm-primary-ready.v1","home":"01M4VHKBRP4FSMX1MSDV7PH9K1/.fm-daily-stow-delivery-lab","observed_at":"2026-10-13T22:15:39Z","lock":{"state":"unknown","pid":1,"live_harness":null},"wake_consumer":{"state":"healthy","reason":"supervised","beacon_age_seconds":9},"posture":{"state":"present"},"can_receive":"unknown"}
+Scheduled trigger result:
+daily-stow: skipped (no proven live main session)
+Inbox:
+(inbox empty)

@@ -1,0 +1,42 @@
+Real Codex lab primary, after /new and lock reacquisition:
+› This is a disposable lab verification in /tmp/fm-lab.iqNMxi only. First run …
+  └ daily-stow: skipped (different main session holds the lock)
+    + Show details
+
+• Captain, both commands ran in the requested order with FM_HOME=/tmp/fm-
+  lab.iqNMxi.
+
+   Command                          Exit code    Output
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   bash bin/fm-lock.sh                      0    lock acquired: harness pid 1
+  ───────────────────────────────  ───────────  ────────────────────────────────
+   bash bin/fm-daily-stow.sh                3    daily-stow: skipped (different
+   --eligible 1                                  main session holds the lock)
+   3370a3eec0221c1a50efad567c479
+   29575d0ac9754fd550e31a8039ec8
+   068c39
+
+  Worked for 9s • 17:48
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7P…
+  ← for agents · ? for shortcuts
+
+Timer-side readiness from outside the Codex PID namespace:
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.iqNMxi","observed_at":"2026-10-13T21:49:03Z","lock":{"state":"unknown","pid":1,"live_harness":null},"wake_consumer":{"state":"unknown","reason":"supervision-model-unknown-for-home","beacon_age_seconds":198},"posture":{"state":"present"},"can_receive":"unknown"}
+Timer-side trigger:
+daily-stow: skipped (no proven live main session)
+Persisted daily note:
+1791927955-J3UddY
+    Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/tmp/fm-lab.iqNMxi /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/bin/fm-daily-stow.sh --eligible 1 3370a3eec0221c1a50efad567c47929575d0ac9754fd550e31a8039ec8068c39. If it exits 0, invoke /stow in this live session, including its existing secondmate cascade. If it skips, leave the scheduled pass undone. Never interrupt in-flight work or start a fresh worker for this request.
+
+Away mode guard on the live lab home:
+daily-stow: skipped (away or quiet mode is active)
+Secondmate-home guard on the lab home:
+daily-stow: skipped (secondmate home; schedule only main)
+
+Timer-side probe with a fresh lab watcher beacon and explicit supervision model:
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.iqNMxi","observed_at":"2026-10-13T21:49:38Z","lock":{"state":"unknown","pid":1,"live_harness":null},"wake_consumer":{"state":"healthy","reason":"supervised","beacon_age_seconds":0},"posture":{"state":"present"},"can_receive":"unknown"}
+daily-stow: skipped (no proven live main session)

@@ -1,0 +1,8 @@
+systemd calendar around spring DST transition:
+Normalized form: *-*-* 01:30:00 America/Toronto
+    Next elapse: Sun 2026-03-08 01:30:00 EST
+       (in UTC): Sun 2026-03-08 06:30:00 UTC
+       From now: 7 months 6 days ago
+   Iteration #2: Mon 2026-03-09 01:30:00 EDT
+       (in UTC): Mon 2026-03-09 05:30:00 UTC
+       From now: 7 months 5 days ago

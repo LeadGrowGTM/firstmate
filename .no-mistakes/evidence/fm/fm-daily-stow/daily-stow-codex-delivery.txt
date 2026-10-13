@@ -1,0 +1,62 @@
+LAB PRIMARY READY (host view)
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.Eb48Yt","observed_at":"2026-10-13T21:32:37Z","lock":{"state":"held","pid":362982,"live_harness":true},"wake_consumer":{"state":"unknown","reason":"no-watcher","beacon_age_seconds":84},"posture":{"state":"present"},"can_receive":"unknown"}
+DAILY RETRY
+daily-stow: skipped (main wake consumer is not proven healthy)
+BOUND ELIGIBILITY (host view)
+daily-stow: eligible
+PERSISTED INBOX RECEIPT
+{"schema":"fm-inbox-receipts.v1","home":"tmp/fm-lab.Eb48Yt","generated":"2026-10-13T21:32:39Z","pending":[{"id":"1791927060-u2oqw1","at":"2026-10-13T21:31:00Z","source":"text","request_id":"daily-stow:2026-10-13","body":"Scheduled daily stow: at the next safe checkpoint after current work, run FM_HOME=/tmp/fm-lab.Eb48Yt /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7PH9K1/bin/fm-daily-stow.sh --eligible 362982 ddf62abd23c942d31be228d80b2002bc0a47c4609038c42ca0e8735af8b34f67. If it exits 0, invoke /stow in this live session, including its existing secondmate cascade. If it skips, leave the scheduled pass undone. Never interrupt in-flight work or start a fresh worker for this request.","acknowledged":false,"announced":true,"reply":null}],"handled":[],"replies":[],"reply_cursor":"","omitted":[]}
+RECIPIENT PANE
+› At this normal checkpoint, run bin/fm-wake-drain.sh and bin/fm-inbox.sh list…
+    daily-stow: skipped (no proven live main session)
+    + 1 line (ctrl+t to expand)
+
+• Captain, the eligibility check skipped the daily stow because it could not
+  prove a live main session. I’ll leave that pass undone and acknowledge the
+  handled wake.
+
+• Ran FM_HOME=/tmp/fm-lab.Eb48Yt bin/fm-wake-drain.sh --ack-through 1 --recover…
+  └ error: Can't create the symlink for multishells at "/run/user/1000/fnm_mult…
+    + 1 line (ctrl+t to expand)
+
+• Captain, I drained the lab wake queue and listed its inbox. The scheduled
+  daily stow eligibility check exited 3 with “no proven live main session,” so I
+  left the stow pass undone as instructed. I acknowledged the handled wake.
+  └ Tip: You can run any shell command from Codex using ! (e.g. !ls)
+
+  Worked for 16s • 17:32
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7P…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
+
+RECIPIENT READY FROM TOOL SANDBOX
+› For diagnosis only, run FM_HOME=/tmp/fm-lab.Eb48Yt bin/fm-inbox.sh ready thr…
+  without changing files.
+
+• Ran FM_HOME=/tmp/fm-lab.Eb48Yt bin/fm-inbox.sh ready
+  └ error: Can't create the symlink for multishells at "/run/user/1000/fnm_mult…
+    {"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.Eb48Yt","observed_at":"2…
+    + 2 lines (ctrl+t to expand)
+
+• Captain, the readiness check returned:
+
+  {"schema":"fm-primary-ready.v1","home":"tmp/fm-
+  lab.Eb48Yt","observed_at":"2026-10-13T21:32:50Z","lock":
+  {"state":"stale","pid":362982,"live_harness":false},"wake_consumer":
+  {"state":"unknown","reason":"supervision-model-unknown-for-
+  home","beacon_age_seconds":96},"posture":
+  {"state":"present"},"can_receive":false}
+
+  Worked for 5s • 17:32
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7P…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
+
+HOST READY SAME PRIMARY
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.Eb48Yt","observed_at":"2026-10-13T21:33:00Z","lock":{"state":"held","pid":362982,"live_harness":true},"wake_consumer":{"state":"unknown","reason":"no-watcher","beacon_age_seconds":106},"posture":{"state":"present"},"can_receive":"unknown"}

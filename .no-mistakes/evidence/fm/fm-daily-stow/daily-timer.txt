@@ -1,0 +1,15 @@
+Normalized form: *-*-* 01:30:00 America/Toronto
+    Next elapse: Sun 2026-03-08 01:30:00 EST
+       (in UTC): Sun 2026-03-08 06:30:00 UTC
+       From now: 7 months 6 days ago
+Configured timer:
+# Opt-in daily memory pass before the Toronto session refresh.
+[Unit]
+Description=Firstmate daily stow before session refresh
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 America/Toronto
+Persistent=true
+
+[Install]
+WantedBy=timers.target

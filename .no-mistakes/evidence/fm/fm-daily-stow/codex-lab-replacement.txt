@@ -1,0 +1,24 @@
+› In this disposable lab, run FM_HOME=/tmp/fm-lab.aemcyU bash bin/fm-lock.sh t…
+  Lock command output:
+
+  error: Can't create the symlink for multishells at "/run/user/1000/
+  fnm_multishells/8_1791929022009". Maybe there are some issues with permissions
+  for the directory? Read-only file system (os error 30)
+  lock acquired: harness pid 1
+
+  Daily-stow command output:
+
+  error: Can't create the symlink for multishells at "/run/user/1000/
+  fnm_multishells/8_1791929024251". Maybe there are some issues with permissions
+  for the directory? Read-only file system (os error 30)
+  daily-stow: skipped (different main session holds the lock)
+
+  I did not run /stow or edit project files.
+
+  Worked for 9s • 18:03
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7P…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view

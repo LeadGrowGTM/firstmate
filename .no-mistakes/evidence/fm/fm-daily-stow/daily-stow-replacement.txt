@@ -1,0 +1,30 @@
+REPLACEMENT PRIMARY AFTER PRIVATE TMUX SERVER RESTART
+› 3
+    + Show details
+
+• Ran bin/fm-session-start.sh
+  └
+    The digest above is complete for this session start. The READ-ONCE CONTRACT
+    section near the top of it governs what may still be read from disk.
+    + 138 lines (ctrl+t to expand)
+
+• Captain, what does “3” refer to? I don’t have the numbered options in this
+  conversation. Please paste them or name the choice.
+
+  Worked for 14s • 17:33
+
+• You ran bin/fm-lock.sh
+  └ lock acquired: harness pid 362982
+
+  Worked for <1s • 17:33
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7P…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
+OLD NOTE ELIGIBILITY AGAINST REPLACEMENT
+daily-stow: eligible
+LOCK AND RECORDED SESSION
+{"schema":"fm-primary-ready.v1","home":"tmp/fm-lab.Eb48Yt","observed_at":"2026-10-13T21:34:06Z","lock":{"state":"held","pid":362982,"live_harness":true},"wake_consumer":{"state":"unknown","reason":"no-watcher","beacon_age_seconds":172},"posture":{"state":"present"},"can_receive":"unknown"}
+lock-session absent

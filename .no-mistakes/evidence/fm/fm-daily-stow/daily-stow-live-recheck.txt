@@ -1,0 +1,12 @@
+DELIVERED NOTE AFTER WATCHER EXIT
+daily-stow: eligible
+RECENT PRIMARY PASS
+role=primary
+secondmates=0
+exceptions=0
+reason=no secondmate registry in this home
+daily-stow: skipped (primary stow pass ran within the last 20 hours)
+exit=3
+AWAY POSTURE
+daily-stow: skipped (away or quiet mode is active)
+exit=3

@@ -1,0 +1,28 @@
+Systemd calendar consumer:
+Normalized form: *-*-* 01:30:00 America/Toronto
+    Next elapse: Wed 2026-10-14 01:30:00 EDT
+       (in UTC): Wed 2026-10-14 05:30:00 UTC
+       From now: 7h left
+   Iteration #2: Thu 2026-10-15 01:30:00 EDT
+       (in UTC): Thu 2026-10-15 05:30:00 UTC
+       From now: 1 day 7h left
+   Iteration #3: Fri 2026-10-16 01:30:00 EDT
+       (in UTC): Fri 2026-10-16 05:30:00 UTC
+       From now: 2 days left
+
+Unit verification and DST/catch-up behavioral test:
+ok - Codex delivery survives a hidden host PID and rejects daemon reuse
+ok - configured companion units pass systemd verification without activation
+ok - daily timer has a spring occurrence and catches up after downtime
+
+DST transition calculation by systemd:
+Normalized form: *-*-* 01:30:00 America/Toronto
+    Next elapse: Sun 2026-03-08 01:30:00 EST
+       (in UTC): Sun 2026-03-08 06:30:00 UTC
+       From now: 7 months 6 days ago
+   Iteration #2: Mon 2026-03-09 01:30:00 EDT
+       (in UTC): Mon 2026-03-09 05:30:00 UTC
+       From now: 7 months 5 days ago
+   Iteration #3: Tue 2026-03-10 01:30:00 EDT
+       (in UTC): Tue 2026-03-10 05:30:00 UTC
+       From now: 7 months 4 days ago

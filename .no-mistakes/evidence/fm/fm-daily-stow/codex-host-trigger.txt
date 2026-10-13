@@ -1,0 +1,9 @@
+Real Codex lab primary, host-side daily trigger
+Lab lock:
+1
+Host readiness:
+{"schema":"fm-primary-ready.v1","home":"01M4VHKBRP4FSMX1MSDV7PH9K1/.fm-daily-stow-live-lab","observed_at":"2026-10-13T22:14:00Z","lock":{"state":"unknown","pid":1,"live_harness":null},"wake_consumer":{"state":"down","reason":"no-beacon","beacon_age_seconds":null},"posture":{"state":"present"},"can_receive":false}
+Scheduled trigger result:
+daily-stow: skipped (no proven live main session)
+Inbox:
+(inbox empty)

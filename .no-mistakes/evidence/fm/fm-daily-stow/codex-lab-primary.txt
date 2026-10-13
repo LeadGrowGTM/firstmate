@@ -1,0 +1,24 @@
+› 1The disposable lab now has a 4000-token startup memory budget at /tmp/fm-la…
+  • Startup memory was 0 estimated tokens before and after, within the 4,000-
+    token budget. /tmp/fm-lab.aemcyU/data/captain.md, /tmp/fm-lab.aemcyU/data/
+    captain-shared.md, and /tmp/fm-lab.aemcyU/data/learnings.md were absent and
+    left unchanged.
+
+  • There were no durable findings to file, entries to archive or offload, or
+    open work records to correct. The cascade reported 0 secondmates and 0
+    exceptions because this lab has no secondmate registry.
+
+  • The primary-pass record was written to /tmp/fm-lab.aemcyU/state/.last-stow-
+    primary-pass with value 1791928948. The scheduled inbox note was
+    acknowledged.
+
+  This lab session is safe to reset: nothing this session knew remains
+  uncaptured. No real fleet home or project file was changed.
+
+  Worked for 23s • 18:02
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4VHKBRP4FSMX1MSDV7P…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view

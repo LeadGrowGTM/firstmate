@@ -1,0 +1,3 @@
+Host view after primary exits and lock is removed:
+lock.state=free lock.pid=None
+daily-stow: skipped (no proven live main session)

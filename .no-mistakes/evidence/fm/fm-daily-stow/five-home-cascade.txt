@@ -1,0 +1,79 @@
+role=primary
+
+secondmate=one
+placement=local
+home=/tmp/fm-lab.s0l6vur1
+budget_report=ok
+estimator=ceil(UTF-8 bytes / 3) conservative-local-estimate
+role=secondmate
+effective_budget_tokens=4000
+file=data/captain.md bytes=0 estimated_tokens=0 status=absent
+file=data/captain-shared.md bytes=0 estimated_tokens=0 status=absent
+file=data/learnings.md bytes=0 estimated_tokens=0 status=absent
+total_estimated_tokens=0
+budget_status=within-budget
+transport=direct
+reason=no recorded endpoint for this home
+
+secondmate=two
+placement=local
+home=/tmp/fm-lab.tvo9a26k
+budget_report=ok
+estimator=ceil(UTF-8 bytes / 3) conservative-local-estimate
+role=secondmate
+effective_budget_tokens=4000
+file=data/captain.md bytes=0 estimated_tokens=0 status=absent
+file=data/captain-shared.md bytes=0 estimated_tokens=0 status=absent
+file=data/learnings.md bytes=0 estimated_tokens=0 status=absent
+total_estimated_tokens=0
+budget_status=within-budget
+transport=direct
+reason=no recorded endpoint for this home
+
+secondmate=three
+placement=local
+home=/tmp/fm-lab.wvg76og1
+budget_report=ok
+estimator=ceil(UTF-8 bytes / 3) conservative-local-estimate
+role=secondmate
+effective_budget_tokens=4000
+file=data/captain.md bytes=0 estimated_tokens=0 status=absent
+file=data/captain-shared.md bytes=0 estimated_tokens=0 status=absent
+file=data/learnings.md bytes=0 estimated_tokens=0 status=absent
+total_estimated_tokens=0
+budget_status=within-budget
+transport=direct
+reason=no recorded endpoint for this home
+
+secondmate=four
+placement=local
+home=/tmp/fm-lab.m1aj1itu
+budget_report=ok
+estimator=ceil(UTF-8 bytes / 3) conservative-local-estimate
+role=secondmate
+effective_budget_tokens=4000
+file=data/captain.md bytes=0 estimated_tokens=0 status=absent
+file=data/captain-shared.md bytes=0 estimated_tokens=0 status=absent
+file=data/learnings.md bytes=0 estimated_tokens=0 status=absent
+total_estimated_tokens=0
+budget_status=within-budget
+transport=direct
+reason=no recorded endpoint for this home
+
+secondmate=five
+placement=local
+home=/tmp/fm-lab.x8qiyp0v
+budget_report=ok
+estimator=ceil(UTF-8 bytes / 3) conservative-local-estimate
+role=secondmate
+effective_budget_tokens=4000
+file=data/captain.md bytes=0 estimated_tokens=0 status=absent
+file=data/captain-shared.md bytes=0 estimated_tokens=0 status=absent
+file=data/learnings.md bytes=0 estimated_tokens=0 status=absent
+total_estimated_tokens=0
+budget_status=within-budget
+transport=direct
+reason=no recorded endpoint for this home
+
+secondmates=5
+exceptions=0
