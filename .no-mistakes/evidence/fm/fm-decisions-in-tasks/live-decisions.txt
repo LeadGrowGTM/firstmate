@@ -1,0 +1,95 @@
+
+SCENARIO 1: task-owned copy and side-file exclusion
+{
+  "decision_layout": [
+    {
+      "key": "route",
+      "title": "Choose route",
+      "about": "Release route",
+      "decide": "Choose deployment route",
+      "options": [
+        {
+          "value": "north",
+          "hint": "Gradual",
+          "label": "North"
+        },
+        {
+          "label": "South",
+          "value": "south"
+        }
+      ],
+      "recommended": "north"
+    }
+  ]
+}
+after release: route absent from decision layout
+{
+  "decision_layout": [
+    {
+      "key": "route",
+      "reason": "Ask again without options",
+      "options": null
+    }
+  ]
+}
+
+SCENARIO 2: migration preview, apply, retry, label mapping, closed skip
+would-hold: collision Choose option
+held: collision
+{
+  "decision_layout": [
+    {
+      "key": "collision",
+      "about": "Legacy options",
+      "options": [
+        {
+          "label": "Other",
+          "value": "option-1"
+        },
+        {
+          "label": "option-1",
+          "value": "option-2"
+        }
+      ],
+      "recommended": "option-2"
+    }
+  ]
+}
+held: collision
+already-closed: collision
+already-closed: collision
+ambiguous recommendation rejected before any task was held
+
+SCENARIO 3: drain finds orphan and ignores resolved, blocked, owned
+OPEN DECISIONS: orphan needs-decision task=origin key=missing; no matching captain-held task in this home
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+
+SCENARIO 4: unreadable backlog is disclosed
+OPEN DECISIONS: captain-held task orphan check unavailable; backlog read failed or exceeded its bound
+
+SCENARIO 5: second mate owns its held option copy
+{
+  "decision_layout": []
+}
+
+SCENARIO 5 RETRY: registered second mate projects its own task copy
+{
+  "layout": [
+    {
+      "owner": "mate",
+      "key": "mate-choice",
+      "about": "Mate choice",
+      "options": [
+        {
+          "label": "A",
+          "value": "a"
+        }
+      ]
+    }
+  ],
+  "unavailable": []
+}
+
+SCENARIO 6: migration preserves existing title and refuses backend read errors
+would-hold: existing Current title
+would-hold: existing Current title

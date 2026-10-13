@@ -1,0 +1,31 @@
+SECOND MATE: registered home and refreshed real summary ledger
+{
+  "layout": [
+    {
+      "owner": "mate",
+      "key": "mate-choice",
+      "about": "Mate choice",
+      "options": [
+        {
+          "label": "A",
+          "value": "a"
+        }
+      ]
+    }
+  ],
+  "unavailable": []
+}
+
+MIGRATION: existing target title in preview
+would-hold: existing Current title
+
+MIGRATION: preview rejects unreadable existing target
+fm-captain-hold: could not read migration target existing
+
+MIGRATION: apply rejects unreadable existing target
+fm-captain-hold: could not read migration target existing
+
+MIGRATION: target remains queued under current title
+  title: Current title
+  state: queued
+  held: no
