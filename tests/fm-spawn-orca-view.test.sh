@@ -82,10 +82,14 @@ case "$1 $2" in
       case "$1" in --command) cmd=$2; shift 2 ;; *) shift ;; esac
     done
     n=$(grep -c 'terminal create' "$D/orca.log")
-    env ORCA_PANE_KEY="tab-$n:leaf" ORCA_TAB_ID="tab-$n" ORCA_WORKTREE_ID=wt-1 \
-      ORCA_AGENT_HOOK_ENDPOINT=/hooks/endpoint.env ORCA_AGENT_HOOK_ENV=production \
-      ORCA_AGENT_HOOK_VERSION=1 ORCA_AGENT_HOOK_TOKEN=never-forwarded \
-      sh -c "$cmd" >/dev/null 2>&1
+    if [ ! -e "$D/identity-missing" ]; then
+      worktree_id=wt-1
+      [ ! -e "$D/identity-incomplete" ] || worktree_id=
+      env ORCA_PANE_KEY="tab-$n:leaf" ORCA_TAB_ID="tab-$n" ORCA_WORKTREE_ID="$worktree_id" \
+        ORCA_AGENT_HOOK_ENDPOINT=/hooks/endpoint.env ORCA_AGENT_HOOK_ENV=production \
+        ORCA_AGENT_HOOK_VERSION=1 ORCA_AGENT_HOOK_TOKEN=never-forwarded \
+        sh -c "$cmd" >/dev/null 2>&1
+    fi
     printf '{"ok":true,"result":{"terminal":{"handle":"term-%s"}}}\n' "$n" ;;
   "terminal close") printf '{"ok":true,"result":{"closed":true}}\n' ;;
   *) printf '{"ok":false}\n'; exit 1 ;;
@@ -109,7 +113,9 @@ SH
 # tmux server started inside an Orca terminal would hand every new window.
 run_launch() {  # <fakebin> <pane-exports> <launch>
   env -i HOME="$TMP_ROOT/pane-home" PATH="$1:$PATH" TERM=xterm TMUX=synthetic-pane \
-    ORCA_PANE_KEY=stale-tab:leaf ORCA_AGENT_HOOK_TOKEN=stale-token \
+    ORCA_PANE_KEY=stale-tab:leaf ORCA_TAB_ID=stale-tab ORCA_WORKTREE_ID=stale-wt \
+    ORCA_AGENT_HOOK_ENDPOINT=/old/endpoint.env ORCA_AGENT_HOOK_ENV=old ORCA_AGENT_HOOK_VERSION=1 \
+    ORCA_AGENT_HOOK_TOKEN=stale-token \
     /bin/sh -c "$2
 $3"
 }
@@ -127,7 +133,7 @@ make_secondmate_home() {  # <dir> <id>
 # HOME_DIR, FAKEBIN, VIEW_DIR, PANE_LOG, LAUNCH_LOG, OUT, STATUS. A file at
 # $TMP_ROOT/<case>.prior-meta becomes the existing record a respawn replaces.
 spawn_secondmate() {
-  local name=$1 id=$2 switch=$3 allowlist=${4:-}
+  local name=$1 id=$2 switch=$3 allowlist=${4:-} identity_mode=${5:-}
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
   VIEW_DIR="$CASE_DIR/view"
@@ -135,6 +141,7 @@ spawn_secondmate() {
   LAUNCH_LOG="$CASE_DIR/launch.log"
   FAKEBIN=$(fm_test_make_spawn_fakebin "$CASE_DIR/fake")
   install_view_fakes "$FAKEBIN" "$VIEW_DIR"
+  [ -z "$identity_mode" ] || : > "$VIEW_DIR/identity-$identity_mode"
   printf 'fm-%s\n' "$id" > "$VIEW_DIR/windows"
   fm_test_spawn_home "$HOME_DIR" codex
   fm_test_spawn_brief "$HOME_DIR" "$id"
@@ -197,6 +204,21 @@ test_unavailable_orca_steps_aside() {
   pass "Orca unavailable: the spawn goes on without a tab and clears any inherited Orca identity"
 }
 
+test_missing_identity_keeps_fresh_spawn_unbadged() {
+  local seen
+  spawn_secondmate missing-identity sm-missing on allowlist missing
+  expect_code 0 "$STATUS" "a missing Orca identity must not fail the secondmate spawn: $OUT"
+  assert_equals "" "$(meta sm-missing orca_view_handle)" "an unbadged tab is not recorded"
+  assert_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
+    "a tab without an identity is closed"
+  install_env_probe "$FAKEBIN"
+  seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$PANE_LOG")" "$(cat "$LAUNCH_LOG")") \
+    || fail "the launch after missing identity failed to run"
+  assert_equals "pane=unset token=unset" "$seen" \
+    "a fresh spawn clears unrelated inherited identity when tab identity never arrives"
+  pass "missing identity: the secondmate launches without recording or forwarding the new tab"
+}
+
 # --- relaunch ---------------------------------------------------------------
 # The lifecycle stub: the harness exit command leaves a bare shell, and a launch
 # literal starts the harness again.
@@ -255,7 +277,7 @@ SH
 # `untracked` the record names no tab, as for a secondmate launched before the
 # switch, whose hand-opened tab made the view session.
 relaunch_secondmate() {
-  local name=$1 id=$2 switch=$3 untracked=${4:-} sm
+  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} sm
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
   VIEW_DIR="$CASE_DIR/fake"
@@ -267,6 +289,7 @@ relaunch_secondmate() {
   [ "$switch" = absent ] || printf '%s\n' "$switch" > "$HOME_DIR/config/orca-view-tabs"
   make_relaunch_stub "$FAKEBIN"
   install_view_fakes "$FAKEBIN" "$VIEW_DIR"
+  [ -z "$identity_mode" ] || : > "$VIEW_DIR/identity-$identity_mode"
   make_secondmate_home "$sm" "$id"
   mkdir -p "$sm/state"
   : > "$VIEW_DIR/literal"
@@ -322,6 +345,27 @@ test_relaunch_replaces_the_tab() {
   pass "relaunch: opens a fresh tab, forwards its identity, then closes the previous tab and keeps the view session"
 }
 
+test_incomplete_identity_keeps_prior_tab() {
+  local seen launch
+  relaunch_secondmate relaunch-incomplete sm-incomplete on '' incomplete
+  expect_code 0 "$STATUS" "an incomplete identity must not fail relaunch: $OUT"
+  assert_equals term-0 "$(meta sm-incomplete orca_view_handle)" \
+    "the previous tab stays recorded when replacement identity is incomplete"
+  assert_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
+    "the unbadged replacement tab is closed"
+  assert_no_grep "terminal close --terminal term-0" "$VIEW_DIR/orca.log" \
+    "the previous tab remains open"
+  [ ! -s "$VIEW_DIR/killed" ] || fail "the prior tab's view session must remain"
+  install_env_probe "$FAKEBIN"
+  launch=$(grep -E 'encode launch-brief|Firstmate operational input waiting' "$VIEW_DIR/literal" | tail -1)
+  [ -n "$launch" ] || fail "the relaunch sent no replacement launch"
+  seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$VIEW_DIR/keys")" "$launch") \
+    || fail "the relaunch after incomplete identity failed to run"
+  assert_equals "pane=stale-tab:leaf token=stale-token" "$seen" \
+    "the relaunched agent keeps the previous tab's identity"
+  pass "incomplete identity: the old tab, record, and agent identity survive relaunch"
+}
+
 # A secondmate already running when the switch is turned on gets its identity at
 # its next relaunch. Its hand-opened tab is never closed, and the view session
 # that tab made is reused but never becomes this feature's to remove.
@@ -368,7 +412,9 @@ test_respawn_replaces_the_previous_tab() {
 test_switch_absent_changes_nothing
 test_switch_on_opens_and_forwards_identity
 test_unavailable_orca_steps_aside
+test_missing_identity_keeps_fresh_spawn_unbadged
 test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
+test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab

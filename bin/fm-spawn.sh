@@ -5351,6 +5351,7 @@ if [ "$KIND" = secondmate ] && [ "$BACKEND" = tmux ]; then
   ORCA_VIEW_ENABLED=$("$SCRIPT_DIR/fm-orca-view.sh" enabled "$CONFIG") || ORCA_VIEW_ENABLED=off
 fi
 ORCA_VIEW_IDENTITY_FILE=
+ORCA_VIEW_EXPORT=
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
   ORCA_VIEW_IDENTITY_FILE="$STATE/$ID.orca-view-identity"
   if ORCA_VIEW_OUT=$("$SCRIPT_DIR/fm-orca-view.sh" open --target "$T" --view-session "orca-$ID" \
@@ -5364,6 +5365,19 @@ if [ "$ORCA_VIEW_ENABLED" = on ]; then
     if [ "$ORCA_VIEW_OWNED" = 0 ] && [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] &&
       [ "$ORCA_VIEW_SESSION" = "$ORCA_VIEW_PRIOR_SESSION" ]; then
       ORCA_VIEW_OWNED=1
+    fi
+    if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE"); then
+      if [ "$ORCA_VIEW_CREATED" = 1 ]; then
+        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" || true
+      else
+        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
+      fi
+      ORCA_VIEW_HANDLE=
+      ORCA_VIEW_SESSION=
+      ORCA_VIEW_OWNED=
+      ORCA_VIEW_CREATED=0
+      ORCA_VIEW_ABORT_CLOSE=0
+      ORCA_VIEW_IDENTITY_FILE=
     fi
   else
     ORCA_VIEW_IDENTITY_FILE=
@@ -5792,10 +5806,6 @@ fi
 # unrelated tab; a relaunch that keeps its previous tab keeps the identity that
 # tab already gave the reused pane. A forwarded identity also clears any
 # inherited hook port and token, which Orca's hook reads from the endpoint file.
-ORCA_VIEW_EXPORT=
-if [ -n "$ORCA_VIEW_IDENTITY_FILE" ]; then
-  ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE") || ORCA_VIEW_EXPORT=
-fi
 ORCA_VIEW_ENV_NAMES=
 if [ -n "$ORCA_VIEW_EXPORT" ]; then
   spawn_send_text_line "$T" "unset ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"

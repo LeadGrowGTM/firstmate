@@ -118,7 +118,7 @@ cmd_enabled() {
     printf 'off\n'
     return 0
   fi
-  value=$(tr -d '[:space:]' <"$file" 2>/dev/null) || value='(unreadable)'
+  value=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$file" 2>/dev/null) || value='(unreadable)'
   case "$value" in
   on | off) printf '%s\n' "$value" ;;
   *)
@@ -256,14 +256,30 @@ cmd_command() {
   view_command "$IDFILE"
 }
 
-# open_failed <message>: remove a view session this call created, then step aside.
 open_failed() {
-  [ "$OWNED" != 1 ] || tmux kill-session -t "=$VIEW_SESSION" 2>/dev/null || true
+  local hook_line
+  if [ "$OWNED" = 1 ]; then
+    tmux kill-session -t "=$VIEW_SESSION" 2>/dev/null || true
+  else
+    tmux set-hook -u -t "=$VIEW_SESSION:" session-window-changed || true
+    if [ "$PRIOR_OPTION_SET" = 1 ]; then
+      tmux set-option -t "=$VIEW_SESSION:" @fm_view_window "$PRIOR_OPTION" || true
+    else
+      tmux set-option -u -t "=$VIEW_SESSION:" @fm_view_window || true
+    fi
+    tmux select-window -t "=$VIEW_SESSION:$PRIOR_WINDOW" 2>/dev/null || true
+    while IFS= read -r hook_line; do
+      [ -n "$hook_line" ] || continue
+      tmux set-hook -t "=$VIEW_SESSION:" "${hook_line%% *}" "${hook_line#* }" || true
+    done <<EOF
+$PRIOR_HOOK
+EOF
+  fi
   note "$1"
 }
 
 cmd_open() {
-  local cmd out handle
+  local cmd out handle PRIOR_OPTION_SET=0 PRIOR_OPTION='' PRIOR_HOOK='' PRIOR_WINDOW=''
   parse_view_args "$@"
   resolve_target "$TARGET"
   command -v jq >/dev/null 2>&1 || note "jq is not installed, so Orca's reply cannot be read"
@@ -274,6 +290,13 @@ cmd_open() {
     tmux new-session -d -t "$BASE_ID" -s "$VIEW_SESSION" ||
       note "tmux did not create view session $VIEW_SESSION"
     OWNED=1
+  else
+    PRIOR_WINDOW=$(tmux display-message -p -t "=$VIEW_SESSION:" '#{window_id}') ||
+      note "view session $VIEW_SESSION cannot report its selected window"
+    if PRIOR_OPTION=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_window 2>/dev/null); then
+      PRIOR_OPTION_SET=1
+    fi
+    PRIOR_HOOK=$(tmux show-options -H -t "=$VIEW_SESSION:" session-window-changed 2>/dev/null) || PRIOR_HOOK=''
   fi
   track_view || open_failed "view session $VIEW_SESSION cannot show window $WINDOW_ID of $BASE_SESSION"
   [ -z "$IDFILE" ] || rm -f "$IDFILE" "$IDFILE.tmp"
@@ -360,12 +383,12 @@ cmd_identity() {
     name=${line%%=*}
     value=${line#*=}
     case " $IDENTITY_NAMES " in *" $name "*) ;; *) continue ;; esac
-    case "$value" in *[[:cntrl:]]*) continue ;; esac
+    case "$value" in '' | *[[:cntrl:]]*) continue ;; esac
     out="$out $name=$(sh_quote "$value")"
     seen="$seen$name "
   done <"$file"
   rm -f "$file"
-  for name in ORCA_PANE_KEY ORCA_TAB_ID ORCA_AGENT_HOOK_ENDPOINT; do
+  for name in $IDENTITY_NAMES; do
     case "$seen" in *" $name "*) ;; *) note "the Orca view tab's identity has no $name" ;; esac
   done
   printf 'export%s\n' "$out"
