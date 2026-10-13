@@ -497,7 +497,13 @@ backlog_json() (  # [<backlog-path>] - defaults to this home's $BACKLOG
                    and (.pr_url | test("^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^[:space:]]*)?$"))))
       end;
     def captain_decision($lines):
-      [$lines[] | select(startswith("Captain options: ")) | ltrimstr("Captain options: ")] as $entries
+      ([$lines[] | select(test("^Resolution recorded by fm-(captain|decision)-hold\\.$"))] | length + 1) as $occurrence
+      | [$lines[] | capture("^Captain options for hold (?<n>[0-9]+): (?<v>.*)$")?
+          | select(.n == ($occurrence | tostring)) | .v] as $scoped
+      | (if ($scoped | length) > 0 then $scoped
+         elif $occurrence == 1 then
+           [$lines[] | select(startswith("Captain options: ")) | ltrimstr("Captain options: ")]
+         else [] end) as $entries
       | if ($entries | length) != 1 then null
         else (try ($entries[0] | fromjson) catch null) as $decision
         | if (try ($decision | valid_captain_decision) catch false) then $decision else null end
