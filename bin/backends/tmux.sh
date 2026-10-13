@@ -85,13 +85,14 @@ fm_backend_tmux_container_ensure() {
   fmt=$'#{session_name}\t#{session_grouped}\t#{session_group}'
   if [ -n "${TMUX:-}" ]; then
     if [ -n "${TMUX_PANE:-}" ]; then
-      info=$(tmux display-message -p -t "$TMUX_PANE" "$fmt")
+      info=$(tmux display-message -p -t "$TMUX_PANE" "$fmt") || return 1
     else
-      info=$(tmux display-message -p "$fmt")
+      info=$(tmux display-message -p "$fmt") || return 1
     fi
     IFS=$'\t' read -r ses grouped group <<EOF
 $info
 EOF
+    [ -n "$ses" ] || return 1
     if [ "$grouped" = 1 ] && [ -n "$group" ] && [ "$group" != "$ses" ] \
       && tmux has-session -t "=$group" 2>/dev/null; then
       ses=$group
@@ -100,7 +101,7 @@ EOF
   else
     if ! tmux has-session -t firstmate 2>/dev/null; then
       live=$(fm_wsl_live_interop) || live=
-      tmux new-session -d -s firstmate ${live:+-e} ${live:+"WSL_INTEROP=$live"}
+      tmux new-session -d -s firstmate ${live:+-e} ${live:+"WSL_INTEROP=$live"} || return 1
     fi
     printf 'firstmate'
   fi

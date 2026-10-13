@@ -29,10 +29,12 @@ wait_for_capture_text() {  # <target> <text> [samples]
 command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-backend-smoke-$$"
+OUTER_SOCKET=
 SHIM_DIR=
 trap cleanup_all EXIT
 
 cleanup_all() {
+  [ -z "$OUTER_SOCKET" ] || "$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${SHIM_DIR:-}" ] && rm -rf "$SHIM_DIR"
 }
@@ -197,7 +199,11 @@ got=$(TMUX=x TMUX_PANE="$SPAWNER_PANE" fm_backend_tmux_container_ensure) \
 got=$(TMUX=x TMUX_PANE='' fm_backend_tmux_container_ensure) \
   || fail "fm_backend_tmux_container_ensure failed without a pane"
 [ "$got" = base ] || fail "a grouped session without a pane must resolve to its base, got '$got'"
+got=$(TMUX='' TMUX_PANE='' fm_backend_tmux_container_ensure) \
+  || fail "fm_backend_tmux_container_ensure failed outside tmux"
+[ "$got" = firstmate ] || fail "outside tmux, the dedicated firstmate session was not selected"
 "$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
+OUTER_SOCKET=
 pass "real tmux: container_ensure records the base session while a grouped viewer is attached"
 
 # --- a new window carries a live WSL interop socket ---------------------------

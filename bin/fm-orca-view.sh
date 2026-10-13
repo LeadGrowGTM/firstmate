@@ -4,8 +4,8 @@
 # Usage:
 #   fm-orca-view.sh enabled <config-dir>
 #   fm-orca-view.sh command --target <session:window> --view-session <name> [--identity-file <path>]
-#   fm-orca-view.sh open --target <session:window> --view-session <name> [--title <text>] [--worktree <path>] [--identity-file <path>]
-#   fm-orca-view.sh window <@N> [--title <text>] [--worktree <path>]
+#   fm-orca-view.sh open --target <session:window> --view-session <name> [--title <text>] [--identity-file <path>]
+#   fm-orca-view.sh window <@N> [--title <text>]
 #   fm-orca-view.sh identity --file <path> [--wait <seconds>]
 #   fm-orca-view.sh close --handle <terminal-handle> [--view-session <name>]
 #   fm-orca-view.sh follow --view-session <name> [--socket <path>]
@@ -36,7 +36,7 @@
 #           which stalls Orca's Claude account machinery.
 # open      creates or reuses the view session, points it at the target window
 #           as described above, then creates the Orca terminal on the
-#           registered Orca worktree <path> (default: this Firstmate code root)
+#           registered Orca worktree for this Firstmate code root
 #           and prints handle=<terminal-handle>, view_session=<name>, and
 #           view_session_owned=1 when this call created the view session, 0
 #           when it reused one that already existed (for example a hand-opened
@@ -204,13 +204,12 @@ track_view() {
 }
 
 parse_view_args() {
-  TARGET='' VIEW_SESSION='' TITLE='' WORKTREE=$FM_ROOT IDFILE=''
+  TARGET='' VIEW_SESSION='' TITLE='' IDFILE=''
   while [ $# -gt 0 ]; do
     case "$1" in
     --target) TARGET=${2:-}; shift 2 || die_usage "--target needs a value" ;;
     --view-session) VIEW_SESSION=${2:-}; shift 2 || die_usage "--view-session needs a value" ;;
     --title) TITLE=${2:-}; shift 2 || die_usage "--title needs a value" ;;
-    --worktree) WORKTREE=${2:-}; shift 2 || die_usage "--worktree needs a value" ;;
     --identity-file) IDFILE=${2:-}; shift 2 || die_usage "--identity-file needs a value" ;;
     *) die_usage "unknown argument: $1" ;;
     esac
@@ -300,7 +299,7 @@ cmd_open() {
   fi
   track_view || open_failed "view session $VIEW_SESSION cannot show window $WINDOW_ID of $BASE_SESSION"
   [ -z "$IDFILE" ] || rm -f "$IDFILE" "$IDFILE.tmp"
-  set -- terminal create --worktree "path:$WORKTREE" --title "$TITLE" --command "$cmd" --json
+  set -- terminal create --worktree "path:$FM_ROOT" --title "$TITLE" --command "$cmd" --json
   ! on_wsl || set -- "$@" --shell wsl.exe
   out=$(orca_call "$@") || open_failed "Orca is unreachable or refused the view tab: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
   handle=$(printf '%s' "$out" | jq -r 'select(.ok == true) | .result.terminal.handle // empty' 2>/dev/null)
@@ -309,11 +308,10 @@ cmd_open() {
 }
 
 cmd_window() {
-  local id='' title='' worktree=$FM_ROOT inventory wid session name grouped group pick='' first=''
+  local id='' title='' inventory wid session name grouped group pick='' first=''
   while [ $# -gt 0 ]; do
     case "$1" in
     --title) title=${2:-}; shift 2 || die_usage "--title needs a value" ;;
-    --worktree) worktree=${2:-}; shift 2 || die_usage "--worktree needs a value" ;;
     -*) die_usage "unknown argument: $1" ;;
     *) [ -z "$id" ] || die_usage "window takes one window id"; id=$1; shift ;;
     esac
@@ -341,7 +339,7 @@ EOF
   [ -n "$pick" ] || { echo "error: tmux window $id does not exist on this tmux server" >&2; exit 1; }
   session=${pick%%$'\t'*}
   name=${pick#*$'\t'}
-  cmd_open --target "$session:$id" --view-session "orca-w${id#@}" --title "${title:-$session:$name}" --worktree "$worktree"
+  cmd_open --target "$session:$id" --view-session "orca-w${id#@}" --title "${title:-$session:$name}"
 }
 
 cmd_follow() {

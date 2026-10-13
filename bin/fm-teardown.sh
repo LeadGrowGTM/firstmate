@@ -3211,6 +3211,18 @@ endpoint_close_refusal() {  # <subject> <backend> <target> <honors-force>
   return 1
 }
 
+teardown_close_orca_view() {
+  local record=$1 handle
+  handle=$(meta_value "$record" orca_view_handle)
+  [ -n "$handle" ] || return 0
+  if [ "$(meta_value "$record" orca_view_owned)" = 1 ]; then
+    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$handle" \
+      --view-session "$(meta_value "$record" orca_view_session)" || true
+  else
+    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$handle" || true
+  fi
+}
+
 cleanup_firstmate_home_children() {
   local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_return_rc child_busy_gen child_owner_rc
   sub_state="$home/state"
@@ -3313,6 +3325,7 @@ cleanup_firstmate_home_children() {
     retire_busy_state "$sub_state" "$child_id" "$child_busy_gen" || return 1
     status_retire_presentation_task "$sub_state" "$child_id" || return 1
     fm_wake_queue_prune_task "$sub_state" "$child_id" "$child_t" 2>/dev/null || true
+    teardown_close_orca_view "$child_meta"
     fm_backlog_atomic_transition remove "$sub_state/$child_id.meta" "task record" "$sub_state" || return 1
     rm -f "$sub_state/$child_id.turn-ended" "$sub_state/$child_id.progress" \
       "$(fm_wake_signal_seen_path "$sub_state" "$sub_state/$child_id.turn-ended")" \
@@ -3705,15 +3718,7 @@ fi
 # The Orca view tab spawn opened for this task (config/orca-view-tabs), closed
 # by its recorded handle; its view session goes only when spawn created it.
 # Every Orca failure leaves a one-line note and the cleanup goes on.
-TEARDOWN_ORCA_VIEW_HANDLE=$(meta_value "$META" orca_view_handle)
-if [ -n "$TEARDOWN_ORCA_VIEW_HANDLE" ]; then
-  if [ "$(meta_value "$META" orca_view_owned)" = 1 ]; then
-    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$TEARDOWN_ORCA_VIEW_HANDLE" \
-      --view-session "$(meta_value "$META" orca_view_session)" || true
-  else
-    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$TEARDOWN_ORCA_VIEW_HANDLE" || true
-  fi
-fi
+teardown_close_orca_view "$META"
 if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   if [ "$(fm_backend_herdr_pane_agent_state "$HERDR_PRESENTATION_SESSION" "$HERDR_PRESENTATION_PANE")" = dead ]; then
     rm -f "$HERDR_PRESENTATION_JOURNAL"

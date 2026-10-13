@@ -172,6 +172,10 @@ test_command_never_names_claude() {
     "a missing window is refused"
   expect_code 2 "$(run_view command --target firstmate --view-session orca-dev >/dev/null 2>&1; echo $?)" \
     "a target without a window is invalid use"
+  expect_code 2 "$(run_view open --target firstmate:fm-dev --view-session orca-extra --worktree /other >/dev/null 2>&1; echo $?)" \
+    "open refuses a public worktree override"
+  expect_code 2 "$(run_view window "$DEV_ID" --worktree /other >/dev/null 2>&1; echo $?)" \
+    "window refuses a public worktree override"
   pass "command: attaches the view session without naming any window, so no launch line names claude"
 }
 
