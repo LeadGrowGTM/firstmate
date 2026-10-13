@@ -20,6 +20,10 @@ class CoverageError(Exception):
     pass
 
 
+class ForgeNotFound(CoverageError):
+    pass
+
+
 MAX_JSON_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 20
 
@@ -95,6 +99,8 @@ def api(path):
     command = ['bash', '-c', '. "$1"; fm_run_timed 10 gh-axi api GET "$2" --jq @base64 --full', '_', owner, path]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode:
+        if re.search(r'(?im)^.*\b(?:HTTP|status)\s*(?:code\s*)?[:=]?\s*404\b.*$|^\s*(?:error:\s*)?(?:404\s+)?Not Found\s*$', result.stderr):
+            raise ForgeNotFound('forge resource not found: ' + path)
         raise CoverageError('forge read failed (exit %s): %s' % (result.returncode, path))
     try:
         match = re.fullmatch(r'api_response:\s*\n  body: ([A-Za-z0-9+/=]+)\n  truncated: false\s*', result.stdout)
@@ -312,10 +318,10 @@ def merged_instruction(repo, entries, path, unavailable_ok=False):
         raise CoverageError('invalid merged PR instruction entry')
     try:
         return pr_instruction_blob(repo, entry.get('sha'))
-    except CoverageError as error:
-        if unavailable_ok and str(error).startswith(('forge read failed', 'inconsistent PR instruction blob')):
-            return {'availability': 'content unavailable'}
-        raise
+    except ForgeNotFound:
+        if not unavailable_ok:
+            raise
+        return {'availability': 'content unavailable'}
 
 
 def forge(source, previous, now, contributions):

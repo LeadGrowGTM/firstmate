@@ -67,6 +67,18 @@ case "$path" in
   *) exit 92 ;;
 esac
 [ ! -e "$FM_FAKE_FEED/fail" ] || { grep -Fqx "$path" "$FM_FAKE_FEED/fail" && exit 93 || :; }
+if [[ "$path" == /repos/*/git/blobs/* ]]; then
+  if [ -f "$file.failure" ]; then
+    case "$(cat "$file.failure")" in
+      timeout) printf 'request timed out\n' >&2; exit 124 ;;
+      server) printf 'HTTP 503: Service Unavailable\n' >&2; exit 1 ;;
+    esac
+  fi
+  if [ ! -f "$file" ]; then
+    printf 'HTTP 404: Not Found\n' >&2
+    exit 1
+  fi
+fi
 if [ -f "$file" ]; then
   body=$(base64 < "$file" | tr -d '\n')
 else
@@ -496,6 +508,36 @@ for head_case in fork deleted-fork; do
   assert_no_grep '/repos/contrib/widgets/' "$FEED/requests" "$head_case queried fork endpoint"
 done
 pass 'unavailable fork content is recorded without failed coverage'
+
+for head_case in fork deleted-fork; do
+  for read_failure in timeout server; do
+    new_home
+    config "$repo_sources"
+    pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+    if [ "$head_case" = fork ]; then
+      detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo.full_name = "contrib/widgets"' > "$FEED/detail-41.json"
+    else
+      detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
+    fi
+    merge_history 41
+    pr_file AGENTS.md modified | jq -s . > "$FEED/files-41-1.json"
+    tree_content "$PARENT_TREE" AGENTS.md '# Available before'
+    tree_content "$MERGE_TREE" AGENTS.md '# After read failure'
+    failed_blob="$FEED/blob-$(printf '%s' '# After read failure' | git hash-object --stdin).json"
+    printf '%s\n' "$read_failure" > "$failed_blob.failure"
+    collect "$HOME_DIR" "$NOW"
+    expect_code 2 "$STATUS" "$head_case $read_failure after-blob read"
+    bundle
+    jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("forge read failed")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail "$head_case $read_failure read claimed complete coverage"
+    jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$head_case $read_failure read advanced checkpoint"
+    rm "$failed_blob.failure"
+    collect "$HOME_DIR" "$NOW"
+    expect_code 0 "$STATUS" "$head_case $read_failure retry"
+    bundle
+    jq -e '.evidence[0].files[0].instruction.after.content == "# After read failure"' "$OUT" >/dev/null || fail "$head_case $read_failure retry lost content"
+  done
+done
+pass 'fork timeouts and server errors keep coverage incomplete until retry'
 
 new_home
 config "$repo_sources"
