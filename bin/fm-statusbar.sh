@@ -19,9 +19,15 @@
 #   fm-statusbar.sh sync
 #       Label every tmux window recorded in this home's state/*.meta, for
 #       windows spawned before the labels existed. Idempotent.
-#   fm-statusbar.sh apply <session>
+#   fm-statusbar.sh apply [--primary] <session>
 #       Turn the detail line on for windows in <session>. Grouped view sessions
-#       share those window options, including views created later.
+#       share those window options, including views created later. --primary
+#       also shows the fleet count (see fleet) at the left of the session bar.
+#   fm-statusbar.sh fleet [session]
+#       Print "crew N | 2nd M": live worker agents and live second mates
+#       recorded in this home's state/*.meta. A tmux task counts while its
+#       window exists; other backends count while their record exists.
+#       With a session, read its @fm_fleet_state instead of ambient state.
 #   fm-statusbar.sh usage <window>
 #       Print the cached plan-usage segment for one window,
 #       and refresh it from `quota-axi` in the background at most once a minute.
@@ -167,27 +173,82 @@ cmd_sync() {
 }
 
 cmd_apply() {
-  local ses=${1:-} fmt win group group_id sid member_group target_sid
-  [ "$#" -eq 1 ] && [ -n "$ses" ] || { echo 'usage: fm-statusbar.sh apply <session>' >&2; return 2; }
+  local ses fmt win group group_id sid member_group target_sid primary=0 left hook binding peer_binding sessions
+  if [ "${1:-}" = --primary ]; then primary=1; shift; fi
+  ses=${1:-}
+  [ "$#" -eq 1 ] && [ -n "$ses" ] || { echo 'usage: fm-statusbar.sh apply [--primary] <session>' >&2; return 2; }
   command -v tmux >/dev/null 2>&1 || return 0
+  group=$(tmux display-message -p -t "$ses" '#{session_group}' 2>/dev/null) || return 0
+  [ -n "$group" ] || group=$ses
+  target_sid=$(tmux display-message -p -t "$ses" '#{session_id}' 2>/dev/null) || return 0
+  sessions=$(tmux list-sessions -F '#{session_id} #{session_group}' 2>/dev/null) || return 0
+  binding=
+  while read -r sid member_group; do
+    [ "$sid" = "$target_sid" ] || [ "$member_group" = "$group" ] || continue
+    peer_binding=$(tmux show-options -qv -t "$sid" @fm_fleet_state 2>/dev/null) || peer_binding=
+    [ -n "$peer_binding" ] || continue
+    # The group owner is write-once, including claims through late views.
+    [ "$peer_binding" = "$STATE" ] || return 0
+    binding=$peer_binding
+  done <<<"$sessions"
+  if [ -n "$binding" ] || [ -e "$FM_HOME/.fm-secondmate-home" ]; then
+    primary=0
+  fi
   fmt=$(fm_sb_format)
   while IFS= read -r win; do
     [ -n "$win" ] || continue
     tmux set-window-option -t "$win" pane-border-status bottom 2>/dev/null || true
     tmux set-window-option -t "$win" pane-border-format "$fmt" 2>/dev/null || true
   done < <(tmux list-windows -t "$ses" -F '#{window_id}' 2>/dev/null)
-  group=$(tmux display-message -p -t "$ses" '#{session_group}' 2>/dev/null) || return 0
-  [ -n "$group" ] || group=$ses
-  target_sid=$(tmux display-message -p -t "$ses" '#{session_id}' 2>/dev/null) || return 0
+  left="[#S] #(bash \"$SELF\" --socket \"#{socket_path}\" fleet id:${target_sid#\$}) "
   while read -r sid member_group; do
     [ "$sid" = "$target_sid" ] || [ "$member_group" = "$group" ] || continue
     tmux set-option -t "$sid" status-right-length 200 2>/dev/null || true
     tmux set-option -t "$sid" status-right '#{E:pane-border-format}' 2>/dev/null || true
-  done < <(tmux list-sessions -F '#{session_id} #{session_group}' 2>/dev/null)
+    if [ "$primary" -eq 1 ]; then
+      tmux set-option -o -t "$sid" @fm_fleet_state "$STATE" 2>/dev/null || true
+      tmux set-option -t "$sid" status-left-length 40 2>/dev/null || true
+      tmux set-option -t "$sid" status-left "$left" 2>/dev/null || true
+    fi
+  done <<<"$sessions"
+  # An ordinary apply must retain the primary's fleet job and hook verbatim.
+  if [ "$primary" -eq 0 ] && [ -n "$binding" ]; then return 0; fi
   group_id=${target_sid#\$}
+  hook='set-option status-right-length 200; set-option status-right "#{E:pane-border-format}"'
+  if [ "$primary" -eq 1 ]; then
+    # Keep the original session's state binding in future grouped view jobs.
+    hook="$hook; set-option -o @fm_fleet_state \"${STATE//\"/\\\"}\"; set-option status-left-length 40; set-option status-left \"${left//\"/\\\"}\""
+  fi
+  # Quote the entire action for if-shell's outer tmux parser.
+  hook=${hook//\'/\'\\\'\'}
   tmux set-hook -g "after-new-session[$((10000 + group_id))]" \
-    "if-shell -F '#{==:#{session_group},$group}' 'set-option status-right-length 200; set-option status-right \"#{E:pane-border-format}\"'" 2>/dev/null || true
+    "if-shell -F '#{==:#{session_group},$group}' '$hook'" 2>/dev/null || true
   return 0
+}
+
+cmd_fleet() {
+  local meta backend win kind crew=0 second=0 live='' target=${1:-}
+  if [ -n "${1:-}" ]; then
+    case "$target" in id:*) target="\$${target#id:}" ;; esac
+    STATE=$(tmux show-options -qv -t "$target" @fm_fleet_state 2>/dev/null) || STATE=
+    [ -n "$STATE" ] || { printf 'crew ? | 2nd ?\n'; return 0; }
+  fi
+  live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
+  for meta in "$STATE"/*.meta; do
+    [ -f "$meta" ] || continue
+    backend=$(sed -n 's/^backend=//p' "$meta" | head -1)
+    win=$(sed -n 's/^window=//p' "$meta" | head -1)
+    kind=$(sed -n 's/^kind=//p' "$meta" | head -1)
+    [ -n "$win" ] || continue
+    case "$win" in
+      remote:*) ;;
+      *) case "${backend:-tmux}" in
+      tmux) printf '%s\n' "$live" | grep -qxF -- "$win" || continue ;;
+      esac ;;
+    esac
+    if [ "$kind" = secondmate ]; then second=$((second + 1)); else crew=$((crew + 1)); fi
+  done
+  printf 'crew %d | 2nd %d\n' "$crew" "$second"
 }
 
 fm_sb_mtime() {  # <file>
@@ -372,9 +433,10 @@ label) cmd_label "$@" ;;
 apply) cmd_apply "$@" ;;
 sync) cmd_sync ;;
 usage) cmd_usage "$@" ;;
+fleet) cmd_fleet "$@" ;;
 claude-line) cmd_claude_line "$@" ;;
 *)
-  echo "usage: fm-statusbar.sh label|sync|apply|usage|claude-line|theme|install|check|source-line" >&2
+  echo "usage: fm-statusbar.sh label|sync|apply|fleet|usage|claude-line|theme|install|check|source-line" >&2
   exit 2
   ;;
 esac
