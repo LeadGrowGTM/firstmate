@@ -32,6 +32,13 @@ if [ -n "${FM_TEST_TMUX_REAL:-}" ] && [ "$fm_test_current_tmux" != "$FM_TEST_TMU
 fi
 FM_TEST_TMUX_REAL=${FM_TEST_TMUX_REAL:-$fm_test_current_tmux}
 FM_TEST_TMUX_ROOT=$(mktemp -d /tmp/fmt.XXXXXX) || return 1
+if [ -n "${FM_TEST_TMUX_CHILD_REGISTRY:-}" ]; then
+  if [ ! -f "$FM_TEST_TMUX_CHILD_REGISTRY" ] ||
+    ! printf '%s\n' "$FM_TEST_TMUX_ROOT" >> "$FM_TEST_TMUX_CHILD_REGISTRY"; then
+    rm -rf "$FM_TEST_TMUX_ROOT"
+    return 1
+  fi
+fi
 chmod 700 "$FM_TEST_TMUX_ROOT" || return 1
 FM_TEST_TMUX_OWNER=$$
 mkdir -m 700 "$FM_TEST_TMUX_ROOT/bin" "$FM_TEST_TMUX_ROOT/s" || return 1
@@ -91,7 +98,7 @@ while [ "$#" -gt 0 ]; do
       value=$1
       ;;
     -L*|-S*) opt=${1:0:2}; value=${1:2} ;;
-    -f|-T) shift; [ "$#" -gt 0 ] || refuse 'missing option value'; shift; continue ;;
+    -f) shift; [ "$#" -gt 0 ] || refuse 'missing option value'; shift; continue ;;
     -*) refuse 'unsupported tmux global option' ;;
     *) break ;;
   esac

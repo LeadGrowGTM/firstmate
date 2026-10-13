@@ -368,6 +368,8 @@ test_tmux_isolation() (
     || fail 'recorded disposable socket did not answer'
   ( cd "$dir/recorded" && tmux -S dedicated.sock has-session -t disposable ) \
     || fail 'relative recorded disposable socket did not answer'
+  tmux -f /dev/null -S "$dir/recorded/dedicated.sock" has-session -t disposable \
+    || fail 'required config option refused a recorded socket'
   tmux -S "$dir/recorded/dedicated.sock" kill-server \
     || fail 'recorded disposable socket did not stop'
   recorder="$dir/recorder"
@@ -389,6 +391,7 @@ SH
     if tmux -vS"$sentinel" kill-server >/dev/null 2>&1; then exit 1; fi
     if tmux -vL default kill-server >/dev/null 2>&1; then exit 1; fi
     if tmux -vLdefault kill-server >/dev/null 2>&1; then exit 1; fi
+    if tmux -T test kill-server >/dev/null 2>&1; then exit 1; fi
     if TMUX_TMPDIR="$sentinel_dir" tmux -L operator list-sessions >/dev/null 2>&1; then exit 1; fi
     [ ! -e "$FM_TEST_CONTACT_LOG" ]
   ) || fail 'foreign socket refusal contacted the real tmux command'
@@ -482,6 +485,60 @@ SH
   pass 'signal cleanup stops recorded server before removing its lab'
 )
 
+test_timed_suite_reaps_child_tmux() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  local dir="$TMP_ROOT/tmux-runner-timeout" repo mode rc root server_pid i status
+  local -a jobs
+  repo="$dir/repo"
+  mkdir -p "$repo/bin" "$repo/tests"
+  cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" \
+    "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-path-lib.sh" "$repo/bin/"
+  cp "$ROOT/tests/lib.sh" "$ROOT/tests/git-config-helpers.sh" \
+    "$ROOT/tests/tmux-helpers.sh" "$repo/tests/"
+  cat > "$repo/tests/fm-test-run.test.sh" <<'SH'
+#!/usr/bin/env bash
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
+printf '%s\n' "$FM_TEST_TMUX_ROOT" > "$FM_TEST_CHILD_ROOT_FILE"
+tmux new-session -d -s disposable 'exec sleep 600' || exit 1
+tmux display-message -p '#{pid}' > "$FM_TEST_CHILD_SERVER_PID_FILE"
+trap '' TERM
+sleep 600
+SH
+  chmod +x "$repo/tests/fm-test-run.test.sh"
+  cleanup_timed_fixture() {
+    local file recorded
+    for file in "$dir"/root.*; do
+      [ -s "$file" ] || continue
+      recorded=$(cat "$file")
+      FM_TEST_TMUX_ROOT="$recorded" fm_test_tmux_cleanup
+    done
+  }
+  trap cleanup_timed_fixture EXIT
+  for mode in serial captured; do
+    if [ "$mode" = serial ]; then jobs=(--jobs 1); else jobs=(--jobs 2); fi
+    rc=0
+    ( cd "$repo" && FM_TEST_CHILD_ROOT_FILE="$dir/root.$mode" \
+      FM_TEST_CHILD_SERVER_PID_FILE="$dir/pid.$mode" \
+      bin/fm-test-run.sh "${jobs[@]}" --per-script-timeout-secs 2 \
+      tests/fm-test-run.test.sh ) > "$dir/$mode.out" 2>&1 || rc=$?
+    [ "$rc" -eq 1 ] || fail "$mode timed runner returned $rc: $(cat "$dir/$mode.out")"
+    assert_grep 'exit=124' "$dir/$mode.out" "$mode suite did not time out"
+    [ -s "$dir/root.$mode" ] && [ -s "$dir/pid.$mode" ] \
+      || fail "$mode suite did not start a named disposable server"
+    root=$(cat "$dir/root.$mode")
+    server_pid=$(cat "$dir/pid.$mode")
+    [ ! -e "$root" ] || fail "$mode runner left the child socket root"
+    for i in $(seq 1 50); do
+      status=$(ps -p "$server_pid" -o stat= 2>/dev/null || true)
+      status=${status//[[:space:]]/}
+      case "$status" in ''|Z*) break ;; esac
+      sleep 0.1
+    done
+    case "$status" in ''|Z*) ;; *) fail "$mode runner left the detached named server running" ;; esac
+  done
+  pass 'streamed and captured timeouts reap recorded child tmux servers'
+)
+
 test_standalone_afk_avoids_operator_socket() (
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
   if command -v herdr >/dev/null 2>&1; then
@@ -513,6 +570,7 @@ test_standalone_afk_avoids_operator_socket() (
 test_tmux_isolation || fail 'tmux fixture isolation'
 test_tmux_cleanup_after_trap_override || fail 'tmux fixture trap cleanup'
 test_tmux_signal_cleanup || fail 'tmux fixture signal cleanup'
+test_timed_suite_reaps_child_tmux || fail 'timed suite tmux cleanup'
 test_standalone_afk_avoids_operator_socket || fail 'standalone AFK fixture isolation'
 test_git_config_isolation || fail "Git fixture config isolation"
 test_agent_standin_survives_a_multicall_sleep || fail "agent stand-in multicall case"
