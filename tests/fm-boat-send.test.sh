@@ -69,6 +69,9 @@ cat > "$BIN/fm-brief.sh" <<'SH'
 #!/usr/bin/env bash
 set -eu
 printf 'brief %s\n' "$*" >> "$FIXTURES/calls"
+if [ -e "$FIXTURES/use-real-brief" ]; then
+  exec "$REAL_BRIEF" "$@"
+fi
 mkdir -p "$FM_HOME/data/$1"
 printf '## Intent\n{TASK}\n## Spec\n{FIRSTMATE_SPEC}\n' > "$FM_HOME/data/$1/brief.md"
 SH
@@ -141,7 +144,7 @@ run_entry() {
     FM_HOME="$home" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" \
     FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
     FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
-    BIN="$BIN" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
+    BIN="$BIN" REAL_BRIEF="$ROOT/bin/fm-brief.sh" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
     "$BIN/$entry" "$@" < "$FIXTURES/request.json" 2>&1)
   CODE=$?
 }
@@ -447,6 +450,7 @@ test_remote_cap_and_merge_authority() {
   assert_no_grep 'spawn ' "$FIXTURES/calls" 'existing task id launched again'
   new_case retry-prelaunch-failure
   seed_project firstmate
+  : > "$FIXTURES/use-real-brief"
   : > "$FIXTURES/spawn.fail"
   spawn_task
   expect_code 1 "$CODE" 'failed spawn'
@@ -456,6 +460,13 @@ test_remote_cap_and_merge_authority() {
   spawn_task
   expect_code 0 "$CODE" 'same task id retry after prelaunch failure'
   assert_grep 'Retried intent' "$REMOTE_HOME/data/task-one/brief.md" 'retry did not rewrite brief'
+  assert_no_grep 'Implement the requested fix' "$REMOTE_HOME/data/task-one/brief.md" 'retry kept stale intent'
+  : > "$FIXTURES/calls"
+  spawn_task
+  expect_code 1 "$CODE" 'spawn metadata refuses another retry'
+  assert_contains "$OUT" 'task id already exists' 'spawn metadata refusal explanation'
+  assert_no_grep 'brief ' "$FIXTURES/calls" 'recorded task regenerated its brief'
+  assert_grep 'Retried intent' "$REMOTE_HOME/data/task-one/brief.md" 'recorded task changed its brief'
   new_case postlaunch-failure
   seed_project firstmate
   : > "$FIXTURES/spawn.postlaunch.fail"
