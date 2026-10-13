@@ -189,16 +189,27 @@ test_flagged_tracked_edits_kept() {
   pass 'sweep refuses copies with assume-unchanged or skip-worktree paths'
 }
 
+# Spawn writes Claude wiring with or without its statusLine fallback.
+render_claude_wiring() {  # <claude|claude-statusline> <state-real> <statusline-cmd>
+  if [ "$1" = claude-statusline ]; then
+    fm_control_render_claude_settings "$ROOT" "$2" task sweep-generation 1 "$3"
+  else
+    fm_control_render_claude_settings "$ROOT" "$2" task sweep-generation 1
+  fi
+}
+
 test_generated_wiring_exact_and_edited() {
-  local harness home out path state_real
-  for harness in claude opencode; do
+  local harness home out path state_real statusline
+  statusline="'$ROOT/bin/fm-statusbar.sh' claude-line --task 'task'"
+  assert_contains "$(render_claude_wiring claude-statusline /state "$statusline")" '"statusLine":' 'statusLine variant differs'
+  for harness in claude claude-statusline opencode; do
     home=$(make_home "$harness-exact"); add_worker "$home"
     printf 'busy_gen=sweep-generation\n' >> "$home/state/task.meta"
     state_real=$(cd "$home/state" && pwd -P)
-    if [ "$harness" = claude ]; then
+    if [ "$harness" != opencode ]; then
       path=.claude/settings.local.json
       mkdir -p "$home/worker/.claude"
-      fm_control_render_claude_settings "$ROOT" "$state_real" task sweep-generation 1 > "$home/worker/$path"
+      render_claude_wiring "$harness" "$state_real" "$statusline" > "$home/worker/$path"
     else
       path=.opencode/plugins/fm-busy-state.js
       mkdir -p "$home/worker/.opencode/plugins"
@@ -213,9 +224,9 @@ test_generated_wiring_exact_and_edited() {
     home=$(make_home "$harness-edited"); add_worker "$home"
     printf 'busy_gen=sweep-generation\n' >> "$home/state/task.meta"
     state_real=$(cd "$home/state" && pwd -P)
-    if [ "$harness" = claude ]; then
+    if [ "$harness" != opencode ]; then
       mkdir -p "$home/worker/.claude"
-      fm_control_render_claude_settings "$ROOT" "$state_real" task sweep-generation 1 > "$home/worker/$path"
+      render_claude_wiring "$harness" "$state_real" "$statusline" > "$home/worker/$path"
     else
       mkdir -p "$home/worker/.opencode/plugins"
       fm_control_render_opencode_plugin "$ROOT" "$state_real" task sweep-generation true > "$home/worker/$path"
@@ -227,7 +238,7 @@ test_generated_wiring_exact_and_edited() {
     assert_present "$home/state/task.meta" "$harness edited wiring record kept"
     assert_grep 'operator edit' "$home/worker/$path" "$harness edited wiring kept"
   done
-  pass 'sweep removes exact Claude and OpenCode wiring and keeps edits'
+  pass 'sweep removes exact Claude (with or without statusLine) and OpenCode wiring and keeps edits'
 }
 
 test_missing_copy_remote_branch_kept_until_merged() {

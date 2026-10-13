@@ -2013,10 +2013,14 @@ validate_worktree_teardown_safety() {
         '?? .fm-grok-turnend'|'!! .fm-grok-turnend') suffix=grok ; pointer=.fm-grok-turnend ;;
         '?? .fm-kimi-turnend'|'!! .fm-kimi-turnend') suffix=kimi ; pointer=.fm-kimi-turnend ;;
         '?? .claude/settings.local.json'|'!! .claude/settings.local.json')
+          # Spawn adds the statusLine only when no account or project one exists.
           if [ -n "$BUSY_GEN" ] \
             && [ -f "$WT/.claude/settings.local.json" ] && [ ! -L "$WT/.claude/settings.local.json" ] \
-            && cmp -s "$WT/.claude/settings.local.json" \
-              <(fm_control_render_claude_settings "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" 1); then
+            && { cmp -s "$WT/.claude/settings.local.json" \
+                <(fm_control_render_claude_settings "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" 1) \
+              || cmp -s "$WT/.claude/settings.local.json" \
+                <(fm_control_render_claude_settings "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" 1 \
+                  "$(fm_control_wiring_shell_quote "$SCRIPT_DIR/fm-statusbar.sh") claude-line --task $(fm_control_wiring_shell_quote "$ID")"); }; then
             continue
           fi
           dirty="${dirty:+$dirty$'\n'}$line"
