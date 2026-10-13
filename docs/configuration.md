@@ -1741,6 +1741,64 @@ Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
 - Each Boat call is bounded to 9 seconds so the three together fit inside `FM_CHECK_TIMEOUT`.
 - Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and both records.
 
+## Idle session exit
+
+A worker that reported done, or that is parked on a decision, keeps its agent session and that session's MCP children alive until someone exits it, although the work already sits in its worktree, branch, report, and pipeline run.
+[`bin/fm-idle-exit.sh`](../bin/fm-idle-exit.sh) ends those sessions and keeps everything else.
+It is off until armed.
+
+**What it does**
+
+- It reads each direct ship or scout task in this home, never a secondmate and never a remotely placed task.
+- A task's activity is the newest mtime of its status, turn-ended, and meta files and its inbox.
+- A task that `bin/fm-crew-state.sh` reads as `done` is exited after `FM_IDLE_EXIT_DONE_SECS` (default 600) idle seconds, and one read as `parked` after `FM_IDLE_EXIT_PARKED_SECS` (default 3600).
+- Every other state (working, paused, blocked, failed, unknown) is left alone.
+- The exit is `bin/fm-control.sh <id> exit --only-if-idle`, so a turn that is not idle at the exit point is refused with exit 3 and left running, and the endpoint, worktree, and every uncommitted change are kept.
+- It never tears down, discards, relaunches, or removes a worktree.
+- At most one agent is exited per run, which keeps the run inside `FM_CHECK_TIMEOUT`; the next poll takes the next candidate.
+- A handled task is recorded in `state/.idle-exit/<id>` against its activity stamp and is not probed again until it shows new activity; a record whose task record is gone is pruned.
+
+An exited worker stays supervised.
+A steer sent to it with `bin/fm-send.sh` is recorded durably, and the usual [relaunch](agent-control.md) resumes it when an answer arrives.
+
+**Report line**
+
+The check prints `idle-exit: exited <id> (<state>, idle <n>m); endpoint, worktree, and work kept` when it stopped an agent, `idle-exit: exit of <id> ... failed: <reason>` once per activity stamp when an exit could not be proven, and nothing otherwise.
+
+**Arm and disarm**
+
+Arm it once per home with `bin/fm-idle-exit.sh arm`.
+That writes `state/idle-exit.check.sh` and binds its bytes with `bin/fm-check-register.sh`, so the watcher runs it on its `FM_CHECK_INTERVAL` cadence.
+`bin/fm-idle-exit.sh disarm` removes the shim, its trust binding, and the records.
+
+## Clutter check
+
+[`bin/fm-clutter-check.sh`](../bin/fm-clutter-check.sh) is a daily read-only check for machine-wide clutter that slows the whole fleet.
+It never kills, deletes, or moves anything; it reports and a person acts.
+Because it reads the whole machine, `arm` refuses in a secondmate home, and it is armed in the root home only.
+
+**What is reported**
+
+The check prints one `clutter:` line, joining every condition past its threshold, and prints nothing otherwise.
+
+- Orphaned helpers: a `gemini -y hello`, `chrome-devtools-mcp`, headless Chrome, or `lavish-axi` process older than `FM_CLUTTER_ORPHAN_SECS` (default 3600) whose parent is PID 1 or a `systemd --user` subreaper, which is where an exited session's children land.
+- No-mistakes pipeline copies under `FM_CLUTTER_WORKTREES_ROOT` (default `~/.no-mistakes/worktrees`) totalling more than `FM_CLUTTER_WORKTREES_MB` (default 20480), or a single copy over `FM_CLUTTER_COPY_MB` (default 3072).
+- The Linux root filesystem with more than `FM_CLUTTER_ROOT_USED_MB` (default 153600) in use.
+- `/mnt/c` with less than `FM_CLUTTER_WINDOWS_FREE_PCT` (default 10) percent free.
+- A measurement that could not finish, because a check that cannot see is not quiet.
+
+**Cadence**
+
+- An evaluation is due 24 hours after the last one; polls inside that day stay silent, and a condition that persists is reported again at each due evaluation.
+- Sizing every pipeline copy at once can outlast `FM_CHECK_TIMEOUT`, so each copy's size is cached in `state/.clutter-check/sizes` and a poll sizes the copies not yet measured within a budget of `FM_CLUTTER_MEASURE_BUDGET_SECS` (default 18, at most 20) seconds.
+- A due evaluation waits until every copy has a size from since it fell due, and a copy that outlasts the whole budget is reported as a read failure rather than blocking every poll.
+- Each `df` is bounded to 5 seconds.
+
+**Arm and disarm**
+
+Arm it in the root home with `bin/fm-clutter-check.sh arm`, which writes `state/clutter.check.sh` and binds its bytes with `bin/fm-check-register.sh`.
+`bin/fm-clutter-check.sh disarm` removes the shim, its trust binding, and the records.
+
 ## Mail plane (.env)
 
 The mail plane (bin/fm-mail.sh) reads unseen IMAP messages and sends one SMTP message.

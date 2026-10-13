@@ -449,14 +449,21 @@ test_only_if_idle_refuses_instead_of_interrupting() {
     "a refused relaunch must restore the instructions"
 
   out=$(run_control "$dir" rl45 exit --only-if-idle); rc=$?
-  expect_code 1 "$rc" "--only-if-idle applies to relaunch only"$'\n'"$out"
+  expect_code 3 "$rc" "exit --only-if-idle must refuse a busy agent with the distinct status"$'\n'"$out"
+  assert_contains "$out" "--only-if-idle refuses to interrupt it" "the exit refusal should name the option"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "a refused exit must leave the agent running"
+  assert_no_grep "/exit" "$dir/fake/literal" "a refused exit must not type the exit command"
+  assert_equals "" "$(cat "$dir/fake/keys")" "a refused exit must not deliver an interrupt"
+  out=$(run_control "$dir" rl45 interrupt --only-if-idle); rc=$?
+  expect_code 1 "$rc" "--only-if-idle does not apply to interrupt"$'\n'"$out"
+  assert_contains "$out" "applies to 'exit' and 'relaunch' only" "the refusal should scope the option"
 
   "$ROOT/bin/fm-busy-event.sh" arm "$dir/home/state" rl45 \
     --state idle --source claude-hook --event Stop >/dev/null
   out=$(run_control "$dir" rl45 relaunch --only-if-idle --note "nightly"); rc=$?
   expect_code 0 "$rc" "an idle agent relaunches with --only-if-idle"$'\n'"$out"
   assert_contains "$out" "relaunched rl45" "the idle relaunch should complete"
-  pass "fm-control relaunch: --only-if-idle refuses a non-idle agent instead of interrupting it"
+  pass "fm-control relaunch and exit: --only-if-idle refuses a non-idle agent instead of interrupting it"
 }
 
 test_relaunch_from_linked_home_preserves_recorded_worktree() {

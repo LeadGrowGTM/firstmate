@@ -3,7 +3,7 @@
 # lifecycle verbs addressed to an exact task id.
 #
 # Usage: fm-control.sh <task-id> interrupt
-#        fm-control.sh <task-id> exit
+#        fm-control.sh <task-id> exit [--only-if-idle]
 #        fm-control.sh <task-id> relaunch [--harness <name>] [--model <name>]
 #                                         [--effort <level>] [--only-if-idle]
 #                                         (--note <text> | --note-file <path>)
@@ -51,6 +51,11 @@
 #              endpoint, so this verb cannot tell a destroyed window from one on
 #              a tmux server it cannot address, and it will not claim a stop it
 #              cannot see.
+#              --only-if-idle refuses instead of interrupting, exactly as for
+#              relaunch below: unless the semantic busy-state verdict reads
+#              exactly idle, the agent is left running and the command exits
+#              3, so a scheduled caller (bin/fm-idle-exit.sh) never cuts off a
+#              turn that started after its own state read.
 #   relaunch   Transactionally replace the running agent with a new one, in the
 #              SAME worktree - and the same endpoint whenever that endpoint
 #              still exists - on the same or a newly chosen
@@ -309,8 +314,9 @@ fi
 
 if [ "$VERB" != relaunch ]; then
   [ "$HARNESS_SET" = 0 ] && [ "$MODEL_SET" = 0 ] && [ "$EFFORT_SET" = 0 ] && [ "$NOTE_SET" = 0 ] \
-    && [ "$ONLY_IF_IDLE" = 0 ] \
-    || die "--harness, --model, --effort, --note, and --only-if-idle apply to 'relaunch' only"
+    || die "--harness, --model, --effort, and --note apply to 'relaunch' only"
+  [ "$ONLY_IF_IDLE" = 0 ] || [ "$VERB" = exit ] \
+    || die "--only-if-idle applies to 'exit' and 'relaunch' only"
 fi
 [ "$HARNESS_SET" = 0 ] || [ -n "$NEW_HARNESS" ] || die "--harness requires a non-empty value"
 [ "$MODEL_SET" = 0 ] || [ -n "$NEW_MODEL" ] || die "--model requires a non-empty value"
