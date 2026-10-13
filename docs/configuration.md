@@ -1227,16 +1227,16 @@ max_trees = 2
 
 | Repository | `max_trees` | Where it is set |
 | --- | --- | --- |
-| Firstmate | 10 | The [`treehouse.toml`](../treehouse.toml) committed at the root of this repository |
+| Firstmate | 16 | The [`treehouse.toml`](../treehouse.toml) committed at the root of this repository |
 | `gtm-orchestrator` | 2 | Recommended; set in that repository |
 | Client repositories | 1 | Recommended; set in each client repository |
 
 `treehouse.toml` is a file in each project repository, so setting a cap is that project's own change, delivered the way that project delivers any other change.
 Firstmate writes it into no other repository.
 
-This repository's `treehouse.toml` holds only `max_trees = 10`, and changing the cap is a one-line change to that file.
+This repository's `treehouse.toml` holds only `max_trees = 16`, and changing the cap is a one-line change to that file.
 The Firstmate pool also holds the leased copies behind local secondmate homes, and each of them counts against the cap.
-The cap is 10 because the peak number of simultaneous Firstmate copies on the owner's machine was 8.
+The cap is 16 to match how the pool actually runs.
 Once a repository has its own `treehouse.toml`, treehouse takes `max_trees` and `root` for that repository from it and no longer from `~/.config/treehouse/config.toml`.
 A user who set a user-level `root` must therefore expect this repository's pool to use the default root.
 User-level hooks still apply to the default pool.
