@@ -198,7 +198,7 @@ fm_worker_account_check() {
   pi | pi-signed)
     clean+=("PI_CODING_AGENT_DIR=$root")
     if out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
-      "$executable" auth check --provider "$provider" --json --no-refresh 2>/dev/null </dev/null); then
+      "$executable" auth check --provider "$provider" --json --no-refresh 2>&1 </dev/null); then
       check_status=0
     else
       check_status=$?
@@ -208,12 +208,15 @@ fm_worker_account_check() {
       return 2
     fi
     verdict=$(printf '%s\n' "$out" | jq -r '
-      if type != "object" or (has("status") | not) then "list"
+      if type != "object" or (has("status") | not) then "inconclusive"
       elif .status == "ready" then "ready"
       elif .status == "not_ready" and .reason == "provider_not_found" then "list"
       else "\(.status) \(.reason // "")"
-      end' 2>/dev/null)
-    case "${verdict:-list}" in
+      end' 2>/dev/null) || verdict=inconclusive
+    if [ "$check_status" -eq 1 ] && [ "$out" = 'Unknown command: auth' ]; then
+      verdict=list
+    fi
+    case "$verdict" in
     ready)
       if [ "$check_status" -eq 0 ]; then
         return 0
@@ -221,12 +224,7 @@ fm_worker_account_check() {
       echo "error: config/pi-account sign-in check was inconclusive for provider '$provider' (auth check exited $check_status)" >&2
       return 2
       ;;
-    'not_ready credentials_not_configured')
-      if [ "$check_status" -ne 0 ] && [ "$check_status" -ne 1 ]; then
-        echo "error: config/pi-account sign-in check was inconclusive for provider '$provider' (auth check exited $check_status)" >&2
-        return 2
-      fi
-      ;;
+    'not_ready credentials_not_configured') ;;
     list)
       if out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
         "$executable" --list-models "$provider" 2>/dev/null </dev/null); then

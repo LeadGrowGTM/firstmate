@@ -246,6 +246,34 @@ SH
   jq -e '.outcome == "uncertain" and .reason == "selected-account-check-inconclusive"' "$receipt" >/dev/null \
     || fail "a timed-out Pi auth check must block reselection"
   assert_absent "$HOME_DIR/state/acct-pi-timeout.meta" "a timed-out Pi check must not publish a worker"
+
+  local mode
+  for mode in empty malformed; do
+    new_case "pi-$mode" pi
+    mkdir -p "$CASE/pi-work"
+    printf '%s\nopenai-codex\n' "$CASE/pi-work" > "$HOME_DIR/config/pi-account"
+    printf '%s\n' "$mode" > "$CASE/pi-work/probe-mode"
+    cat > "$FAKEBIN/pi" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --help) exit 0 ;;
+  auth)
+    case "$(cat "$PI_CODING_AGENT_DIR/probe-mode")" in
+      empty) exit 1 ;;
+      malformed) printf '{invalid\n'; exit 0 ;;
+    esac ;;
+  --list-models) printf 'provider  model  context\nopenai-codex  gpt-6  128K\n'; exit 0 ;;
+esac
+exit 0
+SH
+    chmod +x "$FAKEBIN/pi"
+    receipt="$HOME_DIR/state/$mode.json"
+    out=$(FM_SPAWN_OUTCOME_FILE="$receipt" spawn_ship "acct-pi-$mode" --model openai-codex/gpt-6); rc=$?
+    expect_code 1 "$rc" "a $mode Pi auth response must refuse despite a model listing"
+    jq -e '.outcome == "uncertain" and .reason == "selected-account-check-inconclusive"' "$receipt" >/dev/null \
+      || fail "a $mode Pi auth response must block reselection"
+    assert_absent "$HOME_DIR/state/acct-pi-$mode.meta" "a $mode Pi auth response must not publish a worker"
+  done
   pass "account receipts distinguish proven unavailability from inconclusive Claude and Pi probes"
 }
 
