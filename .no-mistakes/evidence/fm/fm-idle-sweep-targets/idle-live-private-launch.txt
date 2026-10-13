@@ -1,0 +1,33 @@
+sweep exit: 0sweep output:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/data/red/launch-brief.md records no ship branch; defaulting to legacy branch fm/red
+spawned red harness=codex kind=ship mode=local-only yolo=off window=primary:fm-red worktree=/home/mitch/.treehouse/example-cc3ceb/1/example
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/data/ordinary/launch-brief.md records no ship branch; defaulting to legacy branch fm/ordinary
+spawned ordinary harness=codex kind=ship mode=local-only yolo=off window=primary:fm-ordinary worktree=/home/mitch/.treehouse/example-cc3ceb/2/example
+working [at=1791907878]: idle sweep started red ordinary
+status:
+working [at=1791907878]: idle sweep started red ordinary
+red metadata:
+window=primary:fm-red
+worktree=/home/mitch/.treehouse/example-cc3ceb/1/example
+harness=codex
+kind=ship
+mode=local-only
+model=gpt-6.1-sol
+worktree inside lab: no
+ordinary metadata:
+window=primary:fm-ordinary
+worktree=/home/mitch/.treehouse/example-cc3ceb/2/example
+harness=codex
+kind=ship
+mode=local-only
+model=gpt-6.1-sol
+worktree inside lab: no

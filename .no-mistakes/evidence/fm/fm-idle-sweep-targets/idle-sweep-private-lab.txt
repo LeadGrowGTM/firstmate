@@ -1,0 +1,129 @@
+Private tmux driver transcript:
+bash-5.2$ printf "TMUX=%s\nquota_cli=%s\n" "$TMUX" "$(command -v quota-axi)"; cat "$FM_HOME/config/lab-quota-percent"
+TMUX=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/tmux/tmux-1000/fm-lab,3074090,0
+quota_cli=/home/mitch/.local/bin/quota-axi
+80
+bash-5.2$ export PATH="$FM_HOME/fakebin:$PATH"; command -v quota-axi; quota-axi --provider codex --json --no-credential-
+refresh | jq -c .providers[0].quotaSemantics
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/fakebin/quota-axi
+{"status":"known","effectiveAvailability":[{"scope":"all_models","status":"known","effectivePercentRemaining":80,"runway
+":{"status":"through_reset"}}]}
+bash-5.2$ bash bin/fm-targets.sh --json | jq -c "{repos,targets}"; bash bin/fm-idle-sweep.sh; printf "sweep_rc=%s\n" "$?
+"; cat "$FM_HOME/state/idle-sweep.status"
+{"repos":[{"project":"example","repo":"example/repo","open_prs":7,"red_default_branches":1}],"targets":[{"id":"red_defau
+lt_branches","current":1,"limit":0,"gap":1},{"id":"open_prs","current":7,"limit":4,"gap":3},{"id":"stale_backlog","curre
+nt":null,"limit":0,"gap":null}]}
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M
+4TWCREY6FHCJQV56AF2M2BP/.m
+spawned labred harness=codex kind=ship mode=local-only yolo=off window=primary:fm-labred worktree=/home/mitch/.no-mistak
+es/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example/.treehouse/example-12297c/1/example
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M
+4TWCREY6FHCJQV56AF2M2BP/.m
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+spawned labordinary harness=codex kind=ship mode=local-only yolo=off window=primary:fm-labordinary worktree=/home/mitch/
+.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example/.treehouse/example-12297c/2/example
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M
+4TWCREY6FHCJQV56AF2M2BP/.m
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episod
+e.
+spawned labextra harness=codex kind=ship mode=local-only yolo=off window=primary:fm-labextra worktree=/home/mitch/.no-mi
+stakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example/.treehouse/example-12297c/3/example
+working [at=1791909330]: idle sweep started labred labordinary labextra
+sweep_rc=0
+working [at=1791909330]: idle sweep started labred labordinary labextra
+bash-5.2$ bash bin/fm-idle-sweep.sh; printf "second_sweep_rc=%s meta_count=%s\n" "$?" "$(ls "$FM_HOME/state"/*.meta | wc
+ -l)"
+second_sweep_rc=0 meta_count=3
+bash-5.2$
+
+Private tmux windows:
+node
+driver
+fm-labred
+fm-labordinary
+fm-labextra
+
+Spawn metadata:
+id=labextra.meta
+window=primary:fm-labextra
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example/.treehouse/example-12297c/3/example
+harness=codex
+mode=local-only
+yolo=off
+model=gpt-6.1-sol
+id=labordinary.meta
+window=primary:fm-labordinary
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example/.treehouse/example-12297c/2/example
+harness=codex
+mode=local-only
+yolo=off
+model=gpt-6.1-sol
+id=labred.meta
+window=primary:fm-labred
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example/.treehouse/example-12297c/1/example
+harness=codex
+mode=local-only
+yolo=off
+model=gpt-6.1-sol
+
+Backlog remaining:
+task:
+  id: labextra2
+  title: Disposable labextra2
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: example
+  priority: "-"
+  created: 2026-10-13
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+task:
+  id: labheld
+  title: Disposable labheld
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: operator held
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: example
+  priority: "-"
+  created: 2026-10-13
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+
+Worker TUI readiness:
+
+  Folder access
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example/.treehouse/example-12
+  297c/1/example
+
+  Note: You’re in a subdirectory of a Git project. Trusting will apply to the repository root:
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.m/projects/example
+
+  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder settings
+  can run code automatically, even without a model request. Continue only if you trust these files. Your trust
+  decision will be saved.
+
+› 1. Trust and continue
+  2. Quit
+
+  enter continue · esc quit

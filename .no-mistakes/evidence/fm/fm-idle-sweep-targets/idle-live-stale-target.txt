@@ -1,0 +1,8 @@
+BEFORE FIRST HEARTBEAT:
+{"id":"stale_backlog","current":null,"limit":0,"gap":null}
+HEARTBEAT AT ZERO QUOTA:
+{"id":"stale_backlog","current":0,"limit":0,"gap":0}
+AFTER 15 DAYS UNCHANGED:
+{"id":"stale_backlog","current":1,"limit":0,"gap":1}
+AFTER BACKLOG ROW CHANGES:
+{"id":"stale_backlog","current":null,"limit":0,"gap":null}

@@ -1,0 +1,10 @@
+SCENARIO: target projection before observations
+{"targets":[{"id":"red_default_branches","current":1,"limit":0,"gap":1},{"id":"open_prs","current":7,"limit":4,"gap":3},{"id":"stale_backlog","current":null,"limit":0,"gap":null}],"repos":[{"project":"example","repo":"example/repo","open_prs":7,"red_default_branches":1}]}
+SCENARIO: disabled home
+observations=absent metadata=0
+SCENARIO: another task is in flight
+metadata=0 status=absent
+SCENARIO: Codex availability at the floor
+metadata=0 status=absent
+SCENARIO: observed target projection
+{"targets":[{"id":"red_default_branches","current":1,"limit":0,"gap":1},{"id":"open_prs","current":7,"limit":4,"gap":3},{"id":"stale_backlog","current":0,"limit":0,"gap":0}],"repos":[{"project":"example","repo":"example/repo","open_prs":7,"red_default_branches":1}]}

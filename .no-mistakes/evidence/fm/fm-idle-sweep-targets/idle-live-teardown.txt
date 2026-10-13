@@ -1,0 +1,36 @@
+TEARDOWN red
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for red: 3317269 3318123 3318145
+teardown: force-killing leaked worktree process(es) for red: 3317269
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+teardown red complete (window primary:fm-red, worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/projects/example/.treehouse/example-a417d9/1/example)
+Backlog: red is closed in /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+exit=0
+TEARDOWN ordinary
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for ordinary: 3319432 3320513 3320531 3335005
+teardown: force-killing leaked worktree process(es) for ordinary: 3319432
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+teardown ordinary complete (window primary:fm-ordinary, worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/projects/example/.treehouse/example-a417d9/2/example)
+Backlog: ordinary is closed in /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+exit=0
+TEARDOWN extra
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+teardown: reaping leaked worktree process(es) for extra: 3321697 3322851 3322880 3336620
+teardown: force-killing leaked worktree process(es) for extra: 3321697
+A new version of treehouse is available: v2.1.1 → v3.1.2
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+teardown extra complete (window primary:fm-extra, worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/projects/example/.treehouse/example-a417d9/3/example)
+Backlog: extra is closed in /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+exit=0

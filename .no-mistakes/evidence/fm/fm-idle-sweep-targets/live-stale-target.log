@@ -1,0 +1,4 @@
+Before first heartbeat: {"id": "stale_backlog", "current": null, "limit": 0, "gap": null}
+After observation: {"id": "stale_backlog", "current": 0, "limit": 0, "gap": 0}
+With 15-day unchanged ledger fixture: {"id": "stale_backlog", "current": 1, "limit": 0, "gap": 1}
+After backlog edit: {"id": "stale_backlog", "current": null, "limit": 0, "gap": null}

@@ -1,0 +1,42 @@
+bash-5.2$ FM_POLL=1 FM_HEARTBEAT=1 FM_CHECK_INTERVAL=999999 FM_SIGNAL_GRACE=1 timeout 15 bash bin/fm-watch.sh; printf "w
+atch_rc=%s\n" "$?"
+fm-idle-sweep: invalid configuration
+check: idle-sweep
+watch_rc=0
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Wake queue:

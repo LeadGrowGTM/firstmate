@@ -1,0 +1,4 @@
+Quota exactly 15 percent: exit=0, worker metadata absent=true, dispatch status absent=true
+Stale quota at 80 percent: exit=0, worker metadata absent=true, dispatch status absent=true
+Unmatched Codex account at 80 percent: exit=0, worker metadata absent=true, dispatch status absent=true
+Dangling idle-sweep configuration: exit=2, worker metadata absent=true, dispatch status absent=true

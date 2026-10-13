@@ -1,0 +1,27 @@
+{
+  "schema": "fm-targets.v1",
+  "repos": [],
+  "stale_ids": [
+    "labstale"
+  ],
+  "targets": [
+    {
+      "id": "red_default_branches",
+      "current": 0,
+      "limit": 0,
+      "gap": 0
+    },
+    {
+      "id": "open_prs",
+      "current": 0,
+      "limit": 4,
+      "gap": 0
+    },
+    {
+      "id": "stale_backlog",
+      "current": 1,
+      "limit": 0,
+      "gap": 1
+    }
+  ]
+}

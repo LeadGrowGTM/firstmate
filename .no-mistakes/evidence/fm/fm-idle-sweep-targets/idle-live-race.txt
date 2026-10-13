@@ -1,0 +1,16 @@
+SCENARIO: another task enters flight during forge collection
+forge hook ran=yes
+extra task state: task:
+  id: extra
+  title: Disposable task extra
+  state: in_flight
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: example
+metadata files: none
+dispatch status=absent

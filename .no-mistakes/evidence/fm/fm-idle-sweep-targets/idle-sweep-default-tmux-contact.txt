@@ -1,0 +1,26 @@
+Lab sweep output:
+working [at=1791909217]: idle sweep started red ordinary extra
+
+Recorded worker endpoints:
+.l/state/red.meta
+window=firstmate:fm-red
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.l/projects/example/.treehouse/example-ba8ea0/1/example
+harness=codex
+yolo=off
+model=gpt-6.1-sol
+.l/state/ordinary.meta
+window=firstmate:fm-ordinary
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.l/projects/example/.treehouse/example-ba8ea0/2/example
+harness=codex
+yolo=off
+model=gpt-6.1-sol
+.l/state/extra.meta
+window=firstmate:fm-extra
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.l/projects/example/.treehouse/example-ba8ea0/3/example
+harness=codex
+yolo=off
+model=gpt-6.1-sol
+
+Private lab windows:
+node
+driver

@@ -1,0 +1,5 @@
+real fm-watch.sh heartbeat output:
+check: idle-sweep
+real fm-idle-sweep.sh refusal:
+fm-idle-sweep: invalid configuration
+wake ledger:

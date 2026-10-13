@@ -1,0 +1,35 @@
+Private session windows:
+0: node* (1 panes) [80x24] [layout b25d,80x24,0,0,0] @0 (active)
+1: sweep (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1
+2: fm-red (1 panes) [80x24] [layout b25f,80x24,0,0,2] @2
+3: fm-ordinary (1 panes) [80x24] [layout b260,80x24,0,0,3] @3
+4: fm-extra (1 panes) [80x24] [layout b261,80x24,0,0,4] @4
+5: recheck (1 panes) [80x24] [layout b262,80x24,0,0,5] @5
+
+Worker startup screen:
+
+  Folder access
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.
+  test-labs/idle-live/projects/example/.treehouse/example-a417d9/1/example
+
+  Note: You’re in a subdirectory of a Git project. Trusting will apply to the
+  repository root:
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.
+  test-labs/idle-live/projects/example
+
+  Trust this folder? Codex can read, edit, and run files here, subject to your
+  permission settings. Folder settings can run code automatically, even
+  without a model request. Continue only if you trust these files. Your trust
+  decision will be saved.
+
+› 1. Trust and continue
+  2. Quit
+
+  enter continue · esc quit
+
+
+
+
+
+
+Repeat sweep exit=0, status lines=1

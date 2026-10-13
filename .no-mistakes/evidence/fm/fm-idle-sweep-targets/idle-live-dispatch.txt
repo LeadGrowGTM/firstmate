@@ -1,0 +1,31 @@
+driver tmux=/tmp/fml.ITDAkZ/tmux-1000/fm-lab,3311008,0
+driver pane=%1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live
+spawned red harness=codex kind=ship mode=local-only yolo=off window=primary:fm-red worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/projects/example/.treehouse/example-a417d9/1/example
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+spawned ordinary harness=codex kind=ship mode=local-only yolo=off window=primary:fm-ordinary worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/projects/example/.treehouse/example-a417d9/2/example
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+spawned extra harness=codex kind=ship mode=local-only yolo=off window=primary:fm-extra worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.test-labs/idle-live/projects/example/.treehouse/example-a417d9/3/example
+working [at=1791910441]: idle sweep started red ordinary extra
+sweep exit=0
+sweep status:
+working [at=1791910441]: idle sweep started red ordinary extra
+metadata names:
+extra.meta
+ordinary.meta
+red.meta
+backlog in flight:
+## In flight
+- [ ] extra - Disposable task extra (repo: example) (kind: ship) (since 2026-10-13)
+- [ ] ordinary - Disposable task ordinary (repo: example) (kind: ship) (since 2026-10-13)
+- [ ] red - Disposable task red (repo: example) (kind: ship) (since 2026-10-13)
+  Idle target: red_default_branches
+## Queued

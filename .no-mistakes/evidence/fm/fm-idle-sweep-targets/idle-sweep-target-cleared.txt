@@ -1,0 +1,46 @@
+bash-5.2$ FM_POLL=1 FM_HEARTBEAT=1 FM_CHECK_INTERVAL=999999 FM_SIGNAL_GRACE=1 timeout 15 bash bin/fm-watch.sh; printf "w
+atch_rc=%s\n" "$?"
+fm-idle-sweep: invalid configuration
+check: idle-sweep
+watch_rc=0
+bash-5.2$ export PATH="$FM_HOME/fakebin:$PATH"; bash bin/fm-idle-sweep.sh; printf "race_sweep_rc=%s candidate_meta=%s co
+ncurrent_meta=%s\n" "$?" "$(test -e "$FM_HOME/state/labrace.meta" && echo yes || echo no)" "$(test -e "$FM_HOME/state/co
+ncurrent.meta" && echo yes || echo no)"; tmux -S "$FM_HOME/tmux/tmux-$(id -u)/fm-lab" list-windows -t primary -F "#{wind
+ow_name}"
+race_sweep_rc=0 candidate_meta=no concurrent_meta=yes
+node
+driver
+fm-concurrent
+bash-5.2$ bash bin/fm-idle-sweep.sh; printf "target_race_rc=%s red_reads=%s candidate_meta=%s\n" "$?" "$(cat "$FM_HOME/s
+tate/red-read-count")" "$(test -e "$FM_HOME/state/labrace.meta" && echo yes || echo no)"
+target_race_rc=0 red_reads=2 candidate_meta=no
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Private windows after target cleared:
+node
+driver
+
+Candidate metadata absent: yes

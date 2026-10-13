@@ -1,0 +1,64 @@
+bash-5.2$ export PATH="$FM_HOME/fakebin:$PATH"; command -v quota-axi; quota-axi --provider codex --json --no-credential-
+refresh | jq -r .providers[0].quotaSemantics.effectiveAvailability[0].effectivePercentRemaining; bash bin/fm-idle-sweep.
+sh; printf "floor_rc=%s task_meta=%s\n" "$?" "$(test -e "$FM_HOME/state/labfloor.meta" && echo yes || echo no)"
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.p/fakebin/quota-axi
+15
+floor_rc=0 task_meta=no
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Backlog candidate:
+task:
+  id: labfloor
+  title: Disposable quota floor
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: example
+  priority: "-"
+  created: 2026-10-13
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+
+Private windows:
+node
+driver

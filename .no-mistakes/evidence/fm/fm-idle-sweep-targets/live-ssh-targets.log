@@ -1,0 +1,2 @@
+SSH GitHub remote: {"open_prs": 6, "project": "example", "red_default_branches": 1, "repo": "example/repo"}
+Forge check-run error: {"open_prs": 6, "project": "example", "red_default_branches": null, "repo": "example/repo"}

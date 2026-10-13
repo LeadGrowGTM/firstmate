@@ -1,0 +1,6 @@
+=== First live sweep ===
+exit=0
+spawned proof harness=codex kind=ship mode=local-only yolo=off window=primary:fm-proof worktree=/home/mitch/.treehouse/example-9b13b5/1/example
+working [at=1791906741]: idle sweep started proof
+metadata: harness=codex, kind=ship, mode=local-only, model=gpt-6.1-sol, window=primary:fm-proof
+backlog: id: proof, state: in_flight, held: no, repo: example

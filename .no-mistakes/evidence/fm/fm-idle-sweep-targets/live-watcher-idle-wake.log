@@ -1,0 +1,8 @@
+exit=0
+stdout:
+check: idle-sweep
+
+stderr:
+jq: error: Could not open file /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.fm-live-watch.iwynkb31/config/idle-sweep.json: No such file or directory
+fm-idle-sweep: invalid configuration
+

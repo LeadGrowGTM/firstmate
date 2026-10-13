@@ -1,0 +1,5 @@
+exit=0
+stdout=''
+unsafe brief lacking reversible boundary: worker metadata absent=true
+captain-held task: worker metadata absent=true
+dispatch status absent=true

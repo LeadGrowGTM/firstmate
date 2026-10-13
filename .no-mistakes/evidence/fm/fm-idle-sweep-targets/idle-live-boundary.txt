@@ -1,0 +1,4 @@
+sweep exit: 0
+sweep output: rows: [{"id":"unbounded","state":"queued","hold_kind":null},{"id":"held","state":"queued","hold_kind":"captain"}]
+worker metadata count: 0
+start status: absent

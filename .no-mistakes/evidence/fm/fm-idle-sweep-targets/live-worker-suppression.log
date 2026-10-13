@@ -1,0 +1,5 @@
+=== Second sweep while first worker endpoint exists ===
+exit=0
+stdout=''
+second task state: queued
+second metadata absent=true

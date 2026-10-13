@@ -1,0 +1,32 @@
+{
+  "schema": "fm-targets.v1",
+  "repos": [
+    {
+      "project": "example",
+      "repo": "example/repo",
+      "open_prs": 7,
+      "red_default_branches": 1
+    }
+  ],
+  "stale_ids": [],
+  "targets": [
+    {
+      "id": "red_default_branches",
+      "current": 1,
+      "limit": 0,
+      "gap": 1
+    },
+    {
+      "id": "open_prs",
+      "current": 7,
+      "limit": 4,
+      "gap": 3
+    },
+    {
+      "id": "stale_backlog",
+      "current": 0,
+      "limit": 0,
+      "gap": 0
+    }
+  ]
+}

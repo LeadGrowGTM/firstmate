@@ -1,0 +1,4 @@
+recorded worker state: alivesweep exit: 0
+sweep output:
+ready metadata: absent
+ready backlog state: queued

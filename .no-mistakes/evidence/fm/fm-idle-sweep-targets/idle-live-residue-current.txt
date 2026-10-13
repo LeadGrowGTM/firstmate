@@ -1,0 +1,3 @@
+The first private launch used TREEHOUSE_ROOT without a project treehouse.toml. Treehouse ignored that environment variable and allocated outside the worktree. The exact checkouts still exist; workspace boundary forbids this test agent from removing them.
+/home/mitch/.treehouse/example-cc3ceb/1/example: exists
+/home/mitch/.treehouse/example-cc3ceb/2/example: exists

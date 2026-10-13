@@ -1,0 +1,5 @@
+Private tmux servers and in-worktree labs were removed. Treehouse pool checkouts created during real fm-spawn remain outside the permitted worktree:
+/home/mitch/.treehouse/example-9b13b5/1/example: present=True
+/home/mitch/.treehouse/example-c53bbb/1/example: present=True
+/home/mitch/.treehouse/example-c53bbb/2/example: present=True
+/home/mitch/.treehouse/example-c53bbb/3/example: present=True

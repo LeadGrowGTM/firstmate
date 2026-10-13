@@ -1,0 +1,4 @@
+Before first heartbeat: {"stale_ids":[],"stale_target":{"id":"stale_backlog","current":null,"limit":0,"gap":null}}
+After first observation: {"stale_ids":[],"stale_target":{"id":"stale_backlog","current":0,"limit":0,"gap":0}}
+After 15 unchanged days: {"stale_ids":["red","ordinary","extra","held","captain"],"stale_target":{"id":"stale_backlog","current":5,"limit":0,"gap":5}}
+After one row changes: {"stale_ids":["red","extra","held","captain"],"stale_target":{"id":"stale_backlog","current":null,"limit":0,"gap":null}}

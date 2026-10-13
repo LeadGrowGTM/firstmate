@@ -1,0 +1,14 @@
+sweep exit: 0
+launches:
+spawned red harness=codex kind=ship mode=local-only yolo=off window=primary:fm-red worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/.treehouse/example-cc3ceb/1/example
+spawned ordinary harness=codex kind=ship mode=local-only yolo=off window=primary:fm-ordinary worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/.treehouse/example-cc3ceb/2/example
+spawned extra harness=codex kind=ship mode=local-only yolo=off window=primary:fm-extra worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/.treehouse/example-cc3ceb/3/example
+status:
+working [at=1791908130]: idle sweep started red ordinary extra
+fourth row and metadata:
+[{"id":"fourth","state":"queued"}]
+fourth metadata absent
+worktree locations:
+ordinary: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/.treehouse/example-cc3ceb/2/example
+red: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/.treehouse/example-cc3ceb/1/example
+extra: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/l/.treehouse/example-cc3ceb/3/example

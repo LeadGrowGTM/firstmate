@@ -1,0 +1,9 @@
+TARGETS (SSH GitHub remote):
+{"repos":[{"project":"example","repo":"example/repo","open_prs":7,"red_default_branches":1}],"targets":[{"id":"red_default_branches","current":1,"limit":0,"gap":1},{"id":"open_prs","current":7,"limit":4,"gap":3},{"id":"stale_backlog","current":null,"limit":0,"gap":null}]}
+SWEEP AT QUOTA FLOOR (15%):
+metadata files: SWEEP WITH LIVE WORKER META:
+metadata files: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.idle-live-lab/state/live.meta
+DANGLING CONFIG:
+jq: error: Could not open file /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TWCREY6FHCJQV56AF2M2BP/.idle-live-lab/config/idle-sweep.json: No such file or directory
+fm-idle-sweep: invalid configuration
+refused as expected
