@@ -34,7 +34,7 @@ cat >"$WORK/bin/quota-axi" <<SH
 echo run >>"$WORK/quota-calls"
 [ ! -f "$WORK/quota-fail" ] || exit 1
 cat <<'X'
-quota[10]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[12]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,default,all_models,68,0.4,through_reset,high,none,none
   codex,default,all_models,68,0.4,through_reset,high,none,none
   codex,codex-home,all_models,0.5,-1.9,through_reset,high,none,none
@@ -44,7 +44,9 @@ quota[10]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runw
   codex,openai-codex-hi,all_models,0.04,-1.9,through_reset,high,none,none
   codex,openai-codex-lo,all_models,99.9999,-1.9,through_reset,high,none,none
   claude,default,"model:fable",12,0.8,through_reset,high,none,none
-  claude,default,"model:opus-5-5[1m]",90,0.8,through_reset,high,none,none
+  claude,default,"model:claude-opus-5-5[1m]",90,0.8,through_reset,high,none,none
+  claude,default,"model:claude-3-5-sonnet",9,0.8,through_reset,high,none,none
+  claude,default,"product:special-product",18,0.8,through_reset,high,none,none
 X
 SH
 chmod +x "$WORK/bin/tmux" "$WORK/bin/quota-axi"
@@ -92,8 +94,15 @@ while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.
 selected=$(bash "$SB" usage firstmate:fm-demo-task)
 [ "$selected" = 'u cl:default32%' ] || fail "Claude pane did not select its quota row" "$selected"
 tmux new-window -d -t firstmate: -n fable "sleep 600"
-bash "$SB" label firstmate:fable fable claude claude-fable high /home/u/fable
+bash "$SB" label firstmate:fable fable claude fable high /home/u/fable
 [ "$(bash "$SB" usage firstmate:fable)" = 'u cl:default88%' ] || fail "model limit did not bind the Fable pane"
+tmux new-window -d -t firstmate: -n sonnet "sleep 600"
+bash "$SB" label firstmate:sonnet sonnet claude claude-3-5-sonnet high /home/u/sonnet
+[ "$(tmux show-options -wqv -t firstmate:sonnet @fm_model)" = '3-5-sonnet' ] || fail "quota identity changed the short model label"
+[ "$(bash "$SB" usage firstmate:sonnet)" = 'u cl:default91%' ] || fail "full model identity missed its quota scope"
+tmux new-window -d -t firstmate: -n product "sleep 600"
+bash "$SB" label firstmate:product product claude special-product high /home/u/product
+[ "$(bash "$SB" usage firstmate:product)" = 'u cl:default82%' ] || fail "product limit did not bind its model"
 pass "each pane uses its tighter account or model limit"
 
 tmux select-window -t orca-view:fm-demo-task
@@ -163,7 +172,13 @@ bash "$SB" label firstmate:opencode-usage opencode-usage opencode openai/gpt-5.6
 [ "$(tmux show-options -wqv -t firstmate:opencode-usage @fm_provider)" = codex ] || fail "OpenCode missed the shared Codex provider"
 [ "$(tmux show-options -wqv -t firstmate:opencode-usage @fm_model)" = gpt-5.6-sol ] || fail "OpenCode model retained an account prefix"
 [ "$(bash "$SB" usage firstmate:opencode-usage)" = 'u cx:default32%' ] || fail "OpenCode missed its Codex quota"
-pass "OpenCode uses the shared provider mapping"
+tmux new-window -d -t firstmate: -n opencode-claude "sleep 600"
+bash "$SB" label firstmate:opencode-claude opencode-claude opencode anthropic/claude-3-5-sonnet high /home/u/opencode
+[ "$(bash "$SB" usage firstmate:opencode-claude)" = 'u cl:default91%' ] || fail "OpenCode borrowed the Codex quota for an Anthropic model"
+tmux new-window -d -t firstmate: -n opencode-unknown "sleep 600"
+bash "$SB" label firstmate:opencode-unknown opencode-unknown opencode google/gemini high /home/u/opencode
+[ "$(bash "$SB" usage firstmate:opencode-unknown)" = 'u ?' ] || fail "OpenCode borrowed quota for an unknown provider"
+pass "OpenCode uses the model provider or reports unknown usage"
 
 tmux new-window -d -t firstmate: -n high-used "sleep 600"
 bash "$SB" label firstmate:high-used high-used pi openai-codex-hi/gpt-6-sol high /home/u/pi
@@ -183,6 +198,9 @@ tmux new-window -d -t firstmate: -n pi-fallback "sleep 600"
 bash "$SB" label firstmate:pi-fallback pi-fallback pi anthropic/opus high /home/u/pi
 [ "$(tmux show-options -wqv -t firstmate:pi-fallback @fm_account)" = anthropic ] || fail "Pi model prefix did not select its quota lane"
 [ "$(bash "$SB" usage firstmate:pi-fallback)" = 'u cl:default32%' ] || fail "Pi lane did not fall back to the provider default"
+tmux new-window -d -t firstmate: -n pi-unknown "sleep 600"
+bash "$SB" label firstmate:pi-unknown pi-unknown pi google/gemini high /home/u/pi
+[ "$(bash "$SB" usage firstmate:pi-unknown)" = 'u ?' ] || fail "Pi borrowed quota for an unknown provider"
 pass "every quota lane can fall back to its provider default"
 
 cat >"$WORK/state/sync-lane.meta" <<META
@@ -249,6 +267,15 @@ sleep 0.5
 grep -qi 'token\|secret\|key' "$WORK/state/statusbar-usage.txt" && fail "usage cache holds credential-like text"
 pass "usage is a cached percentage figure refreshed at most once per TTL"
 
+touch -t 200001010000 "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt"
+touch "$WORK/quota-fail"
+[ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "expired quota cache was shown as current"
+i=0
+while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+[ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "failed refresh revived expired quota data"
+rm -f "$WORK/quota-fail"
+pass "expired usage stays unknown after a failed refresh"
+
 rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
 touch "$WORK/quota-fail"
 bash "$SB" usage firstmate:fm-demo-task >/dev/null
@@ -262,18 +289,16 @@ pass "failed quota refresh observes the same TTL"
 # --- claude-line: whitelisted fields only ---
 json='{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_window":{"used_percentage":7.4},"rate_limits":{"five_hour":{"used_percentage":31},"seven_day":{"used_percentage":11}},"workspace":{"current_dir":"/x/y/firstmate","git_worktree":"firstmate2"},"transcript_path":"/home/u/SECRET-transcript.jsonl","session_id":"abc-123","cost":{"total_cost_usd":1.5}}'
 line=$(printf '%s' "$json" | bash "$SB" claude-line --task fm-demo-task)
-[ "$line" = "Opus 5.5 high | fm-demo-task | firstmate2 | ctx 7% | 5h 31% 7d 11%" ] || fail "claude-line output" "$line"
+[ "$line" = "Opus 5.5 high | fm-demo-task | firstmate2 | 5h 31% 7d 11%" ] || fail "claude-line output" "$line"
 case "$line" in *SECRET* | *abc-123* | *1.5*) fail "claude-line leaked a non-whitelisted field" "$line" ;; esac
-pass "claude-line prints only model, effort, task, worktree, context and rate limits"
+pass "claude-line prints only model, effort, task, worktree and rate limits"
 
 sparse=$(printf '%s' '{"model":{"display_name":"Haiku"}}' | bash "$SB" claude-line --task t1)
 [ "$sparse" = "Haiku ? | t1" ] || fail "claude-line with missing fields" "$sparse"
-empty=$(printf '' | bash "$SB" claude-line)
-[ "$empty" = '? ?' ] || fail "claude-line with empty input should show unknown facts" "$empty"
-pass "claude-line tolerates missing fields and empty input"
+pass "claude-line tolerates missing fields"
 
 optional=$(printf '%s' '{"model":{"display_name":"Haiku"},"context_window":{"used_percentage":7},"rate_limits":{"seven_day":{"used_percentage":13}},"workspace":{"current_dir":"/homes/secondmate/child","project_dir":"/homes/secondmate"}}' | bash "$SB" claude-line --task t1)
-[ "$optional" = 'Haiku ? | t1 | secondmate | ctx 7% | 7d 13%' ] || fail "optional Claude fields shifted or home changed after cd" "$optional"
+[ "$optional" = 'Haiku ? | t1 | secondmate | 7d 13%' ] || fail "optional Claude fields shifted or home changed after cd" "$optional"
 no_model=$(printf '%s' '{"effort":{"level":"high"}}' | bash "$SB" claude-line --task t1)
 [ "$no_model" = '? high | t1' ] || fail "missing Claude model lacked its own unknown marker" "$no_model"
 pass "Claude fields remain aligned when effort and a limit window are absent"

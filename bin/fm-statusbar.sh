@@ -18,9 +18,9 @@
 #       Print the cached plan-usage segment for one window,
 #       and refresh it from `quota-axi` in the background at most once a minute.
 #       The cache holds account keys and percentages, never credentials.
-#   fm-statusbar.sh claude-line [--task <id>]
+#   fm-statusbar.sh claude-line --task <id>
 #       The Claude Code statusLine command: reads Claude's statusLine JSON on
-#       stdin and prints one short line (model and effort, context, rate-limit
+#       stdin and prints one short line (model and effort, rate-limit
 #       windows, task). Only whitelisted fields are ever printed.
 #
 # Environment: FM_STATE_OVERRIDE selects the state directory (default
@@ -70,15 +70,14 @@ fm_sb_model_label() {  # <model-id>
 
 cmd_label() {
   local target=${1:-} id=${2:-} harness=${3:-} model=${4:-} effort=${5:-} wt=${6:-}
-  local provider= account
+  local provider= account usage_model
   [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 0
   provider=$(fm_quota_provider_for_harness "$harness" "$model") || provider=
-  case "$provider" in
-    pi)
-      case "${model%%/*}" in
-        openai-codex*|codex-native) provider=codex ;;
-        anthropic|claude-bridge) provider=claude ;;
-        xai) provider=grok ;;
+  case "$harness" in
+    opencode|pi|pi-signed)
+      case "$model" in
+        openai/*|openai-codex*/*|codex-native/*) provider=codex ;;
+        anthropic/*|claude-bridge/*) provider=claude ;;
         *) provider= ;;
       esac
       ;;
@@ -86,9 +85,12 @@ cmd_label() {
   account=$(jq -nr --arg harness "$harness" --arg model "$model" \
     "$FM_QUOTA_ROW_JQ quota_lane(\$harness; \$model)") || account=
   [ -n "$account" ] || account=default
+  usage_model=${model##*/}
+  [ "$usage_model" != default ] || usage_model=
   [ "$effort" != default ] || effort=
   tmux set-window-option -t "$target" @fm_task "$(fm_sb_clean "$id" 40)" 2>/dev/null || return 0
   tmux set-window-option -t "$target" @fm_model "$(fm_sb_clean "$(fm_sb_model_label "$model")")" 2>/dev/null || true
+  tmux set-window-option -t "$target" @fm_model_id "$(fm_sb_clean "$usage_model")" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_effort "$(fm_sb_clean "$effort" 8)" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_wt "$(fm_sb_clean "$(fm_sb_wt_label "$wt")" 28)" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_provider "$(fm_sb_clean "$provider" 16)" 2>/dev/null || true
@@ -159,7 +161,7 @@ fm_sb_usage_refresh() {
     in_quota && /^  / {
       sub(/^  /, ""); n = split($0, row, ","); scope = row[2 + keyed]; rem = row[3 + keyed]
       if (scope ~ /^".*"$/) scope = substr(scope, 2, length(scope) - 2)
-      if (n < 3 + keyed || (scope != "all_models" && scope != "all_products" && scope !~ /^model:.+/) ||
+      if (n < 3 + keyed || (scope != "all_models" && scope != "all_products" && scope !~ /^model:.+/ && scope !~ /^product:.+/) ||
           rem !~ /^[0-9]+(\.[0-9]+)?$/ || rem + 0 > 100) next
       printf "%s\t%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", sprintf("%.15g", 100 - rem), scope
     }
@@ -173,10 +175,10 @@ fm_sb_usage_display() {  # <window>
   local provider account model
   provider=$(tmux show-options -wqv -t "$1" @fm_provider 2>/dev/null) || provider=
   account=$(tmux show-options -wqv -t "$1" @fm_account 2>/dev/null) || account=
-  model=$(tmux show-options -wqv -t "$1" @fm_model 2>/dev/null) || model=
+  model=$(tmux show-options -wqv -t "$1" @fm_model_id 2>/dev/null) || model=
   [ -n "$provider" ] && [ -f "$USAGE_CACHE" ] || { printf 'u ?\n'; return 0; }
   awk -F '\t' -v provider="$provider" -v account="$account" -v model="$model" '
-    $1 == provider && ($4 == "all_models" || $4 == "all_products" || $4 == "model:" model) {
+    $1 == provider && ($4 == "all_models" || $4 == "all_products" || (model != "" && ($4 == "model:" model || $4 == "product:" model))) {
       if ($2 == account || $2 == "*") {
         if (!matched || $3 + 0 > used) { used = $3 + 0; key = $2 }
         matched = 1
@@ -207,7 +209,11 @@ cmd_usage() {
   else
     age=$((USAGE_TTL + 1))
   fi
-  fm_sb_usage_display "$target"
+  if [ "$age" -lt "$USAGE_TTL" ]; then
+    fm_sb_usage_display "$target"
+  else
+    printf 'u ?\n'
+  fi
   [ "$age" -ge "$USAGE_TTL" ] || return 0
   if [ -f "$USAGE_ATTEMPT" ] && [ $((now - $(fm_sb_mtime "$USAGE_ATTEMPT"))) -lt "$USAGE_TTL" ]; then
     return 0
@@ -228,37 +234,29 @@ cmd_usage() {
 }
 
 cmd_claude_line() {
-  local task='' json parts model effort ctx limits wt out
-  while [ $# -gt 0 ]; do
-    case "$1" in
-    --task) task=${2:-}; shift ;;
-    esac
-    shift
-  done
-  command -v jq >/dev/null 2>&1 || { printf '? ?%s\n' "${task:+ | $(fm_sb_clean "$task" 32)}"; return 0; }
+  local task json parts model effort limits wt out
+  [ "$#" -eq 2 ] && [ "$1" = --task ] && [ -n "$2" ] || return 2
+  task=$2
+  command -v jq >/dev/null 2>&1 || { printf '? ? | %s\n' "$(fm_sb_clean "$task" 32)"; return 0; }
   json=$(cat)
-  # Whitelist: model, effort, context fill, rate-limit windows, workspace name.
+  # Whitelist: model, effort, rate-limit windows, workspace name.
   parts=$(printf '%s' "$json" | jq -r '
     def pct: if . == null then "" else (. | floor | tostring) + "%" end;
     [ (.model.display_name // .model.id // ""),
       (.effort.level // ""),
-      (if .context_window.used_percentage == null then "" else "ctx " + (.context_window.used_percentage | pct) end),
       ([if .rate_limits.five_hour.used_percentage == null then empty else "5h " + (.rate_limits.five_hour.used_percentage | pct) end,
         if .rate_limits.seven_day.used_percentage == null then empty else "7d " + (.rate_limits.seven_day.used_percentage | pct) end] | join(" ")),
       (if .workspace.git_worktree != null then .workspace.git_worktree
        elif .workspace.project_dir != null then (.workspace.project_dir | split("/") | last)
        else "" end)
     ] | map(tostring) | join("\u001f")' 2>/dev/null) || parts=
-  IFS=$'\037' read -r model effort ctx limits wt <<< "$parts"
+  IFS=$'\037' read -r model effort limits wt <<< "$parts"
   model=$(fm_sb_clean "$model" 24)
   effort=$(fm_sb_clean "$effort" 8)
-  ctx=$(fm_sb_clean "$ctx" 12)
   limits=$(fm_sb_clean "$limits" 20)
   wt=$(fm_sb_clean "$wt" 24)
-  out="${model:-?} ${effort:-?}"
-  [ -z "$task" ] || out="$out | $(fm_sb_clean "$task" 32)"
+  out="${model:-?} ${effort:-?} | $(fm_sb_clean "$task" 32)"
   [ -z "$wt" ] || out="$out | $wt"
-  [ -z "$ctx" ] || out="$out | $ctx"
   [ -z "$limits" ] || out="$out | $limits"
   printf '%s\n' "$out"
 }
