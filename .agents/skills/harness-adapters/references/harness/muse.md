@@ -1,6 +1,6 @@
 # Muse Code
 
-Verified 2026-08-05 on Muse Code 0.1.0-R708.1, build sha 427a430436.
+Verified 2026-08-05 on Muse Code 0.1.0-R708.1, build sha 427a430436, and re-verified 2026-10-13 on 1.4.7-R6101.1 (Linux x86_64, WSL2, tmux 3.4).
 The router owns Muse's task-kind boundary.
 
 ## Operating facts
@@ -9,7 +9,7 @@ The router owns Muse's task-kind boundary.
 |---|---|
 | Binary | Absolute `muse` from `PATH`, refused if absent; launcher `~/.local/bin/muse` execs versioned `muse-bin-<version>`, so live process name changes on update. |
 | Launch | Positional instructions, like Grok or Pi. |
-| Models | `--model <model>`; only provider `meta`. |
+| Models | `--model <model>`; only provider `meta`. On 1.4.7 the visible catalog is `muse-wonder-1.0` (default), `muse-wonder-full-1.0`, `muse-spark-1.3`, and `muse-spark-1.2`; never dispatch a hidden `-contributor` or `muse-image` id. |
 | Busy | Durable session event log folded by `../../../bin/fm-busy-lib.sh`; no hook or plugin writer, arming, or seeded busy record. |
 | Exit | `/exit`, one Enter; prints `To continue this session, run muse resume <session-uuid>`. |
 | Interrupt | Single Escape records `terminal: cancelled` and restores bright prompt text, so control follows with `Ctrl+U`; the legacy typed key path uses the same clear table. |
@@ -18,8 +18,8 @@ The router owns Muse's task-kind boundary.
 | Autonomy | `--yolo` disables approval and sandbox and trusts the workspace. |
 | Trust | Dialog `Do you trust this workspace?`, choice `1 Trust and continue` preselected for Enter; `--yolo` suppresses it, which fresh task paths require. |
 | Marker | None; identity comes from anchored `muse-bin-*` ancestry, which `../../../bin/fm-harness.sh` keeps a retained foreign marker from overriding, while `MUSE_CURRENT_SESSION_LOG` is a path rather than identity and its export to tools is unverified. |
-| Composer | Bordered `⟩`, truecolor `38;2;90;160;255`, luminance about 149.9 and narrowly above ghost threshold 128; typed text is `38;2;204;211;219`, about 209.8, with no observed placeholder or ghost. |
-| Effort | `--reasoning-effort`, default `high`, accepts `none\|minimal\|low\|medium\|high\|xhigh\|ultra`; shared values expose low through xhigh, explicit captain `max` maps to `ultra`, and `none` or `minimal` remain unreachable. |
+| Composer | Prompt glyph `❯` (U+276F) on 1.4.x, `⟩` (U+27E9) on 0.1.0, which the 1.4.x trust dialog still uses; truecolor `38;2;90;160;255`, luminance about 149.9 and narrowly above ghost threshold 128; typed text is `38;2;204;211;219`, about 209.8. The 1.4.x idle placeholder `Type @ to search and insert workspace file paths` is `38;2;103;108;116`, below the ghost threshold. Without `COLORTERM=truecolor` the glyph and placeholder fall back to indexed `38;5;75` and `38;5;242`. |
+| Effort | `--reasoning-effort`, default `high`; shared values low through max map straight across, and `none` or `minimal` stay unreachable. Never send `ultra`: 1.4.x gates it off and silently runs `xhigh`. Explicit captain `max` is accepted by the Wonder models and `muse-spark-1.3`, while `muse-spark-1.2` rejects it with a visible API 400 rather than downgrading. |
 
 ## Credential preflight
 
@@ -46,11 +46,12 @@ Logs live at `${XDG_DATA_HOME:-$HOME/.local/share}/muse/sessions/YYYY/MM/DD/<ses
 The spawn writes `state/<id>.muse-session` with root, worktree, binding incarnation, and pre-existing matching main logs, then unique resolution pins `state/<id>.muse-session-current`.
 It folds that path while the bounded current-day main namespace is unchanged and resolves again if the namespace changes, path disappears, or a newer binding wins.
 
-Turns are bracketed by `{"payload":{"kind":"run","run_id":"<uuid>","event":{"kind":"started"` and matching `"event":{"kind":"terminal"`, observed as `completed` or `cancelled`.
+Turns are bracketed by a `runtime.session` record whose payload has `kind` `run`, a `run_id`, and `event.kind` `started`, and a matching `terminal` event observed as `completed` or `cancelled`.
+Payload key order differs by release (1.4.x sorts the keys), so the fold tokenizes records instead of matching a byte prefix, and the workspace binding reads the first `runtime.session.metadata` record because 1.4.x precedes it with a `retained_frame` record.
 Interrupt therefore has a real terminal, unlike Claude Stop.
 Never use `--no-session-log`, which removes Muse's only busy source.
 
-The fold must reject nested `"record":{"kind":"terminal"}` cleanup effects and depth-bound away native sub-agent logs under `subagent/<child-session-id>/session.jsonl`.
+The fold must reject nested `"record":{"kind":"terminal"}` cleanup effects and 1.4.x task records that carry a `run_id` and a `started` event, and must depth-bound away native sub-agent logs under `subagent/<child-session-id>/session.jsonl`.
 The recorded resolved `XDG_DATA_HOME` is also forwarded to the worker, preserving daemon alignment.
 An open run is trusted busy and settled log trusted idle; missing binding or match, unreadable log, or run-free log is unknown.
 `../../../docs/verification/muse.md` owns credentialed idle evidence and refresh.
@@ -64,7 +65,7 @@ Inspect, never force past, that refusal.
 
 ## Maturity and primary limit
 
-Muse 0.1.0 is day-zero beta; its hourly channel poll can replace the binary and process name.
+Muse auto-updates through an hourly channel poll that can replace the binary and process name.
 The captain accepted this, so Firstmate does not set `MUSE_NO_AUTO_UPDATE=1`; a fleet may set it without adapter change.
 Plugins report unavailable unless `MUSE_EXPERIMENTAL_PLUGINS=on`, so busy state uses logs.
 The compatibility dialect explicitly lacks `asyncRewake` and model reawakening; the router owns the resulting primary boundary.

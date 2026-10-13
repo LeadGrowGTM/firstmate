@@ -160,9 +160,15 @@ check_harness_idle_cursorless() {  # <name> <version> <target>
 }
 
 # --- 1. Every installed verified harness must reach a proven-empty composer --
-for h in claude codex opencode pi grok kimi muse; do
+for h in claude codex opencode pi grok kimi muse omp; do
   if command -v "$h" >/dev/null 2>&1; then
-    check_harness_idle_empty "$h" "$h"
+    if [ "$h" = omp ]; then
+      # Firstmate workers always receive this overlay. The captain's own omp
+      # composer may use a different shape, which is not the worker surface.
+      check_harness_idle_empty "$h" "$h" --config "$ROOT/.omp/fm-worker-overlay.yml"
+    else
+      check_harness_idle_empty "$h" "$h"
+    fi
   else
     note "harness absent, not verified here: $h"
   fi

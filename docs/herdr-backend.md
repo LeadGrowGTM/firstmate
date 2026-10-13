@@ -629,7 +629,7 @@ The adapter is a thin capture.
 It hands the visible pane's ANSI viewport plus Herdr's capability facts to the fleet-wide classifier in `bin/fm-composer-lib.sh`, which owns every shape:
 
 - Bordered boxes.
-- Bare agent-glyph rows, including muse's `⟩`, which the adapter's retired local pattern silently omitted.
+- Bare agent-glyph rows, including the `⟩` used by Muse 0.1.0, which the adapter's retired local pattern silently omitted.
 - opencode's left bar.
 - The Pi separator region this adapter pioneered, admitted only when native `agent get` identity is exactly Pi and state is idle or done.
 

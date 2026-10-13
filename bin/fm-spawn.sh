@@ -2823,17 +2823,18 @@ effort_flag_for_harness() {
     printf ',"agent":{"build":{"model":"%s","variant":"%s"}}' "$model_json" "$effort"
     ;;
   muse)
-    # muse 0.1.0-R708.1 --reasoning-effort accepts none|minimal|low|medium|
-    # high|xhigh|ultra and defaults to high, so low..xhigh map straight across.
-    # ultra is muse's max-CLASS level, so firstmate's max maps onto it - but
-    # only ever as an EXPLICIT captain choice, never as a fallback, because
-    # AGENTS.md section 4 forbids selecting max without captain preference and
-    # the omitted effort here leaves muse on its own high default. muse's extra
-    # none/minimal levels sit below firstmate's shared vocabulary and are
-    # deliberately unreachable rather than remapped onto low.
+    # muse 1.4.7-R6101.1 --reasoning-effort lists none|minimal|low|medium|
+    # high|xhigh|max|ultra and defaults to high, so low..max map straight
+    # across. Its ultra level is gated off and silently runs at xhigh, so
+    # firstmate's max must never map onto it; a model without max, such as
+    # muse-spark-1.2, rejects it visibly instead. max is only ever passed as an
+    # EXPLICIT captain choice, never as a fallback, because AGENTS.md section 4
+    # forbids selecting max without captain preference and the omitted effort
+    # here leaves muse on its own high default. muse's extra none/minimal
+    # levels sit below firstmate's shared vocabulary and are deliberately
+    # unreachable rather than remapped onto low.
     case "$effort" in
-    low | medium | high | xhigh) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
-    max) printf -- '--reasoning-effort %s ' "$(shell_quote ultra)" ;;
+    low | medium | high | xhigh | max) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
     esac
     ;;
     # rovo has no --effort flag on `run`; its effort mapping rides

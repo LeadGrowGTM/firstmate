@@ -5,9 +5,11 @@
 #
 # The session-log fixtures below reproduce muse 0.1.0-R708.1's real record
 # shapes, including the nested "record":{"kind":"terminal"} cleanup payload that
-# is NOT a run terminal. That decoy is the whole reason the fold matches an
-# anchored structural prefix instead of searching for "kind":"terminal", so a
-# fixture without it would let a naive implementation pass.
+# is NOT a run terminal. That decoy is the whole reason the fold selects the
+# top-level payload kind instead of searching for "kind":"terminal", so a
+# fixture without it would let a naive implementation pass. The muse 1.4.7
+# fixtures add that release's leading retained_frame record, its sorted payload
+# keys, and its task records that carry a run_id and a started event.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -60,6 +62,43 @@ write_session_log() {
   mkdir -p "$dir"
   path="$dir/session.jsonl"
   muse_log_metadata "$ws" > "$path"
+  cat >> "$path"
+  printf '%s\n' "$path"
+}
+
+# muse 1.4.7-R6101.1 shapes: the log opens with a retained_frame transaction
+# record, the metadata record follows it, and payload keys are emitted sorted,
+# so "event" precedes "kind" and "run_id" inside every run record.
+muse14_log_retained_frame() {
+  printf '{"retained_frame":"session_permission_transaction","frame_schema_version":1,"outer_log_ordinal":1,"transaction_id":"01a1353f","children":[{"child_index":0,"record_json":"{\\"payload_type\\":\\"runtime.session.permission\\"}"}],"content_sha256":"0f3c"}\n'
+}
+
+muse14_log_metadata() {  # <workspace-root>
+  printf '{"schema_version":1,"id":"01a1353f","stream":{"kind":"session","id":"01a1353f"},"sequence":3,"record_type":"event","durability":"durable","causation_id":null,"payload_type":"runtime.session.metadata","payload_schema_version":1,"payload":{"kind":"metadata","record":{"build":{"semver":"1.4.7"},"provider_id":"meta","workspace_root":"%s"}}}\n' "$1"
+}
+
+muse14_log_run_started() {  # <run-id>
+  printf '{"schema_version":1,"payload_type":"runtime.session","payload":{"event":{"kind":"started","prompt":"launch brief"},"kind":"run","run_id":"%s","source_run_record_id":null}}\n' "$1"
+}
+
+muse14_log_run_terminal() {  # <run-id> <completed|cancelled>
+  printf '{"schema_version":1,"payload_type":"runtime.session","payload":{"event":{"kind":"terminal","reason":null,"terminal":"%s"},"kind":"run","run_id":"%s","source_run_record_id":null}}\n' "$2" "$1"
+}
+
+# The 1.4.x decoy: a task record carrying the run's id and a started event. It
+# is not a run lifecycle record and must not reopen a settled run.
+muse14_log_task_started_decoy() {  # <run-id>
+  printf '{"schema_version":1,"payload_type":"runtime.session","payload":{"event":{"kind":"started"},"kind":"task","run_id":"%s","task_id":"task-1"}}\n' "$1"
+}
+
+# write_session_log_14 <sessions-root> <yyyy> <mm> <dd> <uuid> <workspace-root>
+# write_session_log for the muse 1.4.7 layout; body records are read from stdin.
+write_session_log_14() {
+  local root=$1 y=$2 m=$3 d=$4 uuid=$5 ws=$6 dir path
+  dir="$root/$y/$m/$d/$uuid"
+  mkdir -p "$dir"
+  path="$dir/session.jsonl"
+  { muse14_log_retained_frame; muse14_log_metadata "$ws"; } > "$path"
   cat >> "$path"
   printf '%s\n' "$path"
 }
@@ -277,7 +316,7 @@ test_spawn_maps_effort_and_model() {
     "medium|--reasoning-effort 'medium'"
     "high|--reasoning-effort 'high'"
     "xhigh|--reasoning-effort 'xhigh'"
-    "max|--reasoning-effort 'ultra'"
+    "max|--reasoning-effort 'max'"
   )
   local entry effort expect
   for entry in "${cases[@]}"; do
@@ -292,10 +331,13 @@ EOF
       || fail "muse spawn with effort $effort failed"
     launch=$(cat "$home/launch.log")
     assert_contains "$launch" "$expect" "muse effort $effort did not map to '$expect'"
+    # muse 1.4.x gates ultra off and silently runs it at xhigh, so no shared
+    # effort may ever reach it.
+    assert_not_contains "$launch" "'ultra'" "muse effort $effort reached the gated ultra level"
     assert_contains "$launch" "--model 'muse-spark-1.2'" "muse spawn dropped the model axis"
   done
-  # ultra is muse's max-class level and must be reachable ONLY through an
-  # explicit max, never as the fallback when no effort was chosen.
+  # max must be reachable ONLY through an explicit choice, never as the
+  # fallback when no effort was chosen.
   rec=$(make_spawn_case effort-default)
   IFS='|' read -r case_dir home proj wt fakebin id <<EOF
 $rec
@@ -304,7 +346,7 @@ EOF
     || fail "muse spawn without an effort axis failed"
   launch=$(cat "$home/launch.log")
   assert_not_contains "$launch" '--reasoning-effort' "muse spawn invented an effort when none was chosen"
-  pass "muse maps the shared effort vocabulary and reaches ultra only via explicit max"
+  pass "muse maps the shared effort vocabulary and reaches max only when chosen explicitly"
 }
 
 # An unauthenticated muse pane does not exit: it sits on an OAuth device-code
@@ -617,6 +659,47 @@ EOF
   [ "$out" = busy ] \
     || fail "a nested cleanup 'terminal' record settled an open run (folded '$out', expected busy)"
   pass "a nested terminal record never settles an in-flight run"
+}
+
+test_muse_1_4_log_binds_and_folds() {
+  local dir state id root log out verdict
+  dir="$TMP_ROOT/muse14"
+  state="$dir/state"
+  root="$dir/sessions"
+  id=muse14task
+  mkdir -p "$state"
+
+  log=$(write_session_log_14 "$root" 2026 10 13 open "$dir/ws" <<EOF
+$(muse14_log_run_started run-1)
+$(muse14_log_task_started_decoy run-1)
+EOF
+)
+  # The fixture must really hold the shapes under test, or the case is vacuous.
+  assert_contains "$(head -1 "$log")" '"retained_frame"' "muse 1.4 fixture lost its leading retained_frame record"
+  assert_contains "$(sed -n 3p "$log")" '"payload":{"event":{"kind":"started"' "muse 1.4 fixture lost its sorted run keys"
+  out=$(run_state "$log")
+  [ "$out" = busy ] || fail "a muse 1.4 open run folded to '$out', expected busy"
+  printf 'sessions_root=%s\nworkspace_root=%s\n' "$root" "$dir/ws" > "$state/$id.muse-session"
+  verdict=$(classify_muse "$state" "$id")
+  [ "$verdict" = "busy muse-session-log" ] \
+    || fail "a muse 1.4 log behind a retained_frame record was not bound busy: got '$verdict'"
+
+  rm -rf "$root" "$state"
+  mkdir -p "$state"
+  log=$(write_session_log_14 "$root" 2026 10 13 settled "$dir/ws" <<EOF
+$(muse14_log_run_started run-1)
+$(muse14_log_run_terminal run-1 completed)
+$(muse14_log_task_started_decoy run-1)
+EOF
+)
+  out=$(run_state "$log")
+  [ "$out" = settled ] \
+    || fail "a muse 1.4 task record reopened a settled run (folded '$out', expected settled)"
+  printf 'sessions_root=%s\nworkspace_root=%s\n' "$root" "$dir/ws" > "$state/$id.muse-session"
+  verdict=$(classify_muse "$state" "$id")
+  [ "$verdict" = "idle muse-session-log" ] \
+    || fail "a settled muse 1.4 log did not read idle: got '$verdict'"
+  pass "a muse 1.4 log binds past its retained_frame record and folds sorted-key run records"
 }
 
 test_binding_selects_the_matching_main_log() {
@@ -964,6 +1047,7 @@ test_non_muse_escape_does_not_clear
 test_failed_clear_is_reported
 test_run_fold_tracks_open_and_settled_turns
 test_nested_terminal_record_does_not_settle_a_run
+test_muse_1_4_log_binds_and_folds
 test_binding_selects_the_matching_main_log
 test_workspace_binding_treats_glob_characters_literally
 test_binding_excludes_preexisting_log_when_mtimes_tie

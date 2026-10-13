@@ -2587,6 +2587,35 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 `FM_OMP_LIVE_E2E=1 tests/fm-omp-primary-live-e2e.test.sh` refreshes the primary evidence; the worker path above is refreshed by repeating the scout dispatch after any omp upgrade.
 
+### Linux re-verification (2026-10-13)
+
+omp 18.8.6 (`~/.local/bin/omp`) was re-verified on Linux x86_64 under WSL2 with the tmux 3.4 backend and the `openai-codex/gpt-6-astra` model; the record above was macOS through Herdr.
+No omp-specific adapter change was needed.
+
+```
+$ bash tests/fm-omp-harness.test.sh
+(16 of 16 ok, exit 0)
+
+$ FM_OMP_LIVE_E2E=1 bash tests/fm-omp-primary-live-e2e.test.sh
+ok - omp omp/18.8.6: both tracked .omp/extensions loaded by auto-discovery with no -e and no trust dialog
+ok - omp omp/18.8.6: before_agent_start delivered the digest into model context and the lock names the omp process
+ok - omp omp/18.8.6: fm_watch_arm_omp started a live watcher through the extension
+ok - omp omp/18.8.6: an actionable close spawned a ledger-linked successor and woke main exactly once
+ok - omp omp/18.8.6: session_stop compelled the guard continuation (guard rc=2, then a stop_hook_active stop) and the model reached for fm_watch_arm_omp
+# omp omp/18.8.6 model=openai-codex/gpt-6-astra: every live omp primary assertion passed
+
+$ FM_HARNESS_LIVENESS_DRIFT=1 bash tests/fm-harness-liveness-drift-live-e2e.test.sh
+ok - harness liveness: omp omp/18.8.6 classifies alive
+ok - harness detection: omp omp/18.8.6 is identified by the ancestry walk at comm strength
+
+$ FM_COMPOSER_MATRIX_LIVE=1 bash tests/fm-composer-matrix-live-e2e.test.sh
+ok - omp (omp/18.8.6): real idle composer classifies empty
+ok - omp (omp/18.8.6): the same idle pane read cursorless is not pending (verdict: empty)
+```
+
+The primary test's watcher-beat age now reads the mtime with GNU `stat -c %Y` before BSD `stat -f %m`, because GNU `stat -f` prints a filesystem report on stdout and broke the arithmetic under `set -u`.
+A scout spawned in a lab home through `bin/fm-spawn.sh --scout --harness omp --model openai-codex/gpt-6-astra --effort low` went busy and idle through the `omp-ext` source, wrote its report and `done:` line, handled an `fm-send` steer, and reported `interrupt-delivered ... verified=agent-alive cancel=unconfirmed` for `bin/fm-control.sh <id> interrupt`, the same result as the 18.1.11 record, before `bin/fm-control.sh <id> exit` stopped it.
+
 ## Busy inbox escalation
 
 Verified at `2026-10-03T19:20:07Z` on commit `23b0232908a5adc7fbf7339ef48c34a091a7a799` with Claude Code `2.1.288 (Claude Code)` on Herdr `0.9.1`, protocol `22`, in a named isolated lab session through `bin/fm-herdr-lab.sh`.
