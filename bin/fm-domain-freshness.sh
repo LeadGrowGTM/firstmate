@@ -9,7 +9,8 @@
 # config/domain-freshness.json is home-local; docs/configuration.md owns its schema.
 # A daily recurring intake may invoke collect at/after 07:00 local; this manual
 # collector does not register checks, schedules, workers, requests, or boards.
-# Requires python3, jq, and gh-axi for repository sources only.
+# Inventory requires python3; enabled collect also requires jq, and repository
+# sources require gh-axi.
 # FM_DOMAIN_FRESHNESS_NOW supplies an ISO UTC clock for fixtures, otherwise UTC now.
 #
 # This script and fm-domain-freshness.py own fm-domain-evidence.v1. Each immutable

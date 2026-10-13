@@ -1452,16 +1452,21 @@ This section owns the version 1 configuration schema:
 
 | Source kind | Required fields and coverage |
 | --- | --- |
-| `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head, changed-file metadata, and bounded before/after content from the effective merged commit and its first parent for changed instruction files. Ambiguous merge history leaves coverage incomplete. |
+| `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head, changed-file metadata, and bounded before/after content from the effective merged commit and its first parent for changed instruction files. |
 | `skills` | Absolute `root`; discover instruction content and digest-only asset fingerprints beneath it, including additions and removals. |
-| `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest, enablement settings, version manifests, relevant instruction files, and effective assets. Missing manifest or enablement declarations leave coverage incomplete. |
-| `remote-inventory` | `route` is a registered remote secondmate id and `source` is a local inventory source id in that home's configuration. The parent requests its bounded read-only snapshot through `fm-on.sh`. |
+| `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest, enablement settings, version manifests, relevant instruction files, and effective assets. |
+| `remote-inventory` | `route` is a registered remote secondmate id and `source` is a local inventory source id in that home's configuration. |
 | `unavailable` | Nonempty `reason`; disclose an unavailable home/host or input instead of treating it as current. |
 
+Ambiguous merged PR history leaves repository coverage incomplete.
+Missing plugin manifest or enablement declarations leave plugin coverage incomplete.
+The parent requests a remote source's bounded read-only snapshot through `fm-on.sh`.
 Inventory sources optionally declare absolute `symlink_roots` for permitted external symlink targets.
 Declare only specific safe roots and instruction files; credentials, environment files, client data, browser profiles, generated logs, and runtime state are excluded.
 A resolved target outside the declared roots fails coverage, and the collector never discovers or reads another home's endpoints.
-An unreachable or unreadable remote inventory fails that source's coverage without advancing its checkpoint. A remote source needs a corresponding configured `skills` or `plugin-files` source in its owning home. A change to that source's root or file list starts a fresh baseline.
+An unreachable or unreadable remote inventory fails that source's coverage without advancing its checkpoint.
+A remote source needs a corresponding configured `skills` or `plugin-files` source in its owning home.
+A change to that source's root or file list starts a fresh baseline.
 Forge feed pages are read twice with a fixed internal 20-page bound; a changed feed or exhausted bound fails coverage.
 
 The `plugin-files` file kinds are `plugin-manifest` (installed `plugins` records with version/scope/path metadata), `plugin-enablement` (the effective `enabledPlugins` boolean map), `plugin-version` (name/version), `instruction` (content digest and bounded text), and `asset` (digest and byte count only).
@@ -1472,6 +1477,7 @@ First inventory observations are explicit baselines rather than historical chang
 
 The current secondmate registry supplies domain id/home/scope context for every bundle.
 All collected sources remain available to scope judgment, including effects that cross department boundaries; collection does not assign repositories exclusively to one mate.
+Repository events include active linked contribution observations when available, without limiting repository-wide discovery.
 The collector makes no model calls, parent requests, or review cards on complete unchanged observations.
 
 An off example, to adapt only after the separate activation approval:
