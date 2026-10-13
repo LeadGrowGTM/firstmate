@@ -1742,7 +1742,7 @@ The authenticated shim runs through the existing watcher; no cron, host timer, p
 `disarm` removes that shim and trust binding while preserving pending receipts.
 `status` prints the coverage journal without contacting the forge.
 
-Direct-PR ships need their canonical task metadata, recorded ready head, clean task copy, idle/done worker, and positive absence of pipeline custody.
+Direct-PR ships need their canonical task metadata, recorded ready head, clean task copy, confirmed done worker, and positive absence of pipeline custody.
 The updater uses `gh-axi`, `jq`, Git, and the installed no-mistakes read surface to establish those preconditions.
 Pipeline-owned tasks are deferred pending a pipeline-native freshness feature; an unknown owner, unavailable read, partial check response, or unsupported forge remains visibly incomplete.
 Successful integration records the current head and its checks; it requires validation on that head and grants no review or merge authority.

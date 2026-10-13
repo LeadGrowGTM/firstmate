@@ -20,7 +20,7 @@
 #
 # Under URL, task-control, and metadata locks, every owner must be a direct-PR
 # ship with a canonical matching pr=, unchanged recorded branch, clean copy,
-# positively idle/done worker, and positively absent pipeline custody. Unknown
+# confirmed done worker, and positively absent pipeline custody. Unknown
 # evidence defers. Pipeline-owned/no-mistakes tasks are unsupported, never written.
 # Use actual base/head repository/ref/SHA; skip drafts, closed, queued/auto-merge,
 # unsupported forges, and any head branch outside the exact configured grant.
