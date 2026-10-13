@@ -830,7 +830,8 @@ A local standalone-clone home cannot receive a primary-local commit through that
 ## Orca view tabs (config/orca-view-tabs)
 
 The optional local, gitignored `config/orca-view-tabs` file gives each secondmate on the tmux backend an Orca desktop tab that views its window.
-It holds one word: `on` opens the tabs, and `off` leaves them off, as an absent file does.
+It holds one word: `on` opens new tabs, and `off` prevents new tabs, as an absent file does.
+Turning it off does not close a tab already recorded for a secondmate; cleanup still attempts to close that tab.
 Any other content is treated as `off` with a one-line warning, so the file never stops a spawn.
 The home that spawns the secondmate reads the switch, and secondmate homes do not inherit it.
 
@@ -843,9 +844,10 @@ The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows
 Waiting covers a permission prompt and a question the agent asks.
 Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
 A relaunch, including a worker account switchover, opens a fresh tab and closes the previous one once the relaunch has gone through.
-Cleanup closes the recorded tab, and it removes the view session only when Firstmate created that session.
+If a fresh tab cannot open, the relaunch keeps the previous recorded tab and its identity.
+Cleanup attempts to close the recorded tab, and it removes the view session only when Firstmate created that session and no other client is attached.
 Orca refuses to close a pinned tab, so Firstmate leaves a pinned tab open and reports it rather than unpinning it.
-When Orca, its command line, or the Orca project is unavailable, the spawn continues without a tab and prints one note.
+When Orca, its command line, or the Orca project is unavailable, the spawn continues without a new tab and prints one note.
 Ship and scout workers never get a tab, and other runtime backends ignore the switch.
 
 The primary session is not spawned by Firstmate.
