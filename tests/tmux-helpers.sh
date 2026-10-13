@@ -69,7 +69,7 @@ private_dir() {
   [ -d "$1" ] && [ ! -L "$1" ] || return 1
   local mode owner
   case "$(uname -s)" in
-    Darwin) mode=$(stat -f '%Lp' "$1"); owner=$(stat -f '%u' "$1") ;;
+    Darwin) mode=$(/usr/bin/stat -f '%Lp' "$1"); owner=$(/usr/bin/stat -f '%u' "$1") ;;
     *) mode=$(stat -c '%a' "$1"); owner=$(stat -c '%u' "$1") ;;
   esac
   [ "$mode" = 700 ] && [ "$owner" = "$(id -u)" ]

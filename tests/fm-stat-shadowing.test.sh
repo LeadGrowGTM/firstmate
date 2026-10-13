@@ -79,6 +79,19 @@ REAL_MTIME=$(/usr/bin/stat -f %m "$0" 2>/dev/null) || true
 }
 pass "shadowing: fake GNU stat shadows /usr/bin/stat in PATH"
 
+# Exercise the generated tmux wrapper while the GNU stat shadow is active.
+if [ -n "${FM_TEST_TMUX_REAL:-}" ]; then
+  tmux -L stat-shadowing new-session -d -s shadow 'sleep 60' ||
+    fail "tmux wrapper refused an owned socket under GNU stat shadowing"
+  tmux -L stat-shadowing has-session -t shadow ||
+    fail "tmux wrapper could not inspect its owned session under GNU stat shadowing"
+  tmux -L stat-shadowing kill-server ||
+    fail "tmux wrapper could not stop its owned server under GNU stat shadowing"
+  pass "tmux wrapper accepts its private named server under GNU stat shadowing"
+else
+  pass "tmux shadowing check: tmux not installed; skipping"
+fi
+
 # --- test the fixed helpers under shadowing ----------------------------------
 
 . "$ROOT/bin/fm-supervision-lib.sh"
