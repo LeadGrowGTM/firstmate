@@ -236,7 +236,7 @@ run_claude_hook() {  # <settings.json> <hook-event>
 }
 
 test_claude_hooks_semantic_lifecycle() {
-  local rec id=busy-cl-1 out state settings
+  local rec id=busy-cl-1 out state settings cmd
   rec=$(make_spawn_case claude-lifecycle claude "$id")
   read_case_record "$rec"
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
@@ -248,6 +248,16 @@ test_claude_hooks_semantic_lifecycle() {
   for ev in UserPromptSubmit Stop StopFailure SessionEnd; do
     jq -e ".hooks[\"$ev\"]" "$settings" >/dev/null || fail "claude hook settings lack $ev"
   done
+
+  # The status line is installed only when the account's own settings define none.
+  if jq -e '.statusLine' "$HOME_DIR/user-home/.claude/settings.json" >/dev/null 2>&1; then
+    jq -e 'has("statusLine") | not' "$settings" >/dev/null || fail "a captain-defined statusLine must not be overridden"
+  else
+    cmd=$(jq -r '.statusLine.command' "$settings")
+    out=$(printf '%s\n' '{"model":{"display_name":"Test Claude"},"effort":{"level":"high"}}' | sh -c "$cmd") \
+      || fail "installed Claude statusLine command failed"
+    [ "$out" = 'Test Claude high | busy-cl-1' ] || fail "installed Claude statusLine command returned wrong task" "$out"
+  fi
 
   out=$(classify claude "$id" "$state")
   [ "$out" = "busy fm-spawn" ] || fail "seed after spawn must be 'busy fm-spawn', got '$out'"
@@ -271,6 +281,66 @@ test_claude_hooks_semantic_lifecycle() {
   out=$(classify claude "$id" "$state")
   [ "$out" = "idle claude-hook" ] || fail "SessionEnd must classify idle, got '$out'"
   pass "claude hooks open on UserPromptSubmit and close on Stop, StopFailure, and SessionEnd"
+}
+
+test_claude_statusline_command_with_spaces() {
+  local rec id=busy-cl-spaces out settings cmd space_root
+  rec=$(make_spawn_case claude-status-spaces claude "$id")
+  read_case_record "$rec"
+  space_root="$CASE_DIR/installed repo"
+  mkdir -p "$space_root"
+  cp -a "$ROOT/bin" "$space_root/bin"
+  mkdir -p "$HOME_DIR/user-home"
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" \
+    CLAUDE_CONFIG_DIR='' FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
+    FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
+    FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$WT_DIR" TMUX=fake,1,0 \
+    PATH="$FAKEBIN_DIR:$PATH" "$space_root/bin/fm-spawn.sh" \
+    "$id" "$PROJ_DIR" --mode no-mistakes --yolo off 2>&1)
+  expect_code 0 $? "Claude spawn from a spaced checkout should succeed: $out"
+  settings="$WT_DIR/.claude/settings.local.json"
+  cmd=$(jq -r '.statusLine.command' "$settings")
+  out=$(printf '%s\n' '{"model":{"display_name":"Spaced Claude"},"effort":{"level":"high"}}' | sh -c "$cmd") \
+    || fail "saved statusLine command failed with spaces in its executable path"
+  [ "$out" = 'Spaced Claude high | busy-cl-spaces' ] || fail "spaced statusLine returned wrong task" "$out"
+  pass "saved Claude statusLine executes from a checkout path with spaces"
+}
+
+test_raw_claude_preserves_account_statusline() {
+  local rec id=busy-cl-raw out settings account
+  rec=$(make_spawn_case claude-raw-statusline claude "$id")
+  read_case_record "$rec"
+  account="$CASE_DIR/other-claude-account"
+  mkdir -p "$account"
+  printf '%s\n' '{"statusLine":{"type":"command","command":"account-status"}}' >"$account/settings.json"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR" \
+    "CLAUDE_CONFIG_DIR='$account' claude --model haiku")
+  expect_code 0 $? "raw Claude launch should succeed: $out"
+  settings="$WT_DIR/.claude/settings.local.json"
+  jq -e 'has("statusLine") | not' "$settings" >/dev/null \
+    || fail "raw Claude fallback overrode the launch account statusLine"
+  jq -e '.hooks.Stop' "$settings" >/dev/null || fail "raw Claude statusLine precedence skipped hooks"
+  pass "raw Claude launch preserves the selected account statusLine"
+}
+
+test_claude_project_statusline_wins() {
+  local rec id=busy-cl-project out settings
+  rec=$(make_spawn_case claude-project-statusline claude "$id")
+  read_case_record "$rec"
+  mkdir -p "$PROJ_DIR/.claude"
+  printf '%s\n' '{"statusLine":{"type":"command","command":"project-status"}}' >"$PROJ_DIR/.claude/settings.json"
+  git -C "$PROJ_DIR" add .claude/settings.json
+  git -C "$PROJ_DIR" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm project-statusline
+  git -C "$PROJ_DIR" push -q origin main
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "claude spawn should succeed: $out"
+  settings="$WT_DIR/.claude/settings.local.json"
+  jq -e '.statusLine.command == "project-status"' "$WT_DIR/.claude/settings.json" >/dev/null \
+    || fail "spawn changed the project status line"
+  jq -e 'has("statusLine") | not' "$settings" >/dev/null \
+    || fail "spawn overrode the project status line"
+  jq -e '.hooks.Stop' "$settings" >/dev/null || fail "project status line skipped Claude hooks"
+  pass "project statusLine takes precedence over the injected fallback"
 }
 
 test_claude_hooks_stale_incarnation_harmless() {
@@ -576,6 +646,9 @@ test_pi_extension_stale_incarnation_rejected
 test_kimi_and_grok_install_no_unverified_wiring
 test_opencode_plugin_semantic_lifecycle
 test_claude_hooks_semantic_lifecycle
+test_claude_statusline_command_with_spaces
+test_raw_claude_preserves_account_statusline
+test_claude_project_statusline_wins
 test_claude_hooks_stale_incarnation_harmless
 test_gemini_hooks_semantic_lifecycle
 test_gemini_hooks_stale_incarnation_harmless

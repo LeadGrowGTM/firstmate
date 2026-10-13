@@ -81,6 +81,12 @@ Env-wrapped and compound raw Claude commands are outside this launch-time denial
 Plain report files and chat text remain available.
 The control is scoped to the launched process and never modifies the captain's own Claude settings or primary session; `bin/fm-spawn.sh` owns the exact tool names and placement, and [`docs/verification/runtime-backends.md`](../../../../../docs/verification/runtime-backends.md#claude-claudeai-publishing-tools) records the live proof.
 
+## Status line
+
+A Claude task worker or secondmate shows one compact status line (model and effort, task, worktree, plan windows) when neither the account it loads nor the project defines a `statusLine` of its own, except for raw Claude launches, which do not receive the fallback.
+The spawn installs it through the firstmate-owned `.claude/settings.local.json`, never the launch line and never the captain's global settings, so a captain-defined `statusLine` always wins.
+`../../../../../bin/fm-statusbar.sh` owns the command, its whitelisted fields, and the tmux detail line that covers every harness.
+
 ## Task control channel
 
 A Claude task worker's launch brief and Firstmate steering-inbox messages arrive as file-shaped content that is otherwise indistinguishable from indirect prompt injection.

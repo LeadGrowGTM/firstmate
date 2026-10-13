@@ -24,6 +24,20 @@ tmux new -s firstmate
 
 Crew tasks become windows in that session.
 `tmux display-message -p '#S'` prints its name.
+A locked `bin/fm-session-start.sh` labels the primary pane with its home and resolved harness, then enables the detail line on the session's windows.
+Its model and effort use explicit `FM_PRIMARY_MODEL` and `FM_PRIMARY_EFFORT` values, or Claude's launch environment when the primary is Claude; unavailable values appear as `?`.
+The detail line uses shared window options, so Orca view sessions created afterward inherit it.
+Plan usage (`u`) shows the cached account-wide `all_models` percentage used for the displayed provider and account; model and product quotas do not contribute.
+When the selected account has no account-wide measurement, usage is `u ?`; if that account is absent from quota output, the provider's default account may appear under its own label.
+Account keys of at most 14 characters appear whole; longer keys show their first six characters, `~`, and last seven.
+Two long keys with the same displayed ends can still share a label.
+The optional persistent dark theme lives in [`../bin/fm-statusbar.tmux`](../bin/fm-statusbar.tmux).
+Use `bin/fm-statusbar.sh source-line` from a stable installed checkout to preview its exact `source-file` line, `bin/fm-statusbar.sh check` to check `~/.tmux.conf`, and `bin/fm-statusbar.sh install` to append it once while preserving existing settings.
+The installer edits only the configuration file; it changes no live server options.
+The next tmux server startup loads the theme, and session start or spawn restores window labels from durable task facts; tmux sessions themselves are not preserved by a server restart.
+To apply the approved configuration to a running server, source `~/.tmux.conf` explicitly on that server.
+The usage job addresses the rendering server's socket and reads the labeled window's home cache, so grouped views and named servers cannot borrow another home's usage.
+Existing sessions pick up the primary label and detail line at their next locked session start or context re-emit; task windows also refresh their labels at spawn and can be refreshed from recorded metadata with `bin/fm-statusbar.sh sync`.
 A viewer attached through a grouped session (`tmux new-session -t <session-name> -s <view>`) does not become the container: Firstmate reads the primary's pane when `TMUX_PANE` is set and resolves a grouped session to its base session.
 If the primary harness runs outside tmux, Firstmate creates or reuses a detached session named `firstmate`:
 
