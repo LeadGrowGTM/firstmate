@@ -175,11 +175,13 @@ if [ "$LAST" = 0 ] || [ "$NOW" -lt "$LAST" ] || [ $((NOW - LAST)) -ge 7200 ]; th
     and all(.rows[]; (.tasks | type == "array" and length > 0))' "$TMP/owned" >/dev/null || fail 'saved contribution coverage incomplete'
   jq -e '.backlog.present == true and (.tasks | type == "array")' "$TMP/input" >/dev/null || fail 'owned task coverage incomplete'
   jq --slurpfile owned "$TMP/owned" --slurpfile input "$TMP/input" --argjson now "$NOW" '
-    .started=$now | .coverage_complete=false |
-    .queue=([.queue[] as $entry | select(.receipts[$entry.url].pending == true) | $entry.owners[] | {url:$entry.url,task:.}]
-      + [$owned[0].rows[] | select(.kind == "pr") | . as $row | .tasks[] | {url:$row.url,task:.}]
+    ([$owned[0].rows[] | select(.kind == "pr") | . as $row | .tasks[] | {url:$row.url,task:.}]
       + [$input[0].tasks[] | select(.kind != "secondmate" and (.pr.url | type == "string" and contains("/c/"))) | {url:.pr.url,task:.id}]
-      | unique_by([.url,.task]) | group_by(.url) | map({url:.[0].url,owners:map(.task)})) |
+      | unique_by([.url,.task]) | group_by(.url) | map({url:.[0].url,owners:map(.task)})) as $current |
+    (.queue | map(.url)) as $unfinished |
+    .started=$now | .coverage_complete=false |
+    .queue=([$unfinished[] as $url | $current[] | select(.url == $url)]
+      + [$current[] | . as $entry | select(($unfinished | index($entry.url)) == null)]) |
     .sweep_urls=(.queue | map(.url)) |
     if (.queue | length) == 0 then .coverage_complete=true else . end' "$TMP/journal" > "$TMP/new"
   mv "$TMP/new" "$TMP/journal"; save

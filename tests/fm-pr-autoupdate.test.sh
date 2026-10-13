@@ -340,6 +340,17 @@ set_fixture "$home" owned '.rows = [.rows[0]]'
 run "$home" check 17200 >/dev/null
 assert_equals true "$(jq '.coverage_complete' "$home/state/pr-autoupdate.json")" 'historical errors do not poison current coverage'
 
+home=$(world long_queue)
+jq -n '{rows:[range(101;126) | {task:"task",kind:"pr",url:("https://github.com/o/r/pull/" + tostring)}]}' > "$home/fixtures/owned.json"
+for segment in {1..24}; do run "$home" >/dev/null; done
+assert_equals 'https://github.com/o/r/pull/125' "$(jq -r '.queue[0].url' "$home/state/pr-autoupdate.json")" 'last owned PR remains next after 24 segments'
+set_fixture "$home" owned '.rows |= map(select(.url != "https://github.com/o/r/pull/110")) | .rows += [{task:"task",kind:"pr",url:"https://github.com/o/r/pull/126"}]'
+run "$home" check 17200 >/dev/null
+assert_equals 'https://github.com/o/r/pull/125' "$(jq -r '.sweep_urls[0]' "$home/state/pr-autoupdate.json")" 'refresh preserves unfinished queue position'
+assert_equals 'https://github.com/o/r/pull/126' "$(jq -r '.sweep_urls[-1]' "$home/state/pr-autoupdate.json")" 'refresh appends new ownership'
+jq -e '.sweep_urls | index("https://github.com/o/r/pull/110") == null' "$home/state/pr-autoupdate.json" >/dev/null || fail 'refresh retained removed ownership'
+jq -e '.receipts["https://github.com/o/r/pull/125"].result == "incomplete"' "$home/state/pr-autoupdate.json" >/dev/null || fail 'last owned PR was not processed'
+
 home=$(world second_owner)
 set_fixture "$home" owned '.rows += [{"task":"other","url":"https://github.com/o/r/pull/1","kind":"pr"}]'
 run "$home" >/dev/null
