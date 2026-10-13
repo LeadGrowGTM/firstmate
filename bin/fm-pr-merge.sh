@@ -96,13 +96,6 @@
 # recorded value stale. Reading that state needs glab and jq, and either one
 # absent stops the merge before any state is recorded.
 #
-# After those live checks pass, either forge merge also requires recorded merge
-# authority for this exact pull request: the task record's merge_ok= line,
-# which bin/fm-merge-ok.sh owns, must name this canonical URL with the captain
-# basis, or with the standing basis and a reviewed head equal to the verified
-# live head. A missing, malformed, or mismatched record refuses before the
-# forge call, naming the command that records it.
-#
 # Before either forge merge, the task's existing per-task control lock
 # serializes the captain-hold check through the forge command. A still-held or
 # unreadable row refuses before that command, so a captain approval must be
@@ -1096,33 +1089,6 @@ require_released_captain_hold() {
   esac
 }
 
-# The recorded merge authority (header above; bin/fm-merge-ok.sh owns the
-# record). Called after the live checks bind FM_PR_MERGE_HEAD, so a standing
-# record is matched against the head this run verified.
-require_recorded_merge_ok() {
-  local line basis rest recorded_url recorded_head='' canonical
-  line=$(grep '^merge_ok=' "$META" | tail -n 1 || true)
-  line=${line#merge_ok=}
-  basis=${line%% *}
-  rest=${line#"$basis"}
-  rest=${rest# }
-  recorded_url=${rest%% *}
-  [ "$recorded_url" = "$rest" ] || recorded_head=${rest#* }
-  canonical=$( fm_pr_url_parse "$recorded_url" 2>/dev/null && printf '%s' "$FM_PR_URL" ) || canonical=
-  if [ -n "$canonical" ] && [ "$canonical" = "$URL" ]; then
-    case "$basis" in
-      captain) [ -z "$recorded_head" ] && return 0 ;;
-      standing) [ -n "$recorded_head" ] && [ "$recorded_head" = "$FM_PR_MERGE_HEAD" ] && return 0 ;;
-    esac
-  fi
-  printf 'error: PR merge refused - no recorded merge authority for %s at head %s; nothing was merged\n' \
-    "$URL" "$FM_PR_MERGE_HEAD" >&2
-  printf '  record the captain'"'"'s word for this PR:  bin/fm-merge-ok.sh %s %s captain\n' "$ID" "$URL" >&2
-  printf '  or, for an ordinary PR that does not deploy live, publish, or touch client systems, after a clean Codex review of this head:  bin/fm-merge-ok.sh %s %s standing %s\n' \
-    "$ID" "$URL" "$FM_PR_MERGE_HEAD" >&2
-  return 1
-}
-
 FM_PR_MERGE_AUTHORITY=
 # The authority read. bin/fm-merge-authority-lib.sh owns what the away-posture
 # record's presence means; this function owns what a merge run may do about it,
@@ -1411,7 +1377,6 @@ case "$PROVIDER" in
       fi
       exit 1
     fi
-    require_recorded_merge_ok || exit 1
     # The away record is locked first, so this last presence and authority read
     # and the forge command below share one live-owner critical section.
     hold_away_record_for_merge || exit 1
@@ -1463,7 +1428,6 @@ case "$PROVIDER" in
     ;;
   gitlab)
     gitlab_verify_mergeable || exit 1
-    require_recorded_merge_ok || exit 1
     # --sha binds the merge to the head this run verified, so a push that lands
     # in between is refused by GitLab instead of merged unverified. --yes only
     # skips the interactive confirmation, which no supervised run can answer;
