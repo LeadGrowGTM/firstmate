@@ -553,6 +553,39 @@ SH
   pass 'streamed and captured timeouts reap nested named and explicit child tmux servers'
 )
 
+test_grok_failed_cell_preserves_server() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] && command -v jq >/dev/null 2>&1 || {
+    echo 'skip: tmux and jq are required for the Grok failure fixture'
+    exit 0
+  }
+  local dir="$TMP_ROOT/grok-failed-cell" cell rc=0
+  mkdir -p "$dir"
+  cat > "$dir/fake-grok" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then printf 'fake-grok\n'; exit 0; fi
+exit 7
+SH
+  chmod +x "$dir/fake-grok"
+  : > "$dir/auth.json"
+  cleanup_grok_cell() {
+    for cell in "$dir"/fm-grok-stop-native.*; do
+      [ -f "$cell/.fm-test-fixture" ] || continue
+      "$FM_TEST_TMUX_REAL" -S "$cell/dedicated.sock" kill-server >/dev/null 2>&1 || true
+    done
+  }
+  trap cleanup_grok_cell EXIT
+  TMPDIR="$dir" FM_GROK_STOP_LIVE_E2E=1 FM_GROK_STOP_LIVE_TIMEOUT=5 \
+    FM_GROK_NATIVE_BIN="$dir/fake-grok" FM_GROK_LEGACY_BIN="$dir/fake-grok" \
+    FM_GROK_AUTH_FILE="$dir/auth.json" bash "$ROOT/tests/fm-grok-stop-live-e2e.test.sh" \
+    > "$dir/suite.log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail 'fake Grok failure unexpectedly passed'
+  cell=$(sed -n 's/^blocked: preserving failed isolated Grok cell at //p' "$dir/suite.log")
+  [ -n "$cell" ] && [ -f "$cell/.fm-test-fixture" ] || fail "failed Grok cell was not preserved: $(cat "$dir/suite.log")"
+  "$FM_TEST_TMUX_REAL" -S "$cell/dedicated.sock" has-session -t native-e2e \
+    || fail 'failed Grok cell server was stopped before inspection'
+  pass 'failed Grok cell retains its recorded disposable server for inspection'
+)
+
 test_standalone_afk_avoids_operator_socket() (
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
   if command -v herdr >/dev/null 2>&1; then
@@ -585,6 +618,7 @@ test_tmux_isolation || fail 'tmux fixture isolation'
 test_tmux_cleanup_after_trap_override || fail 'tmux fixture trap cleanup'
 test_tmux_signal_cleanup || fail 'tmux fixture signal cleanup'
 test_timed_suite_reaps_child_tmux || fail 'timed suite tmux cleanup'
+test_grok_failed_cell_preserves_server || fail 'Grok failed-cell preservation'
 test_standalone_afk_avoids_operator_socket || fail 'standalone AFK fixture isolation'
 test_git_config_isolation || fail "Git fixture config isolation"
 test_agent_standin_survives_a_multicall_sleep || fail "agent stand-in multicall case"

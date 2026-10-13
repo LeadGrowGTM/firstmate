@@ -67,8 +67,15 @@ cleanup_exact_cell() {
 }
 
 preserve_on_failure() {
-  local rc=$?
+  local rc=$? registry socket
   if [ "$rc" -ne 0 ] && [ -n "$ACTIVE_LAB" ]; then
+    registry="$FM_TEST_TMUX_ROOT/explicit-sockets"
+    if [ -f "$registry" ]; then
+      while IFS= read -r socket; do
+        [ "$socket" = "$ACTIVE_LAB/dedicated.sock" ] || printf '%s\n' "$socket"
+      done < "$registry" > "$registry.keep" || exit "$rc"
+      mv -- "$registry.keep" "$registry" || exit "$rc"
+    fi
     echo "blocked: preserving failed isolated Grok cell at $ACTIVE_LAB" >&2
   fi
   fm_test_tmux_cleanup
@@ -221,5 +228,6 @@ EOF
 
 run_cell native "$NATIVE_BIN"
 run_cell legacy "$LEGACY_BIN"
+fm_test_tmux_cleanup
 trap - EXIT
 echo "ok - Grok adaptive Stop real-process matrix passed with exact target cleanup and control-window survival"
