@@ -132,6 +132,33 @@ jq -e '.source == "skills" and .inventory["SKILL.md"].content == "# Available\n"
 assert_absent "$HOME_DIR/data/domain-freshness" 'explicit inventory wrote collector state'
 pass 'disabled configured inventory needs Python but not jq'
 
+PATH="$NO_JQ_BIN" FM_HOME="$HOME_DIR" "$BASH_BIN" "$COLLECTOR" collect > "$TMP_ROOT/probe-stdout" 2> "$TMP_ROOT/probe-stderr"
+expect_code 0 "$?" 'disabled collect without jq'
+assert_equals '' "$(cat "$TMP_ROOT/probe-stdout")" 'disabled collect emitted output without jq'
+assert_absent "$HOME_DIR/data/domain-freshness" 'disabled collect without jq wrote state'
+jq '.enabled = true' "$HOME_DIR/config/domain-freshness.json" > "$HOME_DIR/config/domain-freshness-next.json"
+mv "$HOME_DIR/config/domain-freshness-next.json" "$HOME_DIR/config/domain-freshness.json"
+PATH="$NO_JQ_BIN" FM_HOME="$HOME_DIR" "$BASH_BIN" "$COLLECTOR" collect > "$TMP_ROOT/probe-stdout" 2> "$TMP_ROOT/probe-stderr"
+expect_code 1 "$?" 'enabled collect without jq'
+assert_grep 'jq is required' "$TMP_ROOT/probe-stderr" 'enabled collect bypassed jq requirement'
+printf '%s\n' '{"version":1,"enabled":true,"enabled":false,"sources":[]}' > "$HOME_DIR/config/domain-freshness.json"
+PATH="$NO_JQ_BIN" FM_HOME="$HOME_DIR" "$BASH_BIN" "$COLLECTOR" collect > "$TMP_ROOT/probe-stdout" 2> "$TMP_ROOT/probe-stderr"
+expect_code 1 "$?" 'duplicate enabled keys'
+assert_grep 'duplicate JSON key' "$TMP_ROOT/probe-stderr" 'duplicate enabled keys were accepted'
+printf '%s\n' '{"version":1,"enabled":true,"sources":[],"nested":{"enabled":false},"note":"enabled: false"}' > "$HOME_DIR/config/domain-freshness.json"
+PATH="$NO_JQ_BIN" FM_HOME="$HOME_DIR" "$BASH_BIN" "$COLLECTOR" collect > "$TMP_ROOT/probe-stdout" 2> "$TMP_ROOT/probe-stderr"
+expect_code 1 "$?" 'nested or quoted false with enabled true'
+assert_grep 'jq is required' "$TMP_ROOT/probe-stderr" 'nested or quoted false disabled an enabled source'
+printf '%s\n' '{"version":1,"enabled":false,"sources":[]}' > "$HOME_DIR/config/domain-freshness.json"
+NO_PYTHON_BIN="$TMP_ROOT/no-python-bin"
+mkdir -p "$NO_PYTHON_BIN"
+ln -s "$(command -v dirname)" "$NO_PYTHON_BIN/dirname"
+PATH="$NO_PYTHON_BIN" FM_HOME="$HOME_DIR" "$BASH_BIN" "$COLLECTOR" collect > "$TMP_ROOT/probe-stdout" 2> "$TMP_ROOT/probe-stderr"
+expect_code 1 "$?" 'disabled collect without JSON parser'
+assert_grep 'python3 is required' "$TMP_ROOT/probe-stderr" 'unvalidated disabled config was treated as safe'
+assert_absent "$HOME_DIR/data/domain-freshness" 'dependency probes wrote collector state'
+pass 'disabled collect skips jq only after strict configuration validation'
+
 new_home
 mkdir -p "$HOME_DIR/skills/one"
 printf '# One\n' > "$HOME_DIR/skills/one/SKILL.md"

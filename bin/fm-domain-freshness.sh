@@ -5,7 +5,7 @@
 #        FM_HOME=<home> fm-domain-freshness.sh inventory <local-source-id>
 #        fm-domain-freshness.sh --help
 #
-# No configuration or enabled:false makes collect a silent no-op; configured inventory remains callable.
+# No configuration is silent; enabled:false is silent after Python validation.
 # config/domain-freshness.json is home-local; docs/configuration.md owns its schema.
 # A daily recurring intake may invoke collect at/after 07:00 local; this manual
 # collector does not register checks, schedules, workers, requests, or boards.
@@ -55,6 +55,11 @@ if [ "$1" = inventory ]; then
   python3 "$SCRIPT_DIR/fm-domain-freshness.py" inventory "$FM_HOME" "$CONFIG" "$2"
   exit $?
 fi
+CONFIG_STATUS=$(python3 "$SCRIPT_DIR/fm-domain-freshness.py" config-status "$CONFIG") || exit $?
+if [ "$CONFIG_STATUS" = disabled ]; then
+  exit 0
+fi
+[ "$CONFIG_STATUS" = enabled ] || exit 1
 command -v jq >/dev/null 2>&1 || { echo 'fm-domain-freshness: jq is required' >&2; exit 1; }
 # shellcheck source=bin/fm-secondmate-registry-lib.sh
 . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"

@@ -1435,7 +1435,9 @@ Secondmate homes inherit this file from the primary, so a secondmate's own crewm
 ## Domain evidence collection (config/domain-freshness.json)
 
 The optional home-local `config/domain-freshness.json` declares the permitted inputs for manual domain evidence collection.
-Absent configuration or `enabled: false` makes `collect` a silent no-op; explicit `inventory` can still read a configured local source without changing it.
+Absent configuration makes `collect` a silent no-op; an existing `enabled: false` configuration does the same after Python validates it.
+If Python is unavailable, the command fails closed because it cannot safely identify a valid disabled JSON configuration.
+Explicit `inventory` can still read a configured local source without changing it.
 Machine-specific inventory paths are local choices and must not be inherited across hosts.
 [`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
 Daily intake and domain proposal delivery are separate integrations; this collector neither schedules work nor changes installations or operational instructions.

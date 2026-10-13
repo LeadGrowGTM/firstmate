@@ -50,12 +50,21 @@ def safe_path(path):
     return path
 
 
-def load(path, limit=MAX_JSON_BYTES):
+def unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('duplicate JSON key: ' + key)
+        value[key] = item
+    return value
+
+
+def load(path, limit=MAX_JSON_BYTES, unique=False):
     safe_path(path)
     if path.stat().st_size > limit:
         raise ValueError('JSON input exceeds read limit')
     with path.open() as handle:
-        return json.load(handle)
+        return json.load(handle, object_pairs_hook=unique_object if unique else None)
 
 
 def publish(path, value):
@@ -435,7 +444,7 @@ def validate_config(config):
 
 
 def inventory_cli(home, config_path, source_id):
-    config = load(Path(config_path))
+    config = load(Path(config_path), unique=True)
     validate_config(config)
     source = next((item for item in config['sources'] if item['id'] == source_id), None)
     if source is None or source['kind'] not in ('skills', 'plugin-files'):
@@ -447,9 +456,16 @@ def inventory_cli(home, config_path, source_id):
     return 0
 
 
+def config_status(config_path):
+    config = load(Path(config_path), unique=True)
+    validate_config(config)
+    print('enabled' if config['enabled'] else 'disabled')
+    return 0
+
+
 def main():
     home, config_path, domains_path, clock = sys.argv[1:]
-    config = load(Path(config_path))
+    config = load(Path(config_path), unique=True)
     validate_config(config)
     if not config['enabled']:
         return 0
@@ -538,7 +554,8 @@ def main():
 
 if __name__ == '__main__':
     try:
-        sys.exit(inventory_cli(*sys.argv[2:]) if sys.argv[1] == 'inventory' else main())
+        sys.exit(inventory_cli(*sys.argv[2:]) if sys.argv[1] == 'inventory' else
+                 config_status(sys.argv[2]) if sys.argv[1] == 'config-status' else main())
     except (OSError, ValueError, KeyError, TypeError, CoverageError) as exc:
         print('fm-domain-freshness: ' + str(exc), file=sys.stderr)
         sys.exit(1)
