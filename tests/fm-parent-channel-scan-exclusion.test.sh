@@ -32,7 +32,7 @@ export FM_ROOT_OVERRIDE
 mkdir -p "$FM_ROOT_OVERRIDE"
 
 cleanup() { rm -rf -- "$TMP_ROOT"; }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 # seed_remote_mate <dir>: build a remote mate home whose state dir carries one
 # genuine task log and the outbound parent channel, with one captain-facing

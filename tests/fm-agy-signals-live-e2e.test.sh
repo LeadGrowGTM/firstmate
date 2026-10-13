@@ -34,7 +34,7 @@ fm_live_gate opt-in FM_AGY_SIGNALS_LIVE agy tmux
 [ -n "$AGY_BIN" ] || fail "agy is not installed"
 
 LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-agy-signals.XXXXXX") || fail "could not create the isolated agy lab"
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 mkdir -p "$LAB/workspace"
 git -C "$LAB/workspace" init -q || fail "could not initialize the isolated agy workspace"
 git -C "$LAB/workspace" config user.email "guard@local" || fail "could not configure the isolated agy workspace"
@@ -190,4 +190,5 @@ done
 pass "/quit stops the real agy process"
 
 cleanup
+fm_test_tmux_cleanup
 trap - EXIT

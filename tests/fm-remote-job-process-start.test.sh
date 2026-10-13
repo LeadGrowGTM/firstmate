@@ -46,7 +46,7 @@ cleanup_process_start_fixture() {
   cleanup_owned_child "$LIVE_PID" process
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup_process_start_fixture EXIT
+trap 'cleanup_process_start_fixture; fm_test_tmux_cleanup' EXIT
 
 # Field 22 of this fixture is the start tick.
 # The live pid is only the filename the reader opens, so the same checks run where /proc is absent.

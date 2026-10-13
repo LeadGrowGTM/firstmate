@@ -126,7 +126,7 @@ fi
 fm_live_gate opt-in FM_MUSE_SIGNALS_LIVE muse tmux node
 
 LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-muse-signals.XXXXXX") || fail "could not create the isolated Muse lab"
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 mkdir -p "$LAB/bin" "$LAB/config" "$LAB/data" "$LAB/workspace"
 git -C "$LAB/workspace" init -q || fail "could not initialize the isolated Muse workspace"
 WORKSPACE=$(cd "$LAB/workspace" && pwd -P) || fail "could not resolve the isolated Muse workspace"
@@ -202,4 +202,5 @@ muse_prompt_glyph_is_bright "$CAPTURE" \
 pass "Muse's real bright prompt glyph classifies as an empty composer"
 
 cleanup
+fm_test_tmux_cleanup
 trap - EXIT

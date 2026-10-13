@@ -51,7 +51,7 @@ cleanup_all() {
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${LAB:-}" ] && rm -rf "$LAB"
 }
-trap cleanup_all EXIT
+trap 'cleanup_all; fm_test_tmux_cleanup' EXIT
 
 mkdir -p "$LAB/shim" "$LAB/wt"
 cat > "$LAB/shim/tmux" <<SH
@@ -235,4 +235,5 @@ fi
 note "checked $CHECKED installed harness(es)"
 
 cleanup_all
+fm_test_tmux_cleanup
 trap - EXIT

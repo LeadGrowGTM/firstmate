@@ -31,7 +31,7 @@ fm_git_identity fmtest fmtest@example.com
 TMP_ROOT=$(fm_test_tmproot fm-session-refresh)
 mkdir -p "$TMP_ROOT"
 TMP_ROOT=$(cd "$TMP_ROOT" && pwd -P)
-trap 'fm_test_remove_tree "$TMP_ROOT"' EXIT
+trap 'fm_test_remove_tree "$TMP_ROOT"; fm_test_tmux_cleanup' EXIT
 
 # The tmux stub: the harness exit command stops the agent on that window, a
 # launch brief starts the harness in `becomes`, and - when `idle-on-launch`

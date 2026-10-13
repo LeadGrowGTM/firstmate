@@ -32,7 +32,7 @@ cleanup() {
   "$REAL_TMUX" -S "$SOCKET" kill-server >/dev/null 2>&1 || true
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 fail() { printf 'not ok - %s: %s\n' "$VERSION" "$1" >&2; exit 1; }
 # shellcheck source=bin/fm-busy-lib.sh
 . "$ROOT/bin/fm-busy-lib.sh"

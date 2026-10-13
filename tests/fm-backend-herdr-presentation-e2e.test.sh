@@ -306,7 +306,7 @@ EOF
   fi
   rm -rf "$TMP_ROOT"
 }
-trap cleanup_all EXIT
+trap 'cleanup_all; fm_test_tmux_cleanup' EXIT
 
 PATH="$HERDR_ORIGINAL_PATH" \
   "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" \
@@ -1578,4 +1578,5 @@ LAB_READY=0
 pass "real Herdr lab validation completed on Herdr $HERDR_VERSION with the default-session tripwire intact"
 
 cleanup_all
+fm_test_tmux_cleanup
 trap - EXIT

@@ -71,6 +71,7 @@ preserve_on_failure() {
   if [ "$rc" -ne 0 ] && [ -n "$ACTIVE_LAB" ]; then
     echo "blocked: preserving failed isolated Grok cell at $ACTIVE_LAB" >&2
   fi
+  fm_test_tmux_cleanup
   exit "$rc"
 }
 trap preserve_on_failure EXIT

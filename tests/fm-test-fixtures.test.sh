@@ -374,7 +374,32 @@ SH
   pass 'tmux test isolation: inherited operator socket survives create/kill and unsafe selectors refuse'
 )
 
+test_tmux_cleanup_after_trap_override() (
+  local dir="$TMP_ROOT/tmux-trap-override" root real_mktemp
+  mkdir -p "$dir/bin"
+  real_mktemp=$(command -v mktemp) || fail 'mktemp is required for fixture cleanup test'
+  cat > "$dir/bin/mktemp" <<'SH'
+#!/usr/bin/env bash
+set -e
+allocated=$("$FM_TEST_REAL_MKTEMP" "$@")
+case "$allocated" in
+  /tmp/fmt.??????) printf '%s\n' "$allocated" >> "$FM_TEST_TMUX_ALLOCATIONS" ;;
+esac
+printf '%s\n' "$allocated"
+SH
+  chmod +x "$dir/bin/mktemp"
+  PATH="$dir/bin:$PATH" FM_TEST_REAL_MKTEMP="$real_mktemp" \
+    FM_TEST_TMUX_ALLOCATIONS="$dir/allocated" bash "$ROOT/tests/fm-cursor-harness.test.sh" \
+    > "$dir/suite.log" 2>&1 || fail "trap-override suite failed: $(cat "$dir/suite.log")"
+  [ -s "$dir/allocated" ] || fail 'trap-override suite did not create a private tmux fixture'
+  while IFS= read -r root; do
+    assert_absent "$root" 'trap-override suite left its private tmux fixture behind'
+  done < "$dir/allocated"
+  pass 'tmux fixture cleanup survives a suite replacing its EXIT trap'
+)
+
 test_tmux_isolation || fail 'tmux fixture isolation'
+test_tmux_cleanup_after_trap_override || fail 'tmux fixture trap cleanup'
 test_git_config_isolation || fail "Git fixture config isolation"
 test_agent_standin_survives_a_multicall_sleep || fail "agent stand-in multicall case"
 test_touch_epoch_preserves_repeated_dst_hour

@@ -43,7 +43,7 @@ cleanup() {
   }
 }
 fail() { printf 'not ok - %s\n' "$1" >&2; cleanup; exit 1; }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 VERSION=$(lavish-axi --version 2>/dev/null | tr -d '[:space:]')
 note "lavish-axi ${VERSION:-version-unknown}"

@@ -47,7 +47,7 @@ relaunch_cleanup() {
   done
   fm_test_remove_tree "$TMP_ROOT"
 }
-trap relaunch_cleanup EXIT
+trap 'relaunch_cleanup; fm_test_tmux_cleanup' EXIT
 
 # The same lifecycle-modelling tmux stub as tests/fm-control.test.sh: the
 # harness's exit command stops the agent, and a launch-brief literal starts the

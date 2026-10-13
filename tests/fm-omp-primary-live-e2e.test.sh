@@ -93,7 +93,7 @@ cleanup() {
   reap_lab
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 # --- lab checkout: the tracked tree plus this working tree's pending edits ----
 mkdir -p "$LAB"
