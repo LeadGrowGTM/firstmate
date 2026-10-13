@@ -1191,7 +1191,8 @@ The lease is bounded to 600 seconds, and a fetch that would prompt for credentia
 A launch that still cannot get a worktree of its own clone stops before the worker starts.
 Relaunch resumes in the recorded worktree; a Claude relaunch refuses an old record whose worktree belongs to another clone and names both the worktree and recorded project.
 Non-Claude relaunches continue to use their recorded worktree.
-If a clone-local `treehouse.toml` root redirects the fallback lease to another clone's copy, the launch refuses it and does not force-return that foreign copy; a stopped launch returns only a lease of its own clone.
+If a clone-local `treehouse.toml` root redirects the fallback lease to another clone's copy, the launch refuses it and does not force-return that foreign copy.
+An abort before worker launch returns only its own clone's lease from the recorded project clone; a rollback with an open worker endpoint preserves its lease.
 The attempted `get --lease` may already have marked that foreign copy leased, so the refusal leaves its Treehouse state for the pool owner to inspect.
 Git still refuses to remove a worktree from a clone that does not own it, so a shared pool is not cleared by the other home.
 The daily sweep's extra per-home prune and size checks use the pool path computed in its own environment.
