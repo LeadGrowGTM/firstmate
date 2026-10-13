@@ -1048,10 +1048,6 @@ command_hold() {
     previous_origin=$(body_hold_origin "$(show_field_value "$show" body)")
     write_hold_origin "$id" "$(show_field "$show" body)" "$origin" || exit $?
   fi
-  if [ -n "$copy" ]; then
-    task_show_or_fail "$id" "task $id disappeared before recording its decision copy"
-    write_decision_copy "$id" "$(show_field_value "$show" body)" "$copy"
-  fi
   if [ -n "$until" ]; then
     tasks_axi hold "$id" --reason "$stored_reason" --kind captain --until "$until" >/dev/null \
       || hold_status=$?
@@ -1066,6 +1062,10 @@ command_hold() {
       write_hold_origin "$id" "$(show_field "$show" body)" "$previous_origin" || exit $?
     fi
     fail "could not hold task $id for the captain"
+  fi
+  if [ -n "$copy" ]; then
+    task_show_or_fail "$id" "task $id disappeared before recording its decision copy"
+    write_decision_copy "$id" "$(show_field_value "$show" body)" "$copy"
   fi
   task_show "$id" || fail "task $id disappeared while holding it"
   show=$TASK_SHOW_OUTPUT
@@ -2048,7 +2048,7 @@ command_migrate_options() (
 )
 
 command_orphans() {
-  local origin key verb note candidate state held
+  local origin key verb note candidate state held stored stored_id origin_id candidate_id
   [ "$#" -eq 0 ] || { usage >&2; exit 2; }
   [ "$STATE" = "$FM_HOME/state" ] || fail "orphan check requires this home's state directory"
   command -v tasks-axi >/dev/null 2>&1 || fail "orphan check requires tasks-axi"
@@ -2064,6 +2064,15 @@ command_orphans() {
         state=$(show_field "$TASK_SHOW_OUTPUT" state)
         [ -n "$state" ] || fail "orphan check received no state for $candidate"
         if [ "$state" != "done" ] && [ "$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)" = captain ]; then
+          candidate_id=$(show_field_value "$TASK_SHOW_OUTPUT" id)
+          origin_id=$(task_identity "$origin") || exit $?
+          if [ "$candidate_id" != "$origin_id" ]; then
+            stored=$(body_hold_origin "$(show_field_value "$TASK_SHOW_OUTPUT" body)")
+            if [ -n "$stored" ]; then
+              stored_id=$(task_identity "$stored") || exit $?
+              [ "$stored_id" = "$origin_id" ] || continue
+            fi
+          fi
           held=1
           break
         fi

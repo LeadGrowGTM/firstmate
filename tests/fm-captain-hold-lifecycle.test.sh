@@ -2532,6 +2532,53 @@ EOF
   pass "decision copy stays on the held task, survives answers, and retries without drift"
 }
 
+test_refused_hold_keeps_prior_decision_copy() {
+  local home shown
+  home=$(make_home refused-options)
+  cat > "$home/old-options.json" <<'EOF'
+{"about":"Old route","decide":"Choose","options":[{"value":"old","label":"Old"}]}
+EOF
+  cat > "$home/new-options.json" <<'EOF'
+{"about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}
+EOF
+  run_captain "$home" hold existing --title Existing --reason Choose \
+    --options-file "$home/old-options.json" >/dev/null || fail "could not establish old copy"
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = hold ]; then exit 9; fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  if run_captain "$home" hold existing --reason Choose \
+    --options-file "$home/new-options.json" >/dev/null 2>&1; then
+    fail "re-hold succeeded despite backend refusal"
+  fi
+  shown=$(tasks_in "$home" show existing --full)
+  assert_contains "$shown" 'Old route' "refused re-hold replaced the prior copy"
+  assert_not_contains "$shown" 'New route' "refused re-hold stored the new copy"
+  if run_captain "$home" hold new-call --title New --reason Choose \
+    --options-file "$home/new-options.json" >/dev/null 2>&1; then
+    fail "new hold succeeded despite backend refusal"
+  fi
+  shown=$(tasks_in "$home" show new-call --full)
+  assert_not_contains "$shown" 'Captain options:' "refused new hold stored option copy"
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"existing","title":"Existing","about":"Migrated route","decide":"Choose","options":[{"value":"migrated","label":"Migrated"}]}]}
+EOF
+  if run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null 2>&1; then
+    fail "migration succeeded despite backend refusal"
+  fi
+  shown=$(tasks_in "$home" show existing --full)
+  assert_contains "$shown" 'Old route' "refused migration replaced the prior copy"
+  assert_not_contains "$shown" 'Migrated route' "refused migration stored the new copy"
+  rm "$home/fakebin/tasks-axi"
+  run_captain "$home" hold existing --reason Choose \
+    --options-file "$home/new-options.json" >/dev/null || fail "retry could not store new copy"
+  shown=$(tasks_in "$home" show existing --full)
+  assert_contains "$shown" 'New route' "successful retry did not store the new copy"
+  pass "refused direct and migrated holds preserve existing option copy"
+}
+
 test_legacy_option_migration_is_explicit_and_idempotent() {
   local home before after out
   home=$(make_home option-migration)
@@ -2567,6 +2614,10 @@ test_open_status_orphans_reach_drain() {
   run_captain "$home" hold exact --title Exact --reason Choose >/dev/null || fail "exact hold setup failed"
   run_captain "$home" hold legacy-decision-choice --title Legacy --reason Choose >/dev/null || fail "legacy hold setup failed"
   run_captain "$home" hold ownwork --title Work --reason Choose >/dev/null || fail "work hold setup failed"
+  run_captain "$home" hold shared-call --title Shared --reason Choose --origin owner-a >/dev/null \
+    || fail "owned exact hold setup failed"
+  run_captain "$home" hold owner-b-decision-cross --title Cross --reason Choose --origin owner-a >/dev/null \
+    || fail "owned legacy hold setup failed"
   cat > "$home/state/worker.status" <<'EOF'
 needs-decision [key=exact]: Choose
 needs-decision [key=lost]: Missing hold
@@ -2577,8 +2628,15 @@ resolved [key=settled]: Answered
 EOF
   printf 'needs-decision [key=choice]: Choose\n' > "$home/state/legacy.status"
   printf 'needs-decision [key=question]: Choose\n' > "$home/state/ownwork.status"
+  printf 'needs-decision [key=shared-call]: Choose\n' > "$home/state/owner-a.status"
+  printf 'needs-decision [key=shared-call]: Choose\nneeds-decision [key=cross]: Choose\n' > "$home/state/owner-b.status"
   out=$(run_drain "$home") || fail "orphan drain failed"
   assert_contains "$out" 'orphan needs-decision task=worker key=lost' "buried orphan was not flagged"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=shared-call' "foreign exact hold hid an orphan"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=cross' "foreign legacy hold hid an orphan"
+  if printf '%s' "$out" | grep -F 'orphan needs-decision task=owner-a key=shared-call' >/dev/null; then
+    fail "a locally owned hold was called an orphan: $out"
+  fi
   if printf '%s' "$out" | grep -E 'orphan.*key=(exact|choice|question|settled|dependency)(;|$)' >/dev/null; then
     fail "held, resolved, or blocked status was called an orphan: $out"
   fi
@@ -4789,6 +4847,7 @@ SH
 }
 
 test_decision_copy_is_task_owned
+test_refused_hold_keeps_prior_decision_copy
 test_legacy_option_migration_is_explicit_and_idempotent
 test_open_status_orphans_reach_drain
 test_hold_reason_round_trips_awkward_characters
