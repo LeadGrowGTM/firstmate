@@ -215,6 +215,7 @@ spawn_secondmate() {
   [ -z "$allowlist" ] || : > "$HOME_DIR/config/launch-env-allowlist"
   make_secondmate_home "$CASE_DIR/sm" "$id"
   [ ! -f "$TMP_ROOT/$name.prior-meta" ] || cp "$TMP_ROOT/$name.prior-meta" "$HOME_DIR/state/$id.meta"
+  [ ! -f "$TMP_ROOT/$name.other-meta" ] || cp "$TMP_ROOT/$name.other-meta" "$HOME_DIR/state/another.meta"
   : > "$PANE_LOG"
   : > "$LAUNCH_LOG"
   OUT=$(FM_FAKE_LAUNCH_LOG="$LAUNCH_LOG" FM_FAKE_PANE_LOG="$PANE_LOG" FM_FAKE_VIEW_DIR="$VIEW_DIR" \
@@ -640,6 +641,49 @@ test_base_session_is_not_a_view_candidate() {
   pass "spawn: refuses the base itself as a view candidate and opens a distinct view"
 }
 
+test_recycled_prior_view_is_not_reused() {
+  local view="$TMP_ROOT/recycled-prior/view"
+  mkdir -p "$view"
+  : > "$view/session-orca-dev"
+  printf 'otherbase\n' > "$view/group-orca-dev"
+  : > "$view/session-orca-dev-s-beta"
+  printf 'beta\n' > "$view/group-orca-dev-s-beta"
+  printf '@1\n' > "$view/option-orca-dev-s-beta"
+  cat > "$TMP_ROOT/recycled-prior.prior-meta" <<EOF
+kind=secondmate
+backend=tmux
+orca_view_handle=term-old
+orca_view_session=orca-dev-s-beta
+orca_view_owned=1
+EOF
+  spawn_secondmate recycled-prior dev on '' '' beta
+  expect_code 0 "$STATUS" "a recycled prior view must not block respawn: $OUT"
+  assert_equals orca-dev-s-beta-1 "$(meta dev orca_view_session)" "respawn creates its own view"
+  assert_equals @1 "$(cat "$VIEW_DIR/option-orca-dev-s-beta")" "respawn leaves the other secondmate's view target alone"
+  assert_equals 1 "$(meta dev orca_view_owned)" "ownership is assigned to the newly created view only"
+  pass "respawn: a recycled prior view name cannot retarget another secondmate's view"
+}
+
+test_another_recorded_owner_is_not_adopted() {
+  local view="$TMP_ROOT/recorded-owner/view"
+  mkdir -p "$view"
+  : > "$view/session-orca-dev-s-beta"
+  printf 'beta\n' > "$view/group-orca-dev-s-beta"
+  cat > "$TMP_ROOT/recorded-owner.other-meta" <<EOF
+kind=secondmate
+backend=tmux
+orca_view_session=orca-dev-s-beta
+orca_view_owned=1
+EOF
+  cp "$TMP_ROOT/recorded-owner.other-meta" "$TMP_ROOT/recorded-owner.prior-meta"
+  spawn_secondmate recorded-owner dev-s-beta on '' '' beta
+  expect_code 0 "$STATUS" "another owner's view must not block respawn: $OUT"
+  assert_equals orca-dev-s-beta-s-beta "$(meta dev-s-beta orca_view_session)" \
+    "a view recorded as owned by another secondmate is never adopted"
+  assert_absent "$VIEW_DIR/option-orca-dev-s-beta" "the other owner's untracked view is untouched"
+  pass "respawn: creates a distinct view when another secondmate owns the recorded prior name"
+}
+
 test_incomplete_identity_keeps_prior_tab() {
   local seen launch
   relaunch_secondmate relaunch-incomplete sm-incomplete on '' incomplete
@@ -720,6 +764,8 @@ test_cross_home_view_name_collision
 test_derived_view_name_collision
 test_same_group_view_name_alias
 test_base_session_is_not_a_view_candidate
+test_recycled_prior_view_is_not_reused
+test_another_recorded_owner_is_not_adopted
 test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab

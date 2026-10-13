@@ -839,6 +839,8 @@ With the switch on, every secondmate spawn or relaunch opens one Orca terminal, 
 The tab attaches a grouped tmux view session that shows exactly that secondmate's window, so each tab follows its own window without moving any other viewer.
 It prefers `orca-<id>` and chooses a distinct name when an occupied candidate belongs to another base session or identifies another task's window.
 An eligible existing session, such as one a hand-opened tab created, is reused rather than duplicated.
+It never adopts a view recorded as owned by another secondmate.
+Tracking appends an identifiable hook without replacing existing local or inherited hook entries; rollback and untracking remove only that entry.
 The view session tracks the window by its stable tmux window id, never by index or name, and returns to it whenever it is moved off it, such as after a relaunch or another window closes.
 When the secondmate's window itself is gone, the view ends and the tab says so rather than showing another session.
 If the original base is gone or its name has been reused by an unrelated session, the hook instead removes its tracking and preserves the surviving agent windows.

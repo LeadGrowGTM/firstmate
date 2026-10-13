@@ -5383,14 +5383,20 @@ fi
 ORCA_VIEW_IDENTITY_FILE=
 ORCA_VIEW_EXPORT=
 orca_view_name_usable() {
-  local group recorded_window target_window
+  local group recorded_window target_window owner_meta
   [ "$1" != "$SES" ] || return 1
+  for owner_meta in "$STATE"/*.meta; do
+    [ "$owner_meta" != "$STATE/$ID.meta" ] && [ -f "$owner_meta" ] || continue
+    [ "$(fm_meta_get "$owner_meta" kind)" = secondmate ] || continue
+    [ "$(fm_meta_get "$owner_meta" backend)" = tmux ] || continue
+    [ "$(fm_meta_get "$owner_meta" orca_view_owned)" = 1 ] || continue
+    [ "$(fm_meta_get "$owner_meta" orca_view_session)" != "$1" ] || return 1
+  done
   if ! tmux has-session -t "=$1" 2>/dev/null; then
     return 0
   fi
   group=$(tmux display-message -p -t "=$1:" '#{session_group}' 2>/dev/null) || return 1
   [ "$group" = "$SES" ] || return 1
-  [ "$1" != "$ORCA_VIEW_PRIOR_SESSION" ] || return 0
   if recorded_window=$(tmux show-options -v -t "=$1:" @fm_view_window 2>/dev/null); then
     target_window=$(tmux display-message -p -t "$T" '#{window_id}' 2>/dev/null) || return 1
     [ -n "$target_window" ] && [ "$recorded_window" = "$target_window" ]
