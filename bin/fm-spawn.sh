@@ -1334,6 +1334,7 @@ CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 GIT_HOOKS_DIR=
 SPAWN_LAUNCH_SENT=0
+SPAWN_LAUNCH_ATTEMPTED=0
 SPAWN_ENDPOINT_CLOSED=0
 
 spawn_fresh_commit_rollback() {
@@ -1498,7 +1499,7 @@ spawn_abort_cleanup() {
   # reinstalls this strip dir, is never undone. A launched agent whose endpoint
   # was not closed may still be committing, so it keeps its strip.
   if [ "$status" -ne 0 ] && [ -n "$GIT_HOOKS_DIR" ] &&
-    { [ "$SPAWN_LAUNCH_SENT" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; } &&
+    { [ "$SPAWN_LAUNCH_ATTEMPTED" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; } &&
     fm_lock_try_acquire "$SPAWN_TASK_LOCK"; then
     if [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
       chmod u+w "$GIT_HOOKS_DIR" 2>/dev/null || true
@@ -5748,8 +5749,9 @@ if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   exit 1
 fi
 sleep 0.3
-SPAWN_LAUNCH_SENT=1
+SPAWN_LAUNCH_ATTEMPTED=1
 spawn_send_literal "$T" ". $(shell_quote "$LAUNCH_FILE")"
+SPAWN_LAUNCH_SENT=1
 sleep 0.3
 if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   HERDR_PROJECTION_ABORT_CLEANUP=0

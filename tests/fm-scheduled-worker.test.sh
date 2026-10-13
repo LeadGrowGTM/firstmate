@@ -26,7 +26,8 @@ case "$mode" in
   published) outcome=worker-published; code=0 ;;
 esac
 if [ "$outcome" = worker-published ]; then
-  printf 'spawn_gen=gen-1\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\n' "$2" > "$FM_HOME/state/$1.meta"
+  project=$(CDPATH='' cd -- "$2" && pwd)
+  printf 'spawn_gen=gen-1\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\n' "$project" > "$FM_HOME/state/$1.meta"
 fi
 jq -n --arg task "$1" --arg outcome "$outcome" --argjson code "$code" \
   '{version:1,task:$task,outcome:$outcome,exit_code:$code,spawn_gen:"gen-1",reason:"fixture"}' \
@@ -78,7 +79,7 @@ selection() {
 }
 run_case() {
   local dir=$1; shift
-  FM_HOME="$dir/home" "$dir/bin/fm-scheduled-worker.sh" "$dir/plan.json" "$dir/selection.json" "$@" 2>&1
+  FM_HOME="${FM_TEST_SCHEDULE_HOME:-$dir/home}" "$dir/bin/fm-scheduled-worker.sh" "$dir/plan.json" "$dir/selection.json" "$@" 2>&1
 }
 phase() { jq -r .phase "$1/home/state/scheduled-worker/occ/journal.json"; }
 count_calls() { if [ -f "$1/home/calls" ]; then wc -l < "$1/home/calls"; else printf '0\n'; fi; }
@@ -162,6 +163,7 @@ check_attempt_and_exhaustion() {
   out=$(run_case "$dir"); rc=$?; expect_code 1 "$rc" 'attempting replay'
   assert_equals 0 "$(count_calls "$dir")" 'attempting replay called owner'
   dir=$(make_case exhaustion)
+  jq '.project += "/"' "$dir/plan.json" > "$dir/other.json"; mv "$dir/other.json" "$dir/plan.json"
   out=$(run_case "$dir"); rc=$?; expect_code 0 "$rc" 'initial publication'
   printf '%s\n' '{"kind":"low-warning","spawn_gen":"gen-1","evidence":"low"}' > "$dir/proof.json"
   printf 'checkpoint\n' > "$dir/note.txt"
@@ -177,6 +179,17 @@ check_attempt_and_exhaustion() {
   out=$(run_case "$dir"); rc=$?; expect_code 0 "$rc" 'live replay'
   assert_equals 2 "$(count_calls "$dir")" 'live replay called owner'
   pass 'attempting barrier, current-generation exhaustion, checkpoint and live replay'
+}
+
+check_relative_state_receipt() {
+  local dir out rc
+  dir=$(make_case relative-state)
+  out=$(cd "$dir" && FM_TEST_SCHEDULE_HOME=home FM_STATE_OVERRIDE=home/state run_case "$dir"); rc=$?
+  expect_code 0 "$rc" "relative scheduled state should produce a receipt: $out"
+  assert_equals worker-published "$(phase "$dir")" 'relative state did not publish'
+  jq -e '.outcome == "worker-published" and .exit_code == 0' \
+    "$dir/home/state/scheduled-worker/occ/outcome.1.json" >/dev/null || fail 'relative state receipt was not valid'
+  pass 'scheduled intake makes receipt path absolute for relative state'
 }
 
 check_generation_change_at_control_admission() {
@@ -201,5 +214,6 @@ check_authorization_and_selection
 check_capacity_and_reselect
 check_failure_barriers
 check_attempt_and_exhaustion
+check_relative_state_receipt
 check_generation_change_at_control_admission
 printf '# all fm-scheduled-worker tests passed\n'

@@ -37,6 +37,7 @@ SH
 make_spawn_fakebin() {
   local dir=$1 fakebin
   fakebin=$(fm_test_make_spawn_fakebin "$dir")
+  fm_fake_exit0 "$fakebin" claude
   cat > "$fakebin/timeout" <<'SH'
 #!/usr/bin/env bash
 shift
@@ -2330,7 +2331,7 @@ SH
   out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
   status=$?
   expect_code 1 "$status" "late launch failure must return nonzero: $out"
-  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == true' "$receipt" >/dev/null \
+  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == false' "$receipt" >/dev/null \
     || fail "late launch receipt granted unsafe retry authority"
   [ -s "$LAUNCH_LOG" ] || fail "late failure must follow actual fake transport delivery"
   pass "production spawn receipt preserves uncertain delivery even when metadata rolls back"

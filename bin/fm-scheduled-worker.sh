@@ -93,7 +93,9 @@ jq -e --slurpfile plan "$PLAN" --argjson now "$NOW" '
 ' "$SELECTION" >/dev/null || die 'selection needs fresh evidence and one exactly authorized profile'
 PROFILE=$(jq -cS .profile "$SELECTION")
 OBSERVED=$(jq -r .observed_at "$SELECTION")
+PLAN_PROJECT=$(CDPATH='' cd -- "$(jq -r .project "$PLAN")" && pwd) || die 'plan project is unavailable'
 STATE=${FM_STATE_OVERRIDE:-$FM_HOME/state}
+case "$STATE" in /*) ;; *) STATE="$(pwd -P)/$STATE" ;; esac
 DIR=$STATE/scheduled-worker/$OCCURRENCE
 # Reject unsafe roots before creating or following any occurrence path.
 for directory in "$STATE" "$STATE/scheduled-worker" "$DIR"; do
@@ -145,7 +147,13 @@ case "$PHASE" in
     for axis in backend mode yolo project; do
       actual=$(fm_meta_get "$META" "$axis")
       [ "$axis" != backend ] || actual=${actual:-tmux}
-      [ "$actual" = "$(jq -r ".$axis" "$PLAN")" ] || die "worker $axis changed; refusing continuation"
+      if [ "$axis" = project ]; then
+        actual=$(CDPATH='' cd -- "$actual" && pwd) || die 'worker project is unavailable'
+        planned=$PLAN_PROJECT
+      else
+        planned=$(jq -r ".$axis" "$PLAN")
+      fi
+      [ "$actual" = "$planned" ] || die "worker $axis changed; refusing continuation"
     done
     cp "$PROOF" "$DIR/exhaustion.$GEN.json"
     cp "$NOTE" "$DIR/checkpoint.$GEN.txt"

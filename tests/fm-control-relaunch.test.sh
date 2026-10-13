@@ -194,6 +194,7 @@ new_case() {
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   printf '%s' fmses > "$dir/fake/session-name"
   make_tmux_stub "$dir"
+  fm_fake_exit0 "$dir/fakebin" claude
   printf '%s\n' "$dir"
 }
 
@@ -238,7 +239,7 @@ run_control() {  # <case-dir> <args...>
   mkdir -p "$dir/user-home"
   env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION -u HERDR_SOCKET_PATH \
     -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
-    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="${FM_TEST_CONTROL_HOME:-$dir/home}" FM_FAKE_DIR="$dir/fake" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
@@ -2742,9 +2743,17 @@ test_scheduled_control_receipts() {
   out=$(FM_SPAWN_OUTCOME_FILE="$receipt" FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START=1 \
     run_control "$dir" rl-receipt-late relaunch --note "checkpoint preserved after transport failure"); rc=$?
   expect_code 1 "$rc" "late continuation transport failure should fail: $out"
-  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == true' "$receipt" >/dev/null \
+  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == false' "$receipt" >/dev/null \
     || fail "a started replacement cannot grant prepublication retry authority"
   [ "$(cat "$dir/fake/command")" = claude ] || fail "late-failure fixture must have started the replacement"
+  dir=$(new_case receipt-relative rl-receipt-relative)
+  add_ship_task "$dir" rl-receipt-relative claude
+  receipt="$dir/outcome.json"
+  out=$(cd "$dir" && FM_TEST_CONTROL_HOME=home FM_STATE_OVERRIDE=home/state \
+    FM_SPAWN_OUTCOME_FILE="$receipt" run_control "$dir" rl-receipt-relative relaunch --note "relative state checkpoint"); rc=$?
+  expect_code 0 "$rc" "relative state relaunch should confirm a receipt: $out"
+  jq -e '.outcome == "live-worker" and .exit_code == 0 and .launch_sent == true' "$receipt" >/dev/null \
+    || fail 'relative state did not produce a live receipt'
   dir=$(new_case receipt-stop rl-receipt-stop)
   add_ship_task "$dir" rl-receipt-stop claude
   receipt="$dir/outcome.json"
