@@ -88,8 +88,9 @@ home_idle() {
     esac
   done
   printf '%s' "$current_snapshot" | jq -e '
-    any(.backlog.records[]; .state == "in_flight" and .current_role == "worker" and
-      (.id as $id | ($ARGS.positional | index($id)) == null)) | not
+    any(.backlog.records[]; .state == "in_flight" and
+      ((.structured | not) or (.current_role == "worker" and
+        (.id as $id | ($ARGS.positional | index($id)) == null)))) | not
   ' --args "$@" >/dev/null
 }
 home_idle "$snapshot" || exit 0

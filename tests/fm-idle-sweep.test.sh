@@ -124,6 +124,35 @@ no_starts 'no fire while a worker process is live'
 TEST_ENDPOINT=unverified sweep
 no_starts 'unknown endpoint classification holds the batch'
 rm "$home/state/live.meta"
+cp "$home/data/backlog.md" "$TMP_ROOT/backlog-before-unstructured"
+perl -0pi -e 's/^## In flight\n/## In flight\n\n- investigate active failure\n/m' "$home/data/backlog.md"
+snapshot=$(bash "$home/bin/fm-fleet-snapshot.sh" --contribution-input)
+printf '%s' "$snapshot" | jq -e 'any(.backlog.records[];
+  .state=="in_flight" and .structured==false and .raw=="- investigate active failure")' >/dev/null || fail 'malformed In flight fixture was not parsed'
+sweep
+no_starts 'unstructured In flight task holds automatic dispatch'
+for control in blank body; do
+  cp "$TMP_ROOT/backlog-before-unstructured" "$home/data/backlog.md"
+  if [ "$control" = blank ]; then
+    perl -0pi -e 's/^## In flight\n/## In flight\n\n\n/m' "$home/data/backlog.md"
+  else
+    perl -0pi -e 's/^## In flight\n/## In flight\n\n- [ ] held-control - Parked fixture (hold: parked) (hold-kind: captain)\n  Ordinary indented body.\n/m' "$home/data/backlog.md"
+  fi
+  snapshot=$(bash "$home/bin/fm-fleet-snapshot.sh" --contribution-input)
+  printf '%s' "$snapshot" | jq -e 'all(.backlog.records[]; .structured)' >/dev/null || fail "$control control created an unstructured row"
+  if [ "$control" = body ]; then
+    printf '%s' "$snapshot" | jq -e 'any(.backlog.records[];
+      .id=="held-control" and .state=="in_flight" and .current_role=="held" and
+      .body_lines==["Ordinary indented body."])' >/dev/null || fail 'indented body control did not remain held row content'
+  fi
+  sweep
+  [ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 3 ] || fail "$control control prevented eligible work"
+  if grep -q '^held-control ' "$TEST_SPAWN_LOG"; then fail 'held body control was dispatched'; fi
+  for id in ordinary held captain red extra extra2 extra3 flight; do rm -f "$home/state/$id.meta"; done
+  : > "$TEST_SPAWN_LOG"
+  pass "$control control preserves eligible dispatch"
+done
+cp "$TMP_ROOT/backlog-before-unstructured" "$home/data/backlog.md"
 cat > "$TMP_ROOT/start-concurrent-worker" <<'SH'
 #!/usr/bin/env bash
 printf 'kind=crewmate\nwindow=fm-concurrent\n' > "$FM_HOME/state/concurrent.meta"
