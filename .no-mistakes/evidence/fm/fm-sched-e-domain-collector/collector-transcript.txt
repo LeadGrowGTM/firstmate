@@ -1,0 +1,5 @@
+first exit=0 stdout=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPJ3FVNWKXVTQJV6CQPWR/.domain-e2e.aWPXX5/home/data/domain-freshness/bundles/4088ad45cf8ec47bf382b6578d423c8fb6d54265242582a2eee7864a903c287a.json stderr=
+late_and_change exit=0 stdout=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPJ3FVNWKXVTQJV6CQPWR/.domain-e2e.aWPXX5/home/data/domain-freshness/bundles/771d15a1a792019c125d6a572c05189212a90b88e1ed4ea01d637b2a3ccf9122.json stderr=
+silent_repeat exit=0 stdout= stderr=
+forge_503 exit=2 stdout=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPJ3FVNWKXVTQJV6CQPWR/.domain-e2e.aWPXX5/home/data/domain-freshness/bundles/895a67b4daa36c03184ae083c74510b6da9fd07e4236994fbbb39026922ac515.json stderr=
+verified: first 24h issue and explicit skill baseline; late overlap issue plus skill delta; silent complete repeat; failed forge source held while healthy skills advanced
