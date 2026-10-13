@@ -86,9 +86,14 @@ bash "$SB" apply firstmate
 [ "$(tmux show-options -wqv -t orca-view:fm-demo-task pane-border-status)" = bottom ] || fail "view window did not get the detail line"
 [ -z "$(tmux show-options -wqv -t unrelated pane-border-status)" ] || fail "an ungrouped window was changed"
 [ "$(tmux show-options -qv -t firstmate 'status-format[0]')" = 'CUSTOM #{window_name}' ] || fail "apply replaced a custom status line"
+[ "$(tmux show-options -qv -t firstmate status-right)" = '#{E:pane-border-format}' ] || fail "firstmate status-right missed the pane detail line"
+[ "$(tmux show-options -qv -t orca-view status-right)" = '#{E:pane-border-format}' ] || fail "view status-right missed the pane detail line"
+[ "$(tmux show-options -qv -t orca-view status-right-length)" = 200 ] || fail "view status-right truncates the detail line"
+[ "$(tmux show-options -qv -t unrelated status-right)" != '#{E:pane-border-format}' ] || fail "unrelated status-right was changed"
 tmux new-session -d -t firstmate -s orca-later -x 150 -y 20
 [ "$(tmux show-options -wqv -t orca-later:fm-demo-task pane-border-status)" = bottom ] || fail "late view lost the detail line"
-pass "apply preserves status and covers current and later grouped views"
+[ "$(tmux show-options -qv -t orca-later status-right)" = '#{E:pane-border-format}' ] || fail "late view status-right missed the pane detail line"
+pass "apply preserves custom status and covers current and later grouped views"
 
 bash "$SB" usage firstmate:fm-demo-task >/dev/null
 i=0
@@ -106,6 +111,7 @@ tmux new-window -d -t firstmate: -n product "sleep 600"
 bash "$SB" label firstmate:product product claude special-product high /home/u/product
 [ "$(bash "$SB" usage firstmate:product)" = 'u cl:default82%' ] || fail "product limit did not bind its model"
 pass "each pane uses its tighter account or model limit"
+bash "$SB" apply firstmate
 
 tmux select-window -t orca-view:fm-demo-task
 wide=$(render orca-view 160 'u cl:default32%')
@@ -113,6 +119,18 @@ case "$wide" in
 *"u cl:default32%"*"fm-demo-task"*"opus-5-5[1m] high"*"firstmate/17"*) pass "wide client shows task, model, effort, worktree and usage" ;;
 *) fail "wide render missing fields" "$wide" ;;
 esac
+status_bar=$("$REAL_TMUX" -L "$OUTER" capture-pane -p | tail -1)
+case "$status_bar" in
+*'u cl:default32%'*'fm-demo-task'*'opus-5-5[1m] high'*'firstmate/17'*) ;;
+*) fail "view status bar did not show the active pane detail" "$status_bar" ;;
+esac
+tmux select-window -t orca-view:fable
+active_status=$(tmux display-message -p -t orca-view '#{E:status-right}')
+case "$active_status" in
+*fable*'| fable high | fable'*) pass "status-right follows the active pane" ;;
+*) fail "status-right did not follow the active pane" "$active_status" ;;
+esac
+tmux select-window -t orca-view:fm-demo-task
 
 tmux split-window -h -d -t firstmate:fm-demo-task "sleep 600"
 split_width=$(tmux display-message -p -t firstmate:fm-demo-task.0 '#{pane_width}')

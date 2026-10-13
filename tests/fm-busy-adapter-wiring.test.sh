@@ -281,6 +281,26 @@ test_claude_hooks_semantic_lifecycle() {
   pass "claude hooks open on UserPromptSubmit and close on Stop, StopFailure, and SessionEnd"
 }
 
+test_claude_project_statusline_wins() {
+  local rec id=busy-cl-project out settings
+  rec=$(make_spawn_case claude-project-statusline claude "$id")
+  read_case_record "$rec"
+  mkdir -p "$PROJ_DIR/.claude"
+  printf '%s\n' '{"statusLine":{"type":"command","command":"project-status"}}' >"$PROJ_DIR/.claude/settings.json"
+  git -C "$PROJ_DIR" add .claude/settings.json
+  git -C "$PROJ_DIR" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm project-statusline
+  git -C "$PROJ_DIR" push -q origin main
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "claude spawn should succeed: $out"
+  settings="$WT_DIR/.claude/settings.local.json"
+  jq -e '.statusLine.command == "project-status"' "$WT_DIR/.claude/settings.json" >/dev/null \
+    || fail "spawn changed the project status line"
+  jq -e 'has("statusLine") | not' "$settings" >/dev/null \
+    || fail "spawn overrode the project status line"
+  jq -e '.hooks.Stop' "$settings" >/dev/null || fail "project status line skipped Claude hooks"
+  pass "project statusLine takes precedence over the injected fallback"
+}
+
 test_claude_hooks_stale_incarnation_harmless() {
   local rec id=busy-cl-2 out state settings
   rec=$(make_spawn_case claude-stale claude "$id")
@@ -584,6 +604,7 @@ test_pi_extension_stale_incarnation_rejected
 test_kimi_and_grok_install_no_unverified_wiring
 test_opencode_plugin_semantic_lifecycle
 test_claude_hooks_semantic_lifecycle
+test_claude_project_statusline_wins
 test_claude_hooks_stale_incarnation_harmless
 test_gemini_hooks_semantic_lifecycle
 test_gemini_hooks_stale_incarnation_harmless

@@ -4797,7 +4797,8 @@ fi
     case "$sl_cmd" in
     *[\'\"\\\$\`]* | *[[:cntrl:]]*) ;;
     *)
-      if ! { [ -r "$sl_settings" ] && jq -e '.statusLine' "$sl_settings" >/dev/null 2>&1; }; then
+      if ! { [ -r "$sl_settings" ] && jq -e '.statusLine' "$sl_settings" >/dev/null 2>&1; } \
+        && ! { [ -r "$WT/.claude/settings.json" ] && jq -e '.statusLine' "$WT/.claude/settings.json" >/dev/null 2>&1; }; then
         j_statusline=",\"statusLine\":{\"type\":\"command\",\"command\":\"$sl_cmd\"}"
       fi
       ;;

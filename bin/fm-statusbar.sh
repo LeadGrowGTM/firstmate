@@ -134,7 +134,7 @@ cmd_sync() {
 }
 
 cmd_apply() {
-  local ses=${1:-} fmt win
+  local ses=${1:-} fmt win group group_id sid member_group target_sid
   command -v tmux >/dev/null 2>&1 || return 0
   [ -n "$ses" ] || ses=$(tmux display-message -p '#S' 2>/dev/null) || return 0
   fmt=$(fm_sb_format)
@@ -143,6 +143,18 @@ cmd_apply() {
     tmux set-window-option -t "$win" pane-border-status bottom 2>/dev/null || true
     tmux set-window-option -t "$win" pane-border-format "$fmt" 2>/dev/null || true
   done < <(tmux list-windows -t "$ses" -F '#{window_id}' 2>/dev/null)
+  group=$(tmux display-message -p -t "$ses" '#{session_group}' 2>/dev/null) || return 0
+  [ -n "$group" ] || group=$ses
+  target_sid=$(tmux display-message -p -t "$ses" '#{session_id}' 2>/dev/null) || return 0
+  while read -r sid member_group; do
+    [ "$sid" = "$target_sid" ] || [ "$member_group" = "$group" ] || continue
+    tmux set-option -t "$sid" status-right-length 200 2>/dev/null || true
+    tmux set-option -t "$sid" status-right '#{E:pane-border-format}' 2>/dev/null || true
+  done < <(tmux list-sessions -F '#{session_id} #{session_group}' 2>/dev/null)
+  group_id=$(tmux display-message -p -t "$group" '#{session_id}' 2>/dev/null) || return 0
+  group_id=${group_id#\$}
+  tmux set-hook -g "after-new-session[$((10000 + group_id))]" \
+    "if-shell -F '#{==:#{session_group},$group}' 'set-option status-right-length 200; set-option status-right \"#{E:pane-border-format}\"'" 2>/dev/null || true
   return 0
 }
 
