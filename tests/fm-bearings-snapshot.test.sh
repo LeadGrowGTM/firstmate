@@ -3427,19 +3427,27 @@ test_complete_structured_decision_layout() {
 ## Queued
 - [ ] minor - Minor choice (repo: firstmate) (kind: captain) (priority: low) (hold: Pick A for less work or B for compatibility) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
+  Captain options: {not valid json}
 - [ ] major - Major choice (repo: firstmate) (kind: captain) (priority: high) (hold: Choose whether to preserve the older format for existing consumers or retire it after the migration; preserving it costs maintenance while retiring it requires every consumer to upgrade before rollout) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
+  Captain options: {"about":"Format migration","decide":"Choose the compatibility route","options":[{"value":"preserve","label":"Preserve the format","hint":"Keeps older consumers working"},{"value":"retire","label":"Retire the format"}],"recommended":"preserve","report":"data/format/report.md","pr_url":"https://github.com/acme/sample/pull/17"}
 - [ ] older - Same subject (repo: firstmate) (kind: captain) (hold: Earlier options remain recorded) (hold-kind: captain)
   Captain hold set: 2026-07-10T10:00:00Z
   Captain hold origin: finished
+  Captain options: {"about":null,"decide":"Pick","options":[]}
 - [ ] newer - Same subject (repo: firstmate) (kind: captain) (hold: Newer options) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
+  Captain options: {"about":"Same subject","decide":"Give a freeform route","options":[]}
 - [ ] merged-call - Post-merge rollout for https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: Choose the rollout) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
+  Captain options: {"about":"Rollout","decide":"Pick","options":true}
 
 ## Done
 - [x] finished - Investigation data/finished/report.md (repo: firstmate) (kind: scout) (reported 2026-07-10)
 - [x] shipped - Delivery https://github.com/acme/sample/pull/5 (repo: sample) (kind: ship) (merged 2026-07-11)
+EOF
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"major","title":"Conflicting side copy","about":"Side-file choice","decide":"Ignore task body","options":[{"value":"override","label":"Override"}]},{"key":"side-only","title":"Side-only choice","about":"Side file","decide":"Invent a call","options":[{"value":"yes","label":"Yes"}]}]}
 EOF
   mkdir -p "$home/data/finished"
   printf 'Should we invent another decision from this report?\n' > "$home/data/finished/report.md"
@@ -3455,6 +3463,15 @@ EOF
         printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i" "$i"
       fi
       printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
+      if [ "$i" -eq 1 ]; then
+        printf '  Captain options: {"about":"Remote rollout","decide":"Pick the rollout route","options":[{"value":"stage","label":"Stage rollout"},{"value":"all","label":"Release to all"}],"recommended":"stage","report":"data/remote/report.md","pr_url":"https://github.com/acme/remote/pull/4"}\n'
+      elif [ "$i" -eq 2 ]; then
+        printf '  Captain options: {"about":"Invalid hint","decide":"Pick","options":[{"value":"yes","label":"Yes","hint":2}]}\n'
+      elif [ "$i" -eq 3 ]; then
+        printf '  Captain options: {"about":"Unknown option key","decide":"Pick","options":[{"value":"yes","label":"Yes","extra":true}]}\n'
+      elif [ "$i" -eq 4 ]; then
+        printf '  Captain options: {"about":"Unknown object key","decide":"Pick","options":[],"extra":true}\n'
+      fi
     done
     printf '\n## Done\n'
   } > "$mate/data/backlog.md"
@@ -3465,12 +3482,30 @@ EOF
     and (.decision_layout_unavailable | length) == 0
     and .decision_layout[0].key == "major"
     and (.decision_layout[0].reason | endswith("before rollout"))
+    and (.decision_layout[0].about == "Format migration" and .decision_layout[0].decide == "Choose the compatibility route"
+      and [.decision_layout[0].options[].value] == ["preserve","retire"]
+      and .decision_layout[0].recommended == "preserve"
+      and .decision_layout[0].report == "data/format/report.md"
+      and .decision_layout[0].pr_url == "https://github.com/acme/sample/pull/17")
+    and ([.decision_layout[] | select(.key == "side-only" or .about == "Side-file choice")] | length) == 0
     and (.decision_layout | all(.[]; has("number") | not))
     and (.decision_layout | any(.key == "older" and .origin == "finished"
       and .stale_reason == null))
     and (.decision_layout | any(.key == "newer" and .stale_reason == null))
+    and (.decision_layout | any(.key == "newer" and .options == [] and .about == "Same subject"))
+    and (.decision_layout | any(.key == "minor" and .options == null and .about == null))
+    and (.decision_layout | any(.key == "older" and .options == null and .about == null))
+    and (.decision_layout | any(.key == "merged-call" and .options == null and .about == null
+      and .pr_url == "https://github.com/acme/sample/pull/5"))
     and (.decision_layout | any(.owner == "mate" and .key == "remote-1"
-      and .stale_reason == null))
+      and .stale_reason == null and .about == "Remote rollout"
+      and .decide == "Pick the rollout route"
+      and [.options[].value] == ["stage","all"]
+      and .recommended == "stage"
+      and .report == "data/remote/report.md"
+      and .pr_url == "https://github.com/acme/remote/pull/4"))
+    and ([.decision_layout[] | select(.owner == "mate" and (.key == "remote-2" or .key == "remote-3" or .key == "remote-4"))]
+      | all(.[]; .options == null and .about == null))
     and (.decision_layout | any(.key == "merged-call" and .pr_url == "https://github.com/acme/sample/pull/5"
       and .stale_reason == null))
     and ([.decision_layout[] | select(.owner == "mate")] | length) == 26

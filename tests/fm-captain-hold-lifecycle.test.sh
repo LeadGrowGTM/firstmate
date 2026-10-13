@@ -2490,6 +2490,112 @@ run_drain() {  # <home>
     "$ROOT/bin/fm-wake-drain.sh" 2>/dev/null
 }
 
+test_decision_copy_is_task_owned() {
+  local home before after out
+  home=$(make_home decision-copy)
+  tasks_in "$home" add choice "Choose the route" --repo sample --body 'Keep this note' >/dev/null || fail "could not create work"
+  cat > "$home/options.json" <<'EOF'
+{"about":"Route north","decide":"Which route?","options":[{"value":"north","label":"North","hint":"Fast\nwith ice"},{"value":"south","label":"South"}],"recommended":"north","report":"/tmp/route.md","pr_url":"https://github.com/example/repo/pull/1"}
+EOF
+  run_captain "$home" hold choice --reason 'Choose route' --options-file "$home/options.json" >/dev/null || fail "could not store copy"
+  before=$(tasks_in "$home" show choice --full)
+  assert_contains "$before" 'Keep this note' "options erased existing notes"
+  assert_contains "$before" 'Captain options:' "decision copy is missing from task"
+  run_captain "$home" hold choice --reason 'Choose route' --options-file "$home/options.json" >/dev/null || fail "retry failed"
+  after=$(tasks_in "$home" show choice --full)
+  [ "$before" = "$after" ] || fail "retry changed the held task"
+  jq '.recommended="missing"' "$home/options.json" > "$home/invalid.json"
+  if run_captain "$home" hold absent --title Absent --reason Choose --options-file "$home/invalid.json" >/dev/null 2>&1; then
+    fail "invalid recommended option was accepted"
+  fi
+  if tasks_in "$home" show absent >/dev/null 2>&1; then fail "invalid copy created a task"; fi
+  jq '.pr_url="https:///missing-host"' "$home/options.json" > "$home/invalid-url.json"
+  if run_captain "$home" hold badurl --title Badurl --reason Choose --options-file "$home/invalid-url.json" >/dev/null 2>&1; then
+    fail "URL rejected by the board was accepted into its task copy"
+  fi
+  printf 'North please\n' > "$home/answer.txt"
+  run_captain "$home" answer choice --decision-file "$home/answer.txt" >/dev/null || fail "option copy broke answers"
+  out=$(tasks_in "$home" show choice --full)
+  assert_contains "$out" 'state: done' "answer did not close the task"
+  assert_contains "$out" 'Captain options:' "answer erased option copy"
+  cat "$home/options.json" "$home/options.json" > "$home/two-documents.json"
+  if run_captain "$home" hold multi --title Multi --reason Choose --options-file "$home/two-documents.json" >/dev/null 2>&1; then
+    fail "multiple JSON documents were accepted"
+  fi
+  tasks_in "$home" add workchoice "Gated work" --repo sample >/dev/null || fail "could not add gated work"
+  run_captain "$home" hold workchoice --reason Choose --options-file "$home/options.json" >/dev/null || fail "could not hold work"
+  run_captain "$home" answer workchoice --decision-file "$home/answer.txt" --release >/dev/null || fail "could not release work"
+  run_captain "$home" hold workchoice --reason Choose --options-file "$home/options.json" >/dev/null || fail "could not re-hold work"
+  out=$(tasks_in "$home" show workchoice --full)
+  assert_contains "$out" 'North please' "option copy erased the recorded human answer"
+  assert_contains "$out" 'Captain options:' "re-hold lost its option metadata"
+  pass "decision copy stays on the held task, survives answers, and retries without drift"
+}
+
+test_legacy_option_migration_is_explicit_and_idempotent() {
+  local home before after out
+  home=$(make_home option-migration)
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"route","title":"Choose route","about":"Routing","decide":"Choose a route","options":[{"label":"North","hint":"Fast"},{"label":"South","hint":"Warm"}],"recommended":"North","report":"/tmp/report.md"}]}
+EOF
+  before=$(cat "$home/data/backlog.md")
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "migration preview failed"
+  assert_contains "$out" 'would-hold: route' "migration did not preview the task"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "dry run mutated backlog"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration apply failed"
+  before=$(tasks_in "$home" show route --full)
+  assert_contains "$before" 'hold_kind: captain' "migration did not hold task"
+  assert_contains "$before" 'option-1' "label-only legacy options were not assigned values"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration retry failed"
+  after=$(tasks_in "$home" show route --full)
+  [ "$before" = "$after" ] || fail "migration retry changed the task"
+  [ -f "$home/captain-decisions.json" ] || fail "migration deleted the source file"
+  printf 'North\n' > "$home/answer.txt"
+  run_captain "$home" answer route --decision-file "$home/answer.txt" >/dev/null || fail "could not close migrated task"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) || fail "closed migration retry failed"
+  assert_contains "$out" 'already-closed: route' "migration reopened an answered call"
+  jq '.decisions += [{"key":"bad","title":"Bad","about":"Bad","decide":"Bad","options":[],"recommended":"missing"}]' \
+    "$home/captain-decisions.json" > "$home/bad.json"
+  if run_captain "$home" migrate-options "$home/bad.json" --apply >/dev/null 2>&1; then fail "bad inventory accepted"; fi
+  if tasks_in "$home" show bad >/dev/null 2>&1; then fail "invalid inventory partially applied"; fi
+  pass "migration previews by default, retains the side file, and never resurrects answered calls"
+}
+
+test_open_status_orphans_reach_drain() {
+  local home out
+  home=$(make_home status-orphans)
+  run_captain "$home" hold exact --title Exact --reason Choose >/dev/null || fail "exact hold setup failed"
+  run_captain "$home" hold legacy-decision-choice --title Legacy --reason Choose >/dev/null || fail "legacy hold setup failed"
+  run_captain "$home" hold ownwork --title Work --reason Choose >/dev/null || fail "work hold setup failed"
+  cat > "$home/state/worker.status" <<'EOF'
+needs-decision [key=exact]: Choose
+needs-decision [key=lost]: Missing hold
+working: later unrelated progress
+blocked [key=dependency]: Dependency
+needs-decision [key=settled]: Old choice
+resolved [key=settled]: Answered
+EOF
+  printf 'needs-decision [key=choice]: Choose\n' > "$home/state/legacy.status"
+  printf 'needs-decision [key=question]: Choose\n' > "$home/state/ownwork.status"
+  out=$(run_drain "$home") || fail "orphan drain failed"
+  assert_contains "$out" 'orphan needs-decision task=worker key=lost' "buried orphan was not flagged"
+  if printf '%s' "$out" | grep -E 'orphan.*key=(exact|choice|question|settled|dependency)(;|$)' >/dev/null; then
+    fail "held, resolved, or blocked status was called an orphan: $out"
+  fi
+  tasks_in "$home" "done" exact >/dev/null || fail "close failed"
+  out=$(run_drain "$home") || fail "second drain failed"
+  assert_contains "$out" 'orphan needs-decision task=worker key=exact' "closed hold hid an open status call"
+  printf 'resolved [key=lost]: Answered\n' >> "$home/state/worker.status"
+  out=$(run_drain "$home") || fail "resolution drain failed"
+  if printf '%s' "$out" | grep -F 'task=worker key=lost;' >/dev/null; then fail "resolved orphan remained flagged"; fi
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$home/fakebin/tasks-axi"
+  chmod +x "$home/fakebin/tasks-axi"
+  out=$(run_drain "$home") || fail "backlog failure made the drain fail"
+  assert_contains "$out" 'captain-held task orphan check unavailable' "unreadable backlog was treated as empty"
+  if printf '%s' "$out" | grep -F 'orphan needs-decision task=' >/dev/null; then fail "failed check invented an orphan"; fi
+  pass "drain flags still-open needs-decision keys without a matching local captain hold"
+}
+
 # Reconstructs the 2026-08-06 loss with synthetic names: the answer was posted
 # as a `resolved [key=...]` line and nothing else, so the status fold went quiet
 # while the durable captain-held task stayed open and kept reading as if the
@@ -4682,6 +4788,9 @@ SH
   pass "marked hold reasons round-trip through public reads, fleet, startup, and return without changing other fields"
 }
 
+test_decision_copy_is_task_owned
+test_legacy_option_migration_is_explicit_and_idempotent
+test_open_status_orphans_reach_drain
 test_hold_reason_round_trips_awkward_characters
 test_hold_origins_precede_backend_holds
 test_historical_self_inventory_has_workable_repair
