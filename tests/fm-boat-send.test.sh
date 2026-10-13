@@ -84,7 +84,9 @@ if [ -e "$FIXTURES/spawn.postlaunch.fail" ]; then
   exit 1
 fi
 printf '%s\n' "$@" > "$FIXTURES/spawn.argv"
-printf 'kind=ship\n' > "$FM_HOME/state/$1.meta"
+kind=ship
+for arg in "$@"; do [ "$arg" != --scout ] || kind=scout; done
+printf 'kind=%s\nproject=%s\n' "$kind" "$2" > "$FM_HOME/state/$1.meta"
 SH
 cat > "$BIN/fm-teardown.sh" <<'SH'
 #!/usr/bin/env bash
@@ -380,6 +382,13 @@ test_teardown_stop() {
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 0 "$CODE" 'teardown with another task'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'other task was stopped'
+  new_case dev-loop-scout-teardown
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_worker task-one scout dev-loop 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" "dev-loop scout teardown: $OUT"
+  assert_grep 'teardown task-one' "$FIXTURES/calls" 'allowed scout teardown was not called'
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'last scout did not stop approved box'
   new_case teardown-refused
   printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
   seed_worker task-one ship firstmate 'state: working active'
@@ -395,6 +404,20 @@ test_teardown_stop() {
   expect_code 1 "$CODE" 'teardown of non-worker record'
   [ "$(grep -c '^teardown task-one$' "$FIXTURES/calls")" -eq 0 ] || fail 'non-worker record reached teardown'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-worker record stopped box'
+  new_case teardown-wrong-project
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_worker task-one ship other 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'teardown of non-Boat project'
+  assert_no_grep '^teardown task-one$' "$FIXTURES/calls" 'non-Boat project reached teardown'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-Boat project stopped box'
+  new_case teardown-short-project
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  fm_write_meta "$REMOTE_HOME/state/task-one.meta" 'kind=ship' 'project=firstmate'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'teardown of noncanonical project record'
+  assert_no_grep '^teardown task-one$' "$FIXTURES/calls" 'noncanonical project reached teardown'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'noncanonical project stopped box'
   new_case teardown-no-receipt
   seed_worker task-one ship firstmate 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
@@ -408,7 +431,7 @@ seed_project() {
   git -C "$REMOTE_HOME/projects/$1" remote add origin "https://github.com/LeadGrowGTM/$1.git"
 }
 seed_worker() {
-  fm_write_meta "$REMOTE_HOME/state/$1.meta" "kind=$2" "project=$3" "status=$4"
+  fm_write_meta "$REMOTE_HOME/state/$1.meta" "kind=$2" "project=$REMOTE_HOME/projects/$3" "status=$4"
 }
 
 test_remote_cap_and_merge_authority() {

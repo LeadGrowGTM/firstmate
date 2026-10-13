@@ -46,7 +46,8 @@ if [ "$1" = teardown ]; then
   [ -f "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task has no safe spawn record; reconcile before teardown'
   kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
   project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
-  case "$kind:$project" in ship:firstmate|ship:dev-loop|scout:firstmate|scout:dev-loop) ;; *) die 'task is not an allowed Boat worker' ;; esac
+  case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
+  case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
   "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
   for meta in "$FM_HOME/state/"*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
