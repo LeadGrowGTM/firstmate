@@ -1,0 +1,14 @@
+private-session=captain window=@0
+switch-absent=off
+switch-on=on
+warning: config/orca-view-tabs holds 'malformed'; accepted values are on and off, so Orca view tabs stay off
+switch-malformed=off
+note: no Orca command line was found (set FM_ORCA_CLI, or install Orca's CLI)
+window-no-orca-status=3 grouped-view-present=no
+error: tmux window @99999 does not exist on this tmux server
+window-unknown-status=1
+created-task-window=@1
+printf "pane-interop=%s\n" "$WSL_INTEROP"; /mnt/c/Windows/System32/cmd.exe /c exit 0 && printf "wind
+$ printf "pane-interop=%s\n" "$WSL_INTEROP"; /mnt/c/Windows/System32/cmd.exe /c exit 0 && printf "wi
+pane-interop=/run/WSL/1_interop
+windows-command-ok
