@@ -281,7 +281,7 @@ queue_read() {
   [ "$(jq -r '.data.repository.pullRequest.mergeQueueEntry == null' "$TMP/queue")" = true ] || { RESULT=deferred; REASON='merge queued'; return 1; }
 }
 process_pr() {
-  local id old captured expected previous meta lock_path local_head proposed_receipt
+  local id old captured expected previous meta lock_path local_head proposed_receipt new_owners=''
   fm_pr_url_parse "$URL" || { REASON='invalid owned PR identity'; return 0; }
   [ "$FM_PR_PROVIDER" = github ] || { RESULT=deferred; REASON='unsupported forge'; return 0; }
   PROJECT=$FM_PR_PATH; NUMBER=$FM_PR_NUMBER
@@ -300,16 +300,23 @@ process_pr() {
   fi
   [ "$(jq -r '.base.repo.full_name' "$TMP/core")" = "$PROJECT" ] || { REASON='base repository mismatch'; return 0; }
   custody || { RESULT=deferred; return 0; }
+  if [ "$PENDING" = true ]; then old=$(printf '%s' "$RECEIPT" | jq -r '.old_head'); fi
   for id in $OWNERS; do
     meta="$STATE/$id.meta"
     [ "$(meta_value "$meta" branch)" = "$(jq -r '.head.ref' "$TMP/core")" ] || { REASON='recorded branch does not match PR head'; return 0; }
     local_head=$(bounded git -C "$(meta_value "$meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
     if [ "$PENDING" = true ]; then
       if [ "$local_head" != "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] \
-        || { [ "$(meta_value "$meta" pr_head)" != "$(printf '%s' "$RECEIPT" | jq -r '.old_head')" ] \
+        || { [ "$(meta_value "$meta" pr_head)" != "$old" ] \
           && [ "$(meta_value "$meta" pr_head)" != "$HEAD" ]; }; then
-        [ "$local_head" = "$HEAD" ] && [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] \
-          || { REASON='local head changed since refresh'; return 0; }
+        if [ "$local_head" = "$HEAD" ] && [ "$(meta_value "$meta" pr_head)" = "$HEAD" ]; then
+          :
+        elif [ "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads | has($id)')" = false ] \
+          && [ "$local_head" = "$old" ] && [ "$(meta_value "$meta" pr_head)" = "$old" ]; then
+          new_owners="${new_owners:+$new_owners }$id"
+        else
+          REASON='local head changed since refresh'; return 0
+        fi
       fi
     else
       [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] || { REASON='recorded ready head changed'; return 0; }
@@ -327,7 +334,7 @@ process_pr() {
   fi
   queue_read || return 0
   if [ "$(printf '%s' "$RECEIPT" | jq -r '.pending // false')" = true ]; then
-    old=$(printf '%s' "$RECEIPT" | jq -r '.old_head'); captured=$(printf '%s' "$RECEIPT" | jq -r '.base_sha')
+    captured=$(printf '%s' "$RECEIPT" | jq -r '.base_sha')
     PENDING=true
     compare "$captured" "$HEAD" || return 0
     if [ "$HEAD" = "$old" ] || [ "$(jq '.behind_by' "$TMP/compare")" != 0 ]; then
@@ -351,6 +358,9 @@ process_pr() {
     read_owners || return 0
     [ "$(jq -r --arg url "$URL" '.[] | select(.url == $url) | .owners[]' "$TMP/owners")" = "$OWNERS" ] \
       || { REASON='canonical owners changed before confirmation'; return 0; }
+    for id in $new_owners; do
+      RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --arg id "$id" --arg head "$old" '.local_heads[$id]=$head')
+    done
     for id in $OWNERS; do
       meta="$STATE/$id.meta"
       awk '!/^pr_head=/' "$meta" > "$TMP/meta"

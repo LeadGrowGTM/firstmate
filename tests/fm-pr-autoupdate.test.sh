@@ -60,7 +60,9 @@ case "$method:$path" in
     fi
     payload=$(cat "$FIXTURES/core.json") ;;
   GET:/repos/o/r/compare/*)
-    if [ -e "$FIXTURES/new-base" ] && [ "$path" = "/repos/o/r/compare/$(cat "$FIXTURES/new-base")...$(jq -r '.head.sha' "$FIXTURES/core.json")" ]; then
+    if [ -e "$FIXTURES/old-unreachable" ] && [ "$path" = "/repos/o/r/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]; then
+      payload='{"behind_by":1,"status":"diverged"}'
+    elif [ -e "$FIXTURES/new-base" ] && [ "$path" = "/repos/o/r/compare/$(cat "$FIXTURES/new-base")...$(jq -r '.head.sha' "$FIXTURES/core.json")" ]; then
       payload='{"behind_by":1,"status":"diverged"}'
     else
       payload=$(cat "$FIXTURES/compare.json")
@@ -108,11 +110,16 @@ world() {
 #!/usr/bin/env bash
 if [ "$1" = check-ref-format ]; then exit 0; fi
 [ "$1" = -C ] || exit 91
+worktree=$2
 shift 2
 case "$*" in
   'symbolic-ref --quiet --short HEAD') printf 'topic\n' ;;
   'status --porcelain') cat "$FIXTURES/git-status" ;;
   'rev-parse --verify HEAD')
+    if [ "${worktree##*/}" = other-worktree ] && [ -e "$FIXTURES/other-local-head" ]; then
+      cat "$FIXTURES/other-local-head"
+      exit 0
+    fi
     if [ -e "$FIXTURES/local-head-read-count" ]; then
       count=$(cat "$FIXTURES/local-head-read-count")
       printf '%s\n' "$((count + 1))" > "$FIXTURES/local-head-read-count"
@@ -186,6 +193,8 @@ regression_confirmation() {
   set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
   set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
   cp "$home/state/task.meta" "$home/state/other.meta"
+  mkdir "$home/other-worktree"
+  sed -i "s|worktree=$home/worktree|worktree=$home/other-worktree|" "$home/state/other.meta"
   jq '.rows += [{task:"other",url:"https://github.com/o/r/pull/1",kind:"pr"}]' "$home/fixtures/owned.json" > "$home/fixtures/owned-transition"
   run "$home" >/dev/null
   assert_equals incomplete "$(result "$home")" 'new canonical owner prevents confirmation'
@@ -195,6 +204,45 @@ regression_confirmation() {
   assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_A" 'old owner metadata stays unchanged'
   assert_contains "$(cat "$home/state/other.meta")" "pr_head=$HEAD_A" 'new owner metadata stays unchanged'
   assert_equals 1 "$(put_count "$home")" 'ownership race sends no repeated update'
+  printf '%s\n' "$HEAD_C" > "$home/fixtures/other-local-head"
+  run "$home" >/dev/null
+  assert_equals incomplete "$(result "$home")" 'changed new owner local head is refused'
+  assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_A" 'changed new owner cannot publish metadata'
+  rm "$home/fixtures/other-local-head"
+  printf 'state: working · source: pane · busy\n' > "$home/fixtures/crew"
+  run "$home" >/dev/null
+  assert_equals deferred "$(result "$home")" 'active worker prevents new owner confirmation'
+  printf 'state: done · source: status-log · accepted delivery\n' > "$home/fixtures/crew"
+  : > "$home/fixtures/pipeline"
+  run "$home" >/dev/null
+  assert_equals deferred "$(result "$home")" 'unknown custody prevents new owner confirmation'
+  printf 'count: 0 of 0 total\nruns[0]{id,branch,status,head,pr}:\n' > "$home/fixtures/pipeline"
+  touch "$home/fixtures/old-unreachable"
+  run "$home" >/dev/null
+  assert_equals incomplete "$(result "$home")" 'unreachable old head prevents new owner confirmation'
+  assert_equals true "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'failed reachability preserves pending receipt'
+  assert_contains "$(cat "$home/state/other.meta")" "pr_head=$HEAD_A" 'failed reachability preserves new owner metadata'
+  rm "$home/fixtures/old-unreachable"
+  run "$home" >/dev/null
+  assert_equals updated "$(result "$home")" 'new owner recovers after safe re-observation'
+  assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_B" 'original owner receives confirmed head'
+  assert_contains "$(cat "$home/state/other.meta")" "pr_head=$HEAD_B" 'new owner receives confirmed head'
+  assert_equals "$HEAD_A" "$(jq -r --arg url "$URL" '.receipts[$url].confirmed.local_heads.other' "$home/state/pr-autoupdate.json")" 'new owner old head is bound to confirmed receipt'
+  assert_equals 1 "$(put_count "$home")" 'new owner recovery sends no repeated update'
+  run "$home" check 17200 >/dev/null
+  assert_equals current "$(result "$home")" 'later sweep accepts new owner confirmed local head'
+  home=$(world partial_publication_new_owner)
+  run "$home" >/dev/null
+  set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+  set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+  sed -i "s/pr_head=$HEAD_A/pr_head=$HEAD_B/" "$home/state/task.meta"
+  cp "$home/state/task.meta" "$home/state/other.meta"
+  sed -i "s/pr_head=$HEAD_B/pr_head=$HEAD_A/" "$home/state/other.meta"
+  set_fixture "$home" owned '.rows += [{task:"other",url:"https://github.com/o/r/pull/1",kind:"pr"}]'
+  run "$home" >/dev/null
+  assert_equals updated "$(result "$home")" 'new owner recovers after partial metadata publication'
+  assert_contains "$(cat "$home/state/other.meta")" "pr_head=$HEAD_B" 'partially published metadata reaches new owner'
+  assert_equals 1 "$(put_count "$home")" 'partial publication recovery sends no repeated update'
   home=$(world interrupted_confirmation)
   cp "$home/state/task.meta" "$home/state/other.meta"
   set_fixture "$home" owned '.rows[0].tasks=["task","other"]'
