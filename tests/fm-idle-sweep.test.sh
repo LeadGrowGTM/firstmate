@@ -351,23 +351,41 @@ pass 'launch time does not consume the shared target collection budget'
 # launching a worker or touching a real terminal backend.
 # shellcheck source=tests/wake-helpers.sh
 . "$ROOT/tests/wake-helpers.sh"
-watch_home=$(make_case idle-sweep-heartbeat)
+watch_home=$(make_case idle-sweep-heartbeat-success)
 watch_code="$TMP_ROOT/watch-code"
 mkdir -p "$watch_code" "$watch_home/data" "$watch_home/config"
 cp -R "$ROOT/bin" "$watch_code/bin"
 cat > "$watch_code/bin/fm-idle-sweep.sh" <<'SH'
 #!/usr/bin/env bash
 touch "$FM_HOME/sweep-called"
-exit 1
+printf 'working [at=1]: idle sweep started fixture\n' | tee -a "$FM_STATE_OVERRIDE/idle-sweep.status"
+[ "${TEST_SWEEP_PARTIAL_FAIL:-0}" != 1 ]
 SH
+printf 'away\n' > "$watch_home/state/.afk"
 PATH="$watch_home/fakebin:$PATH" FM_HOME="$watch_home" FM_ROOT_OVERRIDE="$watch_code" \
   FM_STATE_OVERRIDE="$watch_home/state" FM_CONFIG_OVERRIDE="$watch_home/config" \
   FM_DATA_OVERRIDE="$watch_home/data" FM_POLL=1 FM_SIGNAL_GRACE=1 \
   FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=1 \
   bash "$watch_code/bin/fm-watch.sh" > "$watch_home/watch.out" 2> "$watch_home/watch.err" &
 watch_pid=$!
-wait_for_exit "$watch_pid" 200 || fail "watcher failed to surface sweep refusal: $(cat "$watch_home/watch.err")"
+wait_for_exit "$watch_pid" 200 || fail "watcher failed to surface heartbeat after sweep: $(cat "$watch_home/watch.err")"
 [ -f "$watch_home/sweep-called" ] || fail 'heartbeat did not call sweep'
-grep -Fxq 'check: idle-sweep' "$watch_home/watch.out" || fail 'sweep failure did not produce a normal wake'
-pass 'supervision heartbeat calls the sweep and surfaces failures through the wake queue'
+printf 'heartbeat\n' > "$TMP_ROOT/expected-wake"
+cmp -s "$watch_home/watch.out" "$TMP_ROOT/expected-wake" || fail 'successful sweep contaminated heartbeat wake reason'
+grep -Fxq 'working [at=1]: idle sweep started fixture' "$watch_home/state/idle-sweep.status" || fail 'successful sweep lost its status record'
+pass 'successful sweep preserves status and heartbeat wake protocol'
+watch_home=$(make_case idle-sweep-heartbeat-failure)
+mkdir -p "$watch_home/data" "$watch_home/config"
+PATH="$watch_home/fakebin:$PATH" FM_HOME="$watch_home" FM_ROOT_OVERRIDE="$watch_code" \
+  FM_STATE_OVERRIDE="$watch_home/state" FM_CONFIG_OVERRIDE="$watch_home/config" \
+  FM_DATA_OVERRIDE="$watch_home/data" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+  FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=1 TEST_SWEEP_PARTIAL_FAIL=1 \
+  bash "$watch_code/bin/fm-watch.sh" > "$watch_home/watch.out" 2> "$watch_home/watch.err" &
+watch_pid=$!
+wait_for_exit "$watch_pid" 200 || fail "watcher failed to surface partial sweep refusal: $(cat "$watch_home/watch.err")"
+[ -f "$watch_home/sweep-called" ] || fail 'failure heartbeat did not call sweep'
+printf 'check: idle-sweep\n' > "$TMP_ROOT/expected-wake"
+cmp -s "$watch_home/watch.out" "$TMP_ROOT/expected-wake" || fail 'partial sweep failure contaminated check wake reason'
+grep -Fxq 'working [at=1]: idle sweep started fixture' "$watch_home/state/idle-sweep.status" || fail 'partial sweep lost its status record'
+pass 'partial sweep preserves status and check wake protocol'
 echo '# fm-idle-sweep.test.sh: all assertions passed'

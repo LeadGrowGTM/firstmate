@@ -3281,7 +3281,7 @@ EOF
   if [ "$(age_of "$STATE/.last-heartbeat")" -ge "$hb" ]; then
     # The sweep shares this heartbeat across primary harnesses and
     # runtime backends; its own evidence gates fail closed without a new daemon.
-    if ! bash "$SCRIPT_DIR/fm-idle-sweep.sh"; then
+    if ! bash "$SCRIPT_DIR/fm-idle-sweep.sh" > /dev/null; then
       triage_log "idle sweep refused; inspect its configuration or evidence"
       fm_wake_append check idle-sweep "check: idle-sweep refused; inspect configuration or dispatch evidence" || exit 1
       touch "$STATE/.last-heartbeat"
