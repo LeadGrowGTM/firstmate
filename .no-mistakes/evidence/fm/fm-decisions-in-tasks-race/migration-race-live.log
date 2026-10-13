@@ -1,0 +1,16 @@
+CASE held
+skipped: raced (already held)
+  title: Current task title
+  held: yes
+  hold_reason: "New call"
+  hold_kind: captain
+  body: "Captain hold set: 2026-10-13T23:32:41Z"
+{"decision_layout":[{"key":"raced","reason":"New call","about":"Current","options":[{"value":"current","label":"Current"}]}],"decisions_open":[{"id":"raced","key":"raced","verb":"captain-hold","summary":"Current task title: New call","owner":"(main)"}]}
+CASE released
+already-closed: raced
+  title: Current task title
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 737ea06ab665204c39424b9f557aa6ef6c13783592a414b4dd3e72a9b6abf4e8\nResolution mode: released\n\nCaptain decision:\nCurrent answer"
+{"decision_layout":[],"decisions_open":[]}

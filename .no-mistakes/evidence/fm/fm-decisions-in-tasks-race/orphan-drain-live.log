@@ -1,0 +1,13 @@
+OPEN DECISIONS: orphan needs-decision task=worker key=lost; no matching captain-held task in this home
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+current [key=current] needs-decision: Choose current route
+current [key=lost] needs-decision: Untracked choice
+worker [key=lost] needs-decision: Untracked choice
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+ADD MATCHING HELD TASK
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+CLOSE MATCHING HELD TASK WHILE STATUS REMAINS OPEN
+OPEN DECISIONS: orphan needs-decision task=worker key=lost; no matching captain-held task in this home
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+RESOLVE STATUS KEY
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):

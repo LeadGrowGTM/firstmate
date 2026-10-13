@@ -1,0 +1,26 @@
+FM_TEST_BEGIN 2026-10-13T23:32:23Z tests/fm-captain-hold-lifecycle.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - hold reason atomically owns current options and preserves task body history
+ok - refused direct holds and skipped migration preserve prior reason and options
+ok - migration previews by default, retains the side file, and never resurrects answered calls
+ok - bare-array migration preserves released answers and newer owned or option-free holds
+ok - migration skips already-held tasks with and without option copy
+ok - migration rechecks concurrent held and released calls under the mutation lock
+ok - migration rejects backend read errors in preview and apply
+ok - migration resolves legacy labels before generated values and rejects ambiguous labels
+ok - drain flags still-open needs-decision keys without a matching local captain hold
+ok - local and mirrored remote hold relays stay visible without false orphan reports
+ok - marked hold reasons round-trip through public reads, fleet, startup, and return without changing other fields
+ok - new, active, and released holds require the origin first with and without deferral
+ok - historical self-inventories name a workable repair that preserves sibling entries
+ok - completion and verification compare backend identities for entries and current or stored origins
+ok - complete refuses the origin as its own captain-call inventory
+ok - complete refuses an entry held for another origin and flags one with none recorded
+ok - report-only unresolved captain call is reproduced and completion refuses before loss
+ok - both body-decoding paths work without the allow_nonref default
+ok - cleanup preserves every byte of a retained body's non-ASCII characters
+ok - the completion gate attests captain-held inventory and transfers open status decisions
+ok - answer records the captain's words, closes idempotently, and releases routed work
+FM_TEST_END 2026-10-13T23:39:32Z tests/fm-captain-hold-lifecycle.test.sh exit=143 duration_ms=429269 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=429341
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=429269 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-captain-hold-lifecycle.test.sh duration_ms=429269

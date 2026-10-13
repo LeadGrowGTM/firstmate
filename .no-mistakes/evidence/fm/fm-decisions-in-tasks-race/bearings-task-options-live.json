@@ -1,0 +1,44 @@
+{
+  "decision_layout": [
+    {
+      "id": "current",
+      "title": "Current route",
+      "repo": "sample",
+      "reason": "Choose current route",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-13T23:32:09Z",
+      "bucket": "live",
+      "until": null,
+      "about": "Current route",
+      "decide": "Choose east or west",
+      "options": [
+        {
+          "hint": "Faster",
+          "label": "East",
+          "value": "east"
+        },
+        {
+          "value": "west",
+          "hint": "More compatible",
+          "label": "West"
+        }
+      ],
+      "recommended": "east",
+      "report": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "current"
+    }
+  ],
+  "decisions_open": [
+    {
+      "id": "current",
+      "key": "current",
+      "verb": "captain-hold",
+      "summary": "Current route: Choose current route",
+      "owner": "(main)"
+    }
+  ]
+}

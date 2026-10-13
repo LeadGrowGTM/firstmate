@@ -1,0 +1,15 @@
+PREVIEW
+would-hold: route Choose route
+BEFORE APPLY
+error: "Task \"route\" not found in this backlog"
+code: NOT_FOUND
+help[1]: Run `tasks-axi list` to see existing tasks
+route absent
+APPLY
+held: route
+BEARINGS
+{"decision_layout":[{"id":"route","title":"Choose route","repo":"firstmate","reason":"Pick route","priority":null,"origin":null,"hold_set":"2026-10-13T23:33:17Z","bucket":"live","until":null,"about":"Rollout","decide":"Pick route","options":[{"value":"option-1","hint":"Faster","label":"North"},{"value":"option-2","label":"South"}],"recommended":"option-1","report":null,"pr_url":null,"stale_reason":null,"owner":"(main)","key":"route"}],"decisions_open":[{"id":"route","key":"route","verb":"captain-hold","summary":"Choose route: Pick route","owner":"(main)"}]}
+RETRY
+skipped: route (already held)
+SOURCE STILL PRESENT
+yes
