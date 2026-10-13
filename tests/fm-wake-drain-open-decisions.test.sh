@@ -72,7 +72,7 @@ test_reserved_key_namespace_is_owned_by_its_library() {
 
   grep -F 'pending-reply-id=abcdef0123456789' "$out" >/dev/null \
     || fail "a foreign resolution cleared a reserved decision it does not own: $(cat "$out")"
-  if grep -F 'shipping is blocked on infra' "$out" >/dev/null; then
+  if grep -F 'task9 [key=pending-reply-abcdef0123456789] blocked: shipping is blocked on infra' "$out" >/dev/null; then
     fail "a foreign line took over a reserved decision key: $(cat "$out")"
   fi
 
@@ -215,6 +215,433 @@ test_over_long_decision_note_is_capped_with_a_marker() {
   pass "an over-long open decision is cut to its per-item budget with the shared truncation marker"
 }
 
+# A fake gh for the PR-gated annotation: `pr view <url>` answers from
+# $FM_FAKE_GH_MAP ("<url> merged|closed|open|fail|hang" per line) in the field
+# shape bin/fm-pr-state.sh asks for, `pr checks` reports nothing, and every call
+# is logged to $FM_FAKE_GH_LOG so a test can prove which lookups happened.
+make_fake_gh() {  # <fakebin>
+  cat > "$1/gh" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$FM_FAKE_GH_LOG"
+[ "${1:-}" = pr ] && [ "${2:-}" = view ] || exit 0
+mode=$(awk -v u="$3" '$1 == u { print $2 }' "$FM_FAKE_GH_MAP")
+case "$mode" in
+  merged) printf 'state=merged\nmerged_at=2026-10-12T02:15:00Z\n' ;;
+  closed) printf 'state=closed\nmerged_at=\n' ;;
+  open) printf 'state=open\nmerged_at=\n' ;;
+  hang) exec sleep 60 ;;
+  *) exit 1 ;;
+esac
+printf 'draft=false\nhead=abc123\nauthor=someone\nmergeability=mergeable\nreview_decision=\n'
+SH
+  chmod +x "$1/gh"
+}
+
+test_pr_gated_decision_is_flagged_with_its_close_command() {
+  local dir state out map
+  dir=$(make_case pr-gated)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  {
+    printf 'https://github.com/o/r/pull/24 merged\n'
+    printf 'https://github.com/o/r/pull/31 closed\n'
+    printf 'https://github.com/o/r/pull/40 open\n'
+    printf 'https://github.com/o/r/pull/70 fail\n'
+  } > "$map"
+  printf 'needs-decision [key=m1]: merge https://github.com/o/r/pull/24 now?\n' > "$state/t-merged.status"
+  printf 'needs-decision [key=m2]: also gated on https://github.com/o/r/pull/24\n' > "$state/t-same.status"
+  printf 'needs-decision [key=c1]: merge https://github.com/o/r/pull/31?\n' > "$state/t-closed.status"
+  printf 'needs-decision [key=o1]: merge https://github.com/o/r/pull/40?\n' > "$state/t-open.status"
+  printf 'needs-decision [key=two]: pick https://github.com/o/r/pull/50 or https://github.com/o/r/pull/51\n' > "$state/t-two.status"
+  printf 'needs-decision [key=f1]: merge https://github.com/o/r/pull/70?\n' > "$state/t-fail.status"
+  # The offline signal: this log already records the merge, so no lookup is due.
+  printf 'needs-decision [key=off]: merge https://github.com/o/r/pull/60?\n' > "$state/t-off.status"
+  printf 'done [key=merged-t-off]: merged t-off https://github.com/o/r/pull/60\n' >> "$state/t-off.status"
+  # A merge record for a different PR number is not this PR's merge.
+  printf 'needs-decision [key=n1]: merge https://github.com/o/r/pull/6?\n' > "$state/t-near.status"
+  printf 'done [key=merged-t-near]: merged t-near https://github.com/o/r/pull/66\n' >> "$state/t-near.status"
+  printf 'https://github.com/o/r/pull/6 fail\n' >> "$map"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with PR-gated decisions"
+
+  for key in m1 m2 c1 o1 two f1 off n1; do
+    grep -F "[key=$key] needs-decision:" "$out" >/dev/null \
+      || fail "the PR annotation changed which decisions are open (missing $key): $(cat "$out")"
+  done
+  grep -A1 -F 't-merged [key=m1]' "$out" | grep -F "  ^ PR https://github.com/o/r/pull/24 is merged at 2026-10-12T02:15:00Z; if that settles it, close it: bin/fm-send.sh t-merged --resolve-key m1 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a merged PR was not flagged with its exact close command: $(cat "$out")"
+  grep -A1 -F 't-same [key=m2]' "$out" | grep -F "bin/fm-send.sh t-same --resolve-key m2 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a second decision gated on the same PR was not flagged: $(cat "$out")"
+  grep -A1 -F 't-closed [key=c1]' "$out" | grep -F "  ^ PR https://github.com/o/r/pull/31 is closed; if that settles it, close it: bin/fm-send.sh t-closed --resolve-key c1 'PR https://github.com/o/r/pull/31 closed'" >/dev/null \
+    || fail "a closed PR was not flagged with its exact close command: $(cat "$out")"
+  grep -A1 -F 't-off [key=off]' "$out" | grep -F "bin/fm-send.sh t-off --resolve-key off 'PR https://github.com/o/r/pull/60 merged'" >/dev/null \
+    || fail "a merge already recorded in the same log did not flag the decision: $(cat "$out")"
+  for task in t-open t-two t-fail t-near; do
+    if grep -A1 -F "$task [key=" "$out" | grep -F '  ^ PR ' >/dev/null; then
+      fail "$task was flagged although its PR is open, ambiguous, unreadable, or unmerged: $(cat "$out")"
+    fi
+  done
+  [ "$(grep -c 'pr view https://github.com/o/r/pull/24 ' "$dir/gh.log")" = 1 ] \
+    || fail "one PR named by two decisions was read more than once per drain: $(cat "$dir/gh.log")"
+  if grep -E 'pull/(50|51|60) ' "$dir/gh.log" >/dev/null; then
+    fail "an ambiguous or already-recorded PR was looked up: $(cat "$dir/gh.log")"
+  fi
+  pass "an open decision gated on one merged or closed PR is flagged with its exact close command"
+}
+
+# A PR number ends at a URL boundary in the note and offline merge record alike.
+test_pr_url_must_end_at_a_boundary() {
+  local dir state out map task
+  dir=$(make_case pr-url-boundary)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  {
+    printf 'https://github.com/o/r/pull/24 merged\n'
+    printf 'https://github.com/o/r/pull/80 fail\n'
+  } > "$map"
+  printf 'needs-decision [key=s1]: merge https://github.com/o/r/pull/24abc now?\n' > "$state/t-suffix.status"
+  printf 'needs-decision [key=s2]: merge https://github.com/o/r/pull/24+abc now?\n' > "$state/t-plus.status"
+  printf 'needs-decision [key=s3]: merge https://github.com/o/r/pull/24%%20 now?\n' > "$state/t-percent.status"
+  printf 'needs-decision [key=b1]: merge https://github.com/o/r/pull/24\n' > "$state/t-bare.status"
+  printf 'needs-decision [key=p1]: see https://github.com/o/r/pull/24/files first\n' > "$state/t-path.status"
+  printf 'needs-decision [key=h1]: see https://github.com/o/r/pull/24#x first\n' > "$state/t-hash.status"
+  printf 'needs-decision [key=r1]: merge https://github.com/o/r/pull/80?\n' > "$state/t-record.status"
+  printf 'done [key=merged-t-record]: merged t-record https://github.com/o/r/pull/80abc\n' >> "$state/t-record.status"
+  printf 'needs-decision [key=r2]: merge https://github.com/o/r/pull/81?\n' > "$state/t-record2.status"
+  printf 'done [key=merged-t-record2]: merged t-record2 https://github.com/o/r/pull/81.\n' >> "$state/t-record2.status"
+  printf 'needs-decision [key=r3]: merge https://github.com/o/r/pull/82?\n' > "$state/t-record-plus.status"
+  printf 'done [key=merged-t-record-plus]: merged t-record-plus https://github.com/o/r/pull/82+abc\n' >> "$state/t-record-plus.status"
+  printf 'needs-decision [key=r4]: merge https://github.com/o/r/pull/83?\n' > "$state/t-record-percent.status"
+  printf 'done [key=merged-t-record-percent]: merged t-record-percent https://github.com/o/r/pull/83%%20\n' >> "$state/t-record-percent.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with suffixed PR URLs"
+
+  for task in t-suffix t-plus t-percent t-record t-record-plus t-record-percent; do
+    if grep -A1 -F "$task [key=" "$out" | grep -F '  ^ PR ' >/dev/null; then
+      fail "$task was flagged from a PR number with a trailing suffix: $(cat "$out")"
+    fi
+  done
+  grep -A1 -F 't-bare [key=b1]' "$out" | grep -F "bin/fm-send.sh t-bare --resolve-key b1 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a PR URL at the end of the note was not flagged: $(cat "$out")"
+  grep -A1 -F 't-path [key=p1]' "$out" | grep -F "bin/fm-send.sh t-path --resolve-key p1 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a PR URL followed by /files was not flagged as that PR: $(cat "$out")"
+  grep -A1 -F 't-hash [key=h1]' "$out" | grep -F "bin/fm-send.sh t-hash --resolve-key h1 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "a PR URL followed by a fragment was not flagged as that PR: $(cat "$out")"
+  grep -A1 -F 't-record2 [key=r2]' "$out" | grep -F "bin/fm-send.sh t-record2 --resolve-key r2 'PR https://github.com/o/r/pull/81 merged'" >/dev/null \
+    || fail "a merge record ending in punctuation did not count: $(cat "$out")"
+  pass "a PR URL counts only when its number ends at a URL boundary"
+}
+
+test_repeated_pr_url_with_another_pr_is_ambiguous() {
+  local dir state out map
+  dir=$(make_case pr-url-repeated)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  printf 'https://github.com/o/r/pull/24 merged\n' > "$map"
+  printf 'needs-decision [key=two]: choose https://github.com/o/r/pull/24 or https://github.com/o/r/pull/25 then https://github.com/o/r/pull/24\n' > "$state/t-repeated.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with repeated PR URLs"
+
+  grep -F 't-repeated [key=two] needs-decision:' "$out" >/dev/null \
+    || fail "the ambiguous decision was not listed: $(cat "$out")"
+  if grep -F '  ^ PR ' "$out" >/dev/null; then
+    fail "a decision naming two PRs was flagged: $(cat "$out")"
+  fi
+  if grep -E 'pr view https://github.com/o/r/pull/(24|25) ' "$dir/gh.log" >/dev/null; then
+    fail "a decision naming two PRs triggered a lookup: $(cat "$dir/gh.log")"
+  fi
+  pass "a repeated PR URL does not hide another PR in the same decision"
+}
+
+test_captain_hold_pr_uses_owning_home_close_path() {
+  local dir state out map
+  dir=$(make_case captain-hold-pr)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  printf 'https://github.com/o/r/pull/31 closed\n' > "$map"
+  printf 'needs-decision [key=captain-hold-release-1]: review https://github.com/o/r/pull/24\n' > "$state/mate.status"
+  printf 'done [key=merged-release]: merged https://github.com/o/r/pull/24\n' >> "$state/mate.status"
+  printf 'blocked [key=captain-hold-release-2]: review https://github.com/o/r/pull/31\n' > "$state/mate-closed.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on PR-gated captain holds"
+  grep -A1 -F 'mate [key=captain-hold-release-1]' "$out" | grep -F 'PR https://github.com/o/r/pull/24 is merged' >/dev/null \
+    || fail "the merged PR flag was lost for a captain hold: $(cat "$out")"
+  grep -A1 -F 'mate-closed [key=captain-hold-release-2]' "$out" | grep -F 'PR https://github.com/o/r/pull/31 is closed' >/dev/null \
+    || fail "the closed PR flag was lost for a captain hold: $(cat "$out")"
+  grep -F 'call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain' "$out" >/dev/null \
+    || fail "the owning-home close instruction was missing: $(cat "$out")"
+  grep -F 'evidence-backed reconcile close), never by resolving the key as moot' "$out" >/dev/null \
+    || fail "the held-call close restriction was missing: $(cat "$out")"
+  if grep -F 'bin/fm-send.sh' "$out" >/dev/null; then
+    fail "a captain hold was offered the ordinary status-key close path: $(cat "$out")"
+  fi
+
+  printf 'needs-decision [key=ordinary]: review https://github.com/o/r/pull/24\n' > "$state/ordinary.status"
+  printf 'done [key=merged-ordinary]: merged https://github.com/o/r/pull/24\n' >> "$state/ordinary.status"
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with an ordinary PR decision"
+  grep -A1 -F 'ordinary [key=ordinary]' "$out" | grep -F "bin/fm-send.sh ordinary --resolve-key ordinary 'PR https://github.com/o/r/pull/24 merged'" >/dev/null \
+    || fail "the ordinary decision lost its exact close command: $(cat "$out")"
+  pass "captain holds retain PR flags but close only in their owning home"
+}
+
+test_pr_lookups_are_capped_and_bounded() {
+  local dir state out map i start elapsed
+  dir=$(make_case pr-bounded)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  : > "$map"
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    printf 'https://github.com/o/r/pull/%s hang\n' "$i" >> "$map"
+    printf 'needs-decision [key=k%s]: merge https://github.com/o/r/pull/%s?\n' "$i" "$i" > "$state/t$i.status"
+  done
+  start=$(date +%s)
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed while PR lookups hung"
+  elapsed=$(( $(date +%s) - start ))
+  [ "$elapsed" -lt 20 ] || fail "hung PR lookups delayed the drain by ${elapsed}s"
+  [ "$(grep -c '^pr view ' "$dir/gh.log")" -le 8 ] \
+    || fail "the drain made more than the capped PR lookups: $(cat "$dir/gh.log")"
+  [ "$(grep -c 'needs-decision:' "$out")" = 12 ] \
+    || fail "hung lookups changed the listed decisions: $(cat "$out")"
+  if grep -F '  ^ PR ' "$out" >/dev/null; then
+    fail "a timed-out lookup still annotated a decision: $(cat "$out")"
+  fi
+
+  # A missing gh prints nothing extra and still lists every decision.
+  printf '#!/usr/bin/env bash\nexit 127\n' > "$dir/fakebin/gh"
+  FM_STATE_OVERRIDE="$state" PATH="$dir/fakebin:$PATH" "$DRAIN" > "$out" \
+    || fail "drain failed without a usable gh"
+  [ "$(grep -c 'needs-decision:' "$out")" = 12 ] || fail "an unusable gh changed the listing: $(cat "$out")"
+  pass "PR lookups are capped per drain, bounded in time, and silent when they fail"
+}
+
+test_pr_decisions_over_lookup_cap_are_counted() {
+  local dir state out map i
+  dir=$(make_case pr-over-cap)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  : > "$map"
+  for i in 1 2 3 4 5 6 7 8 9; do
+    printf 'https://github.com/o/r/pull/%s open\n' "$i" >> "$map"
+    printf 'needs-decision [key=k%s]: merge https://github.com/o/r/pull/%s?\n' "$i" "$i" > "$state/t$i.status"
+  done
+  printf 'blocked [key=same]: also waiting on https://github.com/o/r/pull/9\n' > "$state/tz.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with PR decisions over the lookup cap"
+  [ "$(grep -c '^pr view ' "$dir/gh.log")" = 8 ] \
+    || fail "the lookup cap changed: $(cat "$dir/gh.log")"
+  [ "$(grep -c 'needs-decision:' "$out")" = 9 ] \
+    || fail "an over-cap decision disappeared: $(cat "$out")"
+  grep -F 'tz [key=same] blocked:' "$out" >/dev/null \
+    || fail "the repeated over-cap PR decision disappeared: $(cat "$out")"
+  [ "$(grep -c '^OPEN DECISIONS: 2 PR-linked decisions were not checked this drain (lookup cap)$' "$out")" = 1 ] \
+    || fail "the two unchecked PR-linked decisions were not counted once: $(cat "$out")"
+  pass "PR-linked decisions beyond the lookup cap are visibly counted"
+}
+
+test_later_offline_merge_record_covers_shared_pr() {
+  local dir state out map i
+  dir=$(make_case pr-later-offline)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  : > "$map"
+  printf 'https://github.com/o/r/pull/24 fail\n' >> "$map"
+  printf 'needs-decision [key=first]: merge https://github.com/o/r/pull/24?\n' > "$state/t9.status"
+  printf 'blocked [key=second]: waiting on https://github.com/o/r/pull/24\n' > "$state/tz.status"
+  printf 'done [key=merged-tz]: merged https://github.com/o/r/pull/24\n' >> "$state/tz.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with a later offline merge record"
+  grep -A1 -F 't9 [key=first]' "$out" | grep -F 'PR https://github.com/o/r/pull/24 is merged' >/dev/null \
+    || fail "the first decision did not use the later offline merge record: $(cat "$out")"
+  grep -A1 -F 'tz [key=second]' "$out" | grep -F 'PR https://github.com/o/r/pull/24 is merged' >/dev/null \
+    || fail "the second decision did not use its own offline merge record: $(cat "$out")"
+  if grep -F 'pr view https://github.com/o/r/pull/24 ' "$dir/gh.log" >/dev/null; then
+    fail "a failing live lookup hid the later offline merge record: $(cat "$dir/gh.log")"
+  fi
+
+  for i in 1 2 3 4 5 6 7 8; do
+    printf 'https://github.com/o/r/pull/%s fail\n' "$i" >> "$map"
+    printf 'needs-decision [key=k%s]: merge https://github.com/o/r/pull/%s?\n' "$i" "$i" > "$state/t$i.status"
+  done
+  : > "$dir/gh.log"
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with an offline merge after the lookup cap"
+  if grep -F 'PR-linked decisions were not checked' "$out" >/dev/null; then
+    fail "a decision with an offline merge record was counted as unchecked: $(cat "$out")"
+  fi
+  [ "$(grep -c '^pr view ' "$dir/gh.log")" = 8 ] \
+    || fail "the lookup cap changed while an offline merge was available: $(cat "$dir/gh.log")"
+  if grep -F 'pr view https://github.com/o/r/pull/24 ' "$dir/gh.log" >/dev/null; then
+    fail "an offline merged PR was looked up despite a failing live result: $(cat "$dir/gh.log")"
+  fi
+  pass "a later offline merge record covers every decision sharing its PR"
+}
+
+test_unparsed_decision_line_is_warned_once() {
+  local dir state out
+  dir=$(make_case unparsed)
+  state="$dir/state"
+  out="$dir/drain.out"
+  {
+    printf 'working: started\n'
+    printf 'needs-decision key=x-article at=1791734068: pick the data source\n'
+    printf 'needs-decision [key=bad!]: invalid key\n'
+    printf 'needs-decision at=1: malformed head\n'
+    printf 'blocked [key=bad!]: invalid blocker key\n'
+    printf 'needs-decision [key=ok]: a well-formed ask\n'
+    printf 'blocked: waiting on key=value prose, not a key\n'
+  } > "$state/mate.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on an unparsed decision line"
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:2, not read as open; rewrite it with [key=<slug>]: needs-decision key=x-article at=1791734068: pick the data source" "$out" >/dev/null \
+    || fail "an unbracketed decision key was not warned with its file and line: $(cat "$out")"
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:3, not read as open; rewrite it with [key=<slug>]: needs-decision [key=bad!]: invalid key" "$out" >/dev/null \
+    || fail "an invalid decision key was not warned: $(cat "$out")"
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:4, not read as open; rewrite it with [key=<slug>]: needs-decision at=1: malformed head" "$out" >/dev/null \
+    || fail "a malformed head without a bracketed key was not warned: $(cat "$out")"
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:5, not read as open; rewrite it with [key=<slug>]: blocked [key=bad!]: invalid blocker key" "$out" >/dev/null \
+    || fail "an invalid blocker key was not warned: $(cat "$out")"
+  [ "$(grep -c 'unparsed decision line' "$out")" = 4 ] \
+    || fail "a well-formed or keyless line was warned as unparsed: $(cat "$out")"
+  if grep -F '[key=x-article]' "$out" >/dev/null; then
+    fail "the unparsed line was treated as an open decision: $(cat "$out")"
+  fi
+  grep -F 'mate [key=ok] needs-decision: a well-formed ask' "$out" >/dev/null \
+    || fail "the well-formed decision beside it was lost: $(cat "$out")"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "second drain failed"
+  if grep -F 'unparsed decision line' "$out" >/dev/null; then
+    fail "an already presented unparsed line was warned again: $(cat "$out")"
+  fi
+
+  {
+    printf 'resolved [key=ok]: answered\n'
+    printf 'blocked key=codex: signed out\n'
+  } >> "$state/mate.status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "third drain failed"
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:9," "$out" >/dev/null \
+    || fail "a new unparsed line with no open decision beside it was not warned: $(cat "$out")"
+  [ "$(grep -c 'unparsed decision line' "$out")" = 1 ] \
+    || fail "the earlier unparsed line re-printed: $(cat "$out")"
+  pass "a decision line the fold cannot parse is warned once with its file and line"
+}
+
+# Past the warning cap the quoted text is dropped but every location is still
+# named: the presentation cursor advances, so no later drain names those lines.
+# The bracketed-key advice is only for a line with no parseable key. Colonless
+# prose is not a decision line at all, and a well-formed key refused for its
+# reserved namespace is ordinary status by that namespace's rule.
+test_unparsed_warning_matches_its_cause() {
+  local dir state out
+  dir=$(make_case unparsed-cause)
+  state="$dir/state"
+  out="$dir/drain.out"
+  {
+    printf 'working: started\n'
+    printf 'blocked waiting on the CI runner\n'
+    printf 'needs-decision about the rollout, more below\n'
+    printf 'blocked [key=pending-reply-abcdef0123456789]: shipping is blocked on infra\n'
+    printf 'needs-decision key=k1 waiting on a pick\n'
+  } > "$state/mate.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on mixed unparsed lines"
+  if grep -F -e 'mate.status:2,' -e 'mate.status:3,' "$out" >/dev/null; then
+    fail "colonless keyless prose was warned as an unparsed decision: $(cat "$out")"
+  fi
+  if grep -F 'mate.status:4,' "$out" >/dev/null; then
+    fail "a well-formed reserved key was told to add a bracketed key it already has: $(cat "$out")"
+  fi
+  grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:5, not read as open; rewrite it with [key=<slug>]: needs-decision key=k1 waiting on a pick" "$out" >/dev/null \
+    || fail "an unbracketed key with no colon was not warned: $(cat "$out")"
+  [ "$(grep -c 'unparsed decision line' "$out")" = 1 ] \
+    || fail "an unexpected line was warned as unparsed: $(cat "$out")"
+  pass "the bracketed-key warning is given only to a decision line with no parseable key"
+}
+
+test_unparsed_lines_past_the_cap_are_each_located() {
+  local dir state out i
+  dir=$(make_case unparsed-over-cap)
+  state="$dir/state"
+  out="$dir/drain.out"
+  printf 'working: started\n' > "$state/mate.status"
+  for i in 1 2 3 4 5 6 7 8; do
+    printf 'needs-decision key=k%s: malformed ask %s\n' "$i" "$i" >> "$state/mate.status"
+  done
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with more malformed lines than the cap"
+  for i in 2 3 4 5 6; do
+    grep -F "OPEN DECISIONS: unparsed decision line $state/mate.status:$i, not read as open" "$out" >/dev/null \
+      || fail "malformed line $i within the cap was not warned with its text: $(cat "$out")"
+  done
+  grep -F "OPEN DECISIONS: 3 more unparsed decision lines, not read as open (text omitted): $state/mate.status:7 $state/mate.status:8 $state/mate.status:9" "$out" >/dev/null \
+    || fail "a malformed line past the cap was not named by location: $(cat "$out")"
+  if grep -F 'malformed ask 7' "$out" >/dev/null; then
+    fail "text past the cap was quoted: $(cat "$out")"
+  fi
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "second drain failed"
+  if grep -F 'unparsed decision line' "$out" >/dev/null; then
+    fail "an already presented malformed line was warned again: $(cat "$out")"
+  fi
+  pass "malformed decision lines past the warning cap are each named by file and line"
+}
+
+test_identical_unparsed_lines_keep_distinct_positions() {
+  local dir state out
+  dir=$(make_case repeated-unparsed)
+  state="$dir/state"
+  out="$dir/drain.out"
+  printf 'note: first presentation\n' > "$state/mate.status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "initial drain failed"
+  {
+    printf 'working: next phase\n'
+    printf 'needs-decision [key=bad!]: choose\n'
+    printf 'needs-decision [key=bad!]: choose\n'
+  } >> "$state/mate.status"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed on repeated malformed lines"
+  grep -F "unparsed decision line $state/mate.status:3," "$out" >/dev/null \
+    || fail "the first malformed line did not keep its position: $(cat "$out")"
+  grep -F "unparsed decision line $state/mate.status:4," "$out" >/dev/null \
+    || fail "the second malformed line did not keep its position: $(cat "$out")"
+  [ "$(grep -c 'unparsed decision line' "$out")" = 2 ] \
+    || fail "the repeated malformed lines were not each warned once: $(cat "$out")"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "later drain failed"
+  if grep -F 'unparsed decision line' "$out" >/dev/null; then
+    fail "the repeated malformed lines were warned after presentation: $(cat "$out")"
+  fi
+  pass "repeated malformed lines retain distinct positions and warn once"
+}
+
 test_buried_decision_still_surfaces
 test_over_long_decision_note_is_capped_with_a_marker
 test_explicit_resolution_closes_it
@@ -224,3 +651,14 @@ test_no_open_decisions_prints_nothing
 test_open_decision_surfaces_even_with_an_unrelated_queued_wake
 test_buried_decision_surfaces_on_the_empty_queue_fast_path
 test_status_symlink_is_not_followed
+test_pr_gated_decision_is_flagged_with_its_close_command
+test_pr_url_must_end_at_a_boundary
+test_repeated_pr_url_with_another_pr_is_ambiguous
+test_captain_hold_pr_uses_owning_home_close_path
+test_pr_lookups_are_capped_and_bounded
+test_pr_decisions_over_lookup_cap_are_counted
+test_later_offline_merge_record_covers_shared_pr
+test_unparsed_decision_line_is_warned_once
+test_identical_unparsed_lines_keep_distinct_positions
+test_unparsed_lines_past_the_cap_are_each_located
+test_unparsed_warning_matches_its_cause

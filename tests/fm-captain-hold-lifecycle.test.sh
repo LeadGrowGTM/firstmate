@@ -1474,6 +1474,59 @@ EOF
   pass "a secondmate home publishes each hold occurrence and its answer on the parent channel"
 }
 
+# `hold --corr` lets the hold itself answer a marked request from the main
+# firstmate: the published decision line carries the correlation token the
+# parent's pending-reply resolver accepts, the fold still reads its key, an
+# identical retry adds no line, and a malformed id refuses before any record.
+test_hold_corr_answers_the_parent_request() {
+  local parent mate fakebin channel line corr=0123456789abcdef out
+  parent=$(make_home corr-parent)
+  mate="$TMP_ROOT/corr-mate-home"
+  mkdir -p "$mate/data" "$mate/state" "$mate/config" "$mate/projects"
+  cp "$ROOT/.tasks.toml" "$mate/.tasks.toml"
+  printf '# Synthetic secondmate home\n' > "$mate/AGENTS.md"
+  printf 'corr-mate\n' > "$mate/.fm-secondmate-home"
+  printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' "$parent" \
+    > "$mate/.fm-secondmate-parent"
+  cat > "$mate/data/backlog.md" <<'EOF2'
+## In flight
+
+## Queued
+
+## Done
+EOF2
+  fakebin=$(fm_fakebin "$mate")
+  fm_fake_exit0 "$fakebin" tmux treehouse no-mistakes gh gh-axi
+  channel="$parent/state/corr-mate.status"
+
+  run_captain "$mate" hold corr-call --title "Choose the corr release" \
+    --reason "corr choice pending" --repo sample --corr "$corr" >/dev/null \
+    || fail "hold with --corr failed"
+  assert_grep "needs-decision [key=captain-hold-corr-call-1]: corr=$corr captain hold corr-call: corr choice pending" \
+    <(sed -E 's/ \[at=[0-9]+\]//' "$channel") "the hold line did not carry the correlation token"
+  line=$(grep -F 'captain-hold-corr-call-1' "$channel")
+  bash -c '. "$1/bin/fm-pending-reply-lib.sh"; fm_pending_reply_line_resolves "$2" "$3"' _ "$ROOT" "$line" "$corr" \
+    || fail "the hold line does not resolve the parent's pending reply: $line"
+  out=$(bash -c '. "$1/bin/fm-classify-lib.sh"; status_open_decisions "$2"' _ "$ROOT" "$channel")
+  printf '%s\n' "$out" | grep -q "^captain-hold-corr-call-1$(printf '\t')needs-decision$(printf '\t')corr=$corr captain hold corr-call" \
+    || fail "the fold no longer reads the corr-carrying hold: $out"
+
+  run_captain "$mate" hold corr-call --reason "corr choice pending" --corr "$corr" >/dev/null \
+    || fail "repeated hold with --corr failed"
+  [ "$(grep -c 'captain-hold-corr-call-1' "$channel")" = 1 ] \
+    || fail "a repeated --corr hold duplicated the parent decision: $(cat "$channel")"
+
+  for bad in 0123 0123456789abcdeg 0123456789abcdef0 '' "corr=$corr" 0123456789ABCDEF; do
+    if run_captain "$mate" hold bad-corr-call --title "Bad corr" --reason "x" \
+      --repo sample --corr "$bad" >/dev/null 2>&1; then
+      fail "a malformed --corr '$bad' was accepted"
+    fi
+  done
+  assert_no_grep 'bad-corr-call' "$mate/data/backlog.md" "a refused --corr hold still created a task"
+  assert_no_grep 'bad-corr-call' "$channel" "a refused --corr hold still reached the parent channel"
+  pass "hold --corr answers the parent request on the hold line itself"
+}
+
 test_secondmate_reconcile_publishes_before_request_retirement() {
   local parent mate channel evidence out show rc request
   parent=$(make_home reconcile-parent-channel)
@@ -4650,6 +4703,7 @@ test_none_inventory_and_resolved_prose_do_not_create_holds
 test_terminal_single_owner_status_decision_does_not_block_empty_inventory
 test_secondmate_hold_stays_in_authoritative_home
 test_secondmate_home_publishes_holds_and_answers
+test_hold_corr_answers_the_parent_request
 test_secondmate_reconcile_publishes_before_request_retirement
 test_bound_channel_answers_close_at_answer_time
 test_reconcile_never_closes_through_the_keyed_answer_intake

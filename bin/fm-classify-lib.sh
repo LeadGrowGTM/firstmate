@@ -1799,11 +1799,12 @@ $fully_presented
       # contiguous cursor may advance through the captured endpoint. Routine
       # lines remain unacknowledged only while they are the sole unread content,
       # preserving delayed signal annotations without replaying a handled note
-      # that happened to follow a routine line.
+      # that happened to follow a routine line. The drain's one-shot warning
+      # about an unparsed decision line is such a presentation too.
       while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
           *[![:space:]]*)
-            if status_line_is_unread_surface "$line"; then safe=true; break; fi
+            if status_line_is_unread_surface "$line" || status_line_is_unparsed_decision "$line"; then safe=true; break; fi
             ;;
         esac
       done <<EOF
@@ -1962,8 +1963,8 @@ status_open_decisions_cursor_offset() {  # <status-file>
 # changed status identity reads the current file from offset 0; malformed or
 # unreadable cursor state fails the scan. Symlinks and unreadable status files
 # print nothing.
-status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>]
-  local f=$1 captured_end=${2:-} cf offset size actual_size chunk_file line rc=0
+status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>] [numbered]
+  local f=$1 captured_end=${2:-} numbered=${3:-} cf offset size actual_size chunk_file line rc=0 ordinal=0
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   cf=$(_fm_open_decisions_cursor_path "$f")
   chunk_file="$cf.unread.$$"
@@ -1983,8 +1984,15 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>]
   _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
     || { rm -f "$chunk_file"; return 1; }
   while IFS= read -r line || [ -n "$line" ]; do
+    ordinal=$((ordinal + 1))
     case "$line" in
-      *[![:space:]]*) printf '%s\n' "$line" || { rc=1; break; } ;;
+      *[![:space:]]*)
+        if [ "$numbered" = numbered ]; then
+          printf '%s\t%s\n' "$ordinal" "$line" || { rc=1; break; }
+        else
+          printf '%s\n' "$line" || { rc=1; break; }
+        fi
+        ;;
     esac
   done < "$chunk_file"
   rm -f "$chunk_file"
@@ -2018,6 +2026,32 @@ status_line_is_unread_surface() {  # <status-line>
   return 1
 }
 
+# 0 for a needs-decision or blocked line the decision fold cannot consume
+# because it lacks a parseable key: a failed verb parse, an invalid key, or a
+# malformed head. Colonless prose with no key= is continuation text, not a
+# decision line, and a well-formed reserved key refused for its namespace is
+# ordinary status by that namespace's rule, so neither is reported. The wake
+# drain warns once at first presentation; this leaves the key grammar and open
+# set unchanged.
+status_line_is_unparsed_decision() {  # <status-line>
+  local line=$1 first folded unstamped parsed
+  first=${line#"${line%%[![:space:]]*}"}
+  first=${first%%[[:space:]:[]*}
+  case "$first" in needs-decision|blocked) ;; *) return 1 ;; esac
+  folded=$(_fm_decision_fold_line '' "$line" "$FM_CLASSIFY_RESOLVE_VERB_DEFAULT" "$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT" ship)
+  [ -z "$folded" ] || return 1
+  _fm_status_unstamped "$line" unstamped
+  case "$unstamped" in
+    *:*|*key=*) ;;
+    *) return 1 ;;
+  esac
+  status_line_verb "$line" parsed
+  case "$parsed" in
+    needs-decision|blocked) ! _fm_decision_key "$line" >/dev/null ;;
+    *) return 0 ;;
+  esac
+}
+
 # Fleet-wide unread informational lines: one "<task>\t<status-line>" row per
 # still-unread `note:` or pending-reply resolution, in glob (task id) order.
 # Prints nothing when none are unread. Directory scan rejects status symlinks
@@ -2042,17 +2076,34 @@ EOF
   return 0
 }
 
-scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
-  local state=$1 snapshot=$2 task endpoint ident f lines line
+# The snapshot sibling reads only each snapshot endpoint's unread span. An
+# optional <predicate> replaces status_line_is_unread_surface as the line filter,
+# so another one-shot surface reuses this same bounded, presentation-cursor span.
+scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot> [<predicate>] [numbered]
+  local state=$1 snapshot=$2 predicate=${3:-status_line_is_unread_surface} numbered=${4:-} task endpoint ident f lines line ordinal base offset
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     f="$state/$task.status"
-    lines=$(status_new_lines_since_cursor "$f" "$endpoint") || return 1
+    lines=$(status_new_lines_since_cursor "$f" "$endpoint" "$numbered") || return 1
     [ -n "$lines" ] || continue
+    base=
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      status_line_is_unread_surface "$line" || continue
-      printf '%s\t%s\n' "$task" "$line"
+      if [ "$numbered" = numbered ]; then
+        ordinal=${line%%$'\t'*}
+        line=${line#*$'\t'}
+      fi
+      "$predicate" "$line" || continue
+      if [ "$numbered" = numbered ]; then
+        if [ -z "$base" ]; then
+          offset=$(status_presentation_cursor_offset "$f") || return 1
+          base=$(LC_ALL=C head -c "$offset" "$f" | wc -l) || return 1
+          base=${base//[[:space:]]/}
+        fi
+        printf '%s\t%s\t%s\n' "$task" "$((base + ordinal))" "$line"
+      else
+        printf '%s\t%s\n' "$task" "$line"
+      fi
     done <<EOF
 $lines
 EOF

@@ -693,7 +693,7 @@ test_unrelated_writer_cannot_close_or_hijack_reserved_key() {
   out=$(drain_out "$home")
   printf '%s' "$out" | grep -F "pending-reply-id=$corr" >/dev/null \
     || fail "an unrelated answered: resolution cleared a reserved decision: $out"
-  if printf '%s' "$out" | grep -F 'shipping is blocked on infra' >/dev/null; then
+  if printf '%s' "$out" | grep -F "mate [key=$key] blocked: shipping is blocked on infra" >/dev/null; then
     fail "an unrelated writer took over a reserved decision key: $out"
   fi
 
@@ -905,6 +905,61 @@ test_decision_answer_partition_relocates_under_the_record() {
   pass "fm-send --resolve-key: a decision answer refuses the attended branch before sending, a blocked: key stays steering, and the away-posture record relocates the answer"
 }
 
+# A steer to a secondmate that closes nothing lists that home's open blocker
+# keys as advisory stderr, so a notice that clears one can carry --resolve-key.
+# It never refuses or changes the exit status, and it stays silent with
+# --resolve-key, with no open blocker, and for a target that is not a secondmate.
+test_secondmate_steer_lists_open_blockers() {
+  local dir fb log home rc err
+  dir="$TMP_ROOT/blocker-advisory"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); log="$dir/send.log"; err="$dir/send.err"
+  home=$(setup_home blocker-advisory)
+  fm_write_secondmate_meta "$home/state/domain.meta" "$home" "sess:fm-domain"
+  {
+    printf 'blocked [key=codex-signin]: codex is signed out\n'
+    printf 'blocked [key=quota]: out of quota\n'
+    printf 'resolved [key=quota]: quota reset\n'
+    printf 'needs-decision [key=pick]: pick a name\n'
+  } > "$home/state/domain.status"
+
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" fm-domain "Codex is signed in again" 2> "$err"; rc=$?
+  expect_code 0 "$rc" "an advisory must not change a delivered steer's exit status"
+  grep -F "fm-send: advisory: domain has open blockers: codex-signin; if this steer clears one, close it: bin/fm-send.sh domain --resolve-key <key> '<what cleared it>'" "$err" >/dev/null \
+    || fail "a steer without --resolve-key did not list the open blocker: $(cat "$err")"
+  if grep -E 'advisory:.*(quota|pick)' "$err" >/dev/null; then
+    fail "the advisory listed a closed blocker or a decision: $(cat "$err")"
+  fi
+  grep -F 'blocked [key=codex-signin]' "$home/state/domain.status" >/dev/null || fail "precondition lost"
+  if grep -F 'resolved [key=codex-signin]' "$home/state/domain.status" >/dev/null; then
+    fail "the advisory closed a blocker on its own"
+  fi
+
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" fm-domain --resolve-key codex-signin "Codex is signed in again" 2> "$err"; rc=$?
+  expect_code 0 "$rc" "a closing steer should succeed"
+  if grep -F 'advisory:' "$err" >/dev/null; then
+    fail "a steer carrying --resolve-key still printed the advisory: $(cat "$err")"
+  fi
+
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" fm-domain "carry on" 2> "$err"; rc=$?
+  expect_code 0 "$rc" "a steer with no open blocker should succeed"
+  if grep -F 'advisory:' "$err" >/dev/null; then
+    fail "the advisory printed with no open blocker: $(cat "$err")"
+  fi
+
+  fm_write_meta "$home/state/t1.meta" "window=sess:fm-t1" "kind=ship"
+  printf 'blocked [key=creds]: waiting on credentials\n' > "$home/state/t1.status"
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" t1 "credentials are in place" 2> "$err"; rc=$?
+  expect_code 0 "$rc" "a ship steer should succeed"
+  if grep -F 'advisory:' "$err" >/dev/null; then
+    fail "the advisory printed for a target that is not a secondmate: $(cat "$err")"
+  fi
+  pass "fm-send: a secondmate steer without --resolve-key lists open blocker keys as advisory output only"
+}
+
 test_answer_send_closes_open_decision
 test_answer_close_is_self_announced
 test_separate_resolve_key_answers_do_not_rewake
@@ -929,3 +984,4 @@ test_stamped_close_line_stays_within_the_status_line_cap
 test_failed_close_recovery_command_is_shell_safe
 test_remote_reserved_pending_reply_key_closes_locally
 test_decision_answer_partition_relocates_under_the_record
+test_secondmate_steer_lists_open_blockers
