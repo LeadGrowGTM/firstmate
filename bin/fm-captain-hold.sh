@@ -962,9 +962,27 @@ write_decision_copy() {  # <id> <decoded-body> <canonical-json>
     || fail "task $id did not retain its decision copy"
 }
 
+restore_hold_body() {
+  local id=$1 body=$2 tmp
+  tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-restore.XXXXXX") \
+    || fail "could not stage the prior body for $id"
+  if ! printf '%s\n' "$body" > "$tmp"; then
+    rm -f -- "$tmp"
+    fail "could not stage the prior body for $id"
+  fi
+  if ! tasks_axi update "$id" --body-file "$tmp" >/dev/null; then
+    rm -f -- "$tmp"
+    fail "could not restore the prior body for $id"
+  fi
+  rm -f -- "$tmp"
+  task_show_or_fail "$id" "task $id disappeared after restoring its prior body"
+  [ "$(show_field_value "$show" body)" = "$body" ] \
+    || fail "task $id did not retain its prior body"
+}
+
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' corr='' corr_given=0 show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' restore_tmp='' hold_status=0 options_file='' copy=''
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' hold_status=0 options_file='' copy=''
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -1055,8 +1073,11 @@ command_hold() {
     write_hold_origin "$id" "$(show_field "$show" body)" "$origin" || exit $?
   fi
   if [ -n "$copy" ]; then
-    task_show_or_fail "$id" "task $id disappeared before recording its decision copy"
-    write_decision_copy "$id" "$(show_field_value "$show" body)" "$copy"
+    if ! (task_show_or_fail "$id" "task $id disappeared before recording its decision copy"
+          write_decision_copy "$id" "$(show_field_value "$show" body)" "$copy"); then
+      restore_hold_body "$id" "$prior_body"
+      fail "could not stage decision copy on $id"
+    fi
   fi
   if [ -n "$until" ]; then
     tasks_axi hold "$id" --reason "$stored_reason" --kind captain --until "$until" >/dev/null \
@@ -1066,20 +1087,7 @@ command_hold() {
       || hold_status=$?
   fi
   if [ "$hold_status" -ne 0 ]; then
-    restore_tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-restore.XXXXXX") \
-      || fail "could not stage the prior body for $id"
-    if ! printf '%s\n' "$prior_body" > "$restore_tmp"; then
-      rm -f -- "$restore_tmp"
-      fail "could not stage the prior body for $id"
-    fi
-    if ! tasks_axi update "$id" --body-file "$restore_tmp" >/dev/null; then
-      rm -f -- "$restore_tmp"
-      fail "could not restore the prior body for $id"
-    fi
-    rm -f -- "$restore_tmp"
-    task_show_or_fail "$id" "task $id disappeared after restoring its prior body"
-    [ "$(show_field_value "$show" body)" = "$prior_body" ] \
-      || fail "task $id did not retain its prior body"
+    restore_hold_body "$id" "$prior_body"
     fail "could not hold task $id for the captain"
   fi
   task_show "$id" || fail "task $id disappeared while holding it"
@@ -2066,13 +2074,28 @@ command_migrate_options() (
 )
 
 command_orphans() {
-  local origin key verb note candidate state held stored stored_id origin_id candidate_id
+  local origin key verb note candidate state held stored stored_id origin_id candidate_id relay_id occurrence
   [ "$#" -eq 0 ] || { usage >&2; exit 2; }
   [ "$STATE" = "$FM_HOME/state" ] || fail "orphan check requires this home's state directory"
   command -v tasks-axi >/dev/null 2>&1 || fail "orphan check requires tasks-axi"
   open_task_ids >/dev/null || fail "orphan check cannot read the backlog"
   while IFS=$'\t' read -r origin key verb note; do
     [ "$verb" = needs-decision ] || continue
+    if [ "$(meta_value "$STATE/$origin.meta" kind)" = secondmate ]; then
+      case "$key" in
+        captain-hold-*)
+          relay_id=${key#captain-hold-}
+          occurrence=${relay_id##*-}
+          relay_id=${relay_id%-*}
+          case "$occurrence" in ''|*[!0-9]*) ;; *)
+            case "$note" in
+              "captain hold $relay_id: "*|corr=*" captain hold $relay_id: "*) continue ;;
+            esac
+            ;;
+          esac
+          ;;
+      esac
+    fi
     held=0
     # Holding the originating work item consolidates every question gating it.
     # Backend reads also resolve aliases to their canonical task identities.

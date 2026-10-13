@@ -2643,6 +2643,75 @@ SH
   pass "failed scratch writes and body updates stop before the hold"
 }
 
+test_option_staging_failure_restores_held_origin() {
+  local path mode home before after shown
+  for path in direct migration; do
+    for mode in scratch update readback; do
+      home=$(make_home "staging-origin-$path-$mode")
+      cat > "$home/old-options.json" <<'EOF'
+{"about":"Old route","decide":"Choose","options":[{"value":"old","label":"Old"}]}
+EOF
+      cat > "$home/new-options.json" <<'EOF'
+{"about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}
+EOF
+      run_captain "$home" hold existing --title Existing --reason Choose --origin origin-a \
+        --options-file "$home/old-options.json" >/dev/null || fail "could not establish the original hold"
+      before=$(tasks_in "$home" show existing --full | sed -n 's/^  body: //p')
+      if [ "$mode" = scratch ]; then
+        cat > "$home/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *fm-captain-options*) printf '%s\n' "$FM_HOME/missing-parent/options"; exit 0 ;;
+esac
+PATH=${PATH#*:} exec mktemp "$@"
+SH
+        chmod +x "$home/fakebin/mktemp"
+      else
+        cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = update ]; then
+  previous=''
+  for arg in "$@"; do
+    if [ "$previous" = --body-file ] && grep -q 'New route' "$arg"; then
+      [ -f "$FM_HOME/refuse-update" ] && exit 9
+      exit 0
+    fi
+    previous=$arg
+  done
+fi
+if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then : > "$FM_HOME/backend-hold-called"; fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+        chmod +x "$home/fakebin/tasks-axi"
+        [ "$mode" != update ] || : > "$home/refuse-update"
+      fi
+      if [ "$path" = direct ]; then
+        if run_captain "$home" hold existing --reason Choose --origin origin-b \
+          --options-file "$home/new-options.json" >/dev/null 2>&1; then
+          fail "$mode direct re-hold succeeded despite option staging failure"
+        fi
+      else
+        cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"existing","title":"Legacy title","origin":"origin-b","about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}]}
+EOF
+        if run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null 2>&1; then
+          fail "$mode migration succeeded despite option staging failure"
+        fi
+      fi
+      shown=$(tasks_in "$home" show existing --full)
+      after=$(printf '%s\n' "$shown" | sed -n 's/^  body: //p')
+      [ "$before" = "$after" ] || fail "$path $mode staging failure changed the prior held body"
+      assert_contains "$shown" 'held: yes' "$path $mode staging failure lifted the original hold"
+      assert_contains "$shown" 'Captain hold origin: origin-a' "$path $mode staging failure lost the original origin"
+      assert_contains "$shown" 'Old route' "$path $mode staging failure lost the original copy"
+      assert_not_contains "$shown" 'origin-b' "$path $mode staging failure retained the new origin"
+      assert_not_contains "$shown" 'New route' "$path $mode staging failure retained the new copy"
+      assert_absent "$home/backend-hold-called" "$path $mode staging failure reached the backend hold"
+    done
+  done
+  pass "direct and migrated copy failures restore the entire held body before any hold"
+}
+
 test_legacy_option_migration_is_explicit_and_idempotent() {
   local home before after out
   home=$(make_home option-migration)
@@ -2726,6 +2795,51 @@ EOF
   assert_contains "$out" 'captain-held task orphan check unavailable' "unreadable backlog was treated as empty"
   if printf '%s' "$out" | grep -F 'orphan needs-decision task=' >/dev/null; then fail "failed check invented an orphan"; fi
   pass "drain flags still-open needs-decision keys without a matching local captain hold"
+}
+
+test_secondmate_hold_relays_are_not_local_orphans() {
+  local parent local_mate remote_mate out
+  parent=$(make_home relay-parent)
+  local_mate=$(make_home relay-local-mate)
+  remote_mate=$(make_home relay-remote-mate)
+  printf 'relay-local-mate\n' > "$local_mate/.fm-secondmate-home"
+  printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' "$parent" \
+    > "$local_mate/.fm-secondmate-parent"
+  fm_write_secondmate_meta "$parent/state/relay-local-mate.meta" "$local_mate"
+  run_captain "$local_mate" hold local-call --title Local --reason 'Choose locally' >/dev/null \
+    || fail "local mate did not publish its hold"
+  printf 'relay-remote-mate\n' > "$remote_mate/.fm-secondmate-home"
+  printf 'schema=fm-secondmate-parent.v1\nroute=remote\nparent_host=remote.example\n' \
+    > "$remote_mate/.fm-secondmate-parent"
+  fm_write_secondmate_meta "$parent/state/relay-remote-mate.meta" "$remote_mate"
+  run_captain "$remote_mate" hold remote-call --title Remote --reason 'Choose remotely' >/dev/null \
+    || fail "remote mate did not publish its hold"
+  cp "$remote_mate/state/parent-replies.status" "$parent/state/relay-remote-mate.status"
+  printf 'needs-decision [key=captain-hold-worker-call-1]: ordinary worker question\n' \
+    > "$parent/state/worker.status"
+  printf 'needs-decision [key=captain-hold-ordinary-call-1]: ordinary mate question\n' \
+    >> "$parent/state/relay-local-mate.status"
+  out=$(run_drain "$parent") || fail "parent relay drain failed"
+  assert_contains "$out" 'relay-local-mate [key=captain-hold-local-call-1] needs-decision' \
+    "local mate relay disappeared from OPEN DECISIONS"
+  assert_contains "$out" 'relay-remote-mate [key=captain-hold-remote-call-1] needs-decision' \
+    "remote mate relay disappeared from OPEN DECISIONS"
+  assert_not_contains "$out" 'orphan needs-decision task=relay-local-mate key=captain-hold-local-call-1' \
+    "local mate relay was checked against the parent backlog"
+  assert_not_contains "$out" 'orphan needs-decision task=relay-remote-mate key=captain-hold-remote-call-1' \
+    "remote mate relay was checked against the parent backlog"
+  assert_contains "$out" 'orphan needs-decision task=worker key=captain-hold-worker-call-1' \
+    "ordinary worker key was suppressed as a relay"
+  assert_contains "$out" 'orphan needs-decision task=relay-local-mate key=captain-hold-ordinary-call-1' \
+    "ordinary mate status key was suppressed as a relay"
+  printf 'Accepted.\n' > "$local_mate/answer.txt"
+  run_captain "$local_mate" answer local-call --decision-file "$local_mate/answer.txt" >/dev/null \
+    || fail "local mate could not relay the answer"
+  out=$(run_drain "$parent") || fail "parent answer relay drain failed"
+  if printf '%s\n' "$out" | grep -F 'relay-local-mate [key=captain-hold-local-call-1] needs-decision' >/dev/null; then
+    fail "the relayed answer left the local mate call open"
+  fi
+  pass "local and mirrored remote hold relays stay visible without false orphan reports"
 }
 
 # Reconstructs the 2026-08-06 loss with synthetic names: the answer was posted
@@ -4923,8 +5037,10 @@ SH
 test_decision_copy_is_task_owned
 test_refused_hold_keeps_prior_decision_copy
 test_option_staging_failure_never_holds
+test_option_staging_failure_restores_held_origin
 test_legacy_option_migration_is_explicit_and_idempotent
 test_open_status_orphans_reach_drain
+test_secondmate_hold_relays_are_not_local_orphans
 test_hold_reason_round_trips_awkward_characters
 test_hold_origins_precede_backend_holds
 test_historical_self_inventory_has_workable_repair
