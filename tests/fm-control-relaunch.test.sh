@@ -79,6 +79,7 @@ case "${1:-}" in
       case "$payload" in
         /exit|/quit)
           printf 'zsh' > "$D/command"
+          [ -z "${FM_FAKE_ON_AGENT_EXIT:-}" ] || "$FM_FAKE_ON_AGENT_EXIT"
           [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
           ;;
         *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
@@ -248,6 +249,7 @@ run_control() {  # <case-dir> <args...>
     FM_FAKE_TRACE_RELEASE="${FM_FAKE_TRACE_RELEASE:-}" \
     FM_FAKE_META_WRITER_READY="${FM_FAKE_META_WRITER_READY:-}" \
     FM_FAKE_TRACE_EXPORTED="${FM_FAKE_TRACE_EXPORTED:-}" \
+    FM_FAKE_ON_AGENT_EXIT="${FM_FAKE_ON_AGENT_EXIT:-}" \
     "$CONTROL" "$@" 2>&1
 }
 
@@ -1012,6 +1014,79 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
     || fail "the configured effort token should come with the pin"
   assert_not_contains "$out" "not a verified harness" "codex is a verified harness"
   pass "fm-control relaunch: a secondmate relaunch re-resolves its durable configured harness pin"
+}
+
+# The watcher's secondmate auto-relaunch and a control-plane relaunch must not
+# both launch the same mate. The old agent's exit is exactly the gap a liveness
+# probe reads as a dead mate, so this drives the real watcher through that gap:
+# the fake terminal runs one watcher while the relaunch is held right after the
+# old agent exited, and that watcher must stand down rather than relaunch.
+test_secondmate_relaunch_holds_off_the_watcher_auto_relaunch() {
+  local dir home out rc hook
+  dir=$(new_case watcher-race sm9)
+  home="$dir/home"
+  mkdir -p "$home/data/sm9"
+  printf '# secondmate brief\n' > "$home/data/sm9/brief.md"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" \
+    "$dir/smhome/config" "$dir/smhome/projects"
+  printf 'sm9\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo "window=fmses:fm-sm9"
+    echo "endpoint_task_id=sm9"
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo "harness=claude"
+    echo "kind=secondmate"
+    echo "mode=secondmate"
+    echo "yolo=off"
+    echo "model=default"
+    echo "effort=default"
+    echo "home=$dir/smhome"
+    echo "backend=tmux"
+  } > "$home/state/sm9.meta"
+  printf '%s\n' "fm-sm9" > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  printf '#!/usr/bin/env bash\necho "state: unknown"\n' > "$dir/fakebin/fm-crew-state.sh"
+  chmod +x "$dir/fakebin/fm-crew-state.sh"
+  hook="$dir/fakebin/on-agent-exit"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'ROOT=%q\nCASE=%q\nSTATE=%q\n' "$ROOT" "$dir" "$home/state"
+    cat <<'SH'
+# Run one watcher while the old agent is gone and the relaunch has not launched
+# its replacement yet, until its liveness tick has either stood down or acted.
+FM_CREW_STATE_BIN="$CASE/fakebin/fm-crew-state.sh" TMUX='' FM_BACKEND=tmux \
+  FM_SECONDMATE_LIVENESS_SECS=1 FM_POLL=1 FM_SIGNAL_GRACE=0 \
+  FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+  "$ROOT/bin/fm-watch.sh" > "$CASE/watch.out" 2> "$CASE/watch.err" &
+pid=$!
+for _ in $(seq 1 150); do
+  grep -q 'secondmate sm9 liveness' "$STATE/.watch-triage.log" 2>/dev/null && break
+  [ ! -e "$STATE/.secondmate-relaunch-sm9" ] || break
+  kill -0 "$pid" 2>/dev/null || break
+  /bin/sleep 0.1
+done
+kill -TERM "$pid" 2>/dev/null || true
+wait "$pid" 2>/dev/null || true
+SH
+  } > "$hook"
+  chmod +x "$hook"
+  out=$(FM_FAKE_ON_AGENT_EXIT="$hook" run_control "$dir" sm9 relaunch); rc=$?
+  expect_code 0 "$rc" "the control-plane relaunch should complete"$'\n'"$out"
+  [ -e "$home/state/.secondmate-liveness-tick" ] \
+    || fail "the watcher never reached its liveness tick, so the stand-down was not exercised: $(cat "$dir/watch.out" "$dir/watch.err" 2>/dev/null)"
+  [ ! -e "$home/state/.secondmate-relaunch-sm9" ] \
+    || fail "the watcher auto-relaunched a mate the control plane was relaunching: $(cat "$home/state/.secondmate-relaunch-sm9")"
+  assert_grep 'secondmate sm9 liveness: skipped while another liveness check or a control-plane relaunch holds its lock' \
+    "$home/state/.watch-triage.log" "the watcher did not record why it stood down"
+  [ "$(journal_field "$dir" sm9 phase)" = complete ] \
+    || fail "the control-plane relaunch did not complete, got phase '$(journal_field "$dir" sm9 phase)'"
+  [ ! -e "$home/state/.secondmate-liveness-sm9.lock" ] \
+    || fail "the control-plane relaunch left the liveness lock behind"
+  pass "fm-control relaunch: the watcher's auto-relaunch stands down while a secondmate relaunch is open"
 }
 
 # claude_hook_cmd <settings.json> <hook-event>: the command a Claude hook runs.
@@ -2666,6 +2741,7 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop
+test_secondmate_relaunch_holds_off_the_watcher_auto_relaunch
 test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop
 test_explicit_secondmate_harness_ignores_configured_profile_axes
 test_ship_relaunch_ignores_the_crew_harness_config

@@ -24,6 +24,7 @@ tmux new -s firstmate
 
 Crew tasks become windows in that session.
 `tmux display-message -p '#S'` prints its name.
+A viewer attached through a grouped session (`tmux new-session -t <session-name> -s <view>`) never becomes the container: Firstmate reads the session of the primary's own pane and resolves a grouped session to its base session.
 If the primary harness runs outside tmux, Firstmate creates or reuses a detached session named `firstmate`:
 
 ```sh

@@ -44,6 +44,9 @@
 # Concurrency: fm_secondmate_liveness_lock serializes probe+kill+relaunch per
 # task across the bootstrap sweep and the watcher tick, so a concurrent
 # relaunch can never be observed mid-flight as a dead endpoint and killed.
+# bin/fm-control.sh relaunch and bin/fm-teardown.sh hold the same lock for
+# their whole operation, so no liveness episode auto-relaunches a mate either
+# of them is deliberately stopping.
 # The attempt ledger (.secondmate-relaunch-<id>, one line per attempt plus one
 # per outcome) is both the durable relaunch record and the input to the
 # watcher's relaunch bound; teardown removes it.
