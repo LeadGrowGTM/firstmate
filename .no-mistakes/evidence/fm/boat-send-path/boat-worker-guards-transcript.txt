@@ -1,0 +1,4 @@
+SCENARIO three-worker cap: exit=75 output=error: Boat three-worker cap reached
+Spawn calls: 0
+SCENARIO unproven no-mistakes: exit=1 output=error: no-mistakes has not been proven on this box
+Spawn calls: 0

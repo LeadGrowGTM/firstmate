@@ -1,0 +1,16 @@
+SCENARIO alias refresh: exit=0
+sandbox=bx_fixture1 state=running
+endpoint: none -> 203.0.113.7:19034
+hostkey:  none -> SHA256:iSa6B9XhLg5t0I8cxJhXqRtvhDo8oUYolMZnN+B9Gzc
+hydrated=true waited=0s
+OpenSSH resolved options:
+hostname=203.0.113.7
+port=19034
+hostkeyalias=boat-prove
+stricthostkeychecking=true
+forwardagent=no
+userknownhostsfile=/tmp/fm-boat-alias-refresh.uemynw/evidence-alias/home/.ssh/known_hosts_boat_prove
+Pinned fingerprint=SHA256:iSa6B9XhLg5t0I8cxJhXqRtvhDo8oUYolMZnN+B9Gzc
+Boat calls:
+--no-update info bx_fixture1 --json
+--no-update exec bx_fixture1 --json -- cat /etc/ssh/ssh_host_ed25519_key.pub

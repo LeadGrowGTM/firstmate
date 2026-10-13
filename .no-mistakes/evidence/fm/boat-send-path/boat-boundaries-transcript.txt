@@ -1,0 +1,11 @@
+SCENARIO daily cap: exit=1 output=error: Boat safety or spend reservation failed; dispatch refused (stop requested for bx_ahnbu3qr)
+Boat calls:
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update limits --json
+boat --no-update list --all --json
+boat --no-update usage bx_ahnbu3qr --since 1791806400 --json
+boat --no-update stop bx_ahnbu3qr --json
+SCENARIO prelaunch failure: exit=1
+SCENARIO same-ID retry: exit=0 output=boat-task: task-one project=firstmate mode=direct-PR route=boat-eng
+Brief intent: Revised intent after retry
+SCENARIO retry after spawn record: exit=1 output=error: task id already exists; reconcile before retry
