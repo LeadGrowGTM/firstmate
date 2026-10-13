@@ -148,7 +148,7 @@ trap 'exit 1' HUP INT TERM
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-deadweight-sweep.XXXXXX")
 workers=0 copies=0 stale=0
 findings=
-projects=() copies_before=()
+projects=()
 note() {
   local reason
   reason=$(printf '%s\n' "$1" | awk 'NF { print; exit }')
@@ -163,26 +163,11 @@ reason() {
 
 inventory() { git -C "$1" worktree list --porcelain -z > "$2" 2> "$TMP/inventory-error"; }
 
-# Capture existing copies before teardown, which can itself safely prune a
-# returned pool slot. Do not count the clone root or duplicate shared paths.
 for project in "$PROJECTS"/*; do
   [ -d "$project" ] && [ ! -L "$project" ] || continue
   top=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null) || continue
   [ "$project" -ef "$top" ] || continue
   projects+=("$project")
-  if ! inventory "$project" "$TMP/before"; then
-    note "inventory failed: $project"
-    continue
-  fi
-  while IFS= read -r -d '' field; do
-    case "$field" in worktree\ *) path=${field#worktree } ;; *) continue ;; esac
-    [ -e "$path" ] && [ ! "$path" -ef "$project" ] || continue
-    duplicate=0
-    for seen in "${copies_before[@]+"${copies_before[@]}"}"; do
-      [ "$seen" != "$path" ] || duplicate=1
-    done
-    [ "$duplicate" = 1 ] || copies_before+=("$path")
-  done < "$TMP/before"
 done
 
 for meta in "$STATE"/*.meta; do
@@ -191,11 +176,19 @@ for meta in "$STATE"/*.meta; do
   case "$kind" in ''|ship|scout) ;; *) continue ;; esac
   [ -z "$(fm_meta_get "$meta" remote_host)" ] || continue
   id=${meta##*/}; id=${id%.meta}
+  worker_copy=$(fm_meta_get "$meta" worktree)
+  had_copy=0
+  if [ -d "$worker_copy" ] && [ ! -L "$worker_copy" ]; then had_copy=1; fi
   rc=0
   FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-teardown.sh" "$id" --only-if-stopped \
     > "$TMP/teardown" 2>&1 || rc=$?
   case "$rc" in
-    0) workers=$((workers + 1)) ;;
+    0)
+      workers=$((workers + 1))
+      if [ "$had_copy" = 1 ] && [ ! -e "$worker_copy" ] && [ ! -L "$worker_copy" ]; then
+        copies=$((copies + 1))
+      fi
+      ;;
     3)
       if fm_backend_validate_task_endpoint "$meta" "$id" >/dev/null 2>&1; then
         endpoint_state=$(fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET")
@@ -222,6 +215,13 @@ for project in "${projects[@]+"${projects[@]}"}"; do
   rc=0
   (
     inventory "$project" "$TMP/prune-before" || exit 1
+    prune_paths=()
+    while IFS= read -r -d '' field; do
+      case "$field" in worktree\ *) path=${field#worktree } ;; *) continue ;; esac
+      [ -e "$path" ] || [ -L "$path" ] || continue
+      [ "$path" -ef "$project" ] && continue
+      prune_paths+=("$path")
+    done < "$TMP/prune-before"
     # git prunes every registration it marks prunable, including a present
     # copy whose .git pointer is missing, so prune only when all are absent.
     candidates=0 present='' path=''
@@ -254,20 +254,26 @@ for project in "${projects[@]+"${projects[@]}"}"; do
       [ "$found" = 1 ] || count=$((count + 1))
     done < "$TMP/prune-before"
     printf '%s\n' "$count" > "$TMP/stale"
-    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune --locked "$project" || exit 1
+    prune_rc=0
+    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune --locked "$project" || prune_rc=$?
+    count=0
+    for path in "${prune_paths[@]+"${prune_paths[@]}"}"; do
+      if [ ! -e "$path" ] && [ ! -L "$path" ]; then count=$((count + 1)); fi
+    done
+    printf '%s\n' "$count" > "$TMP/copies"
+    exit "$prune_rc"
   ) > "$TMP/prune-output" 2>&1 || rc=$?
   fm_lock_release "$project_lock" || true
   project_lock=
   [ ! -f "$TMP/stale" ] || stale=$((stale + $(cat "$TMP/stale")))
   rm -f -- "$TMP/stale"
+  [ ! -f "$TMP/copies" ] || copies=$((copies + $(cat "$TMP/copies")))
+  rm -f -- "$TMP/copies"
   if [ -f "$TMP/prune-skipped" ]; then
     note "prune skipped for $project: prunable registration still present: $(cat "$TMP/prune-skipped")"
     rm -f -- "$TMP/prune-skipped"
   fi
   [ "$rc" = 0 ] || note "prune failed for $project: $(reason "$TMP/prune-output")"
-done
-for path in "${copies_before[@]+"${copies_before[@]}"}"; do
-  [ -e "$path" ] || [ -L "$path" ] || copies=$((copies + 1))
 done
 if [ "$workers" -gt 0 ] || [ "$copies" -gt 0 ] || [ "$stale" -gt 0 ] || [ -n "$findings" ]; then
   printf 'swept: %s workers, %s copies, %s stale registrations%s\n' \

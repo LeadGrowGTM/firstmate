@@ -1977,7 +1977,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged submodules
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged occupied entry path item
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -1988,12 +1988,31 @@ validate_worktree_teardown_safety() {
   untracked=normal
   [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
-    if ! submodules=$(git -C "$WT" submodule status 2>/dev/null); then
-      echo "REFUSED: cannot inspect submodules in worktree $WT; needs a human look." >&2
+    if ! occupied=$(
+      set -o pipefail
+      git -C "$WT" ls-files -s -z 2>/dev/null | {
+        occupied=0
+        while IFS= read -r -d '' entry; do
+          [ "${entry%% *}" = 160000 ] || continue
+          path=${entry#*$'\t'}
+          if [ -e "$WT/$path" ] || [ -L "$WT/$path" ]; then
+            if [ -L "$WT/$path" ] || [ ! -d "$WT/$path" ]; then
+              occupied=1
+            else
+              for item in "$WT/$path"/* "$WT/$path"/.[!.]* "$WT/$path"/..?*; do
+                if [ -e "$item" ] || [ -L "$item" ]; then occupied=1; fi
+              done
+            fi
+          fi
+        done
+        printf '%s\n' "$occupied"
+      }
+    ); then
+      echo "REFUSED: cannot inspect gitlinks in worktree $WT; needs a human look." >&2
       return 1
     fi
-    if [ -n "$submodules" ] && printf '%s\n' "$submodules" | grep -qv '^-'; then
-      echo "REFUSED: worktree $WT has an initialized submodule; needs a human look." >&2
+    if [ "$occupied" = 1 ]; then
+      echo "REFUSED: worktree $WT has an occupied submodule path; needs a human look." >&2
       return 1
     fi
     if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored 2>/dev/null); then

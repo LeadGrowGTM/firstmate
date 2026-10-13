@@ -41,7 +41,7 @@ FAKE
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FIXTURE/treehouse-calls"
 case "$1" in
-  return) git -C "$FIXTURE/projects/project" worktree remove "$3" ;;
+  return) git -C "$FIXTURE/projects/project" worktree remove --force "$3" ;;
   prune)
     [ "$*" = 'prune --yes' ] || exit 1
     [ ! -f "$FIXTURE/slow-prune" ] || sleep 6
@@ -192,7 +192,7 @@ test_flagged_tracked_edits_kept() {
 
 test_initialized_submodule_kept() {
   local home out kind child role
-  for kind in clean-ship clean-scout tracked untracked moved; do
+  for kind in clean-ship clean-scout tracked untracked moved uninitialized empty absent; do
     if [ "$kind" = clean-scout ] && ! command -v tasks-axi >/dev/null 2>&1; then
       continue
     fi
@@ -213,7 +213,12 @@ test_initialized_submodule_kept() {
       env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
         "$ROOT/bin/fm-captain-hold.sh" complete task --none >/dev/null
     fi
-    git -C "$home/worker" -c protocol.file.allow=always submodule update --init -q
+    case "$kind" in
+      uninitialized) mkdir -p "$home/worker/child"; printf 'operator file\n' > "$home/worker/child/file" ;;
+      empty) mkdir -p "$home/worker/child" ;;
+      absent) rmdir "$home/worker/child" 2>/dev/null || true ;;
+      *) git -C "$home/worker" -c protocol.file.allow=always submodule update --init -q ;;
+    esac
     git -C "$home/projects/project" config submodule.child.ignore all
     child="$home/worker/child"
     case "$kind" in
@@ -227,11 +232,16 @@ test_initialized_submodule_kept() {
         ;;
     esac
     out=$(sweep "$home")
-    assert_contains "$out" 'initialized submodule; needs a human look' "$kind submodule refused"
+    if [ "$kind" = empty ] || [ "$kind" = absent ]; then
+      assert_contains "$out" 'swept: 1 workers, 1 copies' "$kind gitlink path swept"
+      assert_absent "$home/state/task.meta" "$kind gitlink record removed"
+      continue
+    fi
+    assert_contains "$out" 'occupied submodule path; needs a human look' "$kind submodule refused"
     assert_present "$home/state/task.meta" "$kind submodule record kept"
     assert_present "$child/file" "$kind submodule copy kept"
   done
-  pass 'sweep keeps initialized submodules for ships and scouts'
+  pass 'sweep keeps occupied submodule paths for ships and scouts'
 }
 
 # Spawn writes Claude wiring with or without its statusLine fallback.
@@ -492,6 +502,40 @@ test_pool_prune_count_and_failure() {
   pass 'sweep delegates pool removal to safe prune and reports its refusal'
 }
 
+test_copy_removed_before_prune_not_counted() {
+  local home out pid ready=0 i
+  home=$(make_home concurrent-copy); add_worker "$home"
+  git -C "$home/projects/project" worktree add -q --detach "$home/pool" main
+  mv "$home/fakebin/tmux" "$home/fakebin/tmux-real"
+  cat > "$home/fakebin/tmux" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$1" = list-windows ] && [ ! -f "$FIXTURE/paused-once" ]; then
+  touch "$FIXTURE/paused-once"
+  while [ ! -f "$FIXTURE/resume" ]; do sleep 0.05; done
+fi
+exec "$FIXTURE/fakebin/tmux-real" "$@"
+FAKE
+  chmod +x "$home/fakebin/tmux"
+  sweep "$home" > "$home/sweep-out" &
+  pid=$!
+  for ((i=0; i<200; i++)); do
+    if [ -f "$home/paused-once" ]; then ready=1; break; fi
+    sleep 0.05
+  done
+  if [ "$ready" != 1 ]; then
+    kill "$pid" 2>/dev/null || true
+    fail 'sweep did not pause before project prune'
+  fi
+  git -C "$home/projects/project" worktree remove "$home/pool"
+  touch "$home/resume"
+  wait "$pid"
+  out=$(cat "$home/sweep-out")
+  assert_equals 'swept: 1 workers, 1 copies, 0 stale registrations' "$out" 'external copy removal not counted'
+  assert_absent "$home/worker" 'own teardown removed worker copy'
+  assert_absent "$home/pool" 'other process removed pool copy'
+  pass 'sweep counts only copies removed by its teardown or prune'
+}
+
 test_guard_cannot_force() {
   local home out rc=0
   home=$(make_home force); add_worker "$home"
@@ -660,6 +704,7 @@ test_scout_gates_and_work_kept
 test_stale_registration_and_live_copy
 test_present_prunable_registration_skips_prune
 test_pool_prune_count_and_failure
+test_copy_removed_before_prune_not_counted
 test_guard_cannot_force
 test_pipeline_and_captain_hold_kept
 
