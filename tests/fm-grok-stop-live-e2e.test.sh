@@ -119,12 +119,13 @@ expected='$lab/dedicated.sock'
 [ -z "\${TMUX:-}" ] && [ -z "\${TMUX_PANE:-}" ] || exit 91
 [ "\${FM_E2E_TMUX_SOCKET_ID:-}" = "\$expected" ] || exit 92
 [ "\$(cat '$lab/tmux.socket-identity')" = "\$expected" ] || exit 93
+case "\${1:-}" in -*) exit 94 ;; esac
 for arg in "\$@"; do case "\$arg" in -S|-L) exit 94 ;; esac; done
 printf 'tmux' >> '$lab/tmux-wrapper.log'
 printf ' <%s>' "\$@" >> '$lab/tmux-wrapper.log'
 printf '\n' >> '$lab/tmux-wrapper.log'
 cd '$lab'
-exec '$REAL_TMUX' -S dedicated.sock "\$@"
+exec '$FM_TEST_TMUX_REAL' -S dedicated.sock "\$@"
 EOF
   cat > "$lab/bin/grok" <<'EOF'
 #!/usr/bin/env bash

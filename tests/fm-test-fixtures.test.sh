@@ -558,8 +558,9 @@ test_grok_failed_cell_preserves_server() (
     echo 'skip: tmux and jq are required for the Grok failure fixture'
     exit 0
   }
-  local dir="$TMP_ROOT/grok-failed-cell" cell rc=0
+  local dir="$TMP_ROOT/grok-failed-cell" cell socket sentinel="$TMP_ROOT/grok-failed-cell/operator/operator.sock" rc=0
   mkdir -p "$dir"
+  mkdir -m 700 "$dir/operator"
   cat > "$dir/fake-grok" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then printf 'fake-grok\n'; exit 0; fi
@@ -572,8 +573,11 @@ SH
       [ -f "$cell/.fm-test-fixture" ] || continue
       "$FM_TEST_TMUX_REAL" -S "$cell/dedicated.sock" kill-server >/dev/null 2>&1 || true
     done
+    "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
   }
   trap cleanup_grok_cell EXIT
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 60' \
+    || fail 'could not start Grok fixture operator sentinel'
   TMPDIR="$dir" FM_GROK_STOP_LIVE_E2E=1 FM_GROK_STOP_LIVE_TIMEOUT=5 \
     FM_GROK_NATIVE_BIN="$dir/fake-grok" FM_GROK_LEGACY_BIN="$dir/fake-grok" \
     FM_GROK_AUTH_FILE="$dir/auth.json" bash "$ROOT/tests/fm-grok-stop-live-e2e.test.sh" \
@@ -581,9 +585,23 @@ SH
   [ "$rc" -ne 0 ] || fail 'fake Grok failure unexpectedly passed'
   cell=$(sed -n 's/^blocked: preserving failed isolated Grok cell at //p' "$dir/suite.log")
   [ -n "$cell" ] && [ -f "$cell/.fm-test-fixture" ] || fail "failed Grok cell was not preserved: $(cat "$dir/suite.log")"
-  "$FM_TEST_TMUX_REAL" -S "$cell/dedicated.sock" has-session -t native-e2e \
-    || fail 'failed Grok cell server was stopped before inspection'
-  pass 'failed Grok cell retains its recorded disposable server for inspection'
+  FM_E2E_TMUX_SOCKET_ID="$cell/dedicated.sock" \
+    env -u TMUX -u TMUX_PANE "$cell/bin/tmux" has-session -t native-e2e \
+    || fail 'failed Grok cell wrapper cannot inspect its server'
+  socket=$(FM_E2E_TMUX_SOCKET_ID="$cell/dedicated.sock" \
+    env -u TMUX -u TMUX_PANE "$cell/bin/tmux" display-message -p -t native-e2e:control '#{socket_path}') \
+    || fail 'failed Grok cell wrapper cannot report its socket'
+  case "$socket" in
+    dedicated.sock|"$cell/dedicated.sock") ;;
+    *) fail "failed Grok cell wrapper selected another socket: $socket" ;;
+  esac
+  if FM_E2E_TMUX_SOCKET_ID="$cell/dedicated.sock" \
+    env -u TMUX -u TMUX_PANE "$cell/bin/tmux" -vS "$sentinel" kill-server >/dev/null 2>&1; then
+    fail 'failed Grok cell wrapper accepted a foreign selector'
+  fi
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected \
+    || fail 'failed Grok cell wrapper contacted the operator sentinel'
+  pass 'failed Grok cell retains a socket-pinned wrapper for inspection'
 )
 
 test_standalone_afk_avoids_operator_socket() (
