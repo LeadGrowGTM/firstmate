@@ -259,7 +259,7 @@ resolve_treehouse_root() {  # <display-root>
 }
 
 sweep_size() {
-  local pool default= default_real= pool_root= pool_real=
+  local pool default='' default_real='' pool_root='' pool_real=''
   if [ -n "${HOME:-}" ]; then
     default=$HOME/.treehouse
     resolve_treehouse_root "$default"
