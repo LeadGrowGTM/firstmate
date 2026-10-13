@@ -1,0 +1,5 @@
+fixture: disposable lab, real tmux and real treehouse
+OpenCode wiring exact: swept: 1 workers, 1 copies, 0 stale registrations
+generated copy removed
+OpenCode wiring edited: swept: 0 workers, 0 copies, 0 stale registrations; kept edited: REFUSED: worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP74QRP1KCC74WZ5X092J/.live-deadweight.BGRWYO/pool/.treehouse/project-410914/1/project has uncommitted changes.
+edited copy retained

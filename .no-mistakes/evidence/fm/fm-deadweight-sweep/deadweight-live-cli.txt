@@ -1,0 +1,6 @@
+fixture: disposable lab, real tmux and real treehouse
+tmux inventory: primary
+with ignored operator file: swept: 0 workers, 0 copies, 0 stale registrations; kept task: REFUSED: worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP74QRP1KCC74WZ5X092J/.live-deadweight.Cq4LFB/pool/.treehouse/project-44d7bc/1/project has uncommitted changes.
+record and operator file retained
+after removing operator file: swept: 1 workers, 1 copies, 0 stale registrations
+record and worker copy removed

@@ -1,0 +1,5 @@
+fixture: disposable lab, real scheduled sweep and watcher
+first surfaced wake: check: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP74QRP1KCC74WZ5X092J/.live-deadweight.b4Ka4B/firstmate/state/due.check.sh: due check ran
+due check state: ran
+queued sweep wake: 1791920774	1	check	deadweight-sweep	check: deadweight-sweep: swept: 0 workers, 0 copies, 1 stale registrations
+stale registration: pruned

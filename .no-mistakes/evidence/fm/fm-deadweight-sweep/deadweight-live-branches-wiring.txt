@@ -1,0 +1,11 @@
+fixture: disposable lab, real tmux, real treehouse, local Git remote
+pushed unmerged branch: swept: 0 workers, 0 copies, 0 stale registrations; kept unmerged: REFUSED: worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP74QRP1KCC74WZ5X092J/.live-deadweight.70VBCK/pool/.treehouse/project-1082ac/1/project has commits beyond its base not landed on main.
+record and unmerged copy retained
+missing copy with remote branch: swept: 0 workers, 0 copies, 0 stale registrations; kept unmerged: REFUSED: remote branch fm/unmerged for missing worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP74QRP1KCC74WZ5X092J/.live-deadweight.70VBCK/pool/.treehouse/project-1082ac/1/project is not confirmed merged.
+record retained while remote branch unmerged
+after branch merged: swept: 1 workers, 0 copies, 0 stale registrations
+stale record removed after merge proof
+Claude wiring exact: swept: 1 workers, 1 copies, 0 stale registrations
+generated copy removed
+Claude wiring edited: swept: 0 workers, 0 copies, 0 stale registrations; kept edited: REFUSED: worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP74QRP1KCC74WZ5X092J/.live-deadweight.70VBCK/pool/.treehouse/project-1082ac/1/project has uncommitted changes.
+edited copy retained
