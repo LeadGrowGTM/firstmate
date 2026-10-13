@@ -155,7 +155,7 @@ due_since() {  # <now>
 # budget, rewriting the size cache. Exit status: 0 every copy has a size from
 # since <due>; 1 some copy is still pending or could not be measured.
 measure_copies() {  # <due> <now>
-  local due=$1 now=$2 started=$SECONDS left repo name mb rc copies cache next="" pending=0 at
+  local due=$1 now=$2 started=$SECONDS left repo name mb rc copies cache rows next="" pending=0 at
   COPY_ERROR=
   if [ ! -e "$WORKTREES_ROOT" ] && [ ! -L "$WORKTREES_ROOT" ]; then
     replace_file "$SIZES" "" || COPY_ERROR='read failed: could not write copy sizes'
@@ -168,10 +168,12 @@ measure_copies() {  # <due> <now>
     done
   done) || { COPY_ERROR="read failed: could not traverse $WORKTREES_ROOT"; return 0; }
   cache=$( [ -f "$SIZES" ] && [ ! -L "$SIZES" ] && cat "$SIZES" 2>/dev/null)
-  while IFS= read -r name; do
+  rows=$(awk -F '\t' '
+    FILENAME == ARGV[1] { if (NF >= 3) { size[$1] = $2; stamp[$1] = $3 }; next }
+    NF { print $0 "\t" ($0 in size && size[$0] != "" ? size[$0] : "-") "\t" ($0 in stamp && stamp[$0] != "" ? stamp[$0] : "0") }
+  ' <(printf '%s\n' "$cache") <(printf '%s\n' "$copies"))
+  while IFS=$'\t' read -r name mb at; do
     [ -n "$name" ] || continue
-    at=$(printf '%s\n' "$cache" | awk -F '\t' -v n="$name" '$1 == n { print $3; exit }')
-    mb=$(printf '%s\n' "$cache" | awk -F '\t' -v n="$name" '$1 == n { print $2; exit }')
     case "$at" in ''|*[!0-9]*) at=0 ;; esac
     if [ "$at" -lt "$due" ] || [ "$at" -eq 0 ]; then
       left=$((MEASURE_BUDGET_SECS - (SECONDS - started)))
@@ -200,7 +202,7 @@ measure_copies() {  # <due> <now>
     fi
     next="$next$name"$'\t'"$mb"$'\t'"$at"$'\n'
   done <<EOF
-$copies
+$rows
 EOF
   replace_file "$SIZES" "$next" || { COPY_ERROR='read failed: could not write copy sizes'; return 0; }
   [ "$pending" -eq 0 ]
@@ -222,13 +224,21 @@ worktree_findings() {
   [ -f "$SIZES" ] && [ ! -L "$SIZES" ] || return 0
   awk -F '\t' -v total_max="$WORKTREES_MB" -v copy_max="$COPY_MB" -v budget="$MEASURE_BUDGET_SECS" '
     function gb(mb) { return sprintf("%.1f GB", mb / 1024) }
-    $2 == "timeout" { slow = slow (slow == "" ? "" : ", ") $1; next }
-    $2 == "error" { bad = bad (bad == "" ? "" : ", ") $1; next }
+    function sample(path) { return length(path) > 60 ? substr(path, 1, 60) "..." : path }
+    function add(list, item) { return list (list == "" ? "" : ", ") item }
+    $2 == "timeout" { slow_count++; if (slow_count <= 2) slow = add(slow, sample($1)); next }
+    $2 == "error" { bad_count++; if (bad_count <= 2) bad = add(bad, sample($1)); next }
     $2 ~ /^[0-9]+$/ {
       total += $2
-      if ($2 > copy_max) big = big (big == "" ? "" : ", ") $1 " " gb($2)
+      if ($2 > copy_max) {
+        big_count++
+        if (big_count <= 2) big = add(big, sample($1) " " gb($2))
+      }
     }
     END {
+      if (big_count > 2) big = add(big, "(+" (big_count - 2) " more)")
+      if (slow_count > 2) slow = add(slow, "(+" (slow_count - 2) " more)")
+      if (bad_count > 2) bad = add(bad, "(+" (bad_count - 2) " more)")
       if (total > total_max) print "no-mistakes worktrees total " gb(total) ", over " gb(total_max)
       if (big != "") print "no-mistakes copies over " gb(copy_max) ": " big
       if (slow != "") print "read failed: could not size " slow " within " budget "s"
@@ -262,12 +272,12 @@ run_check() {
   measure_copies "$due" "$now" || return 0
   found=$(
     size_finding "$POOLS_ROOT" "$POOLS_MB" 'treehouse worktree pools'
-    if [ -n "$COPY_ERROR" ]; then printf '%s\n' "$COPY_ERROR"; else worktree_findings; fi
     size_finding "$LOGS_ROOT" "$LOGS_MB" 'archived no-mistakes logs'
     disk_findings
+    if [ -n "$COPY_ERROR" ]; then printf '%s\n' "$COPY_ERROR"; else worktree_findings; fi
   )
   replace_file "$RECORD" "$(printf 'schema\t%s\nlast_eval\t%s\n' "$RECORD_SCHEMA" "$now")" \
-    || found="${found:+$found$'\n'}read failed: could not write daily record"
+    || found="read failed: could not write daily record${found:+$'\n'$found}"
   [ -n "$found" ] || return 0
   fm_cap_line "clutter: $(printf '%s\n' "$found" | paste -sd ';' - | sed 's/;/; /g')" "$MAX_LINE"
 }

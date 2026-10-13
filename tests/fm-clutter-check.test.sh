@@ -137,6 +137,40 @@ test_du_error_is_not_reported_as_timeout() {
   pass "fm-clutter-check: du errors are distinguished from timeouts"
 }
 
+test_many_cached_copies_preserve_every_category() {
+  local home out i run size
+  home=$(make_home many-copies)
+  mkdir -p "$home/state/.clutter-check"
+  : > "$home/state/.clutter-check/sizes"
+  for i in {1..40}; do
+    printf -v run 'run-%072d' "$i"
+    mkdir -p "$home/worktrees/repo/$run"
+    size=4000
+    case "$i" in
+      1|2|3) size=timeout ;;
+      4|5|6) size=error ;;
+    esac
+    printf 'repo/%s\t%s\t%s\n' "$run" "$size" "$NOW" >> "$home/state/.clutter-check/sizes"
+  done
+  echo 6000 > "$home/fixtures/size-pools"
+  echo 6000 > "$home/fixtures/size-logs"
+  echo 160000 > "$home/fixtures/root-used"
+  echo 50 > "$home/fixtures/win-free"
+  out=$(run_check "$home") || fail "cached-copy check failed: $out"
+  assert_contains "$out" 'treehouse worktree pools use' "pool finding"
+  assert_contains "$out" 'archived no-mistakes logs use' "log finding"
+  assert_contains "$out" 'WSL root has' "root disk finding"
+  assert_contains "$out" 'has 5% free' "Windows disk finding"
+  assert_contains "$out" 'no-mistakes worktrees total' "copy total finding"
+  assert_contains "$out" 'no-mistakes copies over' "oversized copy finding"
+  assert_contains "$out" 'within 14s' "timeout copy finding"
+  assert_contains "$out" '(+32 more)' "oversized copy count"
+  assert_not_contains "$out" '[truncated]' "copy list must not truncate other categories"
+  [ "${#out}" -le 1000 ] || fail "the clutter line exceeded its 1000-character cap"
+  assert_equals 2 "$(wc -l < "$home/fixtures/du.log" | tr -d ' ')" "cached copies should not be remeasured"
+  pass "fm-clutter-check: cached copy summaries preserve every threshold category"
+}
+
 test_daily_gate() {
   local home out
   home=$(make_home daily)
@@ -198,6 +232,7 @@ test_clean_is_silent
 test_space_conditions_join_into_one_line
 test_copy_depth_and_read_failures
 test_du_error_is_not_reported_as_timeout
+test_many_cached_copies_preserve_every_category
 test_daily_gate
 test_budget_and_unmeasurable_copy
 test_arm_refuses_secondmate_home_and_runs_the_shim

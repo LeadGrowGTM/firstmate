@@ -1780,6 +1780,7 @@ Because it reads the whole machine, `arm` refuses in a secondmate home, and it i
 **What is reported**
 
 The check prints one `clutter:` line, joining every condition past its threshold, and prints nothing otherwise.
+Long copy lists show up to two names per finding and count the rest, so the line retains the pool, log, and disk findings.
 
 - Treehouse worktree pools under `FM_CLUTTER_POOLS_ROOT` (default `~/.treehouse`) totalling more than `FM_CLUTTER_POOLS_MB` (default 5120).
 - No-mistakes pipeline copies under `FM_CLUTTER_WORKTREES_ROOT` (default `~/.no-mistakes/worktrees`) totalling more than `FM_CLUTTER_WORKTREES_MB` (default 20480), or a single repository/run copy over `FM_CLUTTER_COPY_MB` (default 3072).
