@@ -885,30 +885,37 @@ jq -e '.sources.large == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/
 pass 'cursor read limit fails oversized source without unreadable state'
 
 new_home
-mkdir -p "$HOME_DIR/plugins"
-printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-head -c 4096 /dev/zero | tr '\0' x > "$HOME_DIR/plugins/preview.md"
-for number in $(seq 1 1200); do
-  cp "$HOME_DIR/plugins/preview.md" "$HOME_DIR/plugins/instruction-$number.md"
-done
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"old",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1201)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+config "$repo_sources"
 collect "$HOME_DIR" "$NOW"
-expect_code 0 "$STATUS" 'large old source baseline'
-[ "$(wc -c < "$HOME_DIR/data/domain-freshness/cursors.json")" -gt 5000000 ] || fail 'old source cursor did not reach roughly 5 MiB'
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"new",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1201)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+expect_code 0 "$STATUS" 'repository checkpoint before removal'
+config '[]'
 collect "$HOME_DIR" 2026-10-14T12:00:00Z
-expect_code 0 "$STATUS" 'replacement of large source'
+expect_code 0 "$STATUS" 'repository source absent for a day'
+jq -e '.sources.forge.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'absent repository lost its successful checkpoint'
+issue 57 2026-10-14T13:00:00Z | jq -s . > "$FEED/issues-1.json"
+config "$repo_sources"
+collect "$HOME_DIR" 2026-10-16T12:00:00Z
+expect_code 0 "$STATUS" 'repository re-added after three days'
 bundle
-jq -e '.coverage[0].id == "new" and .coverage[0].baseline and (.evidence | length) == 1202' "$OUT" >/dev/null || fail 'replacement source did not complete its baseline'
-jq -e '.sources.old == null and .sources.new.checkpoint == "2026-10-14T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'inactive large cursor prevented replacement checkpoint'
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"old",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1201)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
-collect "$HOME_DIR" 2026-10-15T12:00:00Z
-expect_code 0 "$STATUS" 're-added large source'
+jq -e '.coverage[0].window_start == "2026-10-13T11:55:00Z" and .evidence[0].url == "https://github.com/acme/widgets/issues/57"' "$OUT" >/dev/null || fail 're-added repository lost an event older than 24 hours'
+jq -e '.sources.forge.checkpoint == "2026-10-16T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 're-added repository did not advance its retained checkpoint'
+
+new_home
+mkdir -p "$HOME_DIR/skills"
+printf '# Before\n' > "$HOME_DIR/skills/SKILL.md"
+config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'skill checkpoint before removal'
+config '[]'
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 0 "$STATUS" 'skill source absent for a day'
+printf '# After\n' > "$HOME_DIR/skills/SKILL.md"
+config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
+collect "$HOME_DIR" 2026-10-16T12:00:00Z
+expect_code 0 "$STATUS" 'skill source re-added after three days'
 bundle
-jq -e '.coverage[0].id == "old" and .coverage[0].baseline and (.evidence | length) == 1202' "$OUT" >/dev/null || fail 're-added source reused a pruned cursor'
-jq -e '.sources.old.checkpoint == "2026-10-15T12:00:00Z" and .sources.new == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 're-added source did not replace inactive cursor'
-pass 'inactive large cursors are pruned before replacement checkpoints'
+jq -e '.coverage[0].baseline == false and .evidence[0].kind == "inventory-change" and .evidence[0].before.content == "# Before\n" and .evidence[0].after.content == "# After\n"' "$OUT" >/dev/null || fail 're-added skill source lost its prior inventory'
+pass 'inactive source cursors retain missed forge and inventory changes'
 
 new_home
 mkdir -p "$HOME_DIR/skills/one"

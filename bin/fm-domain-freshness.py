@@ -573,8 +573,6 @@ def main():
         cursor = load(cursor_path) if cursor_path.exists() else {'version': 1, 'sources': {}}
         if cursor.get('version') != 1 or not isinstance(cursor.get('sources'), dict):
             raise ValueError('invalid collector cursor')
-        active = {source['id'] for source in config['sources']}
-        cursor['sources'] = {key: saved for key, saved in cursor['sources'].items() if key in active}
         for saved in cursor['sources'].values():
             if not isinstance(saved, dict) or not isinstance(saved.get('binding'), str):
                 raise ValueError('invalid source cursor')
