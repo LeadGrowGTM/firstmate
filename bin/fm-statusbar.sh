@@ -98,10 +98,12 @@ cmd_label() {
   [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 0
   provider=$(fm_quota_provider_for_harness "$harness" "$model") || provider=
   case "$harness" in
+    agy) provider=agy ;;
     opencode|pi|pi-signed)
       case "$model" in
         openai/*|openai-codex*/*|codex-native/*) provider=codex ;;
         anthropic/*|claude-bridge/*) provider=claude ;;
+        xai/grok-*) provider=grok ;;
         *) provider= ;;
       esac
       ;;
@@ -198,9 +200,9 @@ fm_sb_usage_refresh() {
     in_quota && /^  / {
       sub(/^  /, ""); n = split($0, row, ","); scope = row[2 + keyed]; rem = row[3 + keyed]
       if (scope ~ /^".*"$/) scope = substr(scope, 2, length(scope) - 2)
-      if (n < 3 + keyed || (scope != "all_models" && scope != "all_products" && scope !~ /^model:.+/ && scope !~ /^product:.+/) ||
-          rem !~ /^[0-9]+(\.[0-9]+)?$/ || rem + 0 > 100) next
-      printf "%s\t%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", sprintf("%.15g", 100 - rem), scope
+      if (n < 3 + keyed || (scope != "all_models" && scope != "all_products" && scope !~ /^model:.+/ && scope !~ /^product:.+/)) next
+      used = rem ~ /^[0-9]+(\.[0-9]+)?$/ && rem + 0 <= 100 ? sprintf("%.15g", 100 - rem) : "?"
+      printf "%s\t%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", used, scope
     }
   ')
   [ -n "$rows" ] || return 1
@@ -216,7 +218,7 @@ fm_sb_usage_display() {  # <window>
   [ -n "$provider" ] && [ -f "$USAGE_CACHE" ] || { printf 'u ?\n'; return 0; }
   awk -F '\t' -v provider="$provider" -v account="$account" -v model="$model" '
     $1 == provider && ($2 == account || $2 == "*") { exact_exists = 1 }
-    $1 == provider && ($4 == "all_models" || $4 == "all_products" || (model != "" && ($4 == "model:" model || $4 == "product:" model))) {
+    $1 == provider && $3 ~ /^[0-9]+(\.[0-9]+)?$/ && ($4 == "all_models" || $4 == "all_products" || (model != "" && ($4 == "model:" model || $4 == "product:" model))) {
       if ($2 == account || $2 == "*") {
         if (!matched || $3 + 0 > used) { used = $3 + 0; key = $2 }
         matched = 1

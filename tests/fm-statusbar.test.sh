@@ -35,9 +35,12 @@ echo run >>"$WORK/quota-calls"
 [ ! -f "$WORK/quota-fail" ] || exit 1
 [ ! -f "$WORK/quota-hang" ] || sleep 15
 cat <<'X'
-quota[13]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[17]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,default,all_models,68,0.4,through_reset,high,none,none
   codex,default,all_models,68,0.4,through_reset,high,none,none
+  grok,default,all_models,45,0.4,through_reset,high,none,none
+  grok,xai,all_models,20,0.4,through_reset,high,none,none
+  agy,default,all_models,40,0.4,through_reset,high,none,none
   codex,codex-home,all_models,0.5,-1.9,through_reset,high,none,none
   codex,openai-codex-home,all_models,4,-1.9,through_reset,high,none,none
   codex,openai-codex-work,all_models,0.5,-1.9,through_reset,high,none,none
@@ -45,6 +48,7 @@ quota[13]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runw
   codex,openai-codex-hi,all_models,0.04,-1.9,through_reset,high,none,none
   codex,openai-codex-lo,all_models,99.9999,-1.9,through_reset,high,none,none
   codex,openai-codex-scoped,"model:gpt-6-astra",2,-1.9,through_reset,high,none,none
+  codex,openai-codex-unknown,all_models,headroom_unknown,-1.9,unknown,low,none,none
   claude,default,"model:fable",12,0.8,through_reset,high,none,none
   claude,default,"model:claude-opus-5-5[1m]",90,0.8,through_reset,high,none,none
   claude,default,"model:claude-3-5-sonnet",9,0.8,through_reset,high,none,none
@@ -223,6 +227,20 @@ bash "$SB" label firstmate:pi-unknown pi-unknown pi google/gemini high /home/u/p
 [ "$(bash "$SB" usage firstmate:pi-unknown)" = 'u ?' ] || fail "Pi borrowed quota for an unknown provider"
 pass "every quota lane can fall back to its provider default"
 
+tmux new-window -d -t firstmate: -n pi-grok "sleep 600"
+bash "$SB" label firstmate:pi-grok pi-grok pi xai/grok-4.5 high /home/u/pi
+[ "$(bash "$SB" usage firstmate:pi-grok)" = 'u gk:xai80%' ] || fail "Pi xAI model missed its Grok account quota"
+tmux new-window -d -t firstmate: -n oc-grok "sleep 600"
+bash "$SB" label firstmate:oc-grok oc-grok opencode xai/grok-4.5 high /home/u/oc
+[ "$(bash "$SB" usage firstmate:oc-grok)" = 'u gk:default55%' ] || fail "OpenCode xAI model missed Grok quota"
+tmux new-window -d -t firstmate: -n pi-signed-grok "sleep 600"
+bash "$SB" label firstmate:pi-signed-grok pi-signed-grok pi-signed xai/grok-4.5 high /home/u/pi-signed
+[ "$(bash "$SB" usage firstmate:pi-signed-grok)" = 'u gk:xai80%' ] || fail "Pi-signed xAI model missed Grok quota"
+tmux new-window -d -t firstmate: -n agy "sleep 600"
+bash "$SB" label firstmate:agy agy agy default high /home/u/agy
+[ "$(bash "$SB" usage firstmate:agy)" = 'u ag:default60%' ] || fail "Agy status usage disappeared with the legacy chooser mapping"
+pass "xAI models and Agy use only their selected status quota lanes"
+
 cat >"$WORK/state/sync-lane.meta" <<META
 window=firstmate:pi-fallback
 harness=pi
@@ -244,6 +262,13 @@ bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-sol 
 bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-astra high /home/u/pi
 [ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u cx:openai~-scoped98%' ] || fail "exact account model scope was not used"
 pass "exact account selection precedes model scope filtering"
+
+tmux new-window -d -t firstmate: -n pi-unknown-account "sleep 600"
+bash "$SB" label firstmate:pi-unknown-account pi-unknown-account pi openai-codex-unknown/gpt-6-sol high /home/u/pi
+[ "$(bash "$SB" usage firstmate:pi-unknown-account)" = 'u ?' ] || fail "unknown exact account borrowed default quota"
+awk -F '\t' '$1 == "codex" && $2 == "openai-codex-unknown" && $3 == "?" { found=1 } END { exit !found }' \
+  "$WORK/state/statusbar-usage.txt" || fail "unknown exact account vanished from quota cache"
+pass "unknown exact account presence blocks another account's usage"
 
 tmux new-window -d -t firstmate: -n primary "sleep 600"
 primary_pane=$(tmux display-message -p -t firstmate:primary '#{pane_id}')

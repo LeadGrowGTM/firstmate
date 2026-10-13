@@ -4785,21 +4785,21 @@ fi
     # Claude's own statusLine (model, effort, worktree, plan windows, task) rides
     # this firstmate-owned local settings file, only when the account the worker
     # loads and the project define none, so the captain's statusLine wins and the
-    # launch line stays byte-identical. The command path must be JSON- and
-    # shell-inert; anything else installs no statusLine.
+    # launch line stays byte-identical.
     j_statusline=
     if [ -n "$WORKER_ACCOUNT" ]; then
       sl_settings="${WORKER_ACCOUNT_ROOT:-$HOME/.claude}/settings.json"
     else
       sl_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
     fi
-    sl_cmd="$SCRIPT_DIR/fm-statusbar.sh claude-line --task $ID"
-    case "$sl_cmd" in
-    *[\'\"\\\$\`]* | *[[:cntrl:]]*) ;;
+    sl_cmd="$(shell_quote "$SCRIPT_DIR/fm-statusbar.sh") claude-line --task $(shell_quote "$ID")"
+    case "$SCRIPT_DIR" in
+    *[[:cntrl:]]*) ;;
     *)
-      if ! { [ -r "$sl_settings" ] && jq -e '.statusLine' "$sl_settings" >/dev/null 2>&1; } \
+      if [ "$RAW_LAUNCH" -eq 0 ] \
+        && ! { [ -r "$sl_settings" ] && jq -e '.statusLine' "$sl_settings" >/dev/null 2>&1; } \
         && ! { [ -r "$WT/.claude/settings.json" ] && jq -e '.statusLine' "$WT/.claude/settings.json" >/dev/null 2>&1; }; then
-        j_statusline=",\"statusLine\":{\"type\":\"command\",\"command\":\"$sl_cmd\"}"
+        j_statusline=",\"statusLine\":{\"type\":\"command\",\"command\":\"$(json_escape "$sl_cmd")\"}"
       fi
       ;;
     esac
