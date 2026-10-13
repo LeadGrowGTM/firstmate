@@ -1321,6 +1321,7 @@ ORCA_VIEW_HANDLE=
 ORCA_VIEW_SESSION=
 ORCA_VIEW_OWNED=
 ORCA_VIEW_CREATED=0
+ORCA_VIEW_PRIOR_VALID=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -1472,15 +1473,7 @@ spawn_abort_cleanup() {
   if [ "$ORCA_VIEW_ABORT_CLOSE" = 1 ]; then
     if [ "$ORCA_VIEW_IDENTITY_SENT" = 1 ]; then
       ORCA_VIEW_ABORT_CLOSE=0
-      if [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
-        [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ]; then
-        orca_prior_close_args=()
-        if [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] && [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
-          [ "$ORCA_VIEW_PRIOR_SESSION" != "$ORCA_VIEW_SESSION" ]; then
-          orca_prior_close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION")
-        fi
-        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" "${orca_prior_close_args[@]}" || true
-      fi
+      orca_view_close_prior
     elif [ "$RELAUNCH" -eq 1 ] &&
       [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
       orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
@@ -5388,7 +5381,7 @@ orca_view_name_usable() {
   for owner_meta in "$STATE"/*.meta; do
     [ "$owner_meta" != "$STATE/$ID.meta" ] && [ -f "$owner_meta" ] || continue
     [ "$(fm_meta_get "$owner_meta" kind)" = secondmate ] || continue
-    [ "$(fm_meta_get "$owner_meta" backend)" = tmux ] || continue
+    case "$(fm_meta_get "$owner_meta" backend)" in '' | tmux) ;; *) continue ;; esac
     [ "$(fm_meta_get "$owner_meta" orca_view_owned)" = 1 ] || continue
     [ "$(fm_meta_get "$owner_meta" orca_view_session)" != "$1" ] || return 1
   done
@@ -5404,7 +5397,27 @@ orca_view_name_usable() {
     [ "$1" = "orca-$ID" ]
   fi
 }
+orca_view_close_prior() {
+  local -a close_args=()
+  [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
+    [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ] || return 0
+  if [ "$ORCA_VIEW_PRIOR_VALID" != 1 ] ||
+    ! tmux has-session -t "=$ORCA_VIEW_PRIOR_SESSION" 2>/dev/null ||
+    ! orca_view_name_usable "$ORCA_VIEW_PRIOR_SESSION"; then
+    echo "note: prior Orca view $ORCA_VIEW_PRIOR_SESSION did not pass current ownership validation, so it was left alone" >&2
+    return 0
+  fi
+  if [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] &&
+    [ "$ORCA_VIEW_PRIOR_SESSION" != "$ORCA_VIEW_SESSION" ]; then
+    close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION")
+  fi
+  "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" "${close_args[@]}" || true
+}
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
+  if [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
+    orca_view_name_usable "$ORCA_VIEW_PRIOR_SESSION"; then
+    ORCA_VIEW_PRIOR_VALID=1
+  fi
   ORCA_VIEW_NAME="orca-$ID"
   if ! orca_view_name_usable "$ORCA_VIEW_NAME"; then
     case "$SES" in
@@ -6135,15 +6148,7 @@ fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
 ORCA_VIEW_ABORT_CLOSE=0
-if [ -n "$ORCA_VIEW_HANDLE" ] && [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
-  [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ]; then
-  orca_prior_close_args=()
-  if [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] && [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
-    [ "$ORCA_VIEW_PRIOR_SESSION" != "$ORCA_VIEW_SESSION" ]; then
-    orca_prior_close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION")
-  fi
-  "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" "${orca_prior_close_args[@]}" || true
-fi
+[ -z "$ORCA_VIEW_HANDLE" ] || orca_view_close_prior
 
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"
