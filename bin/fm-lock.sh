@@ -124,8 +124,7 @@ remember_lock_session() {
 # byte-identical.
 publish_lock_session() {
   local trusted recorded tmp
-  if trusted=$(fm_session_lock_trusted_session_id) \
-    || { trusted=$(fm_session_lock_trusted_codex_thread_id) && trusted="codex:$trusted"; }; then
+  if trusted=$(fm_session_lock_trusted_session_id); then
     if recorded=$(fm_session_lock_recorded_session_id "$STATE") && [ "$recorded" = "$trusted" ]; then
       return 0
     fi

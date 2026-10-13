@@ -50,7 +50,8 @@ The trigger uses the [durable inbox](../bin/fm-inbox.sh) check path, so the sess
 It never sends terminal keys, interrupts a turn, or starts a replacement worker.
 The [script header](../bin/fm-daily-stow.sh) owns eligibility checks, the 20-hour primary-pass guard, retry semantics, and exit status.
 The primary records its memory pass through the cascade's `--record-pass` option; that record does not certify secondmate completion or reset safety.
-The recipient rechecks the original lock holder's identity and eligibility before acting on a delayed note; a lock holder the host cannot classify may still receive a note.
+The recipient checks the note's intended home and the primary-pass guard before acting; reading the note in that home's inbox is sufficient evidence of a live session.
+A later session in the same home may process a delayed note; a lock holder the host cannot classify may still receive one.
 A missing or positively stale main lock, away or quiet posture, or a recent primary pass produces a logged skip rather than a queued instruction.
 The 01:30 occurrence exists on the spring daylight-saving transition, and the persistent timer catches up after downtime; a catch-up can run after the 03:00 refresh.
 Queueing at 01:30 normally leaves 90 minutes before refresh, but does not guarantee completion when main or a secondmate remains busy.

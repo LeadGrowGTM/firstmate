@@ -80,21 +80,11 @@ assert_equals 1 "$(count_wakes)" 'one check wake queued'
 kill -0 "$holder_pid" || fail 'delivery must leave the live session running'
 notes=$(FM_HOME="$home" bash "$ROOT/bin/fm-inbox.sh" list)
 assert_contains "$notes" 'Scheduled daily stow' 'note goes to the selected live home'
-read -r bound_pid bound_identity < <(printf '%s\n' "$notes" | python3 -c 'import re,sys; match = re.search(r"--eligible ([0-9]+) ([0-9a-f]{64})", sys.stdin.read()); print(*match.groups()) if match else sys.exit(1)')
-assert_equals "$holder_pid" "$bound_pid" 'queued note identifies the original lock holder'
+assert_contains "$notes" "--eligible $(printf '%q' "$home")" 'note identifies its intended home'
 rm "$home/state/.last-watcher-beat"
-ready=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" bash "$ROOT/bin/fm-inbox.sh" ready)
-[ "$(printf '%s' "$ready" | python3 -c 'import json,sys; print(json.load(sys.stdin)["can_receive"])')" != True ] \
-  || fail 'the delivery fixture must have an unhealthy wake consumer'
-out=$(run_daily --eligible "$bound_pid" "$bound_identity")
+out=$(run_daily --eligible "$home")
 assert_contains "$out" 'eligible' 'delivered note does not require its exited watcher'
 assert_equals 1 "$(count_wakes)" 'delivery recheck writes no wake'
-printf 'S1\n' > "$home/state/.lock-session"
-rc=0
-out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
-expect_code 3 "$rc" 'a new session id cannot receive a note queued without one'
-assert_contains "$out" 'different main session holds the lock' 'sidecar appearance drops the old note'
-rm "$home/state/.lock-session"
 touch "$home/state/.last-watcher-beat"
 out=$(run_daily)
 assert_contains "$out" 'replay' 'same Toronto day retry replays note'
@@ -102,26 +92,25 @@ assert_equals 1 "$(count_wakes)" 'same-day retry cannot append another wake'
 # The recipient recheck suppresses a request delayed past another manual pass.
 FM_HOME="$home" bash "$CASCADE" --record-pass >/dev/null
 rc=0
-out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
+out=$(run_daily --eligible "$home") || rc=$?
 expect_code 3 "$rc" 'recipient can distinguish a deferred skip'
 assert_contains "$out" 'last 20 hours' 'delayed note rechecks manual pass'
 printf '%s\n' "$(( $(date +%s) - 20 * 3600 - 5 ))" > "$home/state/.last-stow-primary-pass"
 printf 'quiet\n' > "$home/state/.afk"
 rc=0
-out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
-expect_code 3 "$rc" 'recipient keeps the away/quiet guard'
-assert_contains "$out" 'away or quiet mode' 'delayed note respects current posture'
+out=$(run_daily --eligible "$home") || rc=$?
+expect_code 0 "$rc" 'receipt checks only home and recent pass'
+assert_contains "$out" 'eligible' 'receipt does not recheck queue-time posture'
 rm "$home/state/.afk"
-kill "$holder_pid"
-wait "$holder_pid" 2>/dev/null || true
-perl -e '$0="claude"; sleep 120' &
-holder_pid=$!
-sleep 0.2
-printf '%s\n' "$holder_pid" > "$home/state/.lock"
+rm "$home/state/.lock"
+out=$(run_daily --eligible "$home")
+assert_contains "$out" 'eligible' 'a session reading its home inbox needs no lock proof'
+other="$TMP_ROOT/other-home"
+mkdir -p "$other/state"
 rc=0
-out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
-expect_code 3 "$rc" 'replacement session cannot use the old note'
-assert_contains "$out" 'different main session holds the lock' 'replacement drop names session mismatch'
+out=$(run_daily --eligible "$other") || rc=$?
+expect_code 3 "$rc" 'a different home cannot act on the note'
+assert_contains "$out" 'different home' 'wrong-home skip explains the mismatch'
 pass 'manual-pass stamp, 20-hour guard, idempotent wake, and delayed recheck work'
 
 # Record-pass is primary-only and must not create secondmate bookkeeping.
@@ -132,35 +121,11 @@ FM_HOME="$sub" bash "$CASCADE" --record-pass >/dev/null
 [ ! -e "$sub/state/.last-stow-primary-pass" ] || fail 'secondmate cannot record primary pass'
 pass 'the existing cascade retains secondmate scope'
 
-home="$TMP_ROOT/session-home"
-mkdir -p "$home/state" "$home/data" "$home/config"
-printf '%s\n' "$holder_pid" > "$home/state/.lock"
-printf 'S1\n' > "$home/state/.lock-session"
-touch "$home/state/.last-watcher-beat"
-out=$(run_daily)
-assert_contains "$out" 'queued' 'a live session with a recorded id receives a note'
-notes=$(FM_HOME="$home" bash "$ROOT/bin/fm-inbox.sh" list)
-read -r bound_pid bound_identity < <(printf '%s\n' "$notes" | python3 -c 'import re,sys; match = re.search(r"--eligible ([0-9]+) ([0-9a-f]{64})", sys.stdin.read()); print(*match.groups()) if match else sys.exit(1)')
-out=$(run_daily --eligible "$bound_pid" "$bound_identity")
-assert_contains "$out" 'eligible' 'unchanged recorded session id remains eligible'
-printf 'S2\n' > "$home/state/.lock-session"
-rc=0
-out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
-expect_code 3 "$rc" 'rekeyed session cannot use the old note'
-assert_contains "$out" 'different main session holds the lock' 'rekey drops the old note'
-rm "$home/state/.lock-session"
-rc=0
-out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
-expect_code 3 "$rc" 'disappearing session id cannot use the old note'
-assert_contains "$out" 'different main session holds the lock' 'sidecar disappearance drops the old note'
-pass 'session binding follows recorded id changes and presence'
-
 # Model the host view of a namespaced Codex lock: a recorded PID that the host
-# cannot classify, with a recorded Codex id for the recipient's later recheck.
+# cannot classify, without a new liveness or beacon requirement.
 home="$TMP_ROOT/codex-host-home"
 mkdir -p "$home/state" "$home/data" "$home/config"
 printf '%s\n' "$$" > "$home/state/.lock"
-printf 'codex:old-thread\n' > "$home/state/.lock-session"
 touch "$home/state/.last-watcher-beat"
 ready=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SUPERVISION_MODEL=autoarm \
   bash "$ROOT/bin/fm-inbox.sh" ready)
@@ -182,47 +147,39 @@ assert_contains "$out" 'replay' 'unknown lock retry reuses the note despite a st
 assert_equals 1 "$(count_wakes)" 'same-day retry does not add a second wake'
 pass 'unknown lock queues once despite host PID visibility and watcher state'
 
-# A Codex tool can lose host PID visibility while its daemon still holds the
-# lock. A new conversation can also reuse that daemon PID after the TUI exits.
-home="$TMP_ROOT/codex-home"
+# Model a fully hidden host PID: neither kill nor ps can resolve the holder.
+# Assert the readiness divergence, then exercise the actual recipient CLI.
+home="$TMP_ROOT/hidden-pid-home"
 mkdir -p "$home/state" "$home/data" "$home/config"
-cat > "$TMP_ROOT/codex-session.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-export FM_HOME FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_CONFIG_OVERRIDE
-printf '%s\n' "$$" > "$FM_HOME/state/.lock"
-touch "$FM_HOME/state/.last-watcher-beat"
-out=$(FM_SUPERVISION_MODEL=autoarm bash "$ROOT/bin/fm-daily-stow.sh")
-printf 'unbound=%s\n' "$out"
-CODEX_THREAD_ID=old-thread bash "$ROOT/bin/fm-lock.sh" >/dev/null
-FM_SUPERVISION_MODEL=autoarm bash "$ROOT/bin/fm-daily-stow.sh" >/dev/null
-notes=$(bash "$ROOT/bin/fm-inbox.sh" list)
-read -r bound_pid bound_identity < <(printf '%s\n' "$notes" | python3 -c 'import re,sys; m=re.search(r"--eligible ([0-9]+) ([0-9a-f]{64})",sys.stdin.read()); print(*m.groups()) if m else sys.exit(1)')
-# Model the recipient's PID namespace: kill -0 cannot see the host lock PID.
-BOUND_TEST_PID=$bound_pid
-export BOUND_TEST_PID
+printf '%s\n' "$holder_pid" > "$home/state/.lock"
+HIDDEN_TEST_PID=$holder_pid
+export HIDDEN_TEST_PID
 kill() {
-  if [ "${1:-}" = -0 ] && [ "${2:-}" = "$BOUND_TEST_PID" ]; then return 1; fi
+  if [ "${1:-}" = -0 ] && [ "${2:-}" = "$HIDDEN_TEST_PID" ]; then return 1; fi
   builtin kill "$@"
 }
-export -f kill
-out=$(CODEX_THREAD_ID=old-thread bash "$ROOT/bin/fm-daily-stow.sh" --eligible "$bound_pid" "$bound_identity")
-printf 'same=%s\n' "$out"
-unset -f kill
-CODEX_THREAD_ID=new-thread bash "$ROOT/bin/fm-lock.sh" >/dev/null
+ps() {
+  local previous='' argument
+  for argument in "$@"; do
+    if [ "$previous" = -p ] && [ "$argument" = "$HIDDEN_TEST_PID" ]; then return 1; fi
+    previous=$argument
+  done
+  command ps "$@"
+}
+export -f kill ps
+ready=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" bash "$ROOT/bin/fm-inbox.sh" ready)
+assert_equals stale "$(printf '%s' "$ready" | python3 -c 'import json,sys; print(json.load(sys.stdin)["lock"]["state"])')" \
+  'both hidden PID probes make the host lock look stale'
+out=$(run_daily --eligible "$home")
+assert_contains "$out" 'eligible' 'fully hidden PID does not prevent receipt in the intended home'
+assert_equals 0 "$(count_wakes)" 'recipient eligibility stays read-only'
+FM_HOME="$home" bash "$CASCADE" --record-pass >/dev/null
 rc=0
-out=$(CODEX_THREAD_ID=new-thread bash "$ROOT/bin/fm-daily-stow.sh" --eligible "$bound_pid" "$bound_identity") || rc=$?
-printf 'replacement_rc=%s\nreplacement=%s\n' "$rc" "$out"
-SH
-out=$(ROOT="$ROOT" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
-  FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
-  exec -a codex bash "$TMP_ROOT/codex-session.sh")
-assert_contains "$out" 'unbound=daily-stow: skipped (Codex session identity is unavailable)' \
-  'Codex without a recorded conversation cannot queue a transferable note'
-assert_contains "$out" 'same=daily-stow: eligible' 'Codex recipient accepts its bound note despite hidden host PID'
-assert_contains "$out" 'replacement_rc=3' 'replacement Codex conversation cannot use the old note'
-assert_contains "$out" 'different main session holds the lock' 'replacement skip names the session mismatch'
-pass 'Codex delivery survives a hidden host PID and rejects daemon reuse'
+out=$(run_daily --eligible "$home") || rc=$?
+expect_code 3 "$rc" 'fully hidden recipient still respects the 20-hour guard'
+assert_contains "$out" 'last 20 hours' 'hidden PID cannot bypass a recent pass'
+unset -f kill ps
+pass 'recipient checks intended home and recent pass despite fully hidden host PID'
 
 # Validate copyable units through systemd itself without installing/enabling.
 if command -v systemd-analyze >/dev/null 2>&1; then
