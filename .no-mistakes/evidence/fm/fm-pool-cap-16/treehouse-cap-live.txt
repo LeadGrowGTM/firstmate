@@ -1,0 +1,12 @@
+base lease 10: success; path inside disposable pool
+base status: 10 leased slots
+base lease 11: exit 1; 🌳 Setting up worktree...
+all 10 worktrees are in use or dirty (max_trees = 10). Run 'treehouse status' to see details, or increase max_trees in treehouse.toml
+base cleanup: returned 10 leases
+target lease 10: success; path inside disposable pool
+target lease 11: success; path inside disposable pool
+target lease 16: success; path inside disposable pool
+target status: 16 leased slots
+target lease 17: exit 1; 🌳 Setting up worktree...
+all 16 worktrees are in use or dirty (max_trees = 16). Run 'treehouse status' to see details, or increase max_trees in treehouse.toml
+target cleanup: returned 16 leases
