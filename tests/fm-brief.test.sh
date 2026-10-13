@@ -1702,6 +1702,48 @@ test_task_type_list_and_example() {
   pass "fm-brief: --list-types lists the home types, including the tracked example"
 }
 
+# --sub-agents is an opt-in: without it a ship or scout brief carries no
+# sub-agent section and is byte-identical to the previous scaffold; with it both
+# kinds carry the same bounded-delegation contract before the inbox section.
+test_sub_agents_flag_is_opt_in_and_bounded() {
+  local home id brief out rc
+  home="$TMP_ROOT/sub-agents-home"
+  mkdir -p "$home/data" "$home/config"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" sa-ship-off some-proj --mode no-mistakes >/dev/null 2>&1 \
+    || fail "ship scaffold without --sub-agents exited non-zero"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" sa-scout-off some-proj --scout >/dev/null 2>&1 \
+    || fail "scout scaffold without --sub-agents exited non-zero"
+  for id in sa-ship-off sa-scout-off; do
+    assert_no_grep "# Sub-agents" "$home/data/$id/brief.md" "$id: a brief without the flag carries a sub-agent section"
+  done
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" sa-ship-on some-proj --mode direct-PR --sub-agents >/dev/null 2>&1 \
+    || fail "ship scaffold with --sub-agents exited non-zero"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" sa-scout-on some-proj --scout --sub-agents >/dev/null 2>&1 \
+    || fail "scout scaffold with --sub-agents exited non-zero"
+  for id in sa-ship-on sa-scout-on; do
+    brief="$home/data/$id/brief.md"
+    assert_grep "# Sub-agents" "$brief" "$id: the flag did not add the sub-agent section"
+    assert_grep "you own the task and its result" "$brief" "$id: the worker no longer owns the result"
+    assert_grep "self-contained brief with exact inputs" "$brief" "$id: sub-agent briefs are not required to be self-contained"
+    assert_grep "never outside them, and never to a status file" "$brief" "$id: sub-agent writes are not confined to the worker's own copy"
+    assert_grep "touches no live system" "$brief" "$id: live systems are not off limits by default"
+    assert_grep "Check each sub-agent's output yourself" "$brief" "$id: the worker is not told to check sub-agent output"
+    assert_grep "still routes through you to firstmate" "$brief" "$id: decisions do not route through firstmate"
+    assert_grep "tell them not to spawn sub-agents of their own" "$brief" "$id: nesting is not forbidden"
+    assert_grep "# Firstmate instruction inbox" "$brief" "$id: the inbox section was lost"
+  done
+  # The section sits before the inbox so the home include stays last.
+  awk '/^# Sub-agents/{a=NR} /^# Firstmate instruction inbox/{b=NR} END{exit !(a && b && a < b)}' \
+    "$home/data/sa-ship-on/brief.md" || fail "the sub-agent section does not precede the inbox section"
+
+  out=$(FM_HOME="$home" FM_SECONDMATE_CHARTER='Supervise.' "$ROOT/bin/fm-brief.sh" sa-sm --secondmate --no-projects --sub-agents 2>&1); rc=$?
+  expect_code 1 "$rc" "a secondmate charter must refuse --sub-agents"
+  assert_contains "$out" "--sub-agents applies only to crewmate ship or scout briefs" "the secondmate refusal was not plain"
+  [ ! -e "$home/data/sa-sm" ] || fail "a refused --sub-agents charter left a scaffold behind"
+  pass "fm-brief: --sub-agents is opt-in, bounded, shared by ship and scout, and refused on a charter"
+}
+
 test_script_parses
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
@@ -1743,3 +1785,4 @@ test_task_type_absent_leaves_scaffold_unchanged
 test_task_type_renders_and_surfaces_model_and_effort
 test_task_type_refuses_unknown_malformed_and_wrong_project
 test_task_type_list_and_example
+test_sub_agents_flag_is_opt_in_and_bounded

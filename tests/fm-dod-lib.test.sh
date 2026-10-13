@@ -458,6 +458,8 @@ test_worker_role_names_skill_and_fallback_file() {
     "worker role did not name the skill"
   assert_grep "If the \`firstmate-coding-guidelines\` skill name does not resolve in this session, read \`$path\` instead." "$role_file" \
     "worker role did not name the skill file as the fallback"
+  assert_grep "delegate the task (beyond the bounded pieces a \`# Sub-agents\` section of your brief allows)" "$role_file" \
+    "worker role does not defer bounded delegation to the brief's sub-agent section"
   assert_no_grep "Skill tool cannot resolve" "$role_file" \
     "worker role claims the Skill tool never resolves the skill"
   pass "worker role names the skill and its fallback skill file"
