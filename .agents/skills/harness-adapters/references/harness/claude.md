@@ -21,18 +21,19 @@ Claude gates a folder it has never seen behind an interactive workspace-trust di
 `--dangerously-skip-permissions` does not cover that gate: `claude --help` records that the dialog is skipped only in non-interactive mode, through `-p` or a non-TTY stdout, and a spawned pane is interactive.
 Every claude spawn therefore pre-registers the directory its pane starts in before launch, and the dialog does not appear: the task worktree for a ship or scout, and the home itself for a `--secondmate` spawn, in either seeded shape (a leased worktree or a standalone clone).
 
-A second, separate dialog - "Allow external CLAUDE.md file imports?" - renders whenever a loaded CLAUDE.md chain reaches outside the project tree, which every crewmate's does through the captain's own `~/.claude/CLAUDE.md` importing `~/.claude/RTK.md`.
+A second, separate dialog - "Allow external CLAUDE.md file imports?" - renders whenever a loaded CLAUDE.md chain reaches outside the project tree, including a worker beneath a secondmate home's `CLAUDE.md` importing its `AGENTS.md`.
 `--setting-sources project,local` (the minimal worker tool surface) does not suppress it either, and it gates the pane exactly like the trust dialog: cursor on "No, disable external imports", no way to move the selection from firstmate's steering plane.
 
 `../../../bin/fm-claude-trust.sh` records `hasTrustDialogAccepted` for both the worktree and its primary checkout in `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, where a home's worker account pin decides `CLAUDE_CONFIG_DIR` (`../../../docs/configuration.md` "Worker account pin"), for a ship or scout spawn; a secondmate spawn registers only its own home entry, since a secondmate home has no separate primary-checkout entry to carry import consent forward from.
-For ship and scout launches, the helper pre-approves external imports on the verified worktree and canonical project entries unless an explicit decline is already recorded.
+For a ship or scout worker in a seeded secondmate home's in-repo `.treehouse` or `.worktrees/.treehouse` pool, the helper pre-approves external imports on the canonical project entry unless an explicit decline is already recorded.
+Other worktree launches register trust while leaving import approval to Claude's interactive decision.
 Its header owns the scope, persisted flags, decline refusal, and home-mode behavior.
 This approval also applies to future interactive sessions in the canonical checkout because Claude reads the same project entry.
 
 Never try to answer either dialog with a key.
 Firstmate's key plane carries only Enter, Escape, and C-c with no arrow navigation, so it cannot move a dialog's selection at all, and both dialogs render with the cursor on their declining option, which means a sent Enter ends the session instead of accepting.
 A visible trust dialog means pre-registration did not take effect - inspect the store and the spawn's error output rather than sending keys.
-A visible external-imports dialog on a worker launch means pre-registration did not take effect; inspect the store and spawn output.
+A visible external-imports dialog on a worker in a seeded secondmate home's in-repo pool means pre-registration did not take effect; inspect the store and spawn output.
 `fm-control.sh <id> interrupt` delivers Escape, which is the safe way to clear a wedged workspace-trust dialog for inspection without answering it.
 Escape on the external-imports dialog is different: it records a permanent decline (`hasClaudeMdExternalIncludesApproved: false`, `hasClaudeMdExternalIncludesWarningShown: true`) that `../../../bin/fm-claude-trust.sh` then correctly refuses to override on every later spawn for that project.
 Leave a pane showing the external-imports dialog alone and have a person answer it interactively instead of interrupting it.

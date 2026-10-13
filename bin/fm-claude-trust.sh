@@ -2,9 +2,9 @@
 # Pre-register Claude Code's workspace trust for the directory a claude spawn is
 # about to launch into - the isolated task worktree of a ship or scout crewmate,
 # or the seeded home of a secondmate - so the agent reaches its brief or charter
-# instead of wedging on the trust dialog. Worktree mode also pre-approves
-# external CLAUDE.md imports for the authorized worker launch, unless the
-# canonical project entry already records an explicit decline.
+# instead of wedging on the trust dialog. Worktree mode pre-approves external
+# CLAUDE.md imports only for workers in a seeded secondmate home's in-repo pool,
+# unless the canonical project entry already records an explicit decline.
 #
 # Usage: fm-claude-trust.sh <worktree> <project>
 #        fm-claude-trust.sh --secondmate-home <home> <id>
@@ -31,16 +31,16 @@
 # Code's separate "Allow external CLAUDE.md file imports?" dialog, which
 # `--setting-sources project,local` (firstmate PR 10's minimal worker tool
 # surface) stopped suppressing: it renders whenever a loaded CLAUDE.md chain
-# reaches outside the project tree - which every crewmate's does, through the
-# captain's own `~/.claude/CLAUDE.md` importing `~/.claude/RTK.md` - and it is
+# reaches outside the project tree, including a worker nested beneath a
+# secondmate home's CLAUDE.md importing the home's AGENTS.md, and it is
 # gated the same fail-closed way as trust: cursor on "No, disable", no arrow
 # navigation from firstmate's steering plane. Only worktree mode reaches this
 # second dialog's flags: a secondmate home has no separate "project" entry to
 # carry consent forward from, so its registration stays trust-only.
 #
-# TWO PROJECT-CONFIG ENTRIES IN WORKTREE MODE, NOT ONE. Registering both flags
-# on the worktree entry alone (the original trust-only design) leaves the
-# external-imports dialog showing. Verified 2026-09-06 by disassembling the
+# TWO PROJECT-CONFIG ENTRIES IN WORKTREE MODE, NOT ONE. Registering import flags
+# on the worktree entry alone leaves the external-imports dialog showing.
+# Verified 2026-09-06 by disassembling the
 # installed `claude` binary and reproducing in an isolated three-way tmux
 # launch: Claude Code's own trust check (`Rde`) reads the canonical
 # project-root entry first and, failing that, falls back to an ancestor walk
@@ -54,8 +54,9 @@
 # below. So the trust flag is registered on BOTH the worktree entry (for
 # trust's ancestor-walk fallback and defense in depth) and the project entry
 # (the trust check's first, canonical-shaped, look); the two external-imports
-# flags land on those same two entries unless the project entry already
-# records an explicit decline - the project entry is the only place the external-imports check ever looks. Registering
+# flags land only on the canonical project entry for a seeded secondmate home's
+# in-repo worker pool. The external-imports check reads only that entry.
+# Registering
 # the project entry is a write to the launching user's OWN Claude config
 # store, keyed by a project PATH the scope test below has already verified is
 # real - not a write to the project's tracked content, so hard rule 1 does not
@@ -74,7 +75,7 @@
 # registering trust with a stripped consent record. Approved===false with
 # WarningShown false or absent is NOT that decision: Claude Code's default project entry carries both flags as
 # false before the dialog was ever shown, so that pair means "never asked" and
-# is treated like an absent flag - trust and imports registered.
+# is treated like an absent flag.
 #
 # THE SCOPE TEST IS THE SAFETY PROPERTY, and it is STRUCTURAL rather than a
 # path policy. Each mode has its own, because the two directories have entirely
@@ -99,11 +100,10 @@
 # external-imports flags land on that resolved canonical
 # checkout, never on the linked-worktree argument itself.
 #
-# The test is deliberately NOT a treehouse or orca path prefix. Treehouse's
-# root is configurable (--root, TREEHOUSE_ROOT, config, and a relative
-# in-project pool), so a prefix check would refuse legitimate roots, accept
-# whatever a mutable env var names, and add exactly the policy surface this
-# registration must not grow. The structural test is verified for treehouse
+# The worktree trust test is deliberately NOT a treehouse or orca path prefix.
+# Treehouse's root is configurable (--root, TREEHOUSE_ROOT, config, and a relative
+# in-project pool), so a prefix check would refuse legitimate roots.
+# The structural test is verified for treehouse
 # worktrees, which are linked git worktrees. Orca's worktree shape is UNVERIFIED:
 # docs/orca-backend.md calls it an "independent worktree", which does not
 # establish a shared git common dir, and orca is macOS-only and was not installed
@@ -424,29 +424,43 @@ fi
 # ponytail: fingerprint-and-refuse, not a lock; flock is absent on macOS and
 # cannot stop a vendor session's own rewrite anyway.
 #
-# In worktree mode every flag lands on both the worktree entry and the project
-# entry in the same read-modify-write attempt, so a single rename either
+# In worktree mode trust lands on both the worktree and project entries, and
+# scoped import approval lands on the project entry in the same attempt.
+# A single rename either
 # records all of it or none of it - there is no state where the worktree entry
 # is fresh and the project entry stale, or the other way round. In
 # secondmate-home mode only the single home entry is written.
 #
-# Worktree mode pre-approves both dialogs as part of the authorized worker
-# launch. Claude reads import approval only at the canonical project entry,
-# so this also affects later interactive sessions in that checkout. Preserve
+# Claude reads import approval only at the canonical project entry, so scoped
+# approval also affects later interactive sessions in that checkout. Preserve
 # an explicit prior decline by refusing the whole write, not reversing it.
-# Home modes remain trust-only.
+# Home modes and other worktree launches remain trust-only.
 TRUST_FLAG='hasTrustDialogAccepted'
 IMPORT_FLAGS='["hasClaudeMdExternalIncludesApproved","hasClaudeMdExternalIncludesWarningShown"]'
+APPROVE_IMPORTS=false
 if [ "$MODE" = worktree ]; then
-  WRITE_ARGS=("$STORE" "$MODE" "$TARGET_REAL" "$PROJ_CANON" "$TRUST_FLAG" "$IMPORT_FLAGS")
+  SECOND_HOME=$(dirname -- "$(dirname -- "$PROJ_REAL")")
+  SECOND_MARKER="$SECOND_HOME/.fm-secondmate-home"
+  case "$TARGET_REAL" in
+    "$PROJ_REAL"/.treehouse/* | "$PROJ_REAL"/.worktrees/.treehouse/*)
+      if [ "$PROJ_CANON" = "$PROJ_REAL" ] \
+        && [ "$(dirname -- "$PROJ_REAL")" = "$SECOND_HOME/projects" ] \
+        && [ ! -L "$SECOND_MARKER" ] && [ -f "$SECOND_MARKER" ] \
+        && [ -O "$SECOND_MARKER" ] && [ -s "$SECOND_MARKER" ] \
+        && [ -f "$SECOND_HOME/AGENTS.md" ] && [ -d "$SECOND_HOME/bin" ]; then
+        APPROVE_IMPORTS=true
+      fi
+      ;;
+  esac
+  WRITE_ARGS=("$STORE" "$MODE" "$TARGET_REAL" "$PROJ_CANON" "$TRUST_FLAG" "$IMPORT_FLAGS" "$APPROVE_IMPORTS")
 else
-  WRITE_ARGS=("$STORE" "$MODE" "$TARGET_REAL" "" "$TRUST_FLAG" "$IMPORT_FLAGS")
+  WRITE_ARGS=("$STORE" "$MODE" "$TARGET_REAL" "" "$TRUST_FLAG" "$IMPORT_FLAGS" "$APPROVE_IMPORTS")
 fi
 if ! node - "${WRITE_ARGS[@]}" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const [store, mode, target, project, trustFlag, importFlagsJson] = process.argv.slice(2);
+const [store, mode, target, project, trustFlag, importFlagsJson, approveImports] = process.argv.slice(2);
 const importFlags = JSON.parse(importFlagsJson);
 const readStore = () => {
   try {
@@ -507,8 +521,8 @@ const attempt = () => {
         `project entry for ${project} in ${store} already declined external CLAUDE.md imports; refusing to override that consent. To recover, remove hasClaudeMdExternalIncludesApproved and hasClaudeMdExternalIncludesWarningShown from that project entry and approve the imports dialog interactively once`,
       );
     }
-    const targetFlags = [trustFlag, ...importFlags];
-    const projectFlags = [trustFlag, ...importFlags];
+    const targetFlags = [trustFlag];
+    const projectFlags = approveImports === "true" ? [trustFlag, ...importFlags] : [trustFlag];
     setFlags(projects, target, targetFlags);
     setFlags(projects, project, projectFlags);
     keys = [[target, targetFlags], [project, projectFlags]];

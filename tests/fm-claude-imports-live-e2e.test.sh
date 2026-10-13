@@ -30,6 +30,8 @@ trap cleanup EXIT
 fm_git_worktree "$PROJ" "$WT" worker
 printf '@AGENTS.md\n' > "$LAB/home/CLAUDE.md"
 printf 'Home import sentinel: FM_HOME_IMPORT_PROOF\n' > "$LAB/home/AGENTS.md"
+mkdir -p "$LAB/home/bin"
+printf 'live-n1\n' > "$LAB/home/.fm-secondmate-home"
 mkdir -p "$CONFIG"
 node - "$CONFIG/.claude.json" "$PROJ" "$WT" <<'NODE'
 const fs = require("node:fs");
