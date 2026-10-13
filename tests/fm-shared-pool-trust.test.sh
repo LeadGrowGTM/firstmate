@@ -111,7 +111,8 @@ case "${1:-}" in
             if [ "$a" = exit ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ]; then
               : > "$FM_FAKE_EXIT_FLAG"
               if [ -n "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}" ] \
-                && [ -z "${FM_FAKE_CWD_FAIL_AFTER_EXIT:-}" ]; then
+                && [ -z "${FM_FAKE_CWD_FAIL_AFTER_EXIT:-}" ] \
+                && [ -z "${FM_FAKE_TREEHOUSE_DELAY_RETURN:-}" ]; then
                 rm -f "$FM_FAKE_TREEHOUSE_INITIAL_LEASE"
               fi
             fi
@@ -132,6 +133,28 @@ printf 'HOME=%s\n' "${HOME-}" >> "$log"
 printf 'args=%s\n' "$*" >> "$log"
 printf 'call=%s\t%s\n' "$*" "$(pwd -P)" >> "$log"
 case "$*" in
+  'status --json')
+    lease=${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}
+    path=${FM_FAKE_TREEHOUSE_INITIAL_PATH:-}
+    if [ -z "$lease" ] || [ -z "$path" ]; then
+      printf '[]\n'
+      exit 0
+    fi
+    state=available
+    if [ -f "$lease" ]; then
+      state=in-use
+      if [ -n "${FM_FAKE_TREEHOUSE_DELAY_RETURN:-}" ] \
+        && [ -n "${FM_FAKE_EXIT_FLAG:-}" ] && [ -f "$FM_FAKE_EXIT_FLAG" ]; then
+        if [ -f "$lease.status-seen" ] && [ -z "${FM_FAKE_TREEHOUSE_HOLD_RETURN:-}" ]; then
+          rm -f "$lease"
+          state=available
+        else
+          : > "$lease.status-seen"
+        fi
+      fi
+    fi
+    jq -n --arg path "$path" --arg status "$state" '[{path:$path,status:$status}]'
+    ;;
   'get --lease --lease-holder '*)
     printf 'gitmarker=%s\n' "$(git config --global --get fm.marker 2>/dev/null)" >> "$log"
     echo "fake treehouse lease progress" >&2
@@ -663,8 +686,8 @@ test_shasum_only_path_names_the_pool_from_the_home() {
 }
 
 test_initial_get_checks_returned_worktree() {
-  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd out status
-  for variant in inside outside unconfirmed; do
+  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return out status
+  for variant in inside outside unconfirmed pending; do
     id="pool-placement-initial-$variant"
     case_dir=$TMP_ROOT/$id
     CASE_URL=$(make_same_origin_clones "$case_dir/origin")
@@ -684,6 +707,8 @@ test_initial_get_checks_returned_worktree() {
     lease=$case_dir/initial-lease
     fail_cwd=
     [ "$variant" != unconfirmed ] || fail_cwd=1
+    hold_return=
+    [ "$variant" != pending ] || hold_return=1
     : > "$pane_log"
     : > "$tree_log"
     status=0
@@ -691,6 +716,7 @@ test_initial_get_checks_returned_worktree() {
       FM_FAKE_TREEHOUSE_INITIAL_PATH="$allocated" \
       FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
       FM_FAKE_TREEHOUSE_INITIAL_LEASE="$lease" FM_FAKE_CWD_FAIL_AFTER_EXIT="$fail_cwd" \
+      FM_FAKE_TREEHOUSE_DELAY_RETURN=1 FM_FAKE_TREEHOUSE_HOLD_RETURN="$hold_return" \
       FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" FM_FAKE_EXIT_FLAG="$case_dir/exited" \
       run_spawn "$reported" "$id") || status=$?
     assert_exact_line 'treehouse get' "$pane_log" "$variant: initial get was not sent"
@@ -700,6 +726,8 @@ test_initial_get_checks_returned_worktree() {
       assert_contains "$out" "allocated worktree $allocated is inside Firstmate home" \
         "inside: refusal did not resolve the allocated link"
       assert_exact_line 'exit' "$pane_log" "inside: allocated copy was not returned"
+      [ "$(grep -Fc 'args=status --json' "$tree_log")" -ge 2 ] \
+        || fail "inside: return was accepted before Treehouse finished releasing the copy"
       [ ! -e "$lease" ] || fail "inside: fake Treehouse lease remained active"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "inside: refusal published a task"
     elif [ "$variant" = unconfirmed ]; then
@@ -707,8 +735,19 @@ test_initial_get_checks_returned_worktree() {
       assert_contains "$out" "worktree '$reported' was not confirmed returned" \
         "unconfirmed: missing return warning"
       assert_exact_line 'exit' "$pane_log" "unconfirmed: return was not attempted"
+      assert_no_exact_line 'args=status --json' "$tree_log" \
+        "unconfirmed: queried status without evidence that the pane left"
       [ -f "$lease" ] || fail "unconfirmed: fake Treehouse lease was unexpectedly released"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "unconfirmed: refusal published a task"
+    elif [ "$variant" = pending ]; then
+      [ "$status" -ne 0 ] || fail "pending: spawn accepted the allocated worktree"$'\n'"$out"
+      assert_contains "$out" "worktree '$reported' was not confirmed returned" \
+        "pending: missing warning while Treehouse still held the copy"
+      assert_exact_line 'exit' "$pane_log" "pending: return was not attempted"
+      assert_exact_line 'args=status --json' "$tree_log" \
+        "pending: Treehouse status was not checked"
+      [ -f "$lease" ] || fail "pending: fake Treehouse lease was unexpectedly released"
+      [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "pending: refusal published a task"
     else
       expect_code 0 "$status" "outside: safe allocation was refused"$'\n'"$out"
       assert_no_exact_line 'exit' "$pane_log" "outside: safe copy was returned"

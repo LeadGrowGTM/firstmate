@@ -4626,6 +4626,20 @@ spawn_wait_left_path() {  # <path>
   return 1
 }
 
+spawn_wait_treehouse_returned() {  # <path>
+  local path status _
+  path=$(real_path_or_raw "$1")
+  for _ in $(seq 1 10); do
+    status=$(cd "$PROJ_ABS" && fm_run_timed 2 treehouse status --json 2>/dev/null) || status=
+    if [ -n "$status" ] && printf '%s\n' "$status" | jq -e --arg path "$path" \
+      'type == "array" and ([.[] | select(.path == $path) | .status] == ["available"])' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 spawn_lease_clone_worktree() {
   local errfile leased rc=0
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
@@ -4699,7 +4713,8 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     exit 1
   fi
   if ! fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$WT"; then
-    if ! spawn_send_text_line "$WT_TARGET" 'exit' || ! spawn_wait_left_path "$WT"; then
+    if ! spawn_send_text_line "$WT_TARGET" 'exit' ||
+      ! spawn_wait_left_path "$WT" || ! spawn_wait_treehouse_returned "$WT"; then
       echo "error: Treehouse worktree '$WT' was not confirmed returned; leave it for treehouse prune and inspect window $T" >&2
     fi
     exit 1
