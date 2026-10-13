@@ -2490,6 +2490,439 @@ run_drain() {  # <home>
     "$ROOT/bin/fm-wake-drain.sh" 2>/dev/null
 }
 
+test_hold_options_share_atomic_reason() {
+  local home reason shown before after json
+  home=$(make_home atomic-hold-options)
+  reason=$'Choose (north)\nor south'
+  tasks_in "$home" add choice "Choose the route" --repo sample --body 'Keep this note
+Captain options for hold 2: retain this rationale' >/dev/null || fail "could not create work"
+  cat > "$home/options.json" <<'EOF'
+{"about":"Old route","decide":"Which route?","options":[{"value":"north","label":"North"},{"value":"south","label":"South"}],"recommended":"north"}
+EOF
+  run_captain "$home" hold choice --reason "$reason" --options-file "$home/options.json" >/dev/null || fail "could not hold with options"
+  before=$(tasks_in "$home" show choice --full)
+  assert_contains "$before" 'fm-hold-v2:' "reason and options were not stored on the hold"
+  assert_contains "$before" 'Keep this note' "hold changed unrelated body text"
+  assert_contains "$before" 'Captain options for hold 2: retain this rationale' "hold changed literal body text"
+  assert_not_contains "$before" 'Captain options for hold 1:' "hold wrote body option copy"
+  shown=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+    FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
+    "$ROOT/bin/fm-tasks-axi.sh" show choice --full) || fail "could not read the held task"
+  assert_contains "$shown" 'Choose (north)' "task view did not decode the reason"
+  assert_not_contains "$shown" 'fm-hold-v2:' "task view exposed encoded option copy"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the held task"
+  printf '%s' "$json" | jq -e --arg reason "$reason" '
+    .decision_layout | any(.key == "choice" and .reason == $reason
+      and .about == "Old route" and [.options[].value] == ["north","south"])
+  ' >/dev/null || fail "snapshot did not decode the combined hold: $json"
+  run_captain "$home" hold choice --reason "$reason" --options-file "$home/options.json" >/dev/null || fail "retry failed"
+  after=$(tasks_in "$home" show choice --full)
+  [ "$before" = "$after" ] || fail "identical retry changed the held task"
+  printf 'North please\nCaptain options for hold 2: retain this answer\n' > "$home/answer.txt"
+  run_captain "$home" answer choice --decision-file "$home/answer.txt" --release >/dev/null || fail "release failed"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the release"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "choice") | not
+  ' >/dev/null || fail "release retained reason or options: $json"
+  jq '.about="New route" | .options=[{"value":"east","label":"East"}] | .recommended="east"' \
+    "$home/options.json" > "$home/new-options.json"
+  run_captain "$home" hold choice --reason 'Choose east' --options-file "$home/new-options.json" >/dev/null || fail "rehold failed"
+  shown=$(tasks_in "$home" show choice --full)
+  assert_contains "$shown" 'Captain options for hold 2: retain this rationale' "rehold erased literal note"
+  assert_contains "$shown" 'Captain options for hold 2: retain this answer' "rehold erased the answer"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the new hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "choice" and .reason == "Choose east"
+      and .about == "New route" and [.options[].value] == ["east"])
+  ' >/dev/null || fail "rehold did not replace options: $json"
+  run_captain "$home" hold choice --reason 'Choose freely' >/dev/null || fail "rehold without options failed"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the option-free hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "choice" and .reason == "Choose freely" and .options == null)
+  ' >/dev/null || fail "rehold retained stale options: $json"
+  pass "hold reason atomically owns current options and preserves task body history"
+}
+
+test_refused_hold_keeps_prior_reason_and_options() {
+  local home before after out json
+  home=$(make_home refused-options)
+  cat > "$home/old-options.json" <<'EOF'
+{"about":"Old route","decide":"Choose","options":[{"value":"old","label":"Old"}]}
+EOF
+  cat > "$home/new-options.json" <<'EOF'
+{"about":"New route","decide":"Choose","options":[{"value":"new","label":"New"}]}
+EOF
+  run_captain "$home" hold existing --title Existing --reason 'Old choice' \
+    --options-file "$home/old-options.json" >/dev/null || fail "could not establish old hold"
+  before=$(tasks_in "$home" show existing --full)
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; then exit 9; fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  if run_captain "$home" hold existing --reason 'New choice' \
+    --options-file "$home/new-options.json" >/dev/null 2>&1; then
+    fail "rehold succeeded despite backend refusal"
+  fi
+  after=$(tasks_in "$home" show existing --full)
+  [ "$before" = "$after" ] || fail "refused hold changed the previous reason or body"
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"existing","title":"Legacy title","about":"Migrated route","decide":"Choose","options":[{"value":"migrated","label":"Migrated"}]}]}
+EOF
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "migration preview refused an already-held task"
+  assert_contains "$out" 'skipped: existing (already held)' "preview did not skip the existing hold"
+  after=$(tasks_in "$home" show existing --full)
+  [ "$before" = "$after" ] || fail "migration preview changed the existing hold"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
+    || fail "migration apply refused an already-held task"
+  assert_contains "$out" 'skipped: existing (already held)' "apply did not skip the existing hold"
+  after=$(tasks_in "$home" show existing --full)
+  [ "$before" = "$after" ] || fail "migration apply changed the existing hold"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the refused hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "existing" and .reason == "Old choice"
+      and .about == "Old route" and [.options[].value] == ["old"])
+  ' >/dev/null || fail "refused hold replaced previous options: $json"
+  pass "refused direct holds and skipped migration preserve prior reason and options"
+}
+
+test_legacy_option_migration_is_explicit_and_idempotent() {
+  local home before after out json
+  home=$(make_home option-migration)
+  tasks_in "$home" add renamed "Current task title" --repo sample >/dev/null \
+    || fail "could not create the renamed task"
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"route","title":"Choose route","about":"Routing","decide":"Choose a route","options":[{"label":"North","hint":"Fast"},{"label":"South","hint":"Warm"}],"recommended":"North","report":"/tmp/report.md"},{"key":"renamed","title":"Legacy task title","about":"Renamed route","decide":"Choose the renamed route","options":[{"label":"Keep current"}]}]}
+EOF
+  before=$(cat "$home/data/backlog.md")
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "migration preview failed"
+  assert_contains "$out" 'would-hold: route Choose route' "migration did not preview the new task title"
+  assert_contains "$out" 'would-hold: renamed Current task title' "migration preview ignored the existing title"
+  assert_not_contains "$out" 'would-hold: renamed Legacy task title' "migration preview offered to rename the task"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "dry run mutated backlog"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration apply failed"
+  before=$(tasks_in "$home" show route --full)
+  assert_contains "$before" 'hold_kind: captain' "migration did not hold task"
+  out=$(tasks_in "$home" show renamed --full)
+  assert_contains "$out" 'title: Current task title' "migration changed the existing task title"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project migrated holds"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "route" and .about == "Routing"
+      and [.options[].value] == ["option-1","option-2"])
+  ' >/dev/null || fail "migration did not assign option values: $json"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "renamed" and .title == "Current task title"
+      and .about == "Renamed route")
+  ' >/dev/null || fail "migration lost existing title or option copy: $json"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration retry failed"
+  after=$(tasks_in "$home" show route --full)
+  [ "$before" = "$after" ] || fail "migration retry changed the task"
+  [ -f "$home/captain-decisions.json" ] || fail "migration deleted the source file"
+  printf 'North\n' > "$home/answer.txt"
+  run_captain "$home" answer route --decision-file "$home/answer.txt" >/dev/null || fail "could not close migrated task"
+  before=$(cat "$home/data/backlog.md")
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "closed migration preview failed"
+  assert_contains "$out" 'already-closed: route' "migration preview mislabeled the closed task"
+  assert_not_contains "$out" 'would-hold: route' "migration preview offered to hold a closed task"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "closed migration preview mutated backlog"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) || fail "closed migration retry failed"
+  assert_contains "$out" 'already-closed: route' "migration reopened an answered call"
+  jq '.decisions += [{"key":"bad","title":"Bad","about":"Bad","decide":"Bad","options":[],"recommended":"missing"}]' \
+    "$home/captain-decisions.json" > "$home/bad.json"
+  if run_captain "$home" migrate-options "$home/bad.json" --apply >/dev/null 2>&1; then fail "bad inventory accepted"; fi
+  if tasks_in "$home" show bad >/dev/null 2>&1; then fail "invalid inventory partially applied"; fi
+  pass "migration previews by default, retains the side file, and never resurrects answered calls"
+}
+
+test_released_legacy_migration_stays_resolved() {
+  local home before after out json
+  home=$(make_home released-option-migration)
+  cat > "$home/captain-decisions.json" <<'EOF'
+[{"key":"route","title":"Choose route","about":"Routing","decide":"Choose","options":[{"label":"North"}]}]
+EOF
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "bare-array migration preview failed"
+  assert_contains "$out" 'would-hold: route Choose route' "bare-array migration did not preview the new task"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null \
+    || fail "bare-array migration apply failed"
+  printf 'North please\n' > "$home/answer.txt"
+  run_captain "$home" answer route --decision-file "$home/answer.txt" --release >/dev/null \
+    || fail "could not release the imported call"
+  before=$(tasks_in "$home" show route --full)
+  assert_contains "$before" 'state: queued' "release closed the work item"
+  assert_contains "$before" 'held: no' "release left the imported call held"
+  assert_contains "$before" 'Resolution mode: released' "release lost its resolution record"
+  assert_contains "$before" 'North please' "release lost the captain answer"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "released migration preview failed"
+  assert_contains "$out" 'already-closed: route' "preview offered to reopen a released call"
+  assert_not_contains "$out" 'would-hold: route' "preview treated the released call as open"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
+    || fail "released migration retry failed"
+  assert_contains "$out" 'already-closed: route' "apply reopened a released call"
+  after=$(tasks_in "$home" show route --full)
+  [ "$before" = "$after" ] || fail "migration retry changed the released task or answer"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the released call"
+  printf '%s' "$json" | jq -e '.decision_layout | any(.key == "route") | not' >/dev/null \
+    || fail "released migration retry restored a decision card: $json"
+  assert_present "$home/captain-decisions.json" "migration removed its bare-array source"
+  run_captain "$home" hold route --reason 'Choose a fresh route' >/dev/null \
+    || fail "could not begin a newer hold lifecycle"
+  before=$(tasks_in "$home" show route --full)
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "active newer hold migration preview failed"
+  assert_contains "$out" 'skipped: route (already held)' "preview offered to replace the newer hold"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
+    || fail "active newer hold migration apply failed"
+  assert_contains "$out" 'skipped: route (already held)' "apply replaced the newer hold"
+  after=$(tasks_in "$home" show route --full)
+  [ "$before" = "$after" ] || fail "migration changed the newer option-free hold or recorded answer"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the newer hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "route" and .reason == "Choose a fresh route" and .options == null)
+  ' >/dev/null || fail "migration restored stale options on the newer hold: $json"
+  cat > "$home/new-options.json" <<'EOF'
+{"about":"Fresh route","decide":"Choose east","options":[{"value":"east","label":"East"}],"recommended":"east"}
+EOF
+  run_captain "$home" hold route --reason 'Choose east' --options-file "$home/new-options.json" >/dev/null \
+    || fail "could not add owned options to the active hold"
+  before=$(tasks_in "$home" show route --full)
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "owned-options migration preview failed"
+  assert_contains "$out" 'skipped: route (already held)' "preview offered to replace owned options"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
+    || fail "owned-options migration apply failed"
+  assert_contains "$out" 'skipped: route (already held)' "apply replaced owned options"
+  after=$(tasks_in "$home" show route --full)
+  [ "$before" = "$after" ] || fail "migration changed the owned options, answer, or hold timestamp"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project owned options"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "route" and .reason == "Choose east"
+      and .about == "Fresh route" and [.options[].value] == ["east"])
+  ' >/dev/null || fail "migration restored stale option copy: $json"
+  pass "bare-array migration preserves released answers and newer owned or option-free holds"
+}
+
+test_migration_skips_already_held_tasks() {
+  local home plain_before copy_before out preview_skips apply_skips
+  home=$(make_home migration-already-held)
+  cat > "$home/current-options.json" <<'EOF'
+{"about":"Current route","decide":"Choose east","options":[{"value":"east","label":"East"}]}
+EOF
+  run_captain "$home" hold plain --title 'Plain task' --reason 'Current plain call' >/dev/null \
+    || fail "could not create the option-free hold"
+  run_captain "$home" hold copied --title 'Copied task' --reason 'Current copied call' \
+    --options-file "$home/current-options.json" >/dev/null || fail "could not create the copied hold"
+  tasks_in "$home" add unheld 'Unheld task' --repo sample >/dev/null \
+    || fail "could not create the unheld task"
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"plain","title":"Plain task","about":"Old plain","decide":"Old plain call","options":[{"label":"Old"}]},{"key":"copied","title":"Copied task","about":"Old copied","decide":"Old copied call","options":[{"label":"Old"}]},{"key":"unheld","title":"Legacy title","about":"Imported","decide":"Choose","options":[{"label":"Imported"}]}]}
+EOF
+  plain_before=$(tasks_in "$home" show plain --full)
+  copy_before=$(tasks_in "$home" show copied --full)
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "already-held migration preview failed"
+  preview_skips=$(printf '%s\n' "$out" | grep '^skipped:')
+  assert_contains "$preview_skips" 'skipped: plain (already held)' "preview offered to replace the option-free hold"
+  assert_contains "$preview_skips" 'skipped: copied (already held)' "preview offered to replace the copied hold"
+  assert_contains "$out" 'would-hold: unheld Unheld task' "preview skipped an unheld task"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
+    || fail "already-held migration apply failed"
+  apply_skips=$(printf '%s\n' "$out" | grep '^skipped:')
+  [ "$preview_skips" = "$apply_skips" ] || fail "preview and apply disagreed on already-held tasks"
+  assert_contains "$out" 'held: unheld' "apply failed to import onto the unheld task"
+  [ "$plain_before" = "$(tasks_in "$home" show plain --full)" ] \
+    || fail "migration changed the option-free hold"
+  [ "$copy_before" = "$(tasks_in "$home" show copied --full)" ] \
+    || fail "migration changed the copied hold"
+  assert_present "$home/captain-decisions.json" "migration removed its source inventory"
+  pass "migration skips already-held tasks with and without option copy"
+}
+
+test_migration_rejects_unreadable_target() {
+  local home before out mode
+  home=$(make_home migration-read-error)
+  tasks_in "$home" add unreadable "Current title" --repo sample >/dev/null \
+    || fail "could not create the unreadable migration target"
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"unreadable","title":"Legacy title","about":"Route","decide":"Choose","options":[{"label":"Stay"}]}]}
+EOF
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = show ] && [ "${2:-}" = unreadable ]; then
+  printf 'error: backend read failed\ncode: READ_FAILED\n' >&2
+  exit 75
+fi
+if [ "${1:-}" = add ] || { [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; }; then
+  : > "$FM_HOME/migration-mutating-call"
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  before=$(cat "$home/data/backlog.md")
+  for mode in preview apply; do
+    if [ "$mode" = apply ]; then
+      out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply 2>&1) \
+        && fail "migration apply accepted an unreadable target"
+    else
+      out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" 2>&1) \
+        && fail "migration preview accepted an unreadable target"
+    fi
+    assert_contains "$out" 'could not read migration target unreadable' "migration hid the read error"
+    assert_not_contains "$out" 'would-hold:' "migration preview treated a read error as absence"
+    assert_not_contains "$out" 'held:' "migration apply treated a read error as absence"
+    [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "migration changed an unreadable target"
+    assert_absent "$home/migration-mutating-call" "migration attempted to create or hold an unreadable target"
+    assert_present "$home/captain-decisions.json" "migration removed its source inventory"
+  done
+  pass "migration rejects backend read errors in preview and apply"
+}
+
+test_migration_recommendation_prefers_unique_legacy_label() {
+  local home before after out json encoded
+  home=$(make_home migration-label-collision)
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"collision","title":"Choose option","about":"Routing","decide":"Choose one","options":[{"label":"Other"},{"label":"option-1"}],"recommended":"option-1"}]}
+EOF
+  before=$(cat "$home/data/backlog.md")
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "migration collision preview failed"
+  assert_contains "$out" 'would-hold: collision Choose option' "migration collision preview omitted the task"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "migration collision preview changed the backlog"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null \
+    || fail "migration collision apply failed"
+  before=$(tasks_in "$home" show collision --full)
+  encoded=$(printf '%s\n' "$before" | sed -n 's/^  hold_reason: //p' | jq -Rr '
+    (if startswith("\"") then fromjson else . end)
+    | select(startswith("fm-hold-v2:")) | ltrimstr("fm-hold-v2:")
+  ')
+  [ -n "$encoded" ] || fail "migration did not store the options on the hold"
+  printf '%s' "$encoded" | perl -MMIME::Base64=decode_base64 -0777 -ne 'print decode_base64($_)' | jq -e '
+    .decision.recommended == "option-2"
+    and [.decision.options[] | {value,label}] ==
+      [{value:"option-1",label:"Other"},{value:"option-2",label:"option-1"}]
+  ' >/dev/null || fail "migration stored the wrong recommended option"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project migrated collision"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "collision" and .recommended == "option-2"
+      and [.options[] | {value,label}] ==
+        [{value:"option-1",label:"Other"},{value:"option-2",label:"option-1"}])
+  ' >/dev/null || fail "migration recommended the generated value instead of the legacy label: $json"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null \
+    || fail "migration collision retry failed"
+  after=$(tasks_in "$home" show collision --full)
+  [ "$before" = "$after" ] || fail "migration collision retry changed the held task"
+  assert_present "$home/captain-decisions.json" "migration removed the source inventory"
+
+  cat > "$home/ambiguous.json" <<'EOF'
+{"decisions":[{"key":"should-not-hold","title":"Valid first","about":"Routing","decide":"Choose one","options":[{"label":"First"}]},{"key":"ambiguous","title":"Ambiguous","about":"Routing","decide":"Choose one","options":[{"label":"Same"},{"label":"Same"}],"recommended":"Same"}]}
+EOF
+  before=$(cat "$home/data/backlog.md")
+  if run_captain "$home" migrate-options "$home/ambiguous.json" --apply >/dev/null 2>&1; then
+    fail "migration accepted an ambiguous legacy recommendation"
+  fi
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "ambiguous migration partially held tasks"
+  assert_present "$home/ambiguous.json" "migration removed the ambiguous source inventory"
+  pass "migration resolves legacy labels before generated values and rejects ambiguous labels"
+}
+
+test_open_status_orphans_reach_drain() {
+  local home out
+  home=$(make_home status-orphans)
+  run_captain "$home" hold exact --title Exact --reason Choose --origin worker >/dev/null || fail "exact hold setup failed"
+  run_captain "$home" hold legacy-decision-choice --title Legacy --reason Choose --origin legacy >/dev/null || fail "legacy hold setup failed"
+  run_captain "$home" hold ownwork --title Work --reason Choose >/dev/null || fail "work hold setup failed"
+  run_captain "$home" hold originless-exact --title Originless --reason Choose >/dev/null || fail "originless hold setup failed"
+  run_captain "$home" hold owner-b-decision-originless-legacy --title OriginlessLegacy --reason Choose >/dev/null \
+    || fail "originless legacy hold setup failed"
+  run_captain "$home" hold shared-call --title Shared --reason Choose --origin owner-a >/dev/null \
+    || fail "owned exact hold setup failed"
+  run_captain "$home" hold owner-b-decision-cross --title Cross --reason Choose --origin owner-a >/dev/null \
+    || fail "owned legacy hold setup failed"
+  cat > "$home/state/worker.status" <<'EOF'
+needs-decision [key=exact]: Choose
+needs-decision [key=lost]: Missing hold
+working: later unrelated progress
+blocked [key=dependency]: Dependency
+needs-decision [key=settled]: Old choice
+resolved [key=settled]: Answered
+EOF
+  printf 'needs-decision [key=choice]: Choose\n' > "$home/state/legacy.status"
+  printf 'needs-decision [key=question]: Choose\n' > "$home/state/ownwork.status"
+  printf 'needs-decision [key=shared-call]: Choose\n' > "$home/state/owner-a.status"
+  printf 'needs-decision [key=shared-call]: Choose\nneeds-decision [key=cross]: Choose\nneeds-decision [key=originless-exact]: Choose\nneeds-decision [key=originless-legacy]: Choose\n' > "$home/state/owner-b.status"
+  out=$(run_drain "$home") || fail "orphan drain failed"
+  assert_contains "$out" 'orphan needs-decision task=worker key=lost' "buried orphan was not flagged"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=shared-call' "foreign exact hold hid an orphan"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=cross' "foreign legacy hold hid an orphan"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=originless-exact' "originless exact hold hid an orphan"
+  assert_contains "$out" 'orphan needs-decision task=owner-b key=originless-legacy' "originless legacy hold hid an orphan"
+  if printf '%s' "$out" | grep -F 'orphan needs-decision task=owner-a key=shared-call' >/dev/null; then
+    fail "a locally owned hold was called an orphan: $out"
+  fi
+  if printf '%s' "$out" | grep -E 'orphan.*key=(exact|choice|question|settled|dependency)(;|$)' >/dev/null; then
+    fail "held, resolved, or blocked status was called an orphan: $out"
+  fi
+  tasks_in "$home" "done" exact >/dev/null || fail "close failed"
+  out=$(run_drain "$home") || fail "second drain failed"
+  assert_contains "$out" 'orphan needs-decision task=worker key=exact' "closed hold hid an open status call"
+  printf 'resolved [key=lost]: Answered\n' >> "$home/state/worker.status"
+  out=$(run_drain "$home") || fail "resolution drain failed"
+  if printf '%s' "$out" | grep -F 'task=worker key=lost;' >/dev/null; then fail "resolved orphan remained flagged"; fi
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$home/fakebin/tasks-axi"
+  chmod +x "$home/fakebin/tasks-axi"
+  out=$(run_drain "$home") || fail "backlog failure made the drain fail"
+  assert_contains "$out" 'captain-held task orphan check unavailable' "unreadable backlog was treated as empty"
+  if printf '%s' "$out" | grep -F 'orphan needs-decision task=' >/dev/null; then fail "failed check invented an orphan"; fi
+  pass "drain flags still-open needs-decision keys without a matching local captain hold"
+}
+
+test_secondmate_hold_relays_are_not_local_orphans() {
+  local parent local_mate remote_mate out
+  parent=$(make_home relay-parent)
+  local_mate=$(make_home relay-local-mate)
+  remote_mate=$(make_home relay-remote-mate)
+  printf 'relay-local-mate\n' > "$local_mate/.fm-secondmate-home"
+  printf 'schema=fm-secondmate-parent.v1\nroute=local\nparent_home=%s\n' "$parent" \
+    > "$local_mate/.fm-secondmate-parent"
+  fm_write_secondmate_meta "$parent/state/relay-local-mate.meta" "$local_mate"
+  run_captain "$local_mate" hold local-call --title Local --reason 'Choose locally' >/dev/null \
+    || fail "local mate did not publish its hold"
+  printf 'relay-remote-mate\n' > "$remote_mate/.fm-secondmate-home"
+  printf 'schema=fm-secondmate-parent.v1\nroute=remote\nparent_host=remote.example\n' \
+    > "$remote_mate/.fm-secondmate-parent"
+  fm_write_secondmate_meta "$parent/state/relay-remote-mate.meta" "$remote_mate"
+  run_captain "$remote_mate" hold remote-call --title Remote --reason 'Choose remotely' >/dev/null \
+    || fail "remote mate did not publish its hold"
+  cp "$remote_mate/state/parent-replies.status" "$parent/state/relay-remote-mate.status"
+  printf 'needs-decision [key=captain-hold-worker-call-1]: ordinary worker question\n' \
+    > "$parent/state/worker.status"
+  printf 'needs-decision [key=captain-hold-ordinary-call-1]: ordinary mate question\n' \
+    >> "$parent/state/relay-local-mate.status"
+  out=$(run_drain "$parent") || fail "parent relay drain failed"
+  assert_contains "$out" 'relay-local-mate [key=captain-hold-local-call-1] needs-decision' \
+    "local mate relay disappeared from OPEN DECISIONS"
+  assert_contains "$out" 'relay-remote-mate [key=captain-hold-remote-call-1] needs-decision' \
+    "remote mate relay disappeared from OPEN DECISIONS"
+  assert_not_contains "$out" 'orphan needs-decision task=relay-local-mate key=captain-hold-local-call-1' \
+    "local mate relay was checked against the parent backlog"
+  assert_not_contains "$out" 'orphan needs-decision task=relay-remote-mate key=captain-hold-remote-call-1' \
+    "remote mate relay was checked against the parent backlog"
+  assert_contains "$out" 'orphan needs-decision task=worker key=captain-hold-worker-call-1' \
+    "ordinary worker key was suppressed as a relay"
+  assert_contains "$out" 'orphan needs-decision task=relay-local-mate key=captain-hold-ordinary-call-1' \
+    "ordinary mate status key was suppressed as a relay"
+  printf 'Accepted.\n' > "$local_mate/answer.txt"
+  run_captain "$local_mate" answer local-call --decision-file "$local_mate/answer.txt" >/dev/null \
+    || fail "local mate could not relay the answer"
+  out=$(run_drain "$parent") || fail "parent answer relay drain failed"
+  if printf '%s\n' "$out" | grep -F 'relay-local-mate [key=captain-hold-local-call-1] needs-decision' >/dev/null; then
+    fail "the relayed answer left the local mate call open"
+  fi
+  pass "local and mirrored remote hold relays stay visible without false orphan reports"
+}
+
 # Reconstructs the 2026-08-06 loss with synthetic names: the answer was posted
 # as a `resolved [key=...]` line and nothing else, so the status fold went quiet
 # while the durable captain-held task stayed open and kept reading as if the
@@ -4682,6 +5115,15 @@ SH
   pass "marked hold reasons round-trip through public reads, fleet, startup, and return without changing other fields"
 }
 
+test_hold_options_share_atomic_reason
+test_refused_hold_keeps_prior_reason_and_options
+test_legacy_option_migration_is_explicit_and_idempotent
+test_released_legacy_migration_stays_resolved
+test_migration_skips_already_held_tasks
+test_migration_rejects_unreadable_target
+test_migration_recommendation_prefers_unique_legacy_label
+test_open_status_orphans_reach_drain
+test_secondmate_hold_relays_are_not_local_orphans
 test_hold_reason_round_trips_awkward_characters
 test_hold_origins_precede_backend_holds
 test_historical_self_inventory_has_workable_repair

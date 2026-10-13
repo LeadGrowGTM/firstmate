@@ -23,6 +23,8 @@
 #   fm-captain-hold.sh hold <task-id> --reason <reason> \
 #     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD] \
 #     [--corr <raw-lowercase-16-hex-id>]
+#     [--options-file <decision.json>]
+#   fm-captain-hold.sh migrate-options <captain-decisions.json> [--apply]
 #   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
 #   fm-captain-hold.sh reconcile-requests --source-id <source-id> --source <provenance>   (task ids on stdin)
@@ -33,6 +35,7 @@
 #   fm-captain-hold.sh verify <origin-id>
 #   fm-captain-hold.sh open <task-id> [--identity] [--distinguish-absent]
 #   fm-captain-hold.sh diverged
+#   fm-captain-hold.sh orphans   (open-decision TSV on stdin)
 #   fm-captain-hold.sh reconcile list
 #   fm-captain-hold.sh reconcile close <task-id> --evidence-file <path>
 #   fm-captain-hold.sh reconcile note <task-id> --note-file <path>
@@ -57,6 +60,20 @@
 # `--until` records the captain's own deferral date through `tasks-axi hold
 # --until`, so a "revisit later" answer is stored as a date instead of a live
 # card.
+# `--options-file` stores board copy with the reason in one encoded hold value.
+# The object requires string about and decide,
+# and options [{value,label,hint?}]; values are unique privacy-safe slugs (at most
+# 128 characters), excluding reconcile, and labels are nonempty. Optional
+# recommended names an option value; report is a path string and pr_url is HTTPS.
+# Re-holding replaces both reason and copy; release clears both.
+# migrate-options imports an array (or {decisions:[...]}) of legacy entries with
+# key, title and that copy. Missing option values become option-1, option-2, etc.;
+# a recommended label is converted to its unique value. Optional origin and repo
+# preserve ownership links. It previews by default; --apply holds tasks only in
+# this home, never removes the input, and skips already-held or resolved tasks.
+# orphans reports <origin> TAB <key> for each open needs-decision without a local
+# captain-held task: the key's exact/legacy task or the originating work task.
+# It is read-only and fails rather than calling an unreadable backlog empty.
 #
 # `answer` records the captain's exact words and resolves the call in the same
 # act. It requires a non-empty captain decision file of at most 8192 bytes and
@@ -906,9 +923,46 @@ verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how> <origi
   printf '%s %s %s\n' "$id" "$how" "$origin_state"
 }
 
+decision_copy() {  # <json-file>; validate and print canonical JSON before mutation
+  jq -sceS '
+    select(length == 1) | .[0]
+    | def slug: type == "string" and test("^[A-Za-z0-9._-]{1,128}$") and . != "reconcile";
+    select(type == "object"
+      and ((keys - ["about","decide","options","recommended","report","pr_url"]) | length == 0)
+      and (.about | type == "string") and (.decide | type == "string")
+      and (.options | type == "array")
+      and all(.options[]; type == "object"
+        and ((keys - ["value","label","hint"]) | length == 0)
+        and (.value | slug) and (.label | type == "string" and length > 0)
+        and ((has("hint") | not) or (.hint | type == "string")))
+      and ((.options | map(.value) | unique | length) == (.options | length))
+      and ((has("recommended") | not) or (.recommended as $r | any(.options[]; .value == $r)))
+      and ((has("report") | not) or (.report | type == "string"))
+      and ((has("pr_url") | not) or (.pr_url | type == "string" and test("^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^[:space:]]*)?$"))))
+  ' "$1" || fail "invalid decision copy in $1"
+}
+
+restore_hold_body() {
+  local id=$1 body=$2 tmp
+  tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-restore.XXXXXX") \
+    || fail "could not stage the prior body for $id"
+  if ! printf '%s\n' "$body" > "$tmp"; then
+    rm -f -- "$tmp"
+    fail "could not stage the prior body for $id"
+  fi
+  if ! tasks_axi update "$id" --body-file "$tmp" >/dev/null; then
+    rm -f -- "$tmp"
+    fail "could not restore the prior body for $id"
+  fi
+  rm -f -- "$tmp"
+  task_show_or_fail "$id" "task $id disappeared after restoring its prior body"
+  [ "$(show_field_value "$show" body)" = "$body" ] \
+    || fail "task $id did not retain its prior body"
+}
+
 command_hold() {
   local id=${1:-} title='' reason='' repo='' origin='' until='' corr='' corr_given=0 show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason previous_origin='' hold_status=0
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' hold_status=0 options_file='' copy=''
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -919,14 +973,20 @@ command_hold() {
       --origin) shift; origin=${1:-} ;;
       --until) shift; until=${1:-} ;;
       --corr) shift; corr=${1:-}; corr_given=1 ;;
+      --options-file) shift; options_file=${1:-}; [ -n "$options_file" ] || fail "--options-file needs a path" ;;
       *) usage >&2; exit 2 ;;
     esac
     shift
   done
   validate_slug task-id "$id"
+  [ -z "$options_file" ] || copy=$(decision_copy "$options_file")
   [ -n "$reason" ] || fail "reason must not be empty"
   # bin/fm-hold-reason-lib.sh owns the storage constraint and reversible encoding.
-  stored_reason=$(fm_hold_reason_encode "$reason") || fail "could not encode the hold reason"
+  if [ -n "$copy" ]; then
+    stored_reason=$(fm_hold_reason_encode "$reason" "$copy") || fail "could not encode the hold reason"
+  else
+    stored_reason=$(fm_hold_reason_encode "$reason") || fail "could not encode the hold reason"
+  fi
   if [ -n "$origin" ]; then
     validate_slug origin-id "$origin"
   fi
@@ -989,11 +1049,11 @@ command_hold() {
   task_show_or_fail "$id" "task $id disappeared before recording its hold-set stamp"
   write_hold_set_stamp "$id" "$(show_field "$show" body)" "$hold_set" "$preserve_hold_set"
   task_show_or_fail "$id" "task $id disappeared while recording its hold-set stamp"
+  prior_body=$(show_field_value "$show" body)
   [ -n "$(body_hold_set_timestamp "$(show_field_value "$show" body)")" ] \
     || fail "task $id did not retain its hold-set stamp"
   if [ -n "$origin" ]; then
     origin=$(task_identity "$origin") || exit $?
-    previous_origin=$(body_hold_origin "$(show_field_value "$show" body)")
     write_hold_origin "$id" "$(show_field "$show" body)" "$origin" || exit $?
   fi
   if [ -n "$until" ]; then
@@ -1004,11 +1064,7 @@ command_hold() {
       || hold_status=$?
   fi
   if [ "$hold_status" -ne 0 ]; then
-    # A refused re-hold must not associate the previous hold or answer with a
-    # new origin. Restore the old line verbatim, without resolving it again.
-    if [ -n "$origin" ]; then
-      write_hold_origin "$id" "$(show_field "$show" body)" "$previous_origin" || exit $?
-    fi
+    [ -z "$origin" ] || restore_hold_body "$id" "$prior_body"
     fail "could not hold task $id for the captain"
   fi
   task_show "$id" || fail "task $id disappeared while holding it"
@@ -1899,9 +1955,10 @@ EOF
 # two comma-separated listing fields are read - both are slugs that precede any
 # quoted title - so a title containing commas or quotes cannot shift them.
 open_task_ids() {
-  local data
+  local data output
   data=$(fm_backlog_data_absolute "$DATA") || return 1
-  fm_backlog_row_list "$data" 2>/dev/null | awk -F, '
+  output=$(fm_backlog_row_list "$data" 2>/dev/null) || return 1
+  printf '%s\n' "$output" | awk -F, '
     /^  [A-Za-z0-9._-]+,/ {
       id = $1
       sub(/^ +/, "", id)
@@ -1923,6 +1980,138 @@ list_has_line() {  # <newline-separated-list> <value>
     *$'\n'"$2"$'\n'*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+command_migrate_options() (
+  local input=${1:-} apply=0 migration_dir entries entry id title origin repo reason copy i=0 state existing hold_kind
+  local -a args
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || { usage >&2; exit 2; }
+  if [ "$#" -eq 2 ]; then
+    [ "$2" = --apply ] || { usage >&2; exit 2; }
+    apply=1
+  fi
+  # Validate the entire source before holding any task. This is the only reader
+  # of the retired side file; steady-state views never consult it.
+  entries=$(jq -sce '
+    select(length == 1) | .[0]
+    | (if type == "array" then . else .decisions end)
+    | select(type == "array" and all(.[];
+        type == "object" and (.key | type == "string" and test("^[A-Za-z0-9._-]{1,128}$"))
+        and (.title | type == "string" and length > 0 and (test("[\\r\\n]") | not))
+        and ((has("origin") | not) or (.origin | type == "string" and test("^[A-Za-z0-9._-]+$")))
+        and ((has("repo") | not) or (.repo | type == "string" and length > 0 and (test("[\\r\\n]") | not)))))
+    | select((map(.key) | unique | length) == length)
+  ' "$input") || fail "invalid legacy decision inventory: $input"
+  migration_dir=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/fm-captain-migrate.XXXXXX") || fail "could not create migration scratch"
+  trap 'rm -rf -- "$migration_dir"' EXIT
+  while IFS= read -r entry; do
+    i=$((i + 1))
+    copy=$(printf '%s' "$entry" | jq -ce '
+      .options |= [to_entries[] | .value + {value:(.value.value // ("option-" + ((.key + 1) | tostring)))}]
+      | if has("recommended") and (.recommended != null) then
+          .recommended as $r
+          | ([.options[] | select(.label == $r) | .value]) as $matches
+          | if ($matches | length) == 1 then .recommended = $matches[0]
+            elif ($matches | length) > 1 then error("recommended must name a unique option")
+            elif any(.options[]; .value == $r) then .
+            else error("recommended must name a unique option")
+            end
+        else del(.recommended) end
+      | {about,decide,options} + with_entries(select(.key == "recommended" or .key == "report" or .key == "pr_url"))
+    ') || fail "invalid legacy option copy"
+    printf '%s\n' "$copy" > "$migration_dir/$i.copy"
+    decision_copy "$migration_dir/$i.copy" >/dev/null
+  done < <(printf '%s' "$entries" | jq -c '.[]')
+  i=0
+  while IFS= read -r entry; do
+    i=$((i + 1))
+    id=$(printf '%s' "$entry" | jq -r '.key')
+    title=$(printf '%s' "$entry" | jq -r '.title')
+    existing=0
+    if task_show "$id"; then
+      existing=1
+      title=$(show_field_value "$TASK_SHOW_OUTPUT" title)
+      state=$(show_field "$TASK_SHOW_OUTPUT" state)
+      if [ "$state" = "done" ]; then
+        printf 'already-closed: %s\n' "$id"
+        continue
+      fi
+      hold_kind=$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)
+      if [ -n "$hold_kind" ] || [ "$(show_field_value "$TASK_SHOW_OUTPUT" held)" = yes ]; then
+        printf 'skipped: %s (already held)\n' "$id"
+        continue
+      fi
+      if body_has_resolution_record "$(show_field "$TASK_SHOW_OUTPUT" body)"; then
+        printf 'already-closed: %s\n' "$id"
+        continue
+      fi
+    elif ! printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$'; then
+      fail "could not read migration target $id"
+    fi
+    if [ "$apply" = 0 ]; then
+      printf 'would-hold: %s %s\n' "$id" "$title"
+      continue
+    fi
+    origin=$(printf '%s' "$entry" | jq -r '.origin // empty')
+    repo=$(printf '%s' "$entry" | jq -r '.repo // "firstmate"')
+    reason=$(printf '%s' "$entry" | jq -r 'if .decide != "" then .decide else .title end')
+    args=(hold "$id" --reason "$reason" --repo "$repo" --options-file "$migration_dir/$i.copy")
+    [ "$existing" = 1 ] || args+=(--title "$title")
+    [ -z "$origin" ] || args+=(--origin "$origin")
+    "$0" "${args[@]}" >/dev/null || fail "migration stopped at $id"
+    printf 'held: %s\n' "$id"
+  done < <(printf '%s' "$entries" | jq -c '.[]')
+)
+
+command_orphans() {
+  local origin key verb note candidate state held stored stored_id origin_id candidate_id relay_id occurrence
+  [ "$#" -eq 0 ] || { usage >&2; exit 2; }
+  [ "$STATE" = "$FM_HOME/state" ] || fail "orphan check requires this home's state directory"
+  command -v tasks-axi >/dev/null 2>&1 || fail "orphan check requires tasks-axi"
+  open_task_ids >/dev/null || fail "orphan check cannot read the backlog"
+  while IFS=$'\t' read -r origin key verb note; do
+    [ "$verb" = needs-decision ] || continue
+    if [ "$(meta_value "$STATE/$origin.meta" kind)" = secondmate ]; then
+      case "$key" in
+        captain-hold-*)
+          relay_id=${key#captain-hold-}
+          occurrence=${relay_id##*-}
+          relay_id=${relay_id%-*}
+          case "$occurrence" in ''|*[!0-9]*) ;; *)
+            case "$note" in
+              "captain hold $relay_id: "*|corr=*" captain hold $relay_id: "*) continue ;;
+            esac
+            ;;
+          esac
+          ;;
+      esac
+    fi
+    held=0
+    # Holding the originating work item consolidates every question gating it.
+    # Backend reads also resolve aliases to their canonical task identities.
+    # Probe only these candidates, never every queued task on each drain.
+    for candidate in "$origin" "$key" "$origin-decision-$key"; do
+      if task_show "$candidate"; then
+        state=$(show_field "$TASK_SHOW_OUTPUT" state)
+        [ -n "$state" ] || fail "orphan check received no state for $candidate"
+        if [ "$state" != "done" ] && [ "$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)" = captain ]; then
+          candidate_id=$(show_field_value "$TASK_SHOW_OUTPUT" id)
+          origin_id=$(task_identity "$origin") || exit $?
+          if [ "$candidate_id" != "$origin_id" ]; then
+            stored=$(body_hold_origin "$(show_field_value "$TASK_SHOW_OUTPUT" body)")
+            [ -n "$stored" ] || continue
+            stored_id=$(task_identity "$stored") || exit $?
+            [ "$stored_id" = "$origin_id" ] || continue
+          fi
+          held=1
+          break
+        fi
+      elif ! printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$'; then
+        fail "orphan check cannot read task $candidate"
+      fi
+    done
+    [ "$held" = 1 ] || printf '%s\t%s\n' "$origin" "$key"
+  done
 }
 
 command_diverged() {
@@ -2061,6 +2250,8 @@ case "${1:-}" in
   verify) shift; command_verify "$@" ;;
   open) shift; command_open "$@" ;;
   diverged) shift; command_diverged "$@" ;;
+  orphans) shift; command_orphans "$@" ;;
+  migrate-options) shift; command_migrate_options "$@" ;;
   reconcile) shift; command_reconcile "$@" ;;
   -h|--help) usage ;;
   *) usage >&2; exit 2 ;;

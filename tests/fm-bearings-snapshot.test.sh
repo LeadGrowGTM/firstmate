@@ -3416,30 +3416,56 @@ test_per_repository_pr_cap_is_disclosed
 test_projection_and_toon_fail_closed
 
 # Detail mode must not inherit the compact digest's per-home decision cap.
+fixture_encoded_hold() {
+  local payload
+  payload=$(jq -cn --arg reason "$1" --argjson decision "$2" '{reason:$reason,decision:$decision}') || return 1
+  printf 'fm-hold-v2:%s' "$(printf '%s' "$payload" | base64 | tr -d '\n')"
+}
+
 test_complete_structured_decision_layout() {
-  local home fakebin json toon mate long_id record_filter
+  local home fakebin json toon mate long_id record_filter major_hold newer_hold merged_hold current_hold
+  local remote_one remote_two remote_three remote_four remote_reason
   home=$(make_home decision-layout)
   write_fixture "$home"
   mate=$(fixture_mate_home "$home")
-  cat > "$home/data/backlog.md" <<'EOF'
+  major_hold=$(fixture_encoded_hold 'Choose whether to preserve the older format for existing consumers or retire it after the migration; preserving it costs maintenance while retiring it requires every consumer to upgrade before rollout' '{"about":"Format migration","decide":"Choose the compatibility route","options":[{"value":"preserve","label":"Preserve the format","hint":"Keeps older consumers working"},{"value":"retire","label":"Retire the format"}],"recommended":"preserve","report":"data/format/report.md","pr_url":"https://github.com/acme/sample/pull/17"}')
+  newer_hold=$(fixture_encoded_hold 'Newer options' '{"about":"Same subject","decide":"Give a freeform route","options":[]}')
+  merged_hold=$(fixture_encoded_hold 'Choose the rollout' '{"about":"Rollout","decide":"Pick","options":true}')
+  current_hold=$(fixture_encoded_hold 'Pick again' '{"about":"New route","decide":"Pick","options":[{"value":"new","label":"New"}]}')
+  remote_one=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Remote rollout","decide":"Pick the rollout route","options":[{"value":"stage","label":"Stage rollout"},{"value":"all","label":"Release to all"}],"recommended":"stage","report":"data/remote/report.md","pr_url":"https://github.com/acme/remote/pull/4"}')
+  remote_two=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Invalid hint","decide":"Pick","options":[{"value":"yes","label":"Yes","hint":2}]}')
+  remote_three=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Unknown option key","decide":"Pick","options":[{"value":"yes","label":"Yes","extra":true}]}')
+  remote_four=$(fixture_encoded_hold 'Options A and B with their consequences' '{"about":"Unknown object key","decide":"Pick","options":[],"extra":true}')
+  cat > "$home/data/backlog.md" <<EOF
 ## In flight
 
 ## Queued
 - [ ] minor - Minor choice (repo: firstmate) (kind: captain) (priority: low) (hold: Pick A for less work or B for compatibility) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-- [ ] major - Major choice (repo: firstmate) (kind: captain) (priority: high) (hold: Choose whether to preserve the older format for existing consumers or retire it after the migration; preserving it costs maintenance while retiring it requires every consumer to upgrade before rollout) (hold-kind: captain)
+- [ ] major - Major choice (repo: firstmate) (kind: captain) (priority: high) (hold: $major_hold) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
 - [ ] older - Same subject (repo: firstmate) (kind: captain) (hold: Earlier options remain recorded) (hold-kind: captain)
   Captain hold set: 2026-07-10T10:00:00Z
   Captain hold origin: finished
-- [ ] newer - Same subject (repo: firstmate) (kind: captain) (hold: Newer options) (hold-kind: captain)
+- [ ] newer - Same subject (repo: firstmate) (kind: captain) (hold: $newer_hold) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
-- [ ] merged-call - Post-merge rollout for https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: Choose the rollout) (hold-kind: captain)
+- [ ] merged-call - Post-merge rollout for https://github.com/acme/sample/pull/5 (repo: sample) (kind: captain) (hold: $merged_hold) (hold-kind: captain)
   Captain hold set: 2026-07-11T10:00:00Z
+- [ ] current-copy - Repeated call (repo: firstmate) (kind: captain) (hold: $current_hold) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+  Resolution recorded by fm-captain-hold.
+  Captain options: historical answer text
+- [ ] stale-copy - Repeated call without new choices (repo: firstmate) (kind: captain) (hold: Pick again) (hold-kind: captain)
+  Captain hold set: 2026-07-11T10:00:00Z
+  Captain options for hold 2: {"about":"Old route","decide":"Pick","options":[{"value":"old","label":"Old"}]}
+  Resolution recorded by fm-captain-hold.
 
 ## Done
 - [x] finished - Investigation data/finished/report.md (repo: firstmate) (kind: scout) (reported 2026-07-10)
 - [x] shipped - Delivery https://github.com/acme/sample/pull/5 (repo: sample) (kind: ship) (merged 2026-07-11)
+EOF
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"major","title":"Conflicting side copy","about":"Side-file choice","decide":"Ignore task body","options":[{"value":"override","label":"Override"}]},{"key":"side-only","title":"Side-only choice","about":"Side file","decide":"Invent a call","options":[{"value":"yes","label":"Yes"}]}]}
 EOF
   mkdir -p "$home/data/finished"
   printf 'Should we invent another decision from this report?\n' > "$home/data/finished/report.md"
@@ -3449,10 +3475,17 @@ EOF
     printf -- '- [ ] %s - Long identity choice (repo: sample) (kind: captain) (hold: Pick an option) (hold-kind: captain)\n' "$long_id"
     printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
     for i in {1..25}; do
+      case "$i" in
+        1) remote_reason=$remote_one ;;
+        2) remote_reason=$remote_two ;;
+        3) remote_reason=$remote_three ;;
+        4) remote_reason=$remote_four ;;
+        *) remote_reason='Options A and B with their consequences' ;;
+      esac
       if [ "$i" -eq 1 ]; then
-        printf -- '- [ ] remote-%s - SAME  subject (repo: firstmate) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i"
+        printf -- '- [ ] remote-%s - SAME  subject (repo: firstmate) (kind: captain) (hold: %s) (hold-kind: captain)\n' "$i" "$remote_reason"
       else
-        printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i" "$i"
+        printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: %s) (hold-kind: captain)\n' "$i" "$i" "$remote_reason"
       fi
       printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
     done
@@ -3461,23 +3494,44 @@ EOF
   fakebin=$(make_fakebin "$home")
   json=$(run "$home" "$fakebin" --json --fields decisions)
   printf '%s' "$json" | jq -e '
-    (.decision_layout | length) == 31
+    (.decision_layout | length) == 33
     and (.decision_layout_unavailable | length) == 0
     and .decision_layout[0].key == "major"
     and (.decision_layout[0].reason | endswith("before rollout"))
+    and (.decision_layout[0].about == "Format migration" and .decision_layout[0].decide == "Choose the compatibility route"
+      and [.decision_layout[0].options[].value] == ["preserve","retire"]
+      and .decision_layout[0].recommended == "preserve"
+      and .decision_layout[0].report == "data/format/report.md"
+      and .decision_layout[0].pr_url == "https://github.com/acme/sample/pull/17")
+    and ([.decision_layout[] | select(.key == "side-only" or .about == "Side-file choice")] | length) == 0
     and (.decision_layout | all(.[]; has("number") | not))
     and (.decision_layout | any(.key == "older" and .origin == "finished"
       and .stale_reason == null))
     and (.decision_layout | any(.key == "newer" and .stale_reason == null))
+    and (.decision_layout | any(.key == "newer" and .options == [] and .about == "Same subject"))
+    and (.decision_layout | any(.key == "minor" and .options == null and .about == null))
+    and (.decision_layout | any(.key == "older" and .options == null and .about == null))
+    and (.decision_layout | any(.key == "current-copy" and .about == "New route"
+      and [.options[].value] == ["new"]))
+    and (.decision_layout | any(.key == "stale-copy" and .options == null and .about == null))
+    and (.decision_layout | any(.key == "merged-call" and .options == null and .about == null
+      and .pr_url == "https://github.com/acme/sample/pull/5"))
     and (.decision_layout | any(.owner == "mate" and .key == "remote-1"
-      and .stale_reason == null))
+      and .stale_reason == null and .about == "Remote rollout"
+      and .decide == "Pick the rollout route"
+      and [.options[].value] == ["stage","all"]
+      and .recommended == "stage"
+      and .report == "data/remote/report.md"
+      and .pr_url == "https://github.com/acme/remote/pull/4"))
+    and ([.decision_layout[] | select(.owner == "mate" and (.key == "remote-2" or .key == "remote-3" or .key == "remote-4"))]
+      | all(.[]; .options == null and .about == null))
     and (.decision_layout | any(.key == "merged-call" and .pr_url == "https://github.com/acme/sample/pull/5"
       and .stale_reason == null))
     and ([.decision_layout[] | select(.owner == "mate")] | length) == 26
     and ([.decision_layout[] | select(.reason | contains("invent another"))] | length) == 0
   ' >/dev/null || fail "detailed decision inventory lost structured calls or inferred prose: $json"
   toon=$(run "$home" "$fakebin" --fields decisions)
-  assert_contains "$toon" 'decision_layout[31]' "TOON omitted the detailed inventory"
+  assert_contains "$toon" 'decision_layout[33]' "TOON omitted the detailed inventory"
   assert_contains "$toon" 'before rollout' "TOON truncated the known decision reason"
   [ ! -s "$home/net.log" ] || fail "detail mode fetched GitHub without opting in"
   cp "$mate/state/home-summary.json" "$mate/state/valid-summary.json"
