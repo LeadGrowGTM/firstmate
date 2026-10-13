@@ -88,7 +88,7 @@ cmd_label() {
   [ -n "$account" ] || account=default
   [ "$effort" != default ] || effort=
   tmux set-window-option -t "$target" @fm_task "$(fm_sb_clean "$id" 40)" 2>/dev/null || return 0
-  tmux set-window-option -t "$target" @fm_model "$(fm_sb_clean "$(fm_sb_model_label "$model")" 24)" 2>/dev/null || true
+  tmux set-window-option -t "$target" @fm_model "$(fm_sb_clean "$(fm_sb_model_label "$model")")" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_effort "$(fm_sb_clean "$effort" 8)" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_wt "$(fm_sb_clean "$(fm_sb_wt_label "$wt")" 28)" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_provider "$(fm_sb_clean "$provider" 16)" 2>/dev/null || true
@@ -107,7 +107,7 @@ fm_sb_format() {
   wide="#[bold]#{=24:${task}}#[nobold] | #{=20:${model}} #{=7:${effort}} | #{=22:${wt}}"
   narrow="#{=9:${task}}|#{=10:${model}} #{=4:${effort}}|#{=13:${wt}}"
   compact="#{=3:${task}}|#{=2:${model}} #{=1:${effort}}|#{=2:${wt}}"
-  printf '%s' "${use}|#{?#{e|>=:#{client_width},100},${wide},#{?#{e|>=:#{client_width},60},${narrow},${compact}}}"
+  printf '%s' "${use}|#{?#{e|>=:#{pane_width},100},${wide},#{?#{e|>=:#{pane_width},60},${narrow},${compact}}}"
 }
 
 cmd_sync() {
@@ -158,9 +158,10 @@ fm_sb_usage_refresh() {
     in_quota && !/^  / { in_quota = 0 }
     in_quota && /^  / {
       sub(/^  /, ""); n = split($0, row, ","); scope = row[2 + keyed]; rem = row[3 + keyed]
-      if (n < 3 + keyed || (scope != "all_models" && scope != "all_products") ||
+      if (scope ~ /^".*"$/) scope = substr(scope, 2, length(scope) - 2)
+      if (n < 3 + keyed || (scope != "all_models" && scope != "all_products" && scope !~ /^model:.+/) ||
           rem !~ /^[0-9]+(\.[0-9]+)?$/ || rem + 0 > 100) next
-      printf "%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", sprintf("%.15g", 100 - rem)
+      printf "%s\t%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", sprintf("%.15g", 100 - rem), scope
     }
   ')
   [ -n "$rows" ] || return 1
@@ -169,12 +170,13 @@ fm_sb_usage_refresh() {
 }
 
 fm_sb_usage_display() {  # <window>
-  local provider account
+  local provider account model
   provider=$(tmux show-options -wqv -t "$1" @fm_provider 2>/dev/null) || provider=
   account=$(tmux show-options -wqv -t "$1" @fm_account 2>/dev/null) || account=
+  model=$(tmux show-options -wqv -t "$1" @fm_model 2>/dev/null) || model=
   [ -n "$provider" ] && [ -f "$USAGE_CACHE" ] || { printf 'u ?\n'; return 0; }
-  awk -F '\t' -v provider="$provider" -v account="$account" '
-    $1 == provider {
+  awk -F '\t' -v provider="$provider" -v account="$account" -v model="$model" '
+    $1 == provider && ($4 == "all_models" || $4 == "all_products" || $4 == "model:" model) {
       if ($2 == account || $2 == "*") {
         if (!matched || $3 + 0 > used) { used = $3 + 0; key = $2 }
         matched = 1

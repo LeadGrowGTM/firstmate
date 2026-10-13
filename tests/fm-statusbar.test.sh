@@ -34,7 +34,7 @@ cat >"$WORK/bin/quota-axi" <<SH
 echo run >>"$WORK/quota-calls"
 [ ! -f "$WORK/quota-fail" ] || exit 1
 cat <<'X'
-quota[9]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[10]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,default,all_models,68,0.4,through_reset,high,none,none
   codex,default,all_models,68,0.4,through_reset,high,none,none
   codex,codex-home,all_models,0.5,-1.9,through_reset,high,none,none
@@ -44,6 +44,7 @@ quota[9]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runwa
   codex,openai-codex-hi,all_models,0.04,-1.9,through_reset,high,none,none
   codex,openai-codex-lo,all_models,99.9999,-1.9,through_reset,high,none,none
   claude,default,"model:fable",12,0.8,through_reset,high,none,none
+  claude,default,"model:opus-5-5[1m]",90,0.8,through_reset,high,none,none
 X
 SH
 chmod +x "$WORK/bin/tmux" "$WORK/bin/quota-axi"
@@ -90,6 +91,10 @@ i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 selected=$(bash "$SB" usage firstmate:fm-demo-task)
 [ "$selected" = 'u cl:default32%' ] || fail "Claude pane did not select its quota row" "$selected"
+tmux new-window -d -t firstmate: -n fable "sleep 600"
+bash "$SB" label firstmate:fable fable claude claude-fable high /home/u/fable
+[ "$(bash "$SB" usage firstmate:fable)" = 'u cl:default88%' ] || fail "model limit did not bind the Fable pane"
+pass "each pane uses its tighter account or model limit"
 
 tmux select-window -t orca-view:fm-demo-task
 wide=$(render orca-view 160 'u cl:default32%')
@@ -97,6 +102,16 @@ case "$wide" in
 *"u cl:default32%"*"fm-demo-task"*"opus-5-5[1m] high"*"firstmate/17"*) pass "wide client shows task, model, effort, worktree and usage" ;;
 *) fail "wide render missing fields" "$wide" ;;
 esac
+
+tmux split-window -h -d -t firstmate:fm-demo-task "sleep 600"
+split_width=$(tmux display-message -p -t firstmate:fm-demo-task.0 '#{pane_width}')
+[ "$split_width" -ge 60 ] && [ "$split_width" -lt 100 ] || fail "split pane was not narrower than its client" "$split_width"
+split=$(render orca-view 140 'u cl:default32%|fm-demo-t|')
+case "$split" in
+*'u cl:default32%|fm-demo-t|'*'opus-5-5[1 high'*) pass "wide client formats each split pane by pane width" ;;
+*) fail "split pane used the client width layout" "$split" ;;
+esac
+tmux kill-pane -t firstmate:fm-demo-task.1
 
 narrow=$(render orca-view 60 'u cl:default32%')
 case "$narrow" in
@@ -224,7 +239,7 @@ rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "
 [ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "first usage read should be unknown before the cache exists"
 i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-awk -F '\t' '$1 == "claude" && $2 == "default" && $3 == 32 { found=1 } END { exit !found }' "$WORK/state/statusbar-usage.txt" || fail "usage cache content"
+awk -F '\t' '$1 == "claude" && $2 == "default" && $3 == 32 && $4 == "all_models" { found=1 } END { exit !found }' "$WORK/state/statusbar-usage.txt" || fail "usage cache content"
 [ "$(bash "$SB" usage firstmate:fm-demo-task)" = "u cl:default32%" ] || fail "usage did not serve the selected account"
 bash "$SB" usage >/dev/null 2>&1 && fail "usage accepted an implicit target"
 bash "$SB" usage firstmate:fm-demo-task >/dev/null
