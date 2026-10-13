@@ -73,7 +73,8 @@
 #           session is kept.
 # follow    is what the view session's hook runs: it re-selects the recorded
 #           window when the view shows another one, and removes the view
-#           session when that window no longer exists in it.
+#           session when that window no longer exists in it and its base still
+#           shares the windows. Otherwise it removes only its own tracking.
 #
 # Every Orca step stops at a one-line `note:` on stderr and exit 3 when Orca, its
 # command line, or the registered worktree is unavailable, so a caller can let
@@ -206,6 +207,23 @@ track_view() {
     tmux select-window -t "=$VIEW_SESSION:$WINDOW_ID"
 }
 
+# A group's name outlives its base, which can also be replaced by an unrelated
+# session of the same name. Only a base still in this group retains its windows.
+view_base_survives() {  # <view-session>
+  local grouped group base_group
+  IFS=$'\t' read -r grouped group <<EOF
+$(tmux display-message -p -t "=$1:" $'#{session_grouped}\t#{session_group}' 2>/dev/null)
+EOF
+  [ "$grouped" = 1 ] && [ -n "$group" ] && [ "$group" != "$1" ] || return 1
+  base_group=$(tmux display-message -p -t "=$group:" '#{session_group}' 2>/dev/null) || return 1
+  [ "$base_group" = "$group" ]
+}
+
+untrack_view() {  # <view-session>; track_view installs hook index 0
+  tmux set-hook -u -t "=$1:" 'session-window-changed[0]' 2>/dev/null || true
+  tmux set-option -u -t "=$1:" @fm_view_window 2>/dev/null || true
+}
+
 parse_view_args() {
   TARGET='' VIEW_SESSION='' TITLE='' IDFILE=''
   while [ $# -gt 0 ]; do
@@ -263,7 +281,11 @@ cmd_command() {
 open_failed() {
   local hook_line
   if [ "$OWNED" = 1 ]; then
-    tmux kill-session -t "=$VIEW_SESSION" 2>/dev/null || true
+    if view_base_survives "$VIEW_SESSION"; then
+      tmux kill-session -t "=$VIEW_SESSION" 2>/dev/null || true
+    else
+      untrack_view "$VIEW_SESSION"
+    fi
   else
     tmux set-hook -u -t "=$VIEW_SESSION:" session-window-changed || true
     if [ "$PRIOR_OPTION_SET" = 1 ]; then
@@ -286,6 +308,7 @@ cmd_open() {
   local cmd out handle grouped group PRIOR_OPTION_SET=0 PRIOR_OPTION='' PRIOR_HOOK='' PRIOR_WINDOW=''
   parse_view_args "$@"
   resolve_target "$TARGET"
+  [ "$VIEW_SESSION" != "$BASE_SESSION" ] || note "the base session cannot be used as its own view"
   command -v jq >/dev/null 2>&1 || note "jq is not installed, so Orca's reply cannot be read"
   cmd=$(view_command "$IDFILE")
   orca_env
@@ -368,7 +391,11 @@ cmd_follow() {
   cur=$(tmux display-message -p -t "=$view:" '#{window_id}' 2>/dev/null) || return 0
   [ "$cur" != "$want" ] || return 0
   tmux select-window -t "=$view:$want" 2>/dev/null && return 0
-  tmux kill-session -t "=$view" 2>/dev/null || true
+  if view_base_survives "$view"; then
+    tmux kill-session -t "=$view" 2>/dev/null || true
+  else
+    untrack_view "$view"
+  fi
 }
 
 cmd_identity() {
@@ -401,7 +428,7 @@ cmd_identity() {
 }
 
 cmd_close() {
-  local handle='' view='' out grouped group attached base_group
+  local handle='' view='' out attached
   while [ $# -gt 0 ]; do
     case "$1" in
     --handle) handle=${2:-}; shift 2 || die_usage "--handle needs a value" ;;
@@ -419,12 +446,7 @@ cmd_close() {
     note "Orca did not close view tab $handle: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
   fi
   [ -n "$view" ] || return 0
-  IFS=$'\t' read -r grouped group <<EOF
-$(tmux display-message -p -t "=$view:" $'#{session_grouped}\t#{session_group}' 2>/dev/null)
-EOF
-  if [ "$grouped" = 1 ] && [ -n "$group" ] && [ "$group" != "$view" ]; then
-    base_group=$(tmux display-message -p -t "=$group:" '#{session_group}' 2>/dev/null) || base_group=
-    [ "$base_group" = "$group" ] || return 0
+  if view_base_survives "$view"; then
     attached=$(tmux display-message -p -t "=$view:" '#{session_attached}' 2>/dev/null) || attached=
     [ "$attached" != 0 ] || tmux kill-session -t "=$view" 2>/dev/null || true
   fi

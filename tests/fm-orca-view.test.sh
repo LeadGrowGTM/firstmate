@@ -45,6 +45,12 @@ cat > "$SHIM/orca-ide" <<'SH'
 #!/usr/bin/env bash
 set -u
 printf 'WSL_INTEROP=%s %s\n' "${WSL_INTEROP:-}" "$*" >> "$FM_FAKE_ORCA_LOG"
+if [ -n "${FM_FAKE_ORCA_REMOVE_BASE:-}" ]; then
+  tmux kill-session -t "=$FM_FAKE_ORCA_REMOVE_BASE"
+  [ "${FM_FAKE_ORCA_RECYCLE_BASE:-}" != 1 ] || tmux new-session -d -s "$FM_FAKE_ORCA_REMOVE_BASE" -n unrelated
+  printf '{"ok":false,"error":{"code":"runtime_unavailable"}}\n'
+  exit 1
+fi
 if [ -n "${FM_FAKE_ORCA_FAIL:-}" ]; then
   printf '{"ok":false,"error":{"code":"runtime_unavailable"}}\n'
   exit 1
@@ -485,6 +491,92 @@ test_close_keeps_shared_view() {
   pass "close: a shared view lives until its last attached tab closes"
 }
 
+test_open_refuses_the_base_as_a_view() {
+  local before hooks out status
+  before=$("$SHIM/tmux" display-message -p -t '=firstmate:' '#{window_id}')
+  "$SHIM/tmux" set-hook -t '=firstmate:' 'session-window-changed[7]' 'run-shell true'
+  hooks=$("$SHIM/tmux" show-options -H -t '=firstmate:' session-window-changed)
+  : > "$ORCA_LOG"
+  out=$(run_view open --target firstmate:fm-dev --view-session firstmate 2>&1)
+  status=$?
+  expect_code 3 "$status" "the grouped base cannot be used as its own view"
+  assert_contains "$out" "base session" "the refusal names the base session"
+  assert_equals "$before" "$("$SHIM/tmux" display-message -p -t '=firstmate:' '#{window_id}')" \
+    "the base's selected window is unchanged"
+  assert_equals "$hooks" "$("$SHIM/tmux" show-options -H -t '=firstmate:' session-window-changed)" \
+    "the base's hooks are unchanged"
+  "$SHIM/tmux" show-options -v -t '=firstmate:' @fm_view_window >/dev/null 2>&1 && fail "the base acquired view tracking"
+  assert_no_grep 'terminal create' "$ORCA_LOG" "no Orca tab is created for the base itself"
+  "$SHIM/tmux" set-hook -u -t '=firstmate:' 'session-window-changed[7]'
+  pass "open: refuses the grouped base itself without installing tracking or moving its window"
+}
+
+test_follow_keeps_windows_when_base_is_gone() {
+  local replacement base view out handle target survivor pane_pid hooks i
+  for replacement in absent recycled; do
+    base="follow-base-$replacement"
+    view="follow-view-$replacement"
+    "$SHIM/tmux" new-session -d -s "$base" -n target 'sleep 120' || fail "could not create the base"
+    target=$("$SHIM/tmux" display-message -p -t "=$base:" '#{window_id}')
+    survivor=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t "$base:" -n survivor 'sleep 120')
+    pane_pid=$("$SHIM/tmux" display-message -p -t "$survivor" '#{pane_pid}')
+    out=$(run_view open --target "$base:$target" --view-session "$view") || fail "could not open the view: $out"
+    handle=$(returned_handle "$out")
+    wait_for_attached_count "$view" 1 || fail "the tab did not attach"
+    "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[7]' 'run-shell true'
+    "$SHIM/tmux" kill-session -t "=$base"
+    if [ "$replacement" = recycled ]; then
+      "$SHIM/tmux" new-session -d -s "$base" -n unrelated || fail "could not recycle the base name"
+    fi
+    "$SHIM/tmux" kill-window -t "$target"
+    i=0
+    while [ "$i" -lt 100 ]; do
+      "$SHIM/tmux" show-options -v -t "=$view:" @fm_view_window >/dev/null 2>&1 || break
+      sleep 0.05
+      i=$((i + 1))
+    done
+    "$SHIM/tmux" has-session -t "=$view" 2>/dev/null || fail "the follow hook killed the last surviving session ($replacement base)"
+    assert_equals "$survivor" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')" \
+      "the follow hook preserves the unrelated surviving window"
+    kill -0 "$pane_pid" 2>/dev/null || fail "the follow hook killed the surviving agent process"
+    "$SHIM/tmux" show-options -v -t "=$view:" @fm_view_window >/dev/null 2>&1 && fail "the follow hook did not remove its tracking option"
+    hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
+    assert_not_contains "$hooks" 'session-window-changed[0]' "the follow hook removes its own tracking hook"
+    assert_contains "$hooks" 'session-window-changed[7]' "the follow hook preserves unrelated hooks"
+    run_view close --handle "$handle" --view-session "$view" >/dev/null 2>&1 || fail "the tab did not close"
+    "$SHIM/tmux" kill-session -t "=$view"
+    [ "$replacement" != recycled ] || "$SHIM/tmux" kill-session -t "=$base"
+  done
+  pass "follow: removes only its tracking and preserves agents when the base is gone or recycled"
+}
+
+test_failed_open_keeps_windows_when_base_is_gone() {
+  local replacement base view target pane_pid out status recycle
+  for replacement in absent recycled; do
+    base="failed-base-$replacement"
+    view="failed-view-$replacement"
+    "$SHIM/tmux" new-session -d -s "$base" -n agent 'sleep 120' || fail "could not create the base"
+    target=$("$SHIM/tmux" display-message -p -t "=$base:" '#{window_id}')
+    pane_pid=$("$SHIM/tmux" display-message -p -t "=$base:" '#{pane_pid}')
+    recycle=0
+    [ "$replacement" != recycled ] || recycle=1
+    out=$(FM_FAKE_ORCA_REMOVE_BASE="$base" FM_FAKE_ORCA_RECYCLE_BASE="$recycle" \
+      run_view open --target "$base:$target" --view-session "$view" 2>&1)
+    status=$?
+    expect_code 3 "$status" "failed open is reported after its base disappears"
+    "$SHIM/tmux" has-session -t "=$view" 2>/dev/null || fail "failed open killed the surviving session ($replacement base)"
+    assert_equals "$target" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')" \
+      "failed open preserves the original agent window"
+    kill -0 "$pane_pid" 2>/dev/null || fail "failed open killed the surviving agent process"
+    "$SHIM/tmux" show-options -v -t "=$view:" @fm_view_window >/dev/null 2>&1 && fail "failed open left its tracking option"
+    assert_not_contains "$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)" 'session-window-changed[0]' \
+      "failed open removes its installed tracking hook"
+    "$SHIM/tmux" kill-session -t "=$view"
+    [ "$replacement" != recycled ] || "$SHIM/tmux" kill-session -t "=$base"
+  done
+  pass "failed open: removes tracking and preserves agents if its base disappears during the Orca call"
+}
+
 # The view follows its agent's window by id. This is the incident shape: a
 # hand-made view session left on window 0 (another agent) is reused by an open,
 # as a relaunch does, and must come back to the agent's window; then the
@@ -584,6 +676,7 @@ SH
 test_switch_values
 test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
+test_open_refuses_the_base_as_a_view
 test_open_refuses_a_foreign_view_session
 test_view_follows_the_agent_window
 test_identity_filters_input
@@ -592,6 +685,8 @@ test_unavailable_orca_steps_aside
 test_wsl_uses_live_interop
 test_window_helper
 test_close_keeps_shared_view
+test_follow_keeps_windows_when_base_is_gone
+test_failed_open_keeps_windows_when_base_is_gone
 test_close_keeps_windows_when_base_is_gone
 test_close
 test_timeout_defaults
