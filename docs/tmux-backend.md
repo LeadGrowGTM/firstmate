@@ -55,7 +55,8 @@ tmux select-window -t <session-name>:fm-<id>
 Any terminal that reaches the machine's tmux server can attach this way, including a terminal pane in a desktop app.
 Orca on Windows, for example, can show each secondmate in its own Orca tab automatically when [Orca view tabs](configuration.md#orca-view-tabs-configorca-view-tabs) are on, and any other window, such as the primary's, with the commands that section names.
 That is Orca viewing the tmux backend, not the [Orca runtime backend](orca-backend.md), which is macOS-only.
-On WSL, every window or session Firstmate creates receives a Windows-interop socket proven live at creation, and a relaunch hands the same to the window it reuses, so a tmux server started by an earlier login does not break Windows programs such as Orca's command line.
+On WSL, Firstmate probes for a live Windows-interop socket when it creates a tmux window or session and when it relaunches an agent in an existing window.
+When a socket answers, the new window or session, or the reused window's shell, receives it so the tmux server's stale socket does not break Windows programs such as Orca's command line.
 By default tmux sizes a window to its most recently active client, so attaching from a much smaller screen reflows that window for every other viewer; to follow the primary or a secondmate from a phone, use [Claude Remote Control](configuration.md#claude-remote-control-configclaude-remote-control) instead.
 
 Typing into an attached task window is authoritative direct intervention.
