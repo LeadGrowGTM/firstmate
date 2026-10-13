@@ -27,6 +27,8 @@ Crew tasks become windows in that session.
 A locked `bin/fm-session-start.sh` labels the primary pane with its home and resolved harness, then enables the detail line on the session's windows.
 Its model and effort use explicit `FM_PRIMARY_MODEL` and `FM_PRIMARY_EFFORT` values, or Claude's launch environment when the primary is Claude; unavailable values appear as `?`.
 The detail line uses shared window options, so Orca view sessions created afterward inherit it.
+Plan usage shows account keys of at most 14 characters whole; longer keys show their first six characters, `~`, and last seven.
+Two long keys with the same displayed ends can still share a label.
 Existing sessions pick up the primary label and detail line at their next locked session start or context re-emit; task windows also refresh their labels at spawn and can be refreshed from recorded metadata with `bin/fm-statusbar.sh sync`.
 A viewer attached through a grouped session (`tmux new-session -t <session-name> -s <view>`) does not become the container: Firstmate reads the primary's pane when `TMUX_PANE` is set and resolves a grouped session to its base session.
 If the primary harness runs outside tmux, Firstmate creates or reuses a detached session named `firstmate`:

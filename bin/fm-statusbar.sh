@@ -105,7 +105,7 @@ fm_sb_format() {
   use="#($SELF usage #{window_id})"
   wide="#[bold]#{=24:${task}}#[nobold] | #{=20:${model}} #{=7:${effort}} | #{=22:${wt}}"
   narrow="#{=9:${task}}|#{=10:${model}} #{=4:${effort}}|#{=13:${wt}}"
-  compact="#{=4:${task}}|#{=6:${model}} #{=3:${effort}}|#{=5:${wt}}"
+  compact="#{=3:${task}}|#{=2:${model}} #{=1:${effort}}|#{=2:${wt}}"
   printf '%s' "#{?#{e|>=:#{client_width},100},${wide},#{?#{e|>=:#{client_width},60},${narrow},${compact}}}|${use}"
 }
 
@@ -187,12 +187,7 @@ fm_sb_usage_display() {  # <window>
       if (!matched && fallback) { used = fallback_used; key = "default"; matched = 1 }
       if (!matched) { print "u ?"; exit }
       code = provider == "claude" ? "cl" : provider == "codex" ? "cx" : provider == "grok" ? "gk" : substr(provider, 1, 2)
-      if (key == "*") label = "all"
-      else {
-        label = key
-        sub(/^.*-/, "", label)
-        label = key == label ? substr(key, 1, 4) : substr(key, 1, 2) substr(label, 1, 2)
-      }
+      label = length(key) <= 14 ? key : substr(key, 1, 6) "~" substr(key, length(key) - 6)
       value = sprintf("%.1f", used); sub(/\.0$/, "", value)
       printf "u %s:%s%s%%\n", code, label, value
     }
