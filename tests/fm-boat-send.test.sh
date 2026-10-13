@@ -13,14 +13,16 @@ NOW=1791892800
 BIN="$TMP_ROOT/bin"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
 mkdir -p "$BIN"
-for script in fm-boat-send.sh fm-boat-worker.sh fm-secondmate-registry-lib.sh \
+for script in fm-boat-send.sh fm-boat-worker.sh fm-boat-idle-stop.sh fm-secondmate-registry-lib.sh \
   fm-timeout-lib.sh fm-wake-lib.sh fm-path-lib.sh; do
   cp "$ROOT/bin/$script" "$BIN/$script"
 done
 REAL_DATE=$(command -v date)
 cat > "$FAKEBIN/date" <<SH
 #!/usr/bin/env bash
-if [ "\$*" = +%s ]; then printf '%s\n' '$NOW'; else exec '$REAL_DATE' "\$@"; fi
+if [ "\$*" = +%s ]; then
+  if [ -f "\${FIXTURES:-}/time" ]; then cat "\$FIXTURES/time"; else printf '%s\n' '$NOW'; fi
+else exec '$REAL_DATE' "\$@"; fi
 SH
 cat > "$FAKEBIN/boat" <<'SH'
 #!/usr/bin/env bash
@@ -55,9 +57,20 @@ SH
 cat > "$BIN/fm-on.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'on %s\n' "$*" >> "$FIXTURES/calls"
+[ "$*" != 'boat-eng fm-boat-worker.sh idle' ] || { cat "$FIXTURES/activity"; exit 0; }
 [ "$*" = '--stdin boat-eng fm-boat-worker.sh spawn' ] || exit 97
 cat > "$FIXTURES/transport.request"
 exit "$(cat "$FIXTURES/transport.code" 2>/dev/null || printf 0)"
+SH
+cat > "$BIN/fm-check-register.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'register %s\n' "$*" >> "$FIXTURES/calls"
+[ "$*" = boat-idle ] || exit 97
+exec "$REAL_CHECK_REGISTER" "$@"
+SH
+cat > "$BIN/fm-crew-state.sh" <<'SH'
+#!/usr/bin/env bash
+cat "$FIXTURES/crew-state"
 SH
 cat > "$BIN/fm-brief.sh" <<'SH'
 #!/usr/bin/env bash
@@ -69,6 +82,7 @@ SH
 cat > "$BIN/fm-spawn.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'spawn %s\n' "$*" >> "$FIXTURES/calls"
+[ ! -e "$FIXTURES/spawn.fail" ] || exit 1
 printf '%s\n' "$@" > "$FIXTURES/spawn.argv"
 SH
 # These guards make accidental fixture escape a failure instead of contacting
@@ -94,6 +108,8 @@ new_case() {
   printf 'boat-eng\n' > "$REMOTE_HOME/.fm-secondmate-home"
   printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium"}' \
     > "$FIXTURES/request.json"
+  printf 'empty\n' > "$FIXTURES/activity"
+  printf 'state: working · source: pane · active\n' > "$FIXTURES/crew-state"
   printf '%s\n' '{"billingStatus":"active","canStart":true,"creditSecondsPerDollar":100000,"creditUsedSeconds":1000,"last24hUsageSeconds":2000,"creditBalanceSeconds":100000,"activeStates":["ready","idle","running"]}' \
     > "$FIXTURES/limits.json"
   printf '%s\n' '{"pageInfo":{"hasMore":false},"sandboxes":[{"id":"bx_ahnbu3qr","state":"stopped"}]}' \
@@ -121,7 +137,9 @@ run_entry() {
   OUT=$(env -u FM_ROOT -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u STATE \
     -u FM_WAKE_QUEUE -u FM_WAKE_QUEUE_LOCK \
     FM_HOME="$home" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" \
-    FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
+    FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
+    FM_BOAT_BIN="$FAKEBIN/boat" REAL_CHECK_REGISTER="$ROOT/bin/fm-check-register.sh" \
+    FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
     "$BIN/$entry" "$@" < "$FIXTURES/request.json" 2>&1)
   CODE=$?
 }
@@ -223,13 +241,23 @@ test_unreadable_caps() {
     new_case "failed-$file"
     : > "$FIXTURES/$file.fail"
     send_task
-    assert_pre_resume_refusal "$file unavailable"
+    if [ "$file" = info ]; then
+      expect_code 1 "$CODE" 'info unavailable refusal'
+      assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unknown box state stopped existing work'
+    else
+      assert_pre_resume_refusal "$file unavailable"
+    fi
     new_case "bad-json-$file"
     printf 'not JSON' > "$FIXTURES/$file.json"
     send_task
-    assert_pre_resume_refusal "$file malformed"
+    if [ "$file" = info ]; then
+      expect_code 1 "$CODE" 'info malformed refusal'
+      assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unknown box state stopped existing work'
+    else
+      assert_pre_resume_refusal "$file malformed"
+    fi
   done
-  pass 'Boat unreadable, incomplete, or unsafe readings stop the box before resume'
+  pass 'Boat unreadable, incomplete, or unsafe readings refuse before resume'
 }
 
 test_sender_success_and_timer() {
@@ -249,6 +277,7 @@ test_sender_success_and_timer() {
       "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
     cmp -s "$FIXTURES/request.json" "$FIXTURES/transport.request" || fail 'transport changed the request bytes'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
+    assert_grep 'register boat-idle' "$FIXTURES/calls" 'successful dispatch did not arm idle stop'
     assert_equals bx_ahnbu3qr "$(cat "$LOCAL_HOME/state/.boat-no-env")" 'successful no-env resume receipt'
   done
   new_case already-running
@@ -260,7 +289,9 @@ test_sender_success_and_timer() {
   new_case running-no-receipt
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
   send_task
-  assert_pre_resume_refusal 'running box with no no-env receipt'
+  expect_code 1 "$CODE" 'running box with no no-env receipt'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'running box with no receipt stopped existing work'
+  assert_no_grep 'on ' "$FIXTURES/calls" 'running box with no receipt reached transport'
   new_case timer-missing
   set_json ready 'del(.sandbox.archiveAfter)'
   send_task
@@ -272,7 +303,9 @@ test_sender_success_and_timer() {
     "$FIXTURES/ready.json" > "$FIXTURES/info.json"
   printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
   send_task
-  assert_pre_resume_refusal 'running timer exceeds reservation'
+  expect_code 1 "$CODE" 'running timer exceeds reservation'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'running timer refusal stopped existing work'
+  assert_no_grep 'on ' "$FIXTURES/calls" 'running timer refusal reached transport'
   new_case uncertain-transport
   printf '255\n' > "$FIXTURES/transport.code"
   send_task
@@ -280,6 +313,76 @@ test_sender_success_and_timer() {
   assert_equals 1 "$(grep -c '^on ' "$FIXTURES/calls")" 'uncertain launch was retried'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'uncertain remote launch stopped running work'
   pass 'Boat resumes only the approved box without env, preserves timers, and sends once through fm-on'
+}
+
+test_running_quota_and_route() {
+  new_case running-start-quota
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  set_json limits '.canStart = false'
+  send_task
+  expect_code 0 "$CODE" "running box needs no start quota: $OUT"
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'running worker stopped at exhausted start quota'
+  new_case running-cap-refusal
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  set_json limits '.creditUsedSeconds = 2000000'
+  send_task
+  expect_code 1 "$CODE" 'running box refuses a new task at spend cap'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'spend refusal stopped existing work'
+  new_case stopped-start-quota
+  set_json limits '.canStart = false'
+  send_task
+  assert_pre_resume_refusal 'stopped box with no start quota'
+  new_case alternate-route
+  mkdir -p "$CASE/alternate"
+  printf '%s\n' '- boat-eng - Wrong route (host: other-host; root: /home/user/firstmate; home: /home/user/boat-eng; scope: Code only; projects: firstmate; added 2026-10-13)' > "$CASE/alternate/secondmates.md"
+  OVERRIDE_DATA="$CASE/alternate"
+  send_task
+  unset OVERRIDE_DATA
+  expect_code 1 "$CODE" 'alternate registry route is refused'
+  [ ! -s "$FIXTURES/calls" ] || fail 'alternate registry route contacted Boat'
+  pass 'running work survives start quota and cap refusals; route validation follows transport registry'
+}
+
+test_idle_stop() {
+  new_case idle-stop
+  : > "$FIXTURES/resumed"
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  printf '1000\n' > "$FIXTURES/time"
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh arm
+  expect_code 0 "$CODE" 'idle check arms'
+  assert_grep 'register boat-idle' "$FIXTURES/calls" 'idle check registration'
+  [ -f "$LOCAL_HOME/state/boat-idle.check-trust" ] || fail 'watcher trust binding missing'
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
+  expect_code 0 "$CODE" 'first empty observation'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'first empty observation stopped box'
+  printf '2199\n' > "$FIXTURES/time"
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
+  expect_code 0 "$CODE" 'before idle deadline'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'box stopped early'
+  printf '2200\n' > "$FIXTURES/time"
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
+  expect_code 0 "$CODE" 'at idle deadline'
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'idle deadline did not stop box'
+  : > "$FIXTURES/calls"
+  printf '3000\n' > "$FIXTURES/time"
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
+  printf 'active\n' > "$FIXTURES/activity"
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
+  printf '4200\n' > "$FIXTURES/time"
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'live worker stopped at old idle deadline'
+  new_case remote-idle
+  seed_worker worker-a ship firstmate 'state: working active'
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
+  expect_code 0 "$CODE" 'live remote worker state'
+  assert_equals active "$OUT" 'live remote worker must keep box on'
+  printf 'state: done · source: status-log · completed\n' > "$FIXTURES/crew-state"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
+  expect_code 0 "$CODE" 'completed remote worker state'
+  assert_equals empty "$OUT" 'completed worker must release idle clock'
+  pass 'registered idle check stops only after 20 empty minutes and remote state clears timer'
 }
 
 seed_project() {
@@ -327,6 +430,15 @@ test_remote_cap_and_merge_authority() {
   spawn_task
   expect_code 1 "$CODE" 'existing task id refuses relaunch'
   assert_no_grep 'spawn ' "$FIXTURES/calls" 'existing task id launched again'
+  new_case retry-prelaunch-failure
+  seed_project firstmate
+  : > "$FIXTURES/spawn.fail"
+  spawn_task
+  expect_code 1 "$CODE" 'failed spawn'
+  assert_absent "$REMOTE_HOME/data/task-one" 'failed prelaunch spawn stranded task id'
+  rm "$FIXTURES/spawn.fail"
+  spawn_task
+  expect_code 0 "$CODE" 'same task id retry after prelaunch failure'
   new_case no-mistakes-unproven
   set_json request '.mode = "no-mistakes"'
   seed_project firstmate
@@ -341,5 +453,7 @@ test_validation
 test_whole_timer_reservation
 test_unreadable_caps
 test_sender_success_and_timer
+test_running_quota_and_route
+test_idle_stop
 test_remote_cap_and_merge_authority
 pass 'fm-boat-send'

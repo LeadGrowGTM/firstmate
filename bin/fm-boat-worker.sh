@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validate or spawn a single code-only worker in the dedicated Boat overflow home.
-# Usage: fm-boat-worker.sh validate|spawn < request.json
+# Usage: fm-boat-worker.sh validate|spawn < request.json; idle takes no input.
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
 #   id: safe task id; project: firstmate|dev-loop; kind: ship|scout;
@@ -31,11 +31,40 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 case "${1:-}" in
   --help) sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
   validate|spawn) [ "$#" -eq 1 ] || die 'one operation required' ;;
-  *) die 'expected validate or spawn' ;;
+  idle) [ "$#" -eq 1 ] || die 'one operation required' ;;
+  *) die 'expected validate, spawn, or idle' ;;
 esac
+if [ "$1" = idle ]; then
+  FM_HOME=${FM_HOME:?FM_HOME is required}
+  [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
+    [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] || die 'not the purpose-built boat-eng home'
+  [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] || die 'unsafe overflow state directory'
+  if [ -e "$FM_HOME/state/.boat-worker.lock" ]; then printf 'active\n'; exit 0; fi
+  for meta in "$FM_HOME/state/"*.meta; do
+    [ -e "$meta" ] || continue
+    [ -f "$meta" ] && [ ! -L "$meta" ] || { printf 'active\n'; exit 0; }
+    [ "$(sed -n 's/^kind=//p' "$meta")" != secondmate ] || continue
+    id=${meta##*/}
+    id=${id%.meta}
+    status=$(FM_CREW_STATE_NO_FORGE=1 "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null) || { printf 'active\n'; exit 0; }
+    case "$status" in 'state: done '*|'state: failed '*) ;; *) printf 'active\n'; exit 0 ;; esac
+  done
+  printf 'empty\n'
+  exit 0
+fi
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-boat-worker.XXXXXX")
 LOCK=
-cleanup() { rm -rf -- "$TMP"; [ -z "$LOCK" ] || fm_lock_release "$LOCK" || true; }
+CREATED_BRIEF=0
+cleanup() {
+  local status=$?
+  rm -rf -- "$TMP"
+  if [ "$status" -ne 0 ] && [ "$CREATED_BRIEF" -eq 1 ] &&
+    [ -d "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ] &&
+    [ ! -e "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ]; then
+    rm -rf -- "$FM_HOME/data/$ID"
+  fi
+  [ -z "$LOCK" ] || fm_lock_release "$LOCK" || true
+}
 trap cleanup EXIT
 head -c 65537 > "$TMP/request"
 [ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
@@ -98,6 +127,7 @@ esac
 [ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
 ARGS=()
 if [ "$MODE" = scout ]; then ARGS+=(--scout); else ARGS+=(--mode "$MODE"); fi
+CREATED_BRIEF=1
 "$SCRIPT_DIR/fm-brief.sh" "$ID" "$PROJECT" "${ARGS[@]}" >/dev/null
 BRIEF="$FM_HOME/data/$ID/brief.md"
 # Only code-only task prose crosses the wire. Generate operational paths here,

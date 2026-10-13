@@ -566,7 +566,6 @@ The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
 The approved box and SSH alias are pinned by the sender; `--prepare --code-only` performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
-The alias helper's `FM_BOAT_SSH_DIR` knob permits pins in a task-owned directory while using the existing Boat SSH key.
 
 Send one JSON task envelope whose `intent` and `spec` contain only code-only task prose, with the concrete `harness`, `model`, and `effort` already resolved under the ordinary dispatch and quota rules:
 
@@ -588,8 +587,8 @@ bin/fm-on.sh boat-eng fm-send.sh <task-id> '<steer>'
 bin/fm-on.sh boat-eng fm-remote-file.sh get data/<task-id>/report.md
 ```
 
-The controller owns the idle stop and any cap-checked extension; auto-stop remains a hard bound if it disappears.
-The sender stops and refuses on unreadable spend state or a cap violation, and preserves an uncertain remote launch for same-task reconciliation.
+The sender arms the controller's registered idle check, which stops the approved box after twenty minutes with no live worker or queued Boat dispatch; auto-stop remains a hard bound if controller supervision disappears.
+The sender refuses on unreadable spend state or a cap violation, stops a box it resumed when a later step fails, and preserves an uncertain remote launch for same-task reconciliation.
 It adds no worker retry, merge path, or supervision loop.
 
 ## Provision a route
