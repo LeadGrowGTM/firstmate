@@ -12,6 +12,9 @@ The skill tree rooted at [`.agents/skills/harness-adapters/SKILL.md`](../../.age
 | Artifact | `muse-aarch64-macos`, sha256 `4290bfafa5bbb81a6fd493aaea12f848c789b1d22edfa0c4b849151deba3e70c` |
 | Platform | macOS arm64 (Darwin 25.5.0) |
 
+The sections through the credentialed smoke record that 0.1.0 baseline.
+[Muse 1.4.7 on Linux](#muse-147-on-linux-verified-2026-10-13) records the current release and the protocol changes it introduced.
+
 The binary was fetched from the published channel and its checksum matched the published manifest before any run:
 
 ```
@@ -64,7 +67,7 @@ A two-turn session produced exactly two run brackets, the second closed by an Es
 78 {"kind":"run","run_id":"b50dac92-...","event":{"kind":"terminal","terminal":"cancelled","reason":"cancelled during model step"}}
 ```
 
-The log's first record carries the workspace binding key:
+On 0.1.0 the log's first record carries the workspace binding key:
 
 ```
 "payload_type": "runtime.session.metadata",
@@ -203,6 +206,98 @@ That is the same terminal shape the `echo`-provider interrupt produced, now conf
 
 `tests/fm-muse-harness.test.sh` pins the resulting classifier behavior: a log settled by either terminal reads `idle`, an open run reads `busy`, and only a resolution failure reads `unknown`.
 
+## Muse 1.4.7 on Linux (verified 2026-10-13)
+
+| Field | Value |
+|---|---|
+| Version | `Muse Code 1.4.7 (1.4.7-R6101.1)`, channel `muse-stable` |
+| Artifact | `muse-x86-linux`, sha256 `36e3dac91f56c15572b95be55d70ee9fd9685cd9ab49f747bab4746c8d7c2518`, matching the channel manifest's `x86_linux` checksum |
+| Platform | Linux x86_64 under WSL2 (kernel `6.6.87.2-microsoft-standard-WSL2`), tmux 3.4 |
+
+The launcher was installed into a scratch directory with `MUSE_INSTALL_DIR=<scratch>/bin MUSE_NO_MODIFY_PATH=1 MUSE_LOGIN=0 bash install.sh`, so no shell profile or host PATH entry was touched.
+Credentialed runs used a scratch `XDG_CONFIG_HOME` whose `muse/auth.json` linked to an existing stored login, and a scratch `XDG_DATA_HOME`.
+
+### Session-log changes
+
+Three changes against 0.1.0 were observed in real 1.4.7 logs, and each broke the 0.1.0 busy source:
+
+1. The log opens with a `{"retained_frame":"session_permission_transaction",...}` record, so the `runtime.session.metadata` record moved to line 2 of a main log.
+2. Payload keys are emitted sorted, so a run record reads `"payload":{"event":{"kind":"started",...},"kind":"run","run_id":"<uuid>",...}` and no longer contains the 0.1.0 byte prefix `"payload":{"kind":"run","run_id":"`.
+3. `kind` `task` records carry the run's `run_id` and an `event.kind` of `started`, so only the top-level payload `kind` separates them from run lifecycle records.
+
+Against the 9 main logs of a 2026-10-13 lab, the 0.1.0 code bound no log to its workspace and folded every log to `none`; the current code binds all 9 and folds them `settled`.
+Its run-event output matched a JSON-parsing reference on all 27 lab logs, main and sub-agent, under both gawk and mawk.
+`tests/fm-muse-harness.test.sh` pins all three shapes.
+
+### Live guards
+
+```
+$ COLORTERM=truecolor FM_MUSE_SIGNALS_LIVE=1 bash tests/fm-muse-signals-live-e2e.test.sh
+ok - Muse's real session protocol classifies busy in flight
+ok - Muse's real session protocol emits one matched run bracket
+ok - Muse's real bright prompt glyph classifies as an empty composer
+
+$ FM_HARNESS_LIVENESS_DRIFT=1 bash tests/fm-harness-liveness-drift-live-e2e.test.sh
+ok - harness liveness: muse Muse Code 1.4.7 (1.4.7-R6101.1) classifies alive
+ok - harness detection: muse Muse Code 1.4.7 (1.4.7-R6101.1) is identified by the ancestry walk at comm strength
+```
+
+### Composer rendering
+
+Captured with `tmux capture-pane -p -e` under `COLORTERM=truecolor`:
+
+```
+^[[38;2;90;160;255m^[[48;2;38;56;84m❯ ^[[38;2;204;211;219mglyph probe^[[39m
+^[[0m^[[38;2;90;160;255m❯ ^[[38;2;103;108;116mType @ to search and insert workspace file paths^[[39m
+```
+
+The prompt glyph is now `❯` (U+276F) at the same `38;2;90;160;255` colour, and the trust dialog still marks its choice with `⟩`.
+Without `COLORTERM` the same rows render the glyph as `38;5;75` and the placeholder as `38;5;242`.
+
+### Reasoning effort and models
+
+`muse --help` lists `--reasoning-effort <EFFORT>` as `none|minimal|low|medium|high|xhigh|max|ultra (default: high; alias: --effort)`, but `ultra` is gated off:
+
+```
+$ muse exec --model muse-wonder-1.0 --reasoning-effort ultra ...
+tbh: reasoning effort ultra is not available (gate ultra_reasoning_effort is closed); using xhigh
+
+$ muse exec --model muse-wonder-1.0 --reasoning-effort max ...
+EFFORT-max-OK
+
+$ muse exec --model muse-spark-1.2 --reasoning-effort max ...
+agent loop failed: model failed: API error 400 [...]: reasoning_effort 'max' is not supported for model 'muse-spark-1.2'. Supported values: [minimal, low, medium, high, xhigh] (invalid_request_error)
+```
+
+`muse-wonder-full-1.0` also answered at `max`.
+That is why `bin/fm-spawn.sh` maps an explicit `max` to `--reasoning-effort max` and never to `ultra`.
+
+The model catalog under the Muse data directory lists these visible models, each with a 1,007,997-token context and 128,000-token output limit:
+
+| Model | Released | Catalog flags | Efforts |
+|---|---|---|---|
+| `muse-wonder-1.0` | 2026-10-12 | `is_default` | minimal, low, medium, high, xhigh, max |
+| `muse-wonder-full-1.0` | 2026-10-12 | `is_current` | minimal, low, medium, high, xhigh, max |
+| `muse-spark-1.3` | 2026-09-02 | | minimal, low, medium, high, xhigh, max |
+| `muse-spark-1.2` | 2026-08-05 | | minimal, low, medium, high, xhigh |
+
+Hidden `-contributor` variants and `muse-image-1.0` are also listed and are not dispatch targets.
+
+### Credentialed multi-step smoke
+
+A real `muse --yolo --model muse-wonder-1.0 --reasoning-effort low` TUI pane ran a five-step shell tool loop as one turn, then an interrupted second turn, with the fold sampled through `bin/fm-busy-lib.sh`:
+
+```
+turn1 samples (2s apart): none busy busy busy busy busy busy busy busy settled
+records=274 run_started=1 run_terminal=1 tool_batches=5 terminal=completed
+turn2 busy_before_escape=1
+turn2 state before escape=busy
+turn2 state after escape=settled
+turn2 terminal=cancelled
+```
+
+One run still brackets a whole multi-step turn, and a single Escape still closes it with `terminal` `cancelled`, so the settled-log idle trust above holds on 1.4.7.
+
 ## Refreshing this record
 
 Run both live guards after any muse upgrade, because the version-suffixed process name, session protocol, and styled composer are vendor-controlled surfaces:
@@ -213,7 +308,8 @@ FM_MUSE_SIGNALS_LIVE=1 bin/fm-test-run.sh tests/fm-muse-signals-live-e2e.test.sh
 ```
 
 The Muse signals guard requires a real `muse` binary and tmux but uses `--provider echo`, so it does not require `META_API_KEY` and cannot re-check the real-model turn-to-run relationship on its own.
-The guard follows SGR state through the final prompt glyph and rejects both bright-then-dark and malformed-RGB negative controls before accepting that glyph's effective luminance.
+The guard follows SGR state through the final prompt glyph, either `❯` or `⟩`, and rejects both bright-then-dark and malformed-RGB negative controls before accepting that glyph's effective luminance.
+Run it with `COLORTERM=truecolor` in the launching environment, because without it Muse renders the glyph in indexed colour and the truecolor check cannot pass.
 
 muse's launcher can replace the running binary underneath the fleet, so an upgrade that changes the session protocol also invalidates the credentialed evidence above.
 Repeat that smoke after a protocol-affecting upgrade: run one real multi-step tool-loop turn with credentials in place, confirm the run-scoped `started`/`terminal` counts are still exactly one each, and confirm an Escape still yields `terminal` with `cancelled`.

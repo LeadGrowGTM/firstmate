@@ -313,10 +313,17 @@ fm_busy_record_read() {  # <state-dir> <id>
 # muse persists an append-only session event log per session at
 # <sessions-root>/YYYY/MM/DD/<session-uuid>/session.jsonl, and brackets every
 # submitted turn with one run lifecycle pair. Verified live on muse
-# 0.1.0-R708.1 across completed, interrupted, and killed-mid-turn turns:
-#   {"payload":{"kind":"run","run_id":"<uuid>","event":{"kind":"started",...
-#   {"payload":{"kind":"run","run_id":"<uuid>","event":{"kind":"terminal",
-#     "terminal":"completed"|"cancelled",...
+# 0.1.0-R708.1 across completed, interrupted, and killed-mid-turn turns, and on
+# 1.4.7-R6101.1, which emits the same fields with payload keys in sorted order:
+#   {"payload_type":"runtime.session","payload":{"kind":"run","run_id":"<uuid>",
+#     "event":{"kind":"started",...
+#   {"payload_type":"runtime.session","payload":{"kind":"run","run_id":"<uuid>",
+#     "event":{"kind":"terminal","terminal":"completed"|"cancelled",...
+# Key order is not part of the format, so records are tokenized rather than
+# matched by byte prefix. The runtime.session.metadata record carrying
+# payload.record.workspace_root was the first line on 0.1.0; 1.4.x precedes it
+# with a {"retained_frame":...} transaction record, so the binding reads the
+# first metadata record in the log head.
 # An Escape interrupt closes its run with terminal=cancelled, so unlike Claude's
 # Stop hook this source covers the interrupt path itself. Any later
 # run_retracted records follow the terminal rather than replacing it.
@@ -395,10 +402,19 @@ function metadataWorkspace(file) {
     descriptor = fs.openSync(file, "r");
     const buffer = Buffer.alloc(65536);
     const length = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
-    const newline = buffer.indexOf(10, 0);
-    if (newline < 0 || newline >= length) return null;
-    const record = JSON.parse(buffer.subarray(0, newline).toString("utf8"));
-    return record?.payload?.record?.workspace_root ?? null;
+    // muse 1.4.x precedes the metadata record with retained_frame records, so
+    // take the first metadata record in the log head rather than line one.
+    let start = 0;
+    while (start < length) {
+      const newline = buffer.indexOf(10, start);
+      if (newline < 0 || newline >= length) return null;
+      const record = JSON.parse(buffer.subarray(start, newline).toString("utf8"));
+      if (record?.payload_type === "runtime.session.metadata") {
+        return record?.payload?.record?.workspace_root ?? null;
+      }
+      start = newline + 1;
+    }
+    return null;
   } catch {
     return null;
   } finally {
@@ -563,35 +579,48 @@ EOF
   printf '%s' "$selected"
 }
 
+# fm_busy_muse_run_events: print "<run-id> TAB started|terminal TAB <terminal>"
+# for each run lifecycle record. Each candidate line is tokenized and its
+# string values are keyed by their full object path, so key order and nested
+# records cannot change the verdict. awk rather than node keeps a cached
+# binding's per-poll classification free of an interpreter launch.
 fm_busy_muse_run_events() {  # <session-log>
   [ -f "$1" ] || return 1
   LC_ALL=C awk '
-    BEGIN { OFS = "\t"; pre = "\"payload\":{\"kind\":\"run\",\"run_id\":\"" }
-    {
-      p = index($0, pre)
-      if (p == 0) next
-      rest = substr($0, p + length(pre))
-      q = index(rest, "\"")
-      if (q == 0) next
-      rid = substr(rest, 1, q - 1)
-      rest = substr(rest, q)
-      head = "\",\"event\":{\"kind\":\""
-      if (substr(rest, 1, length(head)) != head) next
-      rest = substr(rest, length(head) + 1)
-      q = index(rest, "\"")
-      if (q == 0) next
-      ev = substr(rest, 1, q - 1)
-      terminal = ""
-      if (ev == "terminal") {
-        marker = "\"terminal\":\""
-        p = index(rest, marker)
-        if (p != 0) {
-          value = substr(rest, p + length(marker))
-          q = index(value, "\"")
-          if (q != 0) terminal = substr(value, 1, q - 1)
+    function scan(s,    n, i, j, c, d, expect_key, str, k, path) {
+      split("", val)
+      n = length(s); d = 0; expect_key = 0
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "{") { d++; type[d] = "o"; key[d] = ""; expect_key = 1 }
+        else if (c == "[") { d++; type[d] = "a"; key[d] = ""; expect_key = 0 }
+        else if (c == "}" || c == "]") { d--; expect_key = 0 }
+        else if (c == ",") { expect_key = (type[d] == "o") }
+        else if (c == ":") { expect_key = 0 }
+        else if (c == "\"") {
+          for (j = i + 1; j <= n; j++) {
+            c = substr(s, j, 1)
+            if (c == "\\") { j++; continue }
+            if (c == "\"") break
+          }
+          str = substr(s, i + 1, j - i - 1)
+          i = j
+          if (d < 1) continue
+          if (expect_key && type[d] == "o") { key[d] = str; expect_key = 0; continue }
+          path = ""
+          for (k = 1; k <= d; k++) path = path "/" (type[k] == "o" ? key[k] : "[]")
+          val[path] = str
         }
       }
-      if (ev == "started" || ev == "terminal") print rid, ev, terminal
+    }
+    BEGIN { OFS = "\t" }
+    index($0, "\"run\"") && index($0, "\"run_id\"") {
+      scan($0)
+      if (val["/payload_type"] != "runtime.session" || val["/payload/kind"] != "run") next
+      rid = val["/payload/run_id"]
+      ev = val["/payload/event/kind"]
+      if (rid == "" || (ev != "started" && ev != "terminal")) next
+      print rid, ev, (ev == "terminal" ? val["/payload/event/terminal"] : "")
     }
   ' "$1"
 }
@@ -600,10 +629,11 @@ fm_busy_muse_run_events() {  # <session-log>
 #   busy     at least one run started with no matching terminal
 #   settled  every started run reached a terminal
 #   none     the log holds no run lifecycle records at all
-# The match is anchored on the exact structural prefix rather than a bare
-# "kind":"terminal" search, because muse also emits nested "record":{"kind":
-# "terminal"} cleanup-effect payloads that are NOT run terminals and would
-# otherwise close a run that is still in flight.
+# fm_busy_muse_run_events selects only a top-level payload kind of "run",
+# never a bare "kind":"terminal" search, because muse also emits nested
+# "record":{"kind":"terminal"} cleanup-effect payloads and task records
+# carrying a run_id and a started event that are NOT run lifecycle records and
+# would otherwise skew a run's state.
 fm_busy_muse_run_state() {  # <session-log>
   [ -f "$1" ] || return 1
   fm_busy_muse_run_events "$1" | LC_ALL=C awk -F '\t' '
