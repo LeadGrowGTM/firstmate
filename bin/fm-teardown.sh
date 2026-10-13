@@ -1881,6 +1881,9 @@ teardown_treehouse_return() {
   local dir=$1 cd_dir=$2 label=$3 post_cleanup_check=${4:-}
   local out lock attempt=0 max_retries lock_desc
 
+  if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$post_cleanup_check" ]; then
+    "$post_cleanup_check" || return 1
+  fi
   # Capture stdout+stderr so non-lock failures stay visible and lock failures can
   # be matched by signature even when the lock file is already gone mid-check.
   if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
@@ -1908,6 +1911,9 @@ teardown_treehouse_return() {
     echo "teardown: $label return failed with transient git lock ($lock_desc); waiting ${TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS}s and retrying ($attempt/${max_retries})" >&2
     sleep "$TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS"
 
+    if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$post_cleanup_check" ]; then
+      "$post_cleanup_check" || return 1
+    fi
     if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
       [ -n "$out" ] && printf '%s\n' "$out"
       echo "teardown: $label return succeeded on retry; lock cleared on its own" >&2
@@ -1982,7 +1988,7 @@ validate_worktree_teardown_safety() {
   untracked=normal
   [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
-    if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored 2>/dev/null); then
+    if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored --ignore-submodules=none 2>/dev/null); then
       echo "REFUSED: cannot inspect worktree $WT for uncommitted changes." >&2
       return 1
     fi
@@ -3763,11 +3769,17 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
     ORCA_PATH_MATCH_VERIFIED=1
   fi
   if [ -d "$WT" ]; then
+    if [ "$ONLY_IF_STOPPED" = 1 ]; then
+      validate_worktree_teardown_safety || exit 1
+    fi
     branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
     if [ "$branch" != "HEAD" ]; then
       if git -C "$WT" checkout --detach -q 2>/dev/null; then
         git -C "$WT" branch -D "$branch" >/dev/null 2>&1 || true
       fi
+    fi
+    if [ "$ONLY_IF_STOPPED" = 1 ]; then
+      validate_worktree_teardown_safety || exit 1
     fi
     rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
       "$WT/.opencode/plugins/fm-busy-state.js" \
@@ -3781,6 +3793,9 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
 elif [ "$KIND" != secondmate ] && ! teardown_owns_worktree; then
   :
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    validate_worktree_teardown_safety || exit 1
+  fi
   branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
   if [ "$branch" != "HEAD" ]; then
     if git -C "$WT" checkout --detach -q 2>/dev/null; then
@@ -3788,6 +3803,9 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
     fi
   fi
   # Remove our hook file so a reused pool worktree cannot fire signals for a dead task.
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    validate_worktree_teardown_safety || exit 1
+  fi
   rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
     "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
   # Kills remaining processes in the worktree (including the agent), resets, returns
@@ -3795,7 +3813,8 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # the project. teardown_treehouse_return tolerates transient and stale git locks
   # left by a killed crew process; see the script header for retry and stale-lock proof.
   post_lock_cleanup_check=
-  if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
+  if [ "$ONLY_IF_STOPPED" = 1 ] \
+    || { [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; }; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {

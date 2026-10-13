@@ -92,6 +92,7 @@ add_worker() {
 
 sweep() {
   env PATH="$1/fakebin:$PATH" FM_HOME="$1" FM_ROOT_OVERRIDE="$ROOT" FIXTURE="$1" \
+    FM_SWEEP_REAL_GIT="${FM_SWEEP_REAL_GIT:-}" FM_SWEEP_REAL_RM="${FM_SWEEP_REAL_RM:-}" \
     FM_TEARDOWN_GUARD_DONE="${FM_TEARDOWN_GUARD_DONE:-1}" "$SWEEP" 2>&1
 }
 
@@ -189,6 +190,38 @@ test_flagged_tracked_edits_kept() {
   pass 'sweep refuses copies with assume-unchanged or skip-worktree paths'
 }
 
+test_submodule_work_kept() {
+  local home out kind child
+  for kind in tracked untracked moved; do
+    home=$(make_home "submodule-$kind")
+    git init -q "$home/submodule-source"
+    printf 'baseline\n' > "$home/submodule-source/file"
+    git -C "$home/submodule-source" add file
+    git -C "$home/submodule-source" commit -qm baseline
+    git -C "$home/projects/project" -c protocol.file.allow=always submodule add -q "$home/submodule-source" child
+    git -C "$home/projects/project" commit -qam submodule
+    git -C "$home/projects/project" push -q origin main
+    add_worker "$home"
+    git -C "$home/worker" -c protocol.file.allow=always submodule update --init -q
+    git -C "$home/projects/project" config submodule.child.ignore all
+    child="$home/worker/child"
+    case "$kind" in
+      tracked) printf 'operator edit\n' >> "$child/file" ;;
+      untracked) printf 'operator file\n' > "$child/new-file" ;;
+      moved)
+        printf 'operator commit\n' >> "$child/file"
+        git -C "$child" add file
+        git -C "$child" commit -qm operator-commit
+        ;;
+    esac
+    out=$(sweep "$home")
+    assert_contains "$out" 'uncommitted changes' "$kind submodule work refused"
+    assert_present "$home/state/task.meta" "$kind submodule record kept"
+    assert_present "$child/file" "$kind submodule copy kept"
+  done
+  pass 'sweep preserves edits, untracked files, and moved commits in ignored submodules'
+}
+
 # Spawn writes Claude wiring with or without its statusLine fallback.
 render_claude_wiring() {  # <claude|claude-statusline> <state-real> <statusline-cmd>
   if [ "$1" = claude-statusline ]; then
@@ -239,6 +272,57 @@ test_generated_wiring_exact_and_edited() {
     assert_grep 'operator edit' "$home/worker/$path" "$harness edited wiring kept"
   done
   pass 'sweep removes exact Claude (with or without statusLine) and OpenCode wiring and keeps edits'
+}
+
+test_late_work_kept() {
+  local home out kind stage state_real
+  for kind in ship scout; do
+    if [ "$kind" = scout ] && ! command -v tasks-axi >/dev/null 2>&1; then
+      continue
+    fi
+    for stage in wiring return; do
+      home=$(make_home "late-$kind-$stage"); add_worker "$home" "$kind"
+      if [ "$kind" = scout ]; then
+        mkdir -p "$home/data/task"
+        printf 'report\n' > "$home/data/task/report.md"
+        env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" \
+          "$ROOT/bin/fm-captain-hold.sh" complete task --none >/dev/null
+      fi
+      printf 'busy_gen=sweep-generation\n' >> "$home/state/task.meta"
+      state_real=$(cd "$home/state" && pwd -P)
+      mkdir -p "$home/worker/.claude"
+      render_claude_wiring claude "$state_real" '' > "$home/worker/.claude/settings.local.json"
+      if [ "$stage" = wiring ]; then
+        cat > "$home/fakebin/git" <<'FAKE'
+#!/usr/bin/env bash
+"$FM_SWEEP_REAL_GIT" "$@" || exit $?
+if [[ " $* " == *' checkout --detach -q '* ]]; then
+  printf 'operator edit\n' >> "$FIXTURE/worker/.claude/settings.local.json"
+fi
+FAKE
+        chmod +x "$home/fakebin/git"
+      else
+        cat > "$home/fakebin/rm" <<'FAKE'
+#!/usr/bin/env bash
+"$FM_SWEEP_REAL_RM" "$@" || exit $?
+if [[ " $* " == *" $FIXTURE/worker/.claude/settings.local.json "* ]]; then
+  printf 'operator file\n' > "$FIXTURE/worker/new-file"
+fi
+FAKE
+        chmod +x "$home/fakebin/rm"
+      fi
+      out=$(FM_SWEEP_REAL_GIT="$(command -v git)" FM_SWEEP_REAL_RM="$(command -v rm)" sweep "$home")
+      assert_contains "$out" 'uncommitted changes' "$kind late $stage work refused"
+      assert_present "$home/state/task.meta" "$kind late $stage record kept"
+      assert_present "$home/worker" "$kind late $stage copy kept"
+      if [ "$stage" = wiring ]; then
+        assert_grep 'operator edit' "$home/worker/.claude/settings.local.json" "$kind edited wiring kept"
+      else
+        assert_present "$home/worker/new-file" "$kind late file kept"
+      fi
+    done
+  done
+  pass 'sweep rechecks ships and scouts before wiring removal and return'
 }
 
 test_missing_copy_remote_branch_kept_until_merged() {
@@ -552,7 +636,9 @@ test_clean_stopped_and_idempotence
 test_changes_kept
 test_ignored_work_kept
 test_flagged_tracked_edits_kept
+test_submodule_work_kept
 test_generated_wiring_exact_and_edited
+test_late_work_kept
 test_missing_copy_remote_branch_kept_until_merged
 test_decisions_secondmates_and_unknown_kept
 test_recorded_pr_kept_until_merged
