@@ -1255,16 +1255,19 @@ _fm_composer_row_is_braille_furniture() {  # <row>
 }
 
 # _fm_composer_bare_row_strip_furniture_var: on a bare agent-glyph row, reduce
-# the row to its glyph when everything behind the glyph is braille furniture,
-# in place through the named variable; a row whose tail carries anything else,
-# and a row with no agent glyph, are left untouched. This is the glyph-row half
-# of the braille rule: codex 0.154's starfield cells behind its (stripped)
-# placeholder must not stand in for typed input.
+# the row to its glyph when everything behind the glyph is known furniture.
+# Codex draws braille starfield cells there; omp 18.8.6 can draw its right-aligned
+# thinking-effort key hint there. Its dark words vanish under ghost stripping,
+# leaving only the two key icons. Other tails and rows without an agent glyph
+# are left untouched, so typed input still blocks injection.
 _fm_composer_bare_row_strip_furniture_var() {  # <varname>
   local __fmbf_name=$1 __fmbf_text=${!1} __fmbf_glyph='' __fmbf_body
   fm_composer_leading_agent_glyph_var __fmbf_glyph "$__fmbf_text" || return 0
   __fmbf_body=${__fmbf_text#*"$__fmbf_glyph"}
   if _fm_composer_row_is_braille_furniture "$__fmbf_body"; then
+    printf -v "$__fmbf_name" '%s' "$__fmbf_glyph"
+  elif [ "$__fmbf_glyph" = '❯' ] \
+       && [[ "$__fmbf_body" =~ ^[[:space:]]{8,}󰘶[[:space:]]+󰌒([[:space:]]+to[[:space:]]+change[[:space:]]+thinking[[:space:]]+effort)?$ ]]; then
     printf -v "$__fmbf_name" '%s' "$__fmbf_glyph"
   fi
 }

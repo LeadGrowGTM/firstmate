@@ -486,6 +486,23 @@ test_matrix_omp_status_row_bounds_bare_composer() {
   pass "matrix: omp's status row bounds the bare composer's wrap region"
 }
 
+test_matrix_omp_right_aligned_effort_hint() {
+  # omp 18.8.6 can draw this key hint at the far right of an otherwise empty
+  # borderless composer. The status row below it is separate furniture.
+  local gap idle idle_ansi typed near
+  gap=$(printf '%20s' '')
+  idle=$'transcript\n❯'"$gap"$'󰘶 󰌒 to change thinking effort\n 󰵗 · 󰪣 Opus 5.5 · 3.9%/1M'
+  typed=$'transcript\n❯ fix the flaky test'"$gap"$'󰘶 󰌒 to change thinking effort\n 󰵗 · 󰪣 Opus 5.5 · 3.9%/1M'
+  near=$'transcript\n❯       󰘶 󰌒 to change thinking effort\n 󰵗 · 󰪣 Opus 5.5 · 3.9%/1M'
+  idle_ansi=$'transcript\n❯'"$gap""${ESC}[38;2;90;160;255m󰘶 󰌒${ESC}[38;2;103;108;116m to change thinking effort${ESC}[0m"$'\n 󰵗 · 󰪣 Opus 5.5 · 3.9%/1M'
+  assert_screen "idle omp effort hint on tmux" empty "$CAPS_TMUX" "$idle" 1
+  assert_screen "idle omp effort hint on cursorless backend" empty "$CAPS_STYLED" "$idle"
+  assert_screen "idle omp effort hint with dark words" empty "$CAPS_STYLED" "$idle_ansi"
+  assert_screen "typed text ahead of omp effort hint" pending "$CAPS_STYLED" "$typed"
+  assert_screen "short gap before effort hint is unproven" pending "$CAPS_STYLED" "$near"
+  pass "matrix: omp's far-right effort hint is furniture only after an empty glyph"
+}
+
 # codex_cell <grey> <glyph>: one codex 0.154 starfield cell exactly as the
 # harness draws it - a truecolor grey foreground, the composer's grey
 # background, the braille glyph, then a reset.
@@ -1030,6 +1047,7 @@ test_matrix_muse_truecolor_glyph_survives_signal_loss
 test_matrix_cursor_reverse_video_placeholder_remnant
 test_matrix_herdr_halfblock_rule_bounds_bare_wrap
 test_matrix_omp_status_row_bounds_bare_composer
+test_matrix_omp_right_aligned_effort_hint
 test_matrix_codex_idle_starfield_furniture
 test_matrix_pi_separated_needs_identity
 test_matrix_pi_dollar_status_footer_is_empty

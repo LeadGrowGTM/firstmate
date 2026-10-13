@@ -2590,7 +2590,7 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 ### Linux re-verification (2026-10-13)
 
 omp 18.8.6 (`~/.local/bin/omp`) was re-verified on Linux x86_64 under WSL2 with the tmux 3.4 backend and the `openai-codex/gpt-6-astra` model; the record above was macOS through Herdr.
-No adapter change was needed.
+No omp-specific adapter change was needed.
 
 ```
 $ bash tests/fm-omp-harness.test.sh
