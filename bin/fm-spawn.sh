@@ -1366,6 +1366,7 @@ parse_orca_worktree_result() {
 
 spawn_abort_cleanup() {
   local status=$?
+  local lease_dirty lease_unlanded
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
     [ -n "$SPAWN_META_TMP" ] &&
@@ -1479,11 +1480,17 @@ spawn_abort_cleanup() {
     fi
   fi
   if [ -n "$SPAWN_PRIVATE_LEASE_PATH" ] &&
-    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] &&
-    { [ "$SPAWN_LAUNCH_SENT" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; }; then
+    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
     if fm_treehouse_same_clone "$PROJ_ABS" "$SPAWN_PRIVATE_LEASE_PATH" &&
       [ "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" != "$PROJ_ABS_REAL" ]; then
-      if ! (cd "$PROJ_ABS" && treehouse return --force "$SPAWN_PRIVATE_LEASE_PATH") >/dev/null 2>&1; then
+      if [ "$SPAWN_LAUNCH_SENT" != 0 ]; then
+        echo "warning: leaving per-home treehouse lease at '$SPAWN_PRIVATE_LEASE_PATH' in place: a worker was launched; preserve its work for teardown" >&2
+      elif ! lease_dirty=$(git -C "$SPAWN_PRIVATE_LEASE_PATH" status --porcelain 2>/dev/null) ||
+        ! lease_unlanded=$(git -C "$SPAWN_PRIVATE_LEASE_PATH" log --oneline HEAD --not --remotes -- 2>/dev/null); then
+        echo "warning: leaving per-home treehouse lease at '$SPAWN_PRIVATE_LEASE_PATH' in place: cannot prove that it has no uncommitted or unlanded work" >&2
+      elif [ -n "$lease_dirty" ] || [ -n "$lease_unlanded" ]; then
+        echo "warning: leaving per-home treehouse lease at '$SPAWN_PRIVATE_LEASE_PATH' in place: it has uncommitted or unlanded work" >&2
+      elif ! (cd "$PROJ_ABS" && treehouse return --force "$SPAWN_PRIVATE_LEASE_PATH") >/dev/null 2>&1; then
         echo "warning: could not return the per-home treehouse lease at $SPAWN_PRIVATE_LEASE_PATH" >&2
       fi
     fi

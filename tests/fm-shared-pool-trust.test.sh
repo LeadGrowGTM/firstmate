@@ -71,7 +71,11 @@ esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows) [ -z "${FM_FAKE_RELAUNCH_WINDOW:-}" ] || printf '%s\n' "$FM_FAKE_RELAUNCH_WINDOW"; exit 0 ;;
-  has-session|new-session|new-window|kill-window|set-window-option) exit 0 ;;
+  has-session|new-session|new-window|set-window-option) exit 0 ;;
+  kill-window)
+    [ -z "${FM_FAKE_ENDPOINT_CLOSE_LOG:-}" ] || printf '%s\n' "$*" >> "$FM_FAKE_ENDPOINT_CLOSE_LOG"
+    exit 0
+    ;;
   send-keys)
     if [ -n "${FM_FAKE_PANE_LOG:-}" ]; then
       shift
@@ -87,6 +91,11 @@ case "${1:-}" in
             [ -n "$literal" ] || printf '%s\n' "$a" >> "$FM_FAKE_PANE_LOG"
             if [ -n "$literal" ] && [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
               printf '%s\n' "$a" >> "$FM_FAKE_LAUNCH_LOG"
+            fi
+            if [ -n "$literal" ] && [ -n "${FM_FAKE_WORKER_EDIT_PATH:-}" ]; then
+              case "$a" in
+                *launch.*) printf 'worker work that must survive\n' >> "$FM_FAKE_WORKER_EDIT_PATH/README.md" ;;
+              esac
             fi
             if [ "$a" = exit ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ]; then
               : > "$FM_FAKE_EXIT_FLAG"
@@ -225,11 +234,13 @@ prepare_spawn_home() {  # <case> <id>
 
 # run_spawn <pane> <id>: one launch of widget from CASE_HOME.
 run_spawn() {
+  local pane=$1 id=$2
+  shift 2
   (
     unset GIT_CONFIG_GLOBAL
     XDG_STATE_HOME="$CASE_STATE" \
-      fm_test_run_spawn "$CASE_HOME" "$1" "$CASE_FAKEBIN" "$2" "$CASE_HOME/projects/widget" \
-      --mode no-mistakes --yolo off
+      fm_test_run_spawn "$CASE_HOME" "$pane" "$CASE_FAKEBIN" "$id" "$CASE_HOME/projects/widget" \
+      --mode no-mistakes --yolo off "$@"
   )
 }
 
@@ -353,6 +364,85 @@ test_spawn_that_stops_after_the_lease_returns_it() {
   assert_exact_line "$(printf 'call=return --force %s\t%s' "$own" "$CASE_HOME/projects/widget")" "$tree_log" \
     "the lease was not returned from the project clone that acquired it"
   pass "a launch that stops after leasing returns the lease"
+}
+
+test_spawn_abort_preserves_uncommitted_and_unlanded_leases() {
+  local kind id case_dir foreign own stray pane_log tree_log out status head after_exit
+  for kind in dirty unlanded; do
+    id=pool-lease-abort-$kind
+    case_dir=$TMP_ROOT/spawn-abort-$kind
+    prepare_spawn_home "$case_dir" "$id"
+    foreign=$case_dir/shared-pool/1/widget
+    own=$CASE_POOL/.treehouse/kept/1/widget
+    stray=$case_dir/stray
+    add_worktree "$case_dir/other/projects/widget" "$foreign"
+    add_worktree "$CASE_HOME/projects/widget" "$own" "kept-$id"
+    add_worktree "$CASE_HOME/projects/widget" "$stray" "stray-$id"
+    printf 'work that must survive\n' >> "$own/README.md"
+    if [ "$kind" = unlanded ]; then
+      git -C "$own" add README.md
+      git -C "$own" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' \
+        commit -qm 'unlanded work'
+    fi
+    head=$(git -C "$own" rev-parse HEAD)
+    pane_log=$case_dir/pane.log
+    tree_log=$case_dir/treehouse.log
+    : > "$pane_log"
+    : > "$tree_log"
+    status=0
+    # Dirty leases reach the real base-refresh refusal; committed leases abort
+    # on the pane handoff before base refresh can change their branch.
+    after_exit=$own
+    [ "$kind" != unlanded ] || after_exit=$stray
+    out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+      FM_FAKE_TREEHOUSE_PRINT="$own" FM_FAKE_PANE_AFTER_EXIT="$after_exit" \
+      FM_FAKE_EXIT_FLAG="$case_dir/exited" run_spawn "$foreign" "$id") || status=$?
+    [ "$status" -ne 0 ] || fail "spawn succeeded instead of aborting the $kind lease"$'\n'"$out"
+    if [ "$kind" = dirty ]; then
+      assert_contains "$out" "refusing to discard uncommitted work" \
+        "the dirty lease did not reach the base-refresh refusal"
+    fi
+    assert_no_grep "args=return" "$tree_log" "abort returned a lease with $kind work"
+    assert_contains "$out" "leaving per-home treehouse lease at '$own' in place" \
+      "abort did not identify the preserved $kind lease"
+    assert_grep "work that must survive" "$own/README.md" "abort lost the $kind work"
+    assert_equals "$head" "$(git -C "$own" rev-parse HEAD)" "abort changed the $kind lease's HEAD"
+    [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "aborted $kind lease published a task record"
+  done
+  pass "abort preserves leases with uncommitted or unlanded work"
+}
+
+test_spawn_keeps_worker_edits_after_readiness_failure_closes_endpoint() {
+  local id=pool-closed-worker case_dir=$TMP_ROOT/spawn-closed-worker
+  local foreign own pane_log tree_log close_log out status=0
+  prepare_spawn_home "$case_dir" "$id"
+  fm_fake_exit0 "$CASE_FAKEBIN" rovo
+  foreign=$case_dir/shared-pool/1/widget
+  own=$CASE_POOL/.treehouse/kept/1/widget
+  add_worktree "$case_dir/other/projects/widget" "$foreign"
+  add_worktree "$CASE_HOME/projects/widget" "$own" "kept-$id"
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  close_log=$case_dir/closed.log
+  : > "$pane_log"
+  : > "$tree_log"
+  : > "$close_log"
+  # The fake worker edits its checkout when the launch is sent. Empty pane
+  # captures then fail Rovo's real readiness gate and close that endpoint.
+  out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    FM_FAKE_TREEHOUSE_PRINT="$own" FM_FAKE_PANE_AFTER_EXIT="$own" \
+    FM_FAKE_EXIT_FLAG="$case_dir/exited" FM_FAKE_WORKER_EDIT_PATH="$own" \
+    FM_FAKE_ENDPOINT_CLOSE_LOG="$close_log" FM_ROVO_READY_POLLS=3 FM_ROVO_POLL_INTERVAL=0 \
+    run_spawn "$foreign" "$id" --harness rovo) || status=$?
+  [ "$status" -ne 0 ] || fail "spawn succeeded despite the failed readiness gate"$'\n'"$out"
+  assert_contains "$out" "rovo did not show a verified ready signal" "readiness gate did not fail"
+  assert_grep "kill-window" "$close_log" "the launched endpoint was not closed"
+  assert_grep "worker work that must survive" "$own/README.md" "closed endpoint lost worker edits"
+  assert_no_grep "args=return" "$tree_log" "closed endpoint caused the worker lease to be returned"
+  assert_contains "$out" "a worker was launched; preserve its work for teardown" \
+    "abort did not explain why the worker lease was preserved"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "readiness failure retained the task record"
+  pass "readiness failure closes the worker endpoint while preserving its work"
 }
 
 test_spawn_keeps_lease_after_dispatch_rollback_with_open_endpoint() {
@@ -552,6 +642,8 @@ test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
 test_spawn_labels_treehouses_own_error_when_the_lease_fails
 test_spawn_refuses_a_configured_foreign_lease_without_returning_it
 test_spawn_that_stops_after_the_lease_returns_it
+test_spawn_abort_preserves_uncommitted_and_unlanded_leases
+test_spawn_keeps_worker_edits_after_readiness_failure_closes_endpoint
 test_spawn_keeps_lease_after_dispatch_rollback_with_open_endpoint
 test_spawn_keeps_the_shared_copy_of_its_own_clone
 test_claude_relaunch_refuses_a_recorded_copy_of_another_clone
