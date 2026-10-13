@@ -2593,7 +2593,9 @@ test_legacy_option_migration_is_explicit_and_idempotent() {
 EOF
   before=$(cat "$home/data/backlog.md")
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "migration preview failed"
-  assert_contains "$out" 'would-hold: route' "migration did not preview the task"
+  assert_contains "$out" 'would-hold: route Choose route' "migration did not preview the new task title"
+  assert_contains "$out" 'would-hold: renamed Current task title' "migration preview ignored the existing title"
+  assert_not_contains "$out" 'would-hold: renamed Legacy task title' "migration preview offered to rename the task"
   [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "dry run mutated backlog"
   run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null || fail "migration apply failed"
   before=$(tasks_in "$home" show route --full)
@@ -2627,6 +2629,45 @@ EOF
   if run_captain "$home" migrate-options "$home/bad.json" --apply >/dev/null 2>&1; then fail "bad inventory accepted"; fi
   if tasks_in "$home" show bad >/dev/null 2>&1; then fail "invalid inventory partially applied"; fi
   pass "migration previews by default, retains the side file, and never resurrects answered calls"
+}
+
+test_migration_rejects_unreadable_target() {
+  local home before out mode
+  home=$(make_home migration-read-error)
+  tasks_in "$home" add unreadable "Current title" --repo sample >/dev/null \
+    || fail "could not create the unreadable migration target"
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"unreadable","title":"Legacy title","about":"Route","decide":"Choose","options":[{"label":"Stay"}]}]}
+EOF
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = show ] && [ "${2:-}" = unreadable ]; then
+  printf 'error: backend read failed\ncode: READ_FAILED\n' >&2
+  exit 75
+fi
+if [ "${1:-}" = add ] || { [ "${1:-}" = hold ] && [ "${2:-}" != --help ]; }; then
+  : > "$FM_HOME/migration-mutating-call"
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  before=$(cat "$home/data/backlog.md")
+  for mode in preview apply; do
+    if [ "$mode" = apply ]; then
+      out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply 2>&1) \
+        && fail "migration apply accepted an unreadable target"
+    else
+      out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" 2>&1) \
+        && fail "migration preview accepted an unreadable target"
+    fi
+    assert_contains "$out" 'could not read migration target unreadable' "migration hid the read error"
+    assert_not_contains "$out" 'would-hold:' "migration preview treated a read error as absence"
+    assert_not_contains "$out" 'held:' "migration apply treated a read error as absence"
+    [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "migration changed an unreadable target"
+    assert_absent "$home/migration-mutating-call" "migration attempted to create or hold an unreadable target"
+    assert_present "$home/captain-decisions.json" "migration removed its source inventory"
+  done
+  pass "migration rejects backend read errors in preview and apply"
 }
 
 test_open_status_orphans_reach_drain() {
@@ -4920,6 +4961,7 @@ SH
 test_hold_options_share_atomic_reason
 test_refused_hold_keeps_prior_reason_and_options
 test_legacy_option_migration_is_explicit_and_idempotent
+test_migration_rejects_unreadable_target
 test_open_status_orphans_reach_drain
 test_secondmate_hold_relays_are_not_local_orphans
 test_hold_reason_round_trips_awkward_characters
