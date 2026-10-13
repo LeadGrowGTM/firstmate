@@ -117,8 +117,9 @@
 # unavailable tools and explicit policy skips; see tests/lib.sh), or none.
 #
 # Every selected script runs isolated from the host's global and system Git
-# configuration, including one that sources no test helper of its own;
-# tests/git-config-helpers.sh owns that contract and its limits.
+# configuration and the operator tmux server, including one that sources no
+# test helper of its own; tests/git-config-helpers.sh and tests/tmux-helpers.sh
+# own those contracts and their limits.
 #
 # Family labels, the changed-file map, and production portable-shard composition
 # live in this script only (one owner). The proven-isolated candidate set remains
@@ -344,7 +345,7 @@ family_for_basename() {
     fm-secondmate-restart.test.sh|fm-remote-secondmate-relaunch.test.sh|\
     fm-remote-secondmate-retire.test.sh|\
     fm-secondmate-safety.test.sh|fm-secondmate-sync.test.sh|\
-    fm-startup-memory-budget.test.sh|fm-stow-cascade.test.sh|\
+    fm-startup-memory-budget.test.sh|fm-stow-cascade.test.sh|fm-daily-stow.test.sh|\
     fm-send-secondmate-marker.test.sh|fm-shared-captain-inheritance.test.sh)
       printf '%s\n' secondmate
       ;;
@@ -409,7 +410,7 @@ family_for_basename() {
     fm-supervision-host.test.sh|fm-host-mirror.test.sh)
       printf '%s\n' afk
       ;;
-    fm-bearings-board-render.test.sh|fm-bearings-snapshot.test.sh|fm-contributions.test.sh|\
+    fm-bearings-board-render.test.sh|fm-bearings-snapshot.test.sh|fm-contributions.test.sh|fm-domain-freshness.test.sh|\
     fm-fleet-snapshot-view.test.sh|fm-home-summary-refresh.test.sh)
       printf '%s\n' snapshot-bearings
       ;;
@@ -1651,7 +1652,7 @@ families_for_changed_path() {
       printf '%s\n' live-harness-optin
       ;;
     bin/fm-bearings-snapshot.sh|bin/fm-bearings-decisions-lib.sh|bin/fm-fleet-snapshot.sh|bin/fm-fleet-view.sh|bin/fm-contributions.sh|bin/fm-contributions.jq|\
-    bin/fm-home-summary-refresh.sh)
+    bin/fm-home-summary-refresh.sh|bin/fm-domain-freshness.sh|bin/fm-domain-freshness.py)
       printf '%s\n' snapshot-bearings
       ;;
     bin/fm-install-herdr.sh|bin/fm-install-treehouse.sh|bin/fm-herdr-ci-cleanup.sh)
@@ -1693,10 +1694,10 @@ families_for_changed_path() {
     docs/configuration.md|docs/supervision-protocols/*)
       printf '%s\n' pure-contract-unit
       ;;
-    tests/git-config-helpers.sh)
+    tests/git-config-helpers.sh|tests/tmux-helpers.sh)
       # The reference scan is not transitive, so match the two helpers that
       # source this one as well: most suites inherit it only through them.
-      families_for_test_reference git-config-helpers.sh lib.sh herdr-test-safety.sh \
+      families_for_test_reference "$(basename "$path")" lib.sh herdr-test-safety.sh \
         || printf '%s\n' "__unmapped__:$path"
       ;;
     tests/fixtures/*/*)
@@ -2463,7 +2464,7 @@ record_script_result() {
 # positive, a script that outruns it is terminated and reported as exit 124: a
 # hung script must become a bounded failure rather than an unbounded suite,
 # because an unbounded suite is what silently outruns its caller's budget.
-run_script_bounded() {  # <script> <out> <stream> <id>
+run_script_bounded() (  # <script> <out> <stream> <id>
   local script=$1 out=$2 stream=$3 id=$4
   # Declaring the variables local first keeps the helper's export scoped to this
   # call and its child script, so the runner's own environment is left as the
@@ -2471,6 +2472,12 @@ run_script_bounded() {  # <script> <out> <stream> <id>
   local GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
   # shellcheck source=tests/git-config-helpers.sh
   . "$ROOT/tests/git-config-helpers.sh" || return
+  # shellcheck source=tests/tmux-helpers.sh
+  . "$ROOT/tests/tmux-helpers.sh" || return
+  FM_TEST_TMUX_CHILD_REGISTRY="$FM_TEST_TMUX_ROOT/children"
+  : > "$FM_TEST_TMUX_CHILD_REGISTRY"
+  export FM_TEST_TMUX_CHILD_REGISTRY
+  trap fm_test_tmux_cleanup EXIT
   local rc
   : "$id"
   set +e
@@ -2498,7 +2505,7 @@ run_script_bounded() {  # <script> <out> <stream> <id>
     [ "$stream" -eq 1 ] && tail -1 "$out"
   fi
   return "$rc"
-}
+)
 
 run_one_serial() {
   local script=$1

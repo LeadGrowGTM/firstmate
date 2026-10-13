@@ -310,7 +310,7 @@ cmd_command() {
 }
 
 cmd_open() {
-  local cmd out handle grouped group
+  local cmd out handle grouped group tracked
   parse_view_args "$@"
   resolve_target "$TARGET"
   [ "$VIEW_SESSION" != "$BASE_SESSION" ] || note "the base session cannot be used as its own view"
@@ -326,6 +326,9 @@ $(tmux display-message -p -t "=$VIEW_SESSION:" $'#{session_grouped}\t#{session_g
 EOF
     [ "$grouped" = 1 ] && [ "$group" = "$BASE_SESSION" ] ||
       note "view session $VIEW_SESSION belongs to another tmux base session"
+    tracked=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_window 2>/dev/null) || tracked=
+    [ -z "$tracked" ] || [ "$tracked" = "$WINDOW_ID" ] ||
+      note "view session $VIEW_SESSION already tracks another tmux window"
   fi
   track_view || note "view session $VIEW_SESSION cannot show window $WINDOW_ID of $BASE_SESSION"
   [ -z "$IDFILE" ] || rm -f "$IDFILE" "$IDFILE.tmp"

@@ -55,7 +55,7 @@ cleanup() {
   tmux -L "$SOCKET" kill-server 2>/dev/null || true
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 # fm-send and the composer readiness read both reach tmux through bare `tmux`
 # calls, so a PATH shim pins them to the private socket.

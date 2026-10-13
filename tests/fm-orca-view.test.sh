@@ -355,6 +355,22 @@ wait_for_attached_count() {
 
 
 
+test_public_open_preserves_another_windows_view() {
+  local view="orca-w${DEV_ID#@}" out hooks
+  out=$(run_view open --target "firstmate:$CLAUDE_ID" --view-session "$view") || fail "the collision fixture could not open: $out"
+  hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
+  : > "$ORCA_LOG"
+  out=$(run_view window "$DEV_ID" 2>&1)
+  expect_code 3 "$?" "the public helper refuses a view tracking another window"
+  assert_contains "$out" 'already tracks another tmux window' "the refusal explains the collision"
+  assert_equals "$CLAUDE_ID" "$("$SHIM/tmux" show-options -v -t "=$view:" @fm_view_window)" "the original tracking remains"
+  assert_equals "$CLAUDE_ID" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')" "the original selection remains"
+  assert_equals "$hooks" "$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)" "the original hooks remain"
+  assert_no_grep 'terminal create' "$ORCA_LOG" "the collision creates no tab"
+  "$SHIM/tmux" kill-session -t "=$view"
+  pass "public open: refuses an existing view tracking another window without changing its tab or hooks"
+}
+
 test_open_refuses_the_base_as_a_view() {
   local before hooks out status
   before=$("$SHIM/tmux" display-message -p -t '=firstmate:' '#{window_id}')
@@ -377,24 +393,24 @@ test_open_refuses_the_base_as_a_view() {
 
 test_open_preserves_borrowed_hooks() {
   local out first_hook last_hook hooks target view=orca-borrowed
+  target=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t firstmate: -n borrowed-target)
   "$SHIM/tmux" new-session -d -t firstmate -s "$view"
   "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[0]' 'run-shell true'
   "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[7]' 'run-shell true'
   first_hook=$("$SHIM/tmux" show-options -H -t "=$view:" 'session-window-changed[0]')
   last_hook=$("$SHIM/tmux" show-options -H -t "=$view:" 'session-window-changed[7]')
-  out=$(run_view open --target firstmate:fm-dev --view-session "$view") || fail "borrowed open failed: $out"
+  out=$(run_view open --target "firstmate:$target" --view-session "$view") || fail "borrowed open failed: $out"
   hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
   assert_contains "$hooks" "$first_hook" "open preserves existing hook index 0"
   assert_contains "$hooks" "$last_hook" "open preserves existing hook index 7"
   assert_equals 3 "$(printf '%s\n' "$hooks" | wc -l | tr -d ' ')" "open appends exactly one hook"
   out=$(FM_FAKE_ORCA_FAIL=1 FM_FAKE_ORCA_ADD_HOOK="$view" \
-    run_view open --target firstmate:fm-dev --view-session "$view" 2>&1)
+    run_view open --target "firstmate:$target" --view-session "$view" 2>&1)
   expect_code 3 "$?" "a failed reopen reports failure"
   hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
   assert_contains "$hooks" "$first_hook" "a refused reopen preserves the original hook at index 0"
   assert_contains "$hooks" "$last_hook" "a refused reopen preserves the original hook at index 7"
   assert_contains "$hooks" 'session-window-changed[9]' "a refused reopen preserves a hook added during the Orca call"
-  target=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t firstmate: -n borrowed-target)
   out=$(run_view open --target "firstmate:$target" --view-session "$view") || fail "reopen failed: $out"
   "$SHIM/tmux" kill-window -t "$target"
   wait_for_attached_count "$view" 0 || fail "the borrowed view did not detach"
@@ -552,6 +568,7 @@ test_switch_values
 test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
 test_open_refuses_the_base_as_a_view
+test_public_open_preserves_another_windows_view
 test_open_preserves_borrowed_hooks
 test_open_preserves_inherited_hooks
 test_open_refuses_a_foreign_view_session

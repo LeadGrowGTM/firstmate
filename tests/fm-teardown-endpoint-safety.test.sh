@@ -14,6 +14,7 @@ make_case() {  # <name>
   mkdir -p "$TMP_ROOT/$dir/home/state" "$TMP_ROOT/$dir/home/data" \
     "$TMP_ROOT/$dir/home/config" "$TMP_ROOT/$dir/fakebin" \
     "$TMP_ROOT/$dir/worktree" "$TMP_ROOT/$dir/project"
+  chmod 700 "$TMP_ROOT/$dir" || return 1
   git init -q "$TMP_ROOT/$dir/project"
   : > "$TMP_ROOT/$dir/worktree/sentinel"
   : > "$TMP_ROOT/$dir/runtime.log"

@@ -29,7 +29,7 @@ cleanup() {
   [ -z "${REAL_TMUX:-}" ] || "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -z "${LAB:-}" ] || rm -rf -- "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 

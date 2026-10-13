@@ -67,20 +67,37 @@ cleanup_exact_cell() {
 }
 
 preserve_on_failure() {
-  local rc=$?
+  local rc=$? registry socket
   if [ "$rc" -ne 0 ] && [ -n "$ACTIVE_LAB" ]; then
+    registry="$FM_TEST_TMUX_ROOT/explicit-sockets"
+    if [ -f "$registry" ]; then
+      while IFS= read -r socket; do
+        [ "$socket" = "$ACTIVE_LAB/dedicated.sock" ] || printf '%s\n' "$socket"
+      done < "$registry" > "$registry.keep" || exit "$rc"
+      mv -- "$registry.keep" "$registry" || exit "$rc"
+    fi
     echo "blocked: preserving failed isolated Grok cell at $ACTIVE_LAB" >&2
   fi
+  fm_test_tmux_cleanup
   exit "$rc"
 }
 trap preserve_on_failure EXIT
+
+stop_on_signal() {
+  [ -z "$ACTIVE_LAB" ] || "$REAL_TMUX" -S "$ACTIVE_LAB/dedicated.sock" kill-server >/dev/null 2>&1 || true
+  ACTIVE_LAB=
+}
+trap 'fm_test_signal_cleanup 130 stop_on_signal' INT
+trap 'fm_test_signal_cleanup 143 stop_on_signal' TERM
+trap 'fm_test_signal_cleanup 129 stop_on_signal' HUP
+trap 'fm_test_signal_cleanup 131 stop_on_signal' QUIT
 
 run_cell() {  # <native|legacy> <exact-binary>
   local kind=$1 binary=$2 lab tmp_base session target prompt i child_count payload_count unique_sessions
   local stop_values outer_turns outer_text
   tmp_base=${TMPDIR:-/tmp}
   tmp_base=${tmp_base%/}
-  lab=$(mktemp -d "$tmp_base/fm-grok-stop-$kind.XXXXXX") || return 1
+  lab=$(TMPDIR="$tmp_base" fm_test_tmproot "fm-grok-stop-$kind") || return 1
   session="$kind-e2e"
   target="fm-$kind"
   ACTIVE_LAB=$lab
@@ -102,12 +119,13 @@ expected='$lab/dedicated.sock'
 [ -z "\${TMUX:-}" ] && [ -z "\${TMUX_PANE:-}" ] || exit 91
 [ "\${FM_E2E_TMUX_SOCKET_ID:-}" = "\$expected" ] || exit 92
 [ "\$(cat '$lab/tmux.socket-identity')" = "\$expected" ] || exit 93
+case "\${1:-}" in -*) exit 94 ;; esac
 for arg in "\$@"; do case "\$arg" in -S|-L) exit 94 ;; esac; done
 printf 'tmux' >> '$lab/tmux-wrapper.log'
 printf ' <%s>' "\$@" >> '$lab/tmux-wrapper.log'
 printf '\n' >> '$lab/tmux-wrapper.log'
 cd '$lab'
-exec '$REAL_TMUX' -S dedicated.sock "\$@"
+exec '$FM_TEST_TMUX_REAL' -S dedicated.sock "\$@"
 EOF
   cat > "$lab/bin/grok" <<'EOF'
 #!/usr/bin/env bash
@@ -211,5 +229,6 @@ EOF
 
 run_cell native "$NATIVE_BIN"
 run_cell legacy "$LEGACY_BIN"
+fm_test_tmux_cleanup
 trap - EXIT
 echo "ok - Grok adaptive Stop real-process matrix passed with exact target cleanup and control-window survival"

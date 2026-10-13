@@ -174,7 +174,7 @@ cleanup() {
   stop_pid "${ORPHAN_PID:-}"
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 ensure_darwin() (
   fm_remote_job_ensure_worker "$REMOTE_ROOT" "$ACCOUNT_HOME" || {

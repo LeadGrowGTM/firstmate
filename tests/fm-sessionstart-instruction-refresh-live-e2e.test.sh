@@ -105,7 +105,7 @@ cleanup() {
   tmux -L "$TMUX_SOCKET" kill-server >/dev/null 2>&1 || true
   rm -rf "$LAB"
 }
-trap cleanup EXIT INT TERM
+trap 'cleanup; fm_test_tmux_cleanup' EXIT INT TERM
 
 mkdir -p "$LAB"
 git clone --quiet --no-hardlinks "$ROOT" "$PROJECT" || fail "could not create isolated Firstmate checkout"

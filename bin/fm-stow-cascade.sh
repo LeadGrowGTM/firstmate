@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Enumerate this home's registered secondmates for an internal /stow cascade.
-# Usage: fm-stow-cascade.sh [--help]
+# Usage: fm-stow-cascade.sh [--record-pass|--help]
 #
 # The internal /stow skill owns curation judgement; this command owns only the
 # mechanical inputs a cascade needs: which homes exist, what each home's own
@@ -42,17 +42,24 @@
 # A secondmate home never cascades: secondmates do not own secondmates, so this
 # command reports the empty cascade there rather than reaching for a registry.
 #
+# --record-pass atomically records the primary's already-finished memory pass
+# as Unix seconds in state/.last-stow-primary-pass for the daily trigger.
+# The skill calls it only after that pass; bare enumeration stays read-only.
+# This stamp makes no claim about secondmate completion or reset safety.
+#
 # Exit status: 0 every home reported cleanly (or there were none); 3 at least
 # one home reported an exception and every home was still reported; 1 the
 # cascade input itself is unusable; 2 invalid use.
 set -u
 
 usage() {
-  sed -n '2,47{s/^# \{0,1\}//;p;}' "$0"
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//;p;}' "$0"
 }
 
+RECORD_PASS=0
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
+  --record-pass) RECORD_PASS=1 ;;
   "") ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -166,6 +173,14 @@ if [ -e "$FM_HOME/$SUB_HOME_MARKER" ] || [ -L "$FM_HOME/$SUB_HOME_MARKER" ]; the
   exit 0
 fi
 emit 'role=primary'
+if [ "$RECORD_PASS" -eq 1 ]; then
+  mkdir -p "$STATE" || die 'cannot create the primary pass state directory'
+  stamp=$(mktemp "$STATE/.last-stow-primary-pass.XXXXXX") || exit 1
+  if ! date +%s > "$stamp" || ! mv -f -- "$stamp" "$STATE/.last-stow-primary-pass"; then
+    rm -f -- "$stamp"
+    die 'cannot record the primary memory pass'
+  fi
+fi
 
 if [ ! -e "$REGISTRY" ] && [ ! -L "$REGISTRY" ]; then
   emit 'secondmates=0'

@@ -830,7 +830,7 @@ A local standalone-clone home cannot receive a primary-local commit through that
 
 The optional local, gitignored `config/orca-view-tabs` file gives each secondmate on the tmux backend an Orca desktop tab that views its window.
 It holds one word: `on` opens new tabs, and `off` prevents new tabs, as an absent file does.
-Turning it off does not close a tab already recorded for a secondmate; cleanup still attempts to close that tab.
+Turning it off prevents future tabs and leaves existing tabs open for the operator.
 Any other content is treated as `off` with a one-line warning, so the file never stops a spawn.
 The home that spawns the secondmate reads the switch, and secondmate homes do not inherit it.
 
@@ -1477,6 +1477,69 @@ See [`docs/examples/crew-dispatch.json`](examples/crew-dispatch.json) for a star
 **Inheritance**
 
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
+
+## Domain evidence collection (config/domain-freshness.json)
+
+The optional home-local `config/domain-freshness.json` declares the permitted inputs for manual domain evidence collection.
+Absent configuration makes `collect` a silent no-op; an existing `enabled: false` configuration does the same after Python validates it.
+The `enabled` flag gates `collect` only; explicit `inventory` reads a declared local source independently.
+If Python is unavailable, the command fails closed because it cannot safely identify a valid disabled JSON configuration.
+Machine-specific inventory paths are local choices and must not be inherited across hosts.
+[`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
+Daily intake and domain proposal delivery are separate integrations; this collector neither schedules work nor changes installations or operational instructions.
+
+This section owns the version 1 configuration schema:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | Exactly `1`. |
+| `enabled` | Required boolean, default posture is off. |
+| `sources` | Up to 100 source objects, each with a unique safe `id` and one `kind` below. |
+
+| Source kind | Required fields and coverage |
+| --- | --- |
+| `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head, changed-file metadata, and bounded before/after content from the effective merged commit and its first parent for changed instruction files. |
+| `skills` | Absolute `root`; discover `SKILL.md` content beneath it, including additions and removals. |
+| `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest and optional version manifests. |
+| `remote-inventory` | `route` is a registered remote secondmate id and `source` is a local inventory source id in that home's configuration. |
+| `unavailable` | Nonempty `reason`; disclose an unavailable home/host or input instead of treating it as current. |
+
+Ambiguous merged PR history leaves repository coverage incomplete.
+If a fork's merged instruction blob is unavailable from the base repository, its after-content records `content unavailable` while the event remains covered.
+Missing plugin manifest declarations leave plugin coverage incomplete.
+The parent requests a remote source's bounded read-only snapshot through `fm-on.sh`.
+Inventory sources optionally declare absolute `symlink_roots` for permitted external symlink targets.
+Declare only specific safe roots and manifest files; skills are read only from `SKILL.md` files.
+A resolved target outside the declared roots fails coverage, and the collector never discovers or reads another home's endpoints.
+An unreachable or unreadable remote inventory fails that source's coverage without advancing its checkpoint.
+A remote source needs a corresponding configured `skills` or `plugin-files` source in its owning home.
+A change to that source's root or file list starts a fresh baseline.
+Forge feed pages are read twice with a fixed internal 20-page bound; a changed feed or exhausted bound fails coverage.
+
+The `plugin-files` file kinds are `plugin-manifest` (installed plugin names and versions) and `plugin-version` (name/version).
+Only those manifest fields are retained; unrelated settings fields are excluded from fingerprints and evidence.
+Inventory coverage names the observed surfaces and explicitly leaves session visibility unmeasured; a cache version alone does not establish effective installation.
+Instruction excerpts disclose truncation while their digest covers the full file.
+First inventory observations are explicit baselines rather than historical change claims.
+
+When present, the current secondmate registry supplies domain id/home/scope/host context; an absent registry is recorded with no domains.
+All collected sources remain available to scope judgment, including effects that cross department boundaries; collection does not assign repositories exclusively to one mate.
+Repository events include active linked contribution observations when available, without limiting repository-wide discovery.
+The collector makes no model calls, parent requests, or review cards on complete unchanged observations.
+
+An off example, to adapt only after the separate activation approval:
+
+```json
+{
+  "version": 1,
+  "enabled": false,
+  "sources": [
+    { "id": "firstmate", "kind": "repository", "repo": "owner/firstmate" },
+    { "id": "local-skills", "kind": "skills", "root": "/absolute/safe/skills" },
+    { "id": "remote-inventory", "kind": "remote-inventory", "route": "remote-mate-id", "source": "local-skills" }
+  ]
+}
+```
 
 ## Task types (config/task-types.json)
 

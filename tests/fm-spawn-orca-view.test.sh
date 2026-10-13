@@ -366,6 +366,7 @@ relaunch_secondmate() {
   sm="$CASE_DIR/sm"
   mkdir -p "$HOME_DIR/state" "$HOME_DIR/data/$id" "$HOME_DIR/config" "$HOME_DIR/projects" "$VIEW_DIR"
   touch "$HOME_DIR/state/.last-watcher-beat"
+  printf 'codex\n' > "$HOME_DIR/config/secondmate-harness"
   printf '# secondmate brief\n' > "$HOME_DIR/data/$id/brief.md"
   [ "$switch" = absent ] || printf '%s\n' "$switch" > "$HOME_DIR/config/orca-view-tabs"
   make_relaunch_stub "$FAKEBIN"

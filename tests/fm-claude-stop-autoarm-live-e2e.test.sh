@@ -35,7 +35,7 @@ CLAUDE_VERSION=$(claude --version)
 cleanup() {
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 mkdir -p "$LAB"
 # git clone of this worktree carries only committed state, so copy the

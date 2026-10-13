@@ -20,6 +20,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/tmux-helpers.sh
+. "$ROOT/tests/tmux-helpers.sh" || exit 1
 LAUNCH="$ROOT/bin/fm-afk-launch.sh"
 START="$ROOT/bin/fm-afk-start.sh"
 CONTRACT="$ROOT/bin/fm-afk-contract.sh"
@@ -54,6 +56,7 @@ GLOBAL_CLEANUP() {
   for s in $TRACK_TMUX_SESSIONS; do
     tmux kill-session -t "$s" 2>/dev/null || true
   done
+  fm_test_tmux_cleanup
 }
 trap GLOBAL_CLEANUP EXIT
 

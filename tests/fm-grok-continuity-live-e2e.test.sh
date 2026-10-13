@@ -61,7 +61,7 @@ cleanup() {
   fi
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 mkdir -p "$LAB"
 git clone -q "$ROOT" "$PROJECT"

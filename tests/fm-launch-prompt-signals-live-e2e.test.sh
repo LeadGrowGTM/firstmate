@@ -71,7 +71,7 @@ cleanup_all() {
     [ -z "$lab" ] || rm -rf -- "$lab"
   done
 }
-trap cleanup_all EXIT
+trap 'cleanup_all; fm_test_tmux_cleanup' EXIT
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 
@@ -269,4 +269,5 @@ fi
 [ "$CHECKED" -gt 0 ] || fail "no installed harness could be checked; this run verified nothing"
 note "checked $CHECKED launch-prompt signature(s) against real installed binaries"
 cleanup_all
+fm_test_tmux_cleanup
 trap - EXIT

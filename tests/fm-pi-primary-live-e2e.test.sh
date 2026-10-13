@@ -98,7 +98,7 @@ cleanup() {
   fi
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 send_prompt() {
   local prompt=$1

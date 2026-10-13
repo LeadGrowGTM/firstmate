@@ -57,6 +57,7 @@ cleanup_all() {
   local status=$?
   [ -n "$SCRATCH" ] && rm -rf "$SCRATCH"
   herdr_safe_stop_and_delete "$SESSION"
+  fm_test_tmux_cleanup
   exit "$status"
 }
 trap cleanup_all EXIT

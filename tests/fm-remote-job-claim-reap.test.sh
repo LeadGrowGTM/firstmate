@@ -42,7 +42,7 @@ cleanup_claim_reap_fixture() {
   fi
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup_claim_reap_fixture EXIT
+trap 'cleanup_claim_reap_fixture; fm_test_tmux_cleanup' EXIT
 
 mkdir -p "$REMOTE_ROOT/bin" "$REMOTE_HOME" "$ACCOUNT_HOME"
 cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" \

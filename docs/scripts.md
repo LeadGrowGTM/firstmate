@@ -130,6 +130,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-lease-lib.sh`        | One owner of the supervision lease contract and the main-only role-partition guards  |
 | `fm-control.sh`          | Agent lifecycle control plane: allowlisted `interrupt`, `exit`, and transactional `relaunch` verbs for an exact task id ([agent-control.md](agent-control.md)) |
 | `fm-scheduled-worker.sh` | Run one explicitly authorized scheduled-worker candidate or guarded exhaustion continuation ([agent-control.md](agent-control.md#scheduled-worker-continuation)) |
+| `fm-daily-stow.sh` | Queue a daily memory pass for the live main session through the durable inbox ([session-refresh.md](session-refresh.md#daily-stow-before-refresh)) |
 | `fm-session-refresh.sh`  | Relaunch this home's idle second mates onto fresh sessions one at a time, for an opt-in nightly schedule ([session-refresh.md](session-refresh.md)) |
 | `fm-control-lib.sh`      | One executable owner of the control-plane verb allowlist, per-harness interrupt/exit mechanics, per-backend capability, and the endpoint-absence proof both `exit` and `relaunch` read |
 | `fm-busy-lib.sh`         | Single owner of the semantic busy-state contract: verdicts, source attribution, and per-harness sources |
@@ -150,6 +151,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-pr-poll.sh`          | Provide the byte-static watcher program for validated pull-request, merge-request, and Gerrit-change poll sidecars |
 | `fm-contributions.sh`    | Observe owned publications, retain exact-head judgments, measure required actors, and wake on maintainer signals |
 | `fm-pr-autoupdate.sh`     | Run the opt-in direct GitHub PR freshness check ([configuration.md](configuration.md#direct-pr-freshness-configpr-autoupdatejson)) |
+| `fm-domain-freshness.sh` | Collect declared domain evidence manually ([configuration.md](configuration.md#domain-evidence-collection-configdomain-freshnessjson)) |
 | `fm-pr-check.sh`         | Record validated task `pr=` and `pr_head=` values, then atomically arm a static merge poll; refuses GitHub drafts and persistent secondmate records (see [architecture.md](architecture.md)) |
 | `fm-pr-merge.sh`         | Record PR metadata, merge a task's canonical full GitHub or GitLab URL, refuse a Gerrit change because firstmate never submits one, then refuse an outcome it cannot prove landed or queued |
 | `fm-pr-state.sh`         | Read-only: print one line per GitHub pull-request blocker it can see, reporting on checks that have reported rather than verdicting merge-readiness |

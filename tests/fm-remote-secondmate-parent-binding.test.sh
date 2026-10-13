@@ -64,7 +64,7 @@ cleanup() {
   fi
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 PUBLISH_HOME="$TMP_ROOT/publication-home"
 PUBLISH_FAKEBIN=$(fm_fakebin "$TMP_ROOT/publication-fake")

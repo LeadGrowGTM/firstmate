@@ -51,7 +51,7 @@ cleanup_all() {
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${LAB:-}" ] && rm -rf "$LAB"
 }
-trap cleanup_all EXIT
+trap 'cleanup_all; fm_test_tmux_cleanup' EXIT
 
 # A plain (non-worktree) checkout of the CURRENT working tree, so the guard
 # tests the code under review rather than whatever is committed.
@@ -210,4 +210,5 @@ pass "cursor primary: an away-mode escalation is delivered, confirmed, and proce
 rm -f "$HOME_DIR/state/.afk"
 
 cleanup_all
+fm_test_tmux_cleanup
 trap - EXIT

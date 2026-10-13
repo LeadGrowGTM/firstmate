@@ -10,14 +10,16 @@
 # Usage:
 #   fm-lab-home.sh create <dir>       make a marked lab home and print it
 #   fm-lab-home.sh tmux-dir <dir>     create or print its private tmux socket dir
+#   fm-lab-home.sh tmux-check <dir>   refuse unless its named socket is selected
+#   fm-lab-home.sh tmux <dir> <cmd>   run tmux only on its recorded named socket
 #   fm-lab-home.sh teardown <dir>     remove its private tmux socket dir
 #
 # A lab home is the stock layout only - state/, data/, config/, projects/ - and
 # callers remove it with ordinary rm -rf when done. Drive it with plain
 # FM_HOME=<dir>; any FM_*_OVERRIDE relocation defeats the allowance.
-# tmux-dir is the single owner of the short private socket directory: callers
-# use TMUX_TMPDIR=<printed-dir> and call teardown from their cleanup trap after
-# killing only the server addressed through that directory.
+# tmux-dir records the short private socket directory; tmux runs commands on
+# its named fm-lab socket. Callers stop that server before teardown, which
+# refuses to remove a directory while any server there remains live.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,7 +54,7 @@ case "${1:-}" in
     mkdir -p "$dir/state" "$dir/data" "$dir/config" "$dir/projects" || exit 1
     printf '%s\n' "$dir"
     ;;
-  tmux-dir)
+  tmux-dir|tmux-check|tmux)
     dir=${2:-}
     [ -n "$dir" ] || { fm_lab_home_error "tmux-dir requires a marked lab home"; exit 2; }
     [ -f "$dir/.fm-lab-home" ] && [ -d "$dir/state" ] \
@@ -66,6 +68,7 @@ case "${1:-}" in
       [ "$(fm_lab_home_mode "$socket_dir")" = 700 ] && [ "$(fm_lab_home_owner "$socket_dir")" = "$(id -u)" ] \
         || { fm_lab_home_error "recorded tmux directory is not private and user-owned"; exit 1; }
     else
+      [ "$1" = tmux-dir ] || { fm_lab_home_error "lab tmux socket record is missing"; exit 1; }
       socket_dir=$(mktemp -d /tmp/fml.XXXXXX) || exit 1
       chmod 700 "$socket_dir" || { rmdir "$socket_dir" 2>/dev/null || true; exit 1; }
       [ "$(fm_lab_home_mode "$socket_dir")" = 700 ] && [ "$(fm_lab_home_owner "$socket_dir")" = "$(id -u)" ] \
@@ -73,7 +76,21 @@ case "${1:-}" in
       (umask 077; printf '%s\n' "$socket_dir" > "$record") || { rmdir "$socket_dir" 2>/dev/null || true; exit 1; }
       chmod 600 "$record" || { rm -f "$record"; rmdir "$socket_dir" 2>/dev/null || true; exit 1; }
     fi
-    printf '%s\n' "$socket_dir"
+    if [ "$1" = tmux ]; then
+      shift 2
+      case "${1:-}" in ''|-*) fm_lab_home_error "tmux requires a command, not socket options"; exit 2 ;; esac
+      socket_parent="$socket_dir/tmux-$(id -u)"
+      [ -d "$socket_parent" ] || mkdir -m 700 "$socket_parent" || exit 1
+      [ ! -L "$socket_parent" ] || { fm_lab_home_error "unsafe tmux socket parent"; exit 1; }
+      exec env -u TMUX -u TMUX_PANE FM_TEST_TMUX_LAB_HOME="$dir" TMUX_TMPDIR="$socket_dir" \
+        tmux -S "$socket_dir/tmux-$(id -u)/fm-lab" -f /dev/null "$@"
+    elif [ "$1" = tmux-check ]; then
+      socket_path="$socket_dir/tmux-$(id -u)/fm-lab"
+      [ "${TMUX_TMPDIR:-}" = "$socket_dir" ] && [ "${TMUX:-}" != "" ] && [ "${TMUX%%,*}" = "$socket_path" ] \
+        || { fm_lab_home_error "lab private named tmux socket is not selected"; exit 1; }
+    else
+      printf '%s\n' "$socket_dir"
+    fi
     ;;
   teardown)
     dir=${2:-}
@@ -92,7 +109,8 @@ case "${1:-}" in
     # private TMUX_TMPDIR could have hosted before removing the directory.
     for socket in "$socket_dir/tmux-$(id -u)"/*; do
       [ -e "$socket" ] || [ -L "$socket" ] || continue
-      if probe=$(tmux -S "$socket" list-sessions 2>&1 >/dev/null) \
+      if probe=$(FM_TEST_TMUX_LAB_HOME="$dir" TMUX_TMPDIR="$socket_dir" \
+        tmux -S "$socket" list-sessions 2>&1 >/dev/null) \
         || [ "${probe#*no server running}" = "$probe" ]; then
         fm_lab_home_error "refusing teardown: cannot confirm the lab tmux server has stopped"
         exit 1
@@ -101,7 +119,7 @@ case "${1:-}" in
     rm -rf "$socket_dir" && rm -f "$record"
     ;;
   *)
-    fm_lab_home_error "usage: fm-lab-home.sh create <dir> | tmux-dir <dir> | teardown <dir>"
+    fm_lab_home_error "usage: fm-lab-home.sh create <dir> | tmux-dir <dir> | tmux-check <dir> | tmux <dir> <cmd> | teardown <dir>"
     exit 2
     ;;
 esac

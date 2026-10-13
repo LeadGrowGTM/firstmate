@@ -1,0 +1,14 @@
+# Opt-in companion to fm-session-refresh.timer (docs/session-refresh.md).
+# Copy this and fm-daily-stow.timer into ~/.config/systemd/user/, replace
+# this service's two /path/to/... placeholders, then run:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now fm-daily-stow.timer
+# Select MAIN only: the live primary's /stow already cascades to secondmates.
+[Unit]
+Description=Firstmate daily stow: queue a memory pass in the live main session
+
+[Service]
+Type=oneshot
+Environment=FM_HOME=/path/to/main-firstmate-home
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/path/to/firstmate/bin/fm-daily-stow.sh
