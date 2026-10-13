@@ -227,34 +227,31 @@ pass 'inventory baseline, change, removal and unchanged silence'
 new_home
 mkdir -p "$HOME_DIR/plugins"
 printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"user","projectPath":"/clients/example/private-campaign","installPath":"/clients/example/private-campaign/install"}]},"token":"secret-one"}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{"demo":true},"token":"secret-one"}' > "$HOME_DIR/plugins/enabled.json"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}]}]')"
+printf '%s\n' '{"enabledPlugins":{"demo":true}}' > "$HOME_DIR/plugins/enabled.json"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"}]}]')"
 collect "$HOME_DIR" "$NOW"
 bundle
-jq -e '.evidence | length == 2 and (all(.[]; .kind == "inventory-baseline"))' "$OUT" >/dev/null || fail 'plugin baseline absent'
+jq -e '(.evidence | length) == 1 and .evidence[0].after.manifest.plugins.demo == [{"version":"1.0"}] and .coverage[0].surfaces == ["plugin-manifest"]' "$OUT" >/dev/null || fail 'plugin baseline did not retain only names and versions'
 assert_no_grep 'secret-one' "$OUT" 'irrelevant manifest field persisted in bundle'
-assert_no_grep 'secret-one' "$HOME_DIR/data/domain-freshness/cursors.json" 'irrelevant manifest field persisted in cursor'
 assert_no_grep 'private-campaign' "$OUT" 'client path persisted in bundle'
 assert_no_grep 'private-campaign' "$HOME_DIR/data/domain-freshness/cursors.json" 'client path persisted in cursor'
 FM_HOME="$HOME_DIR" bash "$COLLECTOR" inventory plugins > "$TMP_ROOT/inventory.json" 2> "$TMP_ROOT/inventory-stderr"
 expect_code 0 "$?" 'plugin inventory with client path'
 assert_no_grep 'private-campaign' "$TMP_ROOT/inventory.json" 'client path persisted in inventory'
-printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"user"}]},"token":"secret-two"}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{"demo":true},"token":"secret-two"}' > "$HOME_DIR/plugins/enabled.json"
-collect "$HOME_DIR" 2026-10-14T12:00:00Z
-assert_equals '' "$OUT" 'irrelevant manifest fields changed fingerprint'
-printf '%s\n' '{"plugins":{"demo":[{"version":"2.0","scope":"user"}]}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"project"}]},"token":"secret-two"}' > "$HOME_DIR/plugins/manifest.json"
 printf '%s\n' '{"enabledPlugins":{"demo":false}}' > "$HOME_DIR/plugins/enabled.json"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+assert_equals '' "$OUT" 'uncollected plugin fields changed fingerprint'
+printf '%s\n' '{"plugins":{"demo":[{"version":"2.0"}]}}' > "$HOME_DIR/plugins/manifest.json"
 collect "$HOME_DIR" 2026-10-15T12:00:00Z
 bundle
-jq -e '.evidence | length == 2 and (any(.[]; .after.manifest.plugins.demo[0].version == "2.0")) and (any(.[]; .after.manifest.enabledPlugins.demo == false))' "$OUT" >/dev/null || fail 'effective plugin changes absent'
-pass 'plugin projections omit irrelevant fields and detect effective changes'
+jq -e '(.evidence | length) == 1 and .evidence[0].after.manifest.plugins.demo == [{"version":"2.0"}] and .evidence[0].before.digest != .evidence[0].after.digest' "$OUT" >/dev/null || fail 'plugin version change absent'
+pass 'plugin fingerprints retain names versions and manifest digest only'
 
 new_home
 mkdir -p "$HOME_DIR/plugins"
-printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"user"}]}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{"demo":true}}' > "$HOME_DIR/plugins/enabled.json"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"./manifest.json",kind:"plugin-enablement"}]}]')"
+printf '%s\n' '{"plugins":{"demo":[{"version":"1.0"}]}}' > "$HOME_DIR/plugins/manifest.json"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"./manifest.json",kind:"plugin-version"}]}]')"
 collect "$HOME_DIR" "$NOW"
 expect_code 1 "$STATUS" 'normalized plugin file collision'
 assert_grep 'invalid or duplicate inventory filename' "$TMP_ROOT/stderr" 'colliding plugin file paths passed config validation'
@@ -263,166 +260,99 @@ pass 'local configuration rejects paths that normalize to one inventory record'
 
 new_home
 mkdir -p "$HOME_DIR/skills/one" "$HOME_DIR/plugins"
+printf '# Only skill\n' > "$HOME_DIR/skills/one/SKILL.md"
+printf 'private password content' > "$HOME_DIR/skills/one/passwords.md"
+printf 'private client secret' > "$HOME_DIR/skills/one/clientsecret.md"
 printf 'first script' > "$HOME_DIR/skills/one/run.py"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-printf 'first template' > "$HOME_DIR/plugins/template.toml"
+printf 'private token content' > "$HOME_DIR/plugins/token.json"
 config "$(jq -nc --arg skills "$HOME_DIR/skills" --arg plugins "$HOME_DIR/plugins" '[
   {id:"skills",kind:"skills",root:$skills},
-  {id:"plugins",kind:"plugin-files",root:$plugins,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"template.toml",kind:"asset"}]}
+  {id:"plugins",kind:"plugin-files",root:$plugins,files:[{path:"manifest.json",kind:"plugin-manifest"}]}
 ]')"
 collect "$HOME_DIR" "$NOW"
-expect_code 0 "$STATUS" 'asset baselines'
+expect_code 0 "$STATUS" 'narrow inventory baseline'
+bundle
+jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-baseline") and .coverage[0].surfaces == ["instruction"] and .coverage[1].surfaces == ["plugin-manifest"]' "$OUT" >/dev/null || fail 'narrow inventory included extra surfaces'
+for marker in 'private password content' 'private client secret' 'private token content'; do
+  assert_no_grep "$marker" "$OUT" 'unselected content entered inventory bundle'
+  assert_no_grep "$marker" "$HOME_DIR/data/domain-freshness/cursors.json" 'unselected content entered cursor'
+done
 printf 'second script' > "$HOME_DIR/skills/one/run.py"
-printf 'second template' > "$HOME_DIR/plugins/template.toml"
+printf 'second private password' > "$HOME_DIR/skills/one/passwords.md"
+printf 'second private token' > "$HOME_DIR/plugins/token.json"
 collect "$HOME_DIR" 2026-10-14T12:00:00Z
-expect_code 0 "$STATUS" 'asset changes'
-bundle
-jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-change" and .before.kind == "asset" and .after.kind == "asset" and .before.digest != .after.digest and (.after | has("content") | not) and (.after | has("manifest") | not))' "$OUT" >/dev/null || fail 'effective asset change or digest-only evidence missing'
-rm "$HOME_DIR/plugins/template.toml"
+expect_code 0 "$STATUS" 'unselected files changed'
+assert_equals '' "$OUT" 'unselected files produced inventory delta'
+rm "$HOME_DIR/skills/one/SKILL.md"
+ln -s passwords.md "$HOME_DIR/skills/one/SKILL.md"
 collect "$HOME_DIR" 2026-10-15T12:00:00Z
-expect_code 0 "$STATUS" 'removed plugin asset'
+expect_code 2 "$STATUS" 'skill alias to non-SKILL target'
 bundle
-jq -e --arg path "$HOME_DIR/plugins/template.toml" '(.evidence | length) == 1 and .evidence[0].path == $path and .evidence[0].before.kind == "asset" and .evidence[0].after == null and .coverage[1].surfaces == ["plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'removed plugin asset did not produce a delta'
-pass 'skill and plugin assets change digest-only fingerprints'
-
-new_home
-mkdir -p "$HOME_DIR/skills"
-printf '# Skill\n' > "$HOME_DIR/skills/SKILL.md"
-printf 'generated log' > "$HOME_DIR/skills/trace.log"
-printf 'credential marker' > "$HOME_DIR/skills/token.json"
-printf 'private note' > "$HOME_DIR/skills/secret.md"
-printf 'private token payload' > "$HOME_DIR/skills/token.md"
-printf 'private apikey payload' > "$HOME_DIR/skills/apikey.md"
-config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
-collect "$HOME_DIR" "$NOW"
-expect_code 0 "$STATUS" 'excluded skill files'
-bundle
-jq -e '.complete and (.evidence | length == 1) and (.evidence[0].path | endswith("/SKILL.md"))' "$OUT" >/dev/null || fail 'skill inventory included an excluded file'
-for bad in trace.log token.json secret.md token.md apikey.md; do
-  assert_no_grep "$bad" "$OUT" "excluded $bad appeared in skill bundle"
-  assert_no_grep "$bad" "$HOME_DIR/data/domain-freshness/cursors.json" "excluded $bad appeared in skill cursor"
-done
-rm "$HOME_DIR/skills/SKILL.md"
-ln -s token.md "$HOME_DIR/skills/SKILL.md"
-collect "$HOME_DIR" 2026-10-14T12:00:00Z
-expect_code 2 "$STATUS" 'skill alias to token file'
-bundle
-jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("excluded inventory path")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'skill alias to token file claimed complete coverage'
-assert_no_grep 'private token payload' "$OUT" 'skill alias leaked token content'
-jq -e '.sources.skills.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'skill alias advanced checkpoint'
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("skill instruction unavailable")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'non-SKILL alias claimed complete coverage'
+assert_no_grep 'second private password' "$OUT" 'non-SKILL alias leaked content'
+jq -e '.sources.skills.checkpoint == "2026-10-14T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'non-SKILL alias advanced checkpoint'
+pass 'only SKILL.md and plugin manifests enter inventory'
 
 new_home
 mkdir -p "$HOME_DIR/plugins"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-for bad in trace.log token.json secret.md apikey.md; do
-  printf 'excluded file' > "$HOME_DIR/plugins/$bad"
-  kind=asset
-  [ "$bad" != secret.md ] || kind=instruction
-  config "$(jq -nc --arg root "$HOME_DIR/plugins" --arg bad "$bad" --arg kind "$kind" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:$bad,kind:$kind}]}]')"
+for bad_kind in asset instruction plugin-enablement; do
+  config "$(jq -nc --arg root "$HOME_DIR/plugins" --arg kind "$bad_kind" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"extra.md",kind:$kind}]}]')"
   collect "$HOME_DIR" "$NOW"
-  expect_code 2 "$STATUS" "declared excluded $bad"
-  bundle
-  jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("excluded inventory file")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail "declared $bad was fingerprinted"
-  jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "declared $bad advanced checkpoint"
+  expect_code 1 "$STATUS" "removed plugin file kind $bad_kind"
+  assert_grep 'invalid inventory file kind' "$TMP_ROOT/stderr" "removed plugin file kind $bad_kind was accepted"
 done
-ln -s apikey.md "$HOME_DIR/plugins/GUIDE.md"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"GUIDE.md",kind:"instruction"}]}]')"
-collect "$HOME_DIR" "$NOW"
-expect_code 2 "$STATUS" 'plugin alias to apikey file'
-bundle
-jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("excluded inventory path")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'plugin alias to apikey file claimed complete coverage'
-assert_no_grep 'excluded file' "$OUT" 'plugin alias leaked credential content'
-jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'plugin alias advanced checkpoint'
-pass 'skill and declared plugin aliases exclude credential targets'
-
-new_home
-mkdir -p "$HOME_DIR/plugins/optional"
-printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/template.toml",kind:"asset"}]}]')"
-collect "$HOME_DIR" "$NOW"
-expect_code 0 "$STATUS" 'initially absent plugin asset'
-bundle
-jq -e '.coverage[0].complete and .coverage[0].baseline and .coverage[0].surfaces == ["plugin-enablement","plugin-manifest"] and (.evidence | length) == 2' "$OUT" >/dev/null || fail 'initially absent plugin asset broke baseline'
-rmdir "$HOME_DIR/plugins/optional"
-ln -s "$HOME_DIR/plugins/missing" "$HOME_DIR/plugins/optional"
-collect "$HOME_DIR" 2026-10-14T12:00:00Z
-expect_code 2 "$STATUS" 'broken optional asset parent'
-bundle
-jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'broken optional asset parent claimed complete coverage'
-jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'broken optional asset parent advanced checkpoint'
-pass 'absent assets need an available parent and removals emit deltas'
+assert_absent "$HOME_DIR/data/domain-freshness" 'removed plugin file kinds wrote state'
+pass 'plugin file declarations accept manifests and versions only'
 
 new_home
 mkdir -p "$HOME_DIR/plugins"
-printf '# Only instructions\n' > "$HOME_DIR/plugins/PLUGIN.md"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"PLUGIN.md",kind:"instruction"}]}]')"
-collect "$HOME_DIR" "$NOW"
-expect_code 2 "$STATUS" 'plugin source without install state'
-bundle
-jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("manifest and enablement")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'instruction-only plugin source claimed complete coverage'
-jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'incomplete plugin source advanced cursor'
-pass 'plugin coverage requires manifest and enablement declarations'
-
-new_home
-mkdir -p "$HOME_DIR/plugins"
-printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
 printf '%s\n' '{"name":"demo","version":"1"}' > "$HOME_DIR/plugins/version.json"
-printf '# Installed\n' > "$HOME_DIR/plugins/PLUGIN.md"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"version.json",kind:"plugin-version"},{path:"PLUGIN.md",kind:"instruction"}]}]')"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"version.json",kind:"plugin-version"}]}]')"
 collect "$HOME_DIR" "$NOW"
-rm "$HOME_DIR/plugins/version.json" "$HOME_DIR/plugins/PLUGIN.md"
-collect "$HOME_DIR" 2026-10-14T12:00:00Z
-expect_code 0 "$STATUS" 'removed plugin content'
+expect_code 2 "$STATUS" 'plugin source without installed manifest'
 bundle
-jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-change" and .after == null)' "$OUT" >/dev/null || fail 'removed plugin content did not produce null after'
-jq -e '.coverage[0].surfaces == ["plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'absent optional files counted as observed'
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("plugin manifest surface")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'version-only plugin source claimed complete coverage'
+jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'incomplete plugin source advanced cursor'
+pass 'plugin coverage requires installed manifest declaration'
+
+new_home
+mkdir -p "$HOME_DIR/plugins"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"name":"demo","version":"1"}' > "$HOME_DIR/plugins/version.json"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"version.json",kind:"plugin-version"}]}]')"
+collect "$HOME_DIR" "$NOW"
+rm "$HOME_DIR/plugins/version.json"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 0 "$STATUS" 'removed plugin version'
+bundle
+jq -e '(.evidence | length) == 1 and .evidence[0].kind == "inventory-change" and .evidence[0].after == null and .coverage[0].surfaces == ["plugin-manifest"]' "$OUT" >/dev/null || fail 'removed plugin version did not produce a delta'
 rm "$HOME_DIR/plugins/manifest.json"
 collect "$HOME_DIR" 2026-10-15T12:00:00Z
 expect_code 2 "$STATUS" 'missing required plugin manifest'
-pass 'plugin content removal is a delta and required manifest loss fails coverage'
+pass 'optional version removal is a delta and required manifest loss fails coverage'
 
-new_home
-mkdir -p "$HOME_DIR/plugins/optional"
-printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/PLUGIN.md",kind:"instruction"},{path:"optional/version.json",kind:"plugin-version"}]}]')"
-collect "$HOME_DIR" "$NOW"
-expect_code 0 "$STATUS" 'absent optional plugin files'
-rmdir "$HOME_DIR/plugins/optional"
-ln -s "$HOME_DIR/plugins/missing" "$HOME_DIR/plugins/optional"
-collect "$HOME_DIR" 2026-10-14T12:00:00Z
-expect_code 2 "$STATUS" 'broken optional inventory parent'
-bundle
-jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'broken optional parent claimed complete coverage'
-jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'broken optional parent advanced checkpoint'
-pass 'missing optional files remain optional only under available parents'
-
-for optional_kind in instruction plugin-version asset; do
+for parent_mode in symlink file; do
   new_home
   mkdir -p "$HOME_DIR/plugins/optional"
   printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-  printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-  case "$optional_kind" in
-    instruction) optional_path=optional/entry.md ;;
-    plugin-version) optional_path=optional/entry.json ;;
-    asset) optional_path=optional/entry.toml ;;
-  esac
-  config "$(jq -nc --arg root "$HOME_DIR/plugins" --arg kind "$optional_kind" --arg path "$optional_path" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:$path,kind:$kind}]}]')"
+  config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"optional/version.json",kind:"plugin-version"}]}]')"
   collect "$HOME_DIR" "$NOW"
-  expect_code 0 "$STATUS" "$optional_kind absent under directory"
+  expect_code 0 "$STATUS" 'absent optional version'
   rmdir "$HOME_DIR/plugins/optional"
-  printf 'not a directory' > "$HOME_DIR/plugins/optional"
+  if [ "$parent_mode" = symlink ]; then
+    ln -s "$HOME_DIR/plugins/missing" "$HOME_DIR/plugins/optional"
+  else
+    printf 'not a directory' > "$HOME_DIR/plugins/optional"
+  fi
   collect "$HOME_DIR" 2026-10-14T12:00:00Z
-  expect_code 2 "$STATUS" "$optional_kind parent became a file"
+  expect_code 2 "$STATUS" "optional version $parent_mode parent"
   bundle
-  jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("parent unavailable")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail "$optional_kind regular-file parent claimed complete coverage"
-  jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$optional_kind regular-file parent advanced checkpoint"
+  jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail "optional version $parent_mode parent claimed complete coverage"
+  jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "optional version $parent_mode parent advanced checkpoint"
 done
-pass 'optional instruction, version and asset absence requires a directory parent'
+pass 'absent optional version requires an available directory parent'
 
 new_home
 config "$repo_sources"
@@ -544,20 +474,43 @@ jq -e '.evidence[0].head.repository == null and .evidence[0].files[0].instructio
 assert_no_grep '/repos/contrib/widgets/' "$FEED/requests" 'deleted fork head was queried'
 pass 'deleted fork uses effective base merge history'
 
+for head_case in fork deleted-fork; do
+  new_home
+  config "$repo_sources"
+  pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+  if [ "$head_case" = fork ]; then
+    detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo.full_name = "contrib/widgets"' > "$FEED/detail-41.json"
+  else
+    detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
+  fi
+  merge_history 41
+  pr_file AGENTS.md modified | jq -s . > "$FEED/files-41-1.json"
+  tree_content "$PARENT_TREE" AGENTS.md '# Available before'
+  tree_content "$MERGE_TREE" AGENTS.md '# Missing merged blob'
+  rm "$FEED/blob-$(printf '%s' '# Missing merged blob' | git hash-object --stdin).json"
+  collect "$HOME_DIR" "$NOW"
+  expect_code 0 "$STATUS" "$head_case unavailable merged blob"
+  bundle
+  jq -e '.coverage[0].complete and .evidence[0].files[0].instruction.before.content == "# Available before" and .evidence[0].files[0].instruction.after.availability == "content unavailable"' "$OUT" >/dev/null || fail "$head_case unavailable content was not recorded"
+  jq -e '.sources.forge.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$head_case unavailable content did not checkpoint"
+  assert_no_grep '/repos/contrib/widgets/' "$FEED/requests" "$head_case queried fork endpoint"
+done
+pass 'unavailable fork content is recorded without failed coverage'
+
 new_home
 config "$repo_sources"
 pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
-detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
+detail 41 2026-10-13T11:00:00Z 1 > "$FEED/detail-41.json"
 merge_history 41
 pr_file AGENTS.md added | jq -s . > "$FEED/files-41-1.json"
-tree_content "$MERGE_TREE" AGENTS.md '# Missing merged blob'
-rm "$FEED/blob-$(printf '%s' '# Missing merged blob' | git hash-object --stdin).json"
+tree_content "$MERGE_TREE" AGENTS.md '# Missing local blob'
+rm "$FEED/blob-$(printf '%s' '# Missing local blob' | git hash-object --stdin).json"
 collect "$HOME_DIR" "$NOW"
-expect_code 2 "$STATUS" 'unavailable merged blob'
+expect_code 2 "$STATUS" 'unavailable same-repository blob'
 bundle
-jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'unavailable merged blob claimed complete coverage'
-jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'unavailable merged blob advanced checkpoint'
-pass 'unavailable merged blob leaves explicit incomplete coverage'
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'unavailable same-repository blob claimed complete coverage'
+jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'unavailable same-repository blob advanced checkpoint'
+pass 'same-repository blob failure retains incomplete coverage'
 
 new_home
 config "$repo_sources"
@@ -848,15 +801,13 @@ PY
 new_home
 mkdir -p "$HOME_DIR/plugins" "$HOME_DIR/clients"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-printf '# Public guidance\n' > "$HOME_DIR/plugins/GUIDE.md"
-printf '# Private client guidance\n' > "$HOME_DIR/clients/private.md"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"GUIDE.md",kind:"instruction"}]}]')"
-FM_RACE_TARGET="$HOME_DIR/plugins/GUIDE.md" FM_RACE_OUTSIDE="$HOME_DIR/clients/private.md" FM_RACE_AFTER=1 FM_RACE_MODE=file FM_RACE_MARKER="$TMP_ROOT/race-marker" PYTHONPATH="$TMP_ROOT/race-hook" collect "$HOME_DIR" "$NOW"
+printf '%s\n' '{"plugins":{"private":[{"version":"1"}]}}' > "$HOME_DIR/clients/private.json"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"}]}]')"
+FM_RACE_TARGET="$HOME_DIR/plugins/manifest.json" FM_RACE_OUTSIDE="$HOME_DIR/clients/private.json" FM_RACE_AFTER=1 FM_RACE_MODE=file FM_RACE_MARKER="$TMP_ROOT/race-marker" PYTHONPATH="$TMP_ROOT/race-hook" collect "$HOME_DIR" "$NOW"
 expect_code 2 "$STATUS" 'inventory file replaced after validation'
 bundle
 jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'replaced inventory file claimed complete coverage'
-assert_no_grep 'Private client guidance' "$OUT" 'replaced file leaked client content'
+assert_no_grep 'private' "$OUT" 'replaced file leaked client content'
 jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'replaced inventory file advanced checkpoint'
 
 new_home
@@ -963,20 +914,19 @@ expect_code 0 "$STATUS" 'reconfigured remote root'
 bundle
 jq -e '.coverage[0].baseline and .evidence[0].kind == "inventory-baseline" and .evidence[0].before == null and .evidence[0].after.content == "# Different root\n"' "$OUT" >/dev/null || fail 'remote root reconfiguration reused old before state'
 printf '%s\n' '{"plugins":{}}' > "$REMOTE_HOME/skills-new/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$REMOTE_HOME/skills-new/enabled.json"
-printf 'first asset' > "$REMOTE_HOME/skills-new/first.toml"
-printf 'second asset' > "$REMOTE_HOME/skills-new/second.toml"
-jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"first.toml",kind:"asset"},{path:"optional.json",kind:"plugin-version"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+printf '%s\n' '{"name":"first","version":"1"}' > "$REMOTE_HOME/skills-new/first.json"
+printf '%s\n' '{"name":"second","version":"1"}' > "$REMOTE_HOME/skills-new/second.json"
+jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"first.json",kind:"plugin-version"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
 FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-17T12:00:00Z
 expect_code 0 "$STATUS" 'remote plugin file baseline'
 bundle
-jq -e '.coverage[0].baseline and .coverage[0].surfaces == ["asset","plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'remote observed surfaces included absent optional file'
-jq '.sources[0].files[2].path = "second.toml"' "$REMOTE_HOME/config/domain-freshness.json" > "$REMOTE_HOME/config/domain-freshness-next.json"
+jq -e '.coverage[0].baseline and .coverage[0].surfaces == ["plugin-manifest","plugin-version"]' "$OUT" >/dev/null || fail 'remote observed surfaces omitted plugin version'
+jq '.sources[0].files[1].path = "second.json"' "$REMOTE_HOME/config/domain-freshness.json" > "$REMOTE_HOME/config/domain-freshness-next.json"
 mv "$REMOTE_HOME/config/domain-freshness-next.json" "$REMOTE_HOME/config/domain-freshness.json"
 FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-18T12:00:00Z
 expect_code 0 "$STATUS" 'reconfigured remote file list'
 bundle
-jq -e '.coverage[0].baseline and all(.evidence[]; .kind == "inventory-baseline" and .before == null) and any(.evidence[]; .path | endswith("second.toml"))' "$OUT" >/dev/null || fail 'remote file-list reconfiguration reused old before state'
+jq -e '.coverage[0].baseline and all(.evidence[]; .kind == "inventory-baseline" and .before == null) and any(.evidence[]; .path | endswith("second.json"))' "$OUT" >/dev/null || fail 'remote file-list reconfiguration reused old before state'
 pass 'fake parent transport returns bounded remote inventory and preserves failed cursor'
 jq -n '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"skills",root:"/.."}]}' > "$REMOTE_HOME/config/domain-freshness.json"
 FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-19T12:00:00Z
@@ -988,7 +938,7 @@ pass 'remote inventory rejects a root target before returning a snapshot'
 
 mkdir -p "$REMOTE_HOME/skills-new/sub"
 printf '%s\n' '{"plugins":{}}' > "$REMOTE_HOME/skills-new/sub/manifest.json"
-jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"sub/manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"sub//manifest.json",kind:"plugin-enablement"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"sub/manifest.json",kind:"plugin-manifest"},{path:"sub//manifest.json",kind:"plugin-version"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
 FM_HOME="$REMOTE_HOME" bash "$COLLECTOR" inventory remote-skills > "$TMP_ROOT/remote-collision-stdout" 2> "$TMP_ROOT/remote-collision-stderr"
 expect_code 1 "$?" 'remote inventory normalized path collision'
 assert_grep 'invalid or duplicate inventory filename' "$TMP_ROOT/remote-collision-stderr" 'remote inventory accepted redundant separator collision'
@@ -1065,12 +1015,11 @@ pass 'pagination bounds remain explicit incomplete coverage'
 new_home
 mkdir -p "$HOME_DIR/plugins"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
-printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-head -c 4096 /dev/zero | tr '\0' x > "$HOME_DIR/plugins/preview.md"
+head -c 4096 /dev/zero | tr '\0' x | jq -Rs '{name:"preview",version:.}' > "$HOME_DIR/plugins/preview.json"
 for number in $(seq 1 1998); do
-  cp "$HOME_DIR/plugins/preview.md" "$HOME_DIR/plugins/instruction-$number.md"
+  cp "$HOME_DIR/plugins/preview.json" "$HOME_DIR/plugins/version-$number.json"
 done
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"large",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1999)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"large",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"}] + [range(1;1999)|{path:("version-"+(.|tostring)+".json"),kind:"plugin-version"}])}]')"
 collect "$HOME_DIR" "$NOW"
 expect_code 2 "$STATUS" 'oversized inventory cursor'
 bundle
@@ -1141,9 +1090,9 @@ collect "$HOME_DIR" "$NOW"
 bundle
 printf '# Revised guidance\n' > "$HOME_DIR/skills/one/resources/ENTRY.md"
 collect "$HOME_DIR" 2026-10-14T12:00:00Z
-bundle
-jq -e '(.evidence | length) == 1 and (.evidence[0].path | endswith("resources/ENTRY.md")) and .evidence[0].before.content == "# Guidance\n"' "$OUT" >/dev/null || fail 'supporting skill instruction change was missed'
-pass 'supporting skill instructions participate in fingerprints'
+expect_code 0 "$STATUS" 'supporting resource change'
+assert_equals '' "$OUT" 'supporting resource changed SKILL.md fingerprint'
+pass 'only SKILL.md content participates in skill fingerprints'
 
 new_home
 config "$repo_sources"

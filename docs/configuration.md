@@ -1436,8 +1436,8 @@ Secondmate homes inherit this file from the primary, so a secondmate's own crewm
 
 The optional home-local `config/domain-freshness.json` declares the permitted inputs for manual domain evidence collection.
 Absent configuration makes `collect` a silent no-op; an existing `enabled: false` configuration does the same after Python validates it.
+The `enabled` flag gates `collect` only; explicit `inventory` reads a declared local source independently.
 If Python is unavailable, the command fails closed because it cannot safely identify a valid disabled JSON configuration.
-Explicit `inventory` can still read a configured local source without changing it.
 Machine-specific inventory paths are local choices and must not be inherited across hosts.
 [`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
 Daily intake and domain proposal delivery are separate integrations; this collector neither schedules work nor changes installations or operational instructions.
@@ -1453,26 +1453,26 @@ This section owns the version 1 configuration schema:
 | Source kind | Required fields and coverage |
 | --- | --- |
 | `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head, changed-file metadata, and bounded before/after content from the effective merged commit and its first parent for changed instruction files. |
-| `skills` | Absolute `root`; discover instruction content and digest-only asset fingerprints beneath it, including additions and removals. |
-| `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest, enablement settings, version manifests, relevant instruction files, and effective assets. |
+| `skills` | Absolute `root`; discover `SKILL.md` content beneath it, including additions and removals. |
+| `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest and optional version manifests. |
 | `remote-inventory` | `route` is a registered remote secondmate id and `source` is a local inventory source id in that home's configuration. |
 | `unavailable` | Nonempty `reason`; disclose an unavailable home/host or input instead of treating it as current. |
 
 Ambiguous merged PR history leaves repository coverage incomplete.
-Missing plugin manifest or enablement declarations leave plugin coverage incomplete.
+If a fork's merged instruction blob is unavailable from the base repository, its after-content records `content unavailable` while the event remains covered.
+Missing plugin manifest declarations leave plugin coverage incomplete.
 The parent requests a remote source's bounded read-only snapshot through `fm-on.sh`.
 Inventory sources optionally declare absolute `symlink_roots` for permitted external symlink targets.
-Declare only specific safe roots and instruction files; credentials, environment files, client data, browser profiles, generated logs, and runtime state are excluded.
+Declare only specific safe roots and manifest files; skills are read only from `SKILL.md` files.
 A resolved target outside the declared roots fails coverage, and the collector never discovers or reads another home's endpoints.
 An unreachable or unreadable remote inventory fails that source's coverage without advancing its checkpoint.
 A remote source needs a corresponding configured `skills` or `plugin-files` source in its owning home.
 A change to that source's root or file list starts a fresh baseline.
 Forge feed pages are read twice with a fixed internal 20-page bound; a changed feed or exhausted bound fails coverage.
 
-The `plugin-files` file kinds are `plugin-manifest` (installed `plugins` records with version/scope metadata), `plugin-enablement` (the effective `enabledPlugins` boolean map), `plugin-version` (name/version), `instruction` (content digest and bounded text), and `asset` (digest and byte count only).
+The `plugin-files` file kinds are `plugin-manifest` (installed plugin names and versions) and `plugin-version` (name/version).
 Only those manifest fields are retained; unrelated settings fields are excluded from fingerprints and evidence.
-Skill and plugin assets are limited to Markdown, shell, Python, TypeScript, JavaScript, TOML, YAML, and exact `manifest.json` files; credential-like and log names are excluded even when declared.
-Inventory coverage names the observed surfaces and explicitly leaves session visibility unmeasured; a cache version alone does not establish effective installation or enablement.
+Inventory coverage names the observed surfaces and explicitly leaves session visibility unmeasured; a cache version alone does not establish effective installation.
 Instruction excerpts disclose truncation while their digest covers the full file.
 First inventory observations are explicit baselines rather than historical change claims.
 

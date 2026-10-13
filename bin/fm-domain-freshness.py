@@ -304,13 +304,18 @@ def merged_instruction_trees(prefix, detail):
     return trees
 
 
-def merged_instruction(repo, entries, path):
+def merged_instruction(repo, entries, path, unavailable_ok=False):
     entry = entries.get(path)
     if entry is None:
         return None
     if entry.get('type') != 'blob' or entry.get('mode') not in ('100644', '100755'):
         raise CoverageError('invalid merged PR instruction entry')
-    return pr_instruction_blob(repo, entry.get('sha'))
+    try:
+        return pr_instruction_blob(repo, entry.get('sha'))
+    except CoverageError as error:
+        if unavailable_ok and str(error).startswith(('forge read failed', 'inconsistent PR instruction blob')):
+            return {'availability': 'content unavailable'}
+        raise
 
 
 def forge(source, previous, now, contributions):
@@ -378,7 +383,8 @@ def forge(source, previous, now, contributions):
                             if not isinstance(old_path, str):
                                 raise CoverageError('missing renamed PR instruction path')
                             before = merged_instruction(base_repo, trees[0], old_path)
-                            after = merged_instruction(base_repo, trees[1], file['filename'])
+                            after = merged_instruction(base_repo, trees[1], file['filename'],
+                                                       head_repo is None or head_repo.casefold() != base_repo.casefold())
                             file['instruction'] = {'before': before, 'after': after}
                     event.update(base={'repository': base_repo, 'ref': base['ref'], 'sha': base['sha']},
                                  head={'repository': head_repo, 'ref': head.get('ref'), 'sha': head['sha']},
@@ -393,14 +399,12 @@ def forge(source, previous, now, contributions):
 
 FORBIDDEN = {'.ssh', '.git', 'credentials', 'credentials.json', '.credentials.json', 'auth.json',
              'secrets', 'clients', 'browser', 'profiles', 'logs', 'state'}
-ASSET_SUFFIXES = {'.md', '.sh', '.py', '.ts', '.tsx', '.js', '.jsx', '.toml', '.yaml', '.yml'}
-SENSITIVE_NAME = re.compile(r'(^|[._-])((api|access|private|public|ssh|auth)?(tokens?|secrets?|credentials?|cookies?|keys?)|dotenv|logs?)([._-]|$)')
 
 
 def inventory_path(path, roots):
     absolute = Path(path).absolute()
     resolved = absolute.resolve(strict=True)
-    if any(part.lower() in FORBIDDEN or part.lower().startswith('.env') or SENSITIVE_NAME.search(part.lower()) for part in (*absolute.parts, *resolved.parts)):
+    if any(part.lower() in FORBIDDEN or part.lower().startswith('.env') for part in (*absolute.parts, *resolved.parts)):
         raise CoverageError('excluded inventory path')
     if not any(resolved == root or root in resolved.parents for root in roots):
         raise CoverageError('inventory symlink escapes declared safe roots')
@@ -420,24 +424,9 @@ def inventory_fd(path, roots, flags):
         os.close(parent)
 
 
-def inventory_file_allowed(path, kind):
-    if any(part.lower().startswith('.env') or SENSITIVE_NAME.search(part.lower()) for part in path.parts):
-        return False
-    if kind == 'instruction':
-        return path.suffix.lower() == '.md'
-    if kind == 'asset':
-        return path.suffix.lower() in ASSET_SUFFIXES or path.name.lower() == 'manifest.json'
-    return True
-
-
 def projection(value, kind):
     if not isinstance(value, dict):
         raise CoverageError('manifest must be an object')
-    if kind == 'plugin-enablement':
-        enabled = value.get('enabledPlugins')
-        if not isinstance(enabled, dict) or any(type(v) is not bool for v in enabled.values()):
-            raise CoverageError('missing effective enabledPlugins map')
-        return {'enabledPlugins': enabled}
     if kind == 'plugin-version':
         if not isinstance(value.get('version'), str) or not isinstance(value.get('name'), str):
             raise CoverageError('missing plugin name/version')
@@ -453,14 +442,14 @@ def projection(value, kind):
         for entry in entries:
             if not isinstance(entry, dict) or not isinstance(entry.get('version'), str):
                 raise CoverageError('missing installed plugin version')
-            result[name].append({key: entry.get(key) for key in ['version', 'scope']})
-        result[name].sort(key=lambda item: json.dumps(item, sort_keys=True))
+            result[name].append({'version': entry['version']})
+        result[name].sort(key=lambda item: item['version'])
     return {'plugins': result}
 
 
 def inventory_snapshot(source):
-    if source['kind'] == 'plugin-files' and not {'plugin-manifest', 'plugin-enablement'} <= {item['kind'] for item in source['files']}:
-        raise CoverageError('plugin manifest and enablement surfaces are required')
+    if source['kind'] == 'plugin-files' and 'plugin-manifest' not in {item['kind'] for item in source['files']}:
+        raise CoverageError('plugin manifest surface is required')
     root = Path(source['root'])
     roots = [Path(item).resolve(strict=True) for item in [source['root'], *source.get('symlink_roots', [])]]
     inventory_path(root, roots)
@@ -488,23 +477,21 @@ def inventory_snapshot(source):
                 raise CoverageError('skill inventory limit reached')
             entries += len(items)
             for item in sorted(items):
-                if item.name.lower() in FORBIDDEN or item.name.lower().startswith('.env') or SENSITIVE_NAME.search(item.name.lower()):
+                if item.name.lower() in FORBIDDEN or item.name.lower().startswith('.env'):
                     continue
-                resolved = inventory_path(item, roots)
-                if resolved.is_dir():
+                if item.name == 'SKILL.md':
+                    resolved = inventory_path(item, roots)
+                    if resolved.name != 'SKILL.md' or not resolved.is_file():
+                        raise CoverageError('skill instruction unavailable')
+                    paths.append((item, 'instruction'))
+                elif item.is_dir():
                     walk(item, depth + 1)
-                elif resolved.is_file():
-                    kind = 'instruction' if item.suffix.lower() == '.md' else 'asset'
-                    if inventory_file_allowed(item, kind):
-                        paths.append((item, kind))
         walk(root, 0)
     else:
         paths = [(root / item['path'], item['kind']) for item in source['files']]
     records = {}
     for path, kind in paths:
-        if not inventory_file_allowed(path, kind):
-            raise CoverageError('excluded inventory file')
-        if source['kind'] == 'plugin-files' and kind in ('instruction', 'plugin-version', 'asset') and not path.exists() and not path.is_symlink():
+        if source['kind'] == 'plugin-files' and kind == 'plugin-version' and not path.exists() and not path.is_symlink():
             try:
                 os.close(inventory_fd(path.parent, roots, os.O_RDONLY | os.O_DIRECTORY))
             except OSError as error:
@@ -521,8 +508,6 @@ def inventory_snapshot(source):
             text = content.decode('utf-8')
             metadata = {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content),
                         'content': text[:4096], 'content_truncated': len(text) > 4096}
-        elif kind == 'asset':
-            metadata = {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content)}
         else:
             value = projection(json.loads(content), kind)
             metadata = {'digest': digest(value), 'manifest': value}
@@ -600,7 +585,7 @@ def validate_config(config):
                     if not isinstance(path, str) or not path or Path(path).is_absolute() or '..' in Path(path).parts or Path(path) in names:
                         raise ValueError('invalid or duplicate inventory filename')
                     names.add(Path(path))
-                    if item.get('kind') not in ('instruction', 'asset', 'plugin-manifest', 'plugin-enablement', 'plugin-version'):
+                    if item.get('kind') not in ('plugin-manifest', 'plugin-version'):
                         raise ValueError('invalid inventory file kind')
         elif kind == 'unavailable':
             if not isinstance(source.get('reason'), str) or not source['reason'].strip():
