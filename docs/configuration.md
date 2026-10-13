@@ -1229,7 +1229,8 @@ It uses teardown's landed-work and completion checks, preserves captain holds an
 It keeps uncertain work, including ignored or operator-edited files, unmerged recorded PRs, and remote branches whose status cannot be verified; only exact Firstmate-generated wiring is exempt from the file check.
 When a worker copy is missing, its record remains unless the recorded remote branch is confirmed merged or absent.
 Automatic teardown requires a proven dead or missing endpoint.
-Alive idle workers and backends without reliable death proof remain in place and appear as `idle-left` in the one-line report when the semantic busy classifier confirms idle.
+Alive workers remain in place and appear as `idle-left` in the one-line report when the semantic busy classifier confirms idle.
+Backends without reliable death proof also remain in place.
 
 ## Worktree pool guard
 
