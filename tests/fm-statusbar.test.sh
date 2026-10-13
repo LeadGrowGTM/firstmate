@@ -365,4 +365,50 @@ tmux select-window -t orca-later:bare
 unknown=$(render orca-later 100 'u ?')
 case "$unknown" in *'u ?'*sync-task*'?'*'?'*proj/4*) pass "metadata defaults render as unknown facts" ;; *) fail "metadata default rendered as a fact" "$unknown" ;; esac
 
+# --- persistent config: preserve user settings and survive server restart ---
+config="$WORK/user tmux.conf"
+printf 'set -g mouse on' >"$config"
+bash "$SB" check "$config" >/dev/null 2>&1 && fail "check accepted a missing source line"
+before=$(cat "$config")
+bash "$SB" source-line >/dev/null || fail "source-line failed"
+[ "$(cat "$config")" = "$before" ] || fail "check or source-line edited config"
+bash "$SB" install "$config" >/dev/null || fail "install failed"
+bash "$SB" check "$config" >/dev/null || fail "check missed installed source line"
+installed=$(cat "$config")
+bash "$SB" install "$config" >/dev/null || fail "repeat install failed"
+[ "$(cat "$config")" = "$installed" ] || fail "install duplicated its source line"
+case "$installed" in 'set -g mouse on'*) ;; *) fail "install lost existing settings" ;; esac
+pass "config install is idempotent and preserves existing bytes"
+
+# Space-containing checkout paths remain usable by both tmux and the shell.
+mkdir -p "$WORK/installed repo/bin"
+cp "$ROOT/bin/fm-statusbar.sh" "$ROOT/bin/fm-statusbar.tmux" \
+  "$ROOT/bin/fm-quota-axi-lib.sh" "$ROOT/bin/fm-timeout-lib.sh" "$WORK/installed repo/bin/"
+space_config="$WORK/space.conf"
+bash "$WORK/installed repo/bin/fm-statusbar.sh" install "$space_config" >/dev/null || fail "space path install failed"
+"$REAL_TMUX" -L "$OUTER" kill-server >/dev/null 2>&1 || true
+tmux kill-server >/dev/null 2>&1 || true
+i=0
+while "$REAL_TMUX" -L "$SOCKET" has-session 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+# No label, apply, or theme call: startup must load the snippet itself.
+"$REAL_TMUX" -L "$SOCKET" -f "$space_config" new-session -d -s restarted -x 120 -y 10 "sleep 600" || fail "configured server failed to start"
+[ "$(tmux show-options -gqv status-style)" = 'bg=colour234,fg=colour250' ] || fail "theme did not survive server restart"
+[ "$(tmux show-options -gqv status-right)" = '#{E:pane-border-format}' ] || fail "restart lost the status format"
+[ "$(tmux show-options -gqv status-left)" = '' ] || fail "restart kept the stock session bar"
+bash "$WORK/installed repo/bin/fm-statusbar.sh" label restarted persist codex gpt-6-sol high /home/u/project
+printf 'codex\tdefault\t32\tall_models\n' >"$WORK/state/statusbar-usage.txt"
+# The fixture uses codex-home; seed the account that labeling actually chose.
+printf 'codex\tcodex-home\t32\tall_models\n' >>"$WORK/state/statusbar-usage.txt"
+# @fm_state binds jobs to the window's home, even if the command is launched
+# from another home's environment.
+other=$(FM_STATE_OVERRIDE="$WORK/other" bash "$SB" usage restarted)
+[ "$other" = 'u cx:codex-home32%' ] || fail "status job read another home's quota cache" "$other"
+restarted=$(render restarted 120 'u cx:codex-home32%')
+case "$restarted" in *'u cx:codex-home32%'*persist*'gpt-6-sol high'*project*) ;;
+*) fail "restart render missed required fields" "$restarted" ;; esac
+pass "startup snippet handles spaces, uses the right socket and shows restored labels"
+tmux source-file "$ROOT/bin/fm-statusbar.tmux"
+[ "$(tmux show-options -gqv status-style)" = 'bg=colour234,fg=colour250' ] || fail "repeat source changed theme"
+pass "theme can be sourced repeatedly"
+
 echo "fm-statusbar: all passed"

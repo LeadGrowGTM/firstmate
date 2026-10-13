@@ -4782,9 +4782,9 @@ fi
     j_stop=$(json_escape "$turnend_touch$busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
     j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
     j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
-    # Claude's own statusLine (model, effort, context, plan windows, task) rides
+    # Claude's own statusLine (model, effort, worktree, plan windows, task) rides
     # this firstmate-owned local settings file, only when the account the worker
-    # loads defines none, so the captain's own statusLine always wins and the
+    # loads and the project define none, so the captain's statusLine wins and the
     # launch line stays byte-identical. The command path must be JSON- and
     # shell-inert; anything else installs no statusLine.
     j_statusline=

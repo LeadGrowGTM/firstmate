@@ -4,6 +4,14 @@
 # per-window data instead of per-refresh probes.
 #
 # Usage:
+#   fm-statusbar.sh [--socket <path>] theme
+#       Load the persistent dark theme on that server. The tracked
+#       fm-statusbar.tmux snippet calls this when sourced by tmux.
+#   fm-statusbar.sh install|check [config-file]
+#       Append/check the exact source line (default ~/.tmux.conf).
+#       Install changes only the config file, never live tmux options.
+#   fm-statusbar.sh source-line
+#       Print the line to add to the config. Use a stable installed checkout.
 #   fm-statusbar.sh label <target> <id> <harness> <model> <effort> <worktree>
 #       Record the task's facts as window user options (@fm_task,
 #       @fm_model, @fm_effort, @fm_wt) on one tmux window. fm-spawn
@@ -36,6 +44,21 @@ USAGE_ATTEMPT="$STATE/.statusbar-usage-attempt"
 USAGE_LOCK="$STATE/.statusbar-usage.lock"
 USAGE_TTL=60
 SELF="$SCRIPT_DIR/fm-statusbar.sh"
+FM_SB_SOCKET=
+if [ "${1:-}" = --socket ]; then
+  [ "$#" -ge 3 ] && [ -n "$2" ] || exit 2
+  FM_SB_SOCKET=$2
+  shift 2
+fi
+# Explicit server addressing also reaches status jobs outside their caller's
+# shell. Never let a named preview query the default tmux server.
+tmux() {
+  if [ -n "$FM_SB_SOCKET" ]; then
+    command tmux -S "$FM_SB_SOCKET" "$@"
+  else
+    command tmux "$@"
+  fi
+}
 . "$SCRIPT_DIR/fm-quota-axi-lib.sh"
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 
@@ -71,7 +94,7 @@ fm_sb_model_label() {  # <model-id>
 
 cmd_label() {
   local target=${1:-} id=${2:-} harness=${3:-} model=${4:-} effort=${5:-} wt=${6:-}
-  local provider= account usage_model
+  local provider='' account usage_model
   [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 0
   provider=$(fm_quota_provider_for_harness "$harness" "$model") || provider=
   case "$harness" in
@@ -89,6 +112,7 @@ cmd_label() {
   usage_model=${model##*/}
   [ "$usage_model" != default ] || usage_model=
   [ "$effort" != default ] || effort=
+  tmux set-window-option -t "$target" @fm_state "$STATE" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_task "$(fm_sb_clean "$id" 40)" 2>/dev/null || return 0
   tmux set-window-option -t "$target" @fm_model "$(fm_sb_clean "$(fm_sb_model_label "$model")")" 2>/dev/null || true
   tmux set-window-option -t "$target" @fm_model_id "$(fm_sb_clean "$usage_model")" 2>/dev/null || true
@@ -106,7 +130,7 @@ fm_sb_format() {
   model='#{?@fm_task,#{?@fm_model,#{@fm_model},?},#{pane_current_command}}'
   effort='#{?@fm_effort,#{@fm_effort},?}'
   wt='#{?@fm_wt,#{@fm_wt},#{b:pane_current_path}}'
-  use="#($SELF usage #{window_id})"
+  use="#(bash \"$SELF\" --socket \"#{socket_path}\" usage #{window_id})"
   wide="#[bold]#{=24:${task}}#[nobold] | #{=20:${model}} #{=7:${effort}} | #{=22:${wt}}"
   narrow="#{=9:${task}}|#{=10:${model}} #{=4:${effort}}|#{=13:${wt}}"
   compact="#{=3:${task}}|#{=2:${model}} #{=1:${effort}}|#{=2:${wt}}"
@@ -215,8 +239,16 @@ fm_sb_usage_display() {  # <window>
 }
 
 cmd_usage() {
-  local age now target=${1:-}
+  local age now state target=${1:-}
   [ -n "$target" ] || return 2
+  [ -n "$(tmux show-options -wqv -t "$target" @fm_provider 2>/dev/null)" ] || { printf 'u ?\n'; return 0; }
+  state=$(tmux show-options -wqv -t "$target" @fm_state 2>/dev/null) || state=
+  if [ -n "$state" ]; then
+    STATE=$state
+    USAGE_CACHE="$STATE/statusbar-usage.txt"
+    USAGE_ATTEMPT="$STATE/.statusbar-usage-attempt"
+    USAGE_LOCK="$STATE/.statusbar-usage.lock"
+  fi
   now=$(date +%s)
   if [ -f "$USAGE_CACHE" ]; then
     age=$((now - $(fm_sb_mtime "$USAGE_CACHE")))
@@ -275,16 +307,61 @@ cmd_claude_line() {
   printf '%s\n' "$out"
 }
 
+# Source paths enter both a tmux string and a shell command. Spaces are safe
+# inside double quotes; reject characters which either parser could expand.
+fm_sb_source_line() {
+  case "$SCRIPT_DIR" in
+    *[\'\"\\\$\`\#]* | *[[:cntrl:]]*)
+      echo "statusbar: unsupported characters in installation path" >&2
+      return 1 ;;
+  esac
+  printf 'source-file "%s/fm-statusbar.tmux"\n' "$SCRIPT_DIR"
+}
+
+cmd_config() { # install|check [config-file]
+  local mode=$1 config=${2:-$HOME/.tmux.conf} line
+  [ "$#" -le 2 ] || return 2
+  line=$(fm_sb_source_line) || return 1
+  if [ -f "$config" ] && grep -Fxq -- "$line" "$config"; then
+    printf 'statusbar: sourced by %s\n' "$config"
+    return 0
+  fi
+  if [ "$mode" = check ]; then
+    printf 'statusbar: not sourced by %s; add:\n%s\n' "$config" "$line"
+    return 1
+  fi
+  # Start a new line even if the existing file lacks its final newline.
+  printf '\n%s\n' "$line" >>"$config" || return 1
+  printf 'statusbar: installed in %s (live server unchanged)\n' "$config"
+}
+
+cmd_theme() {
+  [ -n "$FM_SB_SOCKET" ] || { echo 'statusbar: theme requires --socket' >&2; return 2; }
+  fm_sb_source_line >/dev/null || return 1
+  tmux set-option -g status on &&
+    tmux set-option -g status-style 'bg=colour234,fg=colour250' &&
+    tmux set-option -g status-left '' &&
+    tmux set-option -g status-right-length 200 &&
+    tmux set-option -g status-right '#{E:pane-border-format}' &&
+    tmux set-window-option -g window-status-format ' #I:#W ' &&
+    tmux set-window-option -g window-status-current-format ' #I:#W ' &&
+    tmux set-window-option -g window-status-current-style 'bg=colour24,fg=colour255,bold' &&
+    tmux set-window-option -g pane-border-format "$(fm_sb_format)"
+}
+
 sub=${1:-}
 [ $# -eq 0 ] || shift
 case "$sub" in
+theme) cmd_theme ;;
+install|check) cmd_config "$sub" "$@" ;;
+source-line) fm_sb_source_line ;;
 label) cmd_label "$@" ;;
 apply) cmd_apply "$@" ;;
 sync) cmd_sync ;;
 usage) cmd_usage "$@" ;;
 claude-line) cmd_claude_line "$@" ;;
 *)
-  echo "usage: fm-statusbar.sh label|sync|apply|usage|claude-line" >&2
+  echo "usage: fm-statusbar.sh label|sync|apply|usage|claude-line|theme|install|check|source-line" >&2
   exit 2
   ;;
 esac
