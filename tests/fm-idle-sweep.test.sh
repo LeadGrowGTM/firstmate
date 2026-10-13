@@ -32,6 +32,7 @@ fi
   */status) string success ;;
   */check-runs*)
     [ "${TEST_FORGE_UNKNOWN:-0}" = 0 ] || exit 1
+    [ -z "${TEST_FORGE_UNKNOWN_FILE:-}" ] || [ "$(cat "$TEST_FORGE_UNKNOWN_FILE")" = 0 ] || exit 1
     red_value=$TEST_RED
     [ -z "${TEST_RED_FILE:-}" ] || red_value=$(cat "$TEST_RED_FILE")
     if [ "$red_value" = 1 ]; then
@@ -305,6 +306,24 @@ sweep
 [ ! -s "$TEST_SPAWN_LOG" ] || fail 'closed open-PR gap dispatched targeted work'
 pass 'an open-PR gap that closes during quota read prevents dispatch'
 printf '7\n' > "$TEST_PR_COUNT_FILE"
+export TEST_FORGE_UNKNOWN_FILE="$TMP_ROOT/forge-unknown"
+printf '0\n' > "$TEST_FORGE_UNKNOWN_FILE"
+cat > "$TMP_ROOT/lose-red-evidence" <<'SH'
+#!/usr/bin/env bash
+printf '1\n' > "$TEST_FORGE_UNKNOWN_FILE"
+SH
+TEST_QUOTA_HOOK="$TMP_ROOT/lose-red-evidence"
+rm -f "$TEST_QUOTA_CALLS"
+sweep
+[ "$(cat "$TEST_FORGE_UNKNOWN_FILE")" = 1 ] || fail 'red evidence loss fixture did not run'
+result=$(bash "$home/bin/fm-targets.sh" --json)
+printf '%s' "$result" | jq -e '
+  any(.targets[]; .id=="red_default_branches" and .gap==null) and
+  any(.targets[]; .id=="open_prs" and .gap==3)
+' >/dev/null || fail 'partial forge failure did not preserve a known open-PR gap'
+no_starts 'red evidence lost on a fresh collection holds open-PR work'
+printf '0\n' > "$TEST_FORGE_UNKNOWN_FILE"
+unset TEST_FORGE_UNKNOWN_FILE
 cat > "$TMP_ROOT/change-target-limit" <<'SH'
 #!/usr/bin/env bash
 printf '{"open_prs":10}\n' > "$FM_HOME/config/targets.json"

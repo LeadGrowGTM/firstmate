@@ -153,6 +153,7 @@ while IFS= read -r candidate; do
     collection_start=$(date +%s)
     latest_targets=$(fm_run_timed "$collection_remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || { failed=1; break; }
     collection_remaining=$((collection_remaining - ($(date +%s) - collection_start)))
+    printf '%s' "$latest_targets" | jq -e '.targets[] | select(.id == "red_default_branches") | .gap != null' >/dev/null || break
   fi
   current_config=$(idle_config) || { failed=1; break; }
   [ "$current_config" = "$config" ] || break
