@@ -839,21 +839,18 @@ With the switch on, every secondmate spawn or relaunch opens one Orca terminal, 
 The tab attaches a grouped tmux view session that shows exactly that secondmate's window, so each tab follows its own window without moving any other viewer.
 It prefers `orca-<id>` and chooses a distinct name when an occupied candidate belongs to another base session or identifies another task's window.
 An eligible existing session, such as one a hand-opened tab created, is reused rather than duplicated.
-It never adopts a view recorded as owned by another secondmate.
-Tracking appends an identifiable hook without replacing existing local or inherited hook entries; rollback and untracking remove only that entry.
+It never adopts a view recorded for another secondmate.
+Tracking appends an identifiable hook without replacing existing local or inherited hook entries; untracking removes only that entry.
 The view session tracks the window by its stable tmux window id, never by index or name, and returns to it whenever it is moved off it, such as after a relaunch or another window closes.
-When the secondmate's window itself is gone, the view ends and the tab says so rather than showing another session.
-If the original base is gone or its name has been reused by an unrelated session, the hook instead removes its tracking and preserves the surviving agent windows.
+When the secondmate's window itself is gone, the view detaches and removes its tracking instead of displaying another agent's window.
 The base session itself is never accepted as a view or given view tracking.
 The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate as working, waiting on you, or done on that tab.
 Waiting covers a permission prompt and a question the agent asks.
 Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
-A relaunch, including a worker account switchover, opens a fresh tab and closes the previous one once the relaunch has gone through.
-The common close command leaves a view alone if its current tracking no longer identifies the calling task's exact tmux target, or that target cannot be resolved.
+A relaunch, including a worker account switchover, opens a fresh tab and leaves the previous tab open.
 If a fresh tab cannot open, the relaunch keeps the previous recorded tab and its identity.
-Cleanup attempts to close the recorded tab, and it removes the view session only when it still tracks this task, no other client is attached, and the original base session still shares its windows.
-If the base is gone or its name belongs to an unrelated session, the view survives to keep its agent windows alive.
-Orca refuses to close a pinned tab, so Firstmate leaves a pinned tab open and reports it rather than unpinning it.
+Firstmate never closes view tabs or kills their grouped tmux sessions, including failed opens, replacement, teardown, switch-off, and recursive cleanup.
+Unused views remain for the operator or ordinary tmux session cleanup; orphaned views detach when their tracked window disappears.
 When Orca, its command line, or the Orca project is unavailable, the spawn continues without a new tab and prints one note.
 Ship and scout workers never get a tab, and other runtime backends ignore the switch.
 

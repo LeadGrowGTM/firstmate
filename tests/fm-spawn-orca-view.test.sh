@@ -140,7 +140,6 @@ case "$1 $2" in
         sh -c "$cmd" >/dev/null 2>&1
     fi
     printf '{"ok":true,"result":{"terminal":{"handle":"term-%s"}}}\n' "$n" ;;
-  "terminal close") printf '{"ok":true,"result":{"closed":true}}\n' ;;
   *) printf '{"ok":false}\n'; exit 1 ;;
 esac
 SH
@@ -256,7 +255,6 @@ test_switch_on_opens_and_forwards_identity() {
   expect_code 0 "$STATUS" "a secondmate spawn with the switch on should succeed: $OUT"
   assert_equals term-1 "$(meta sm-on orca_view_handle)" "the tab's handle is recorded"
   assert_equals orca-sm-on "$(meta sm-on orca_view_session)" "the view session is recorded"
-  assert_equals 1 "$(meta sm-on orca_view_owned)" "a view session the spawn created is owned"
   assert_grep "terminal create --worktree path:$ROOT --title sm-on" "$VIEW_DIR/orca.log" \
     "the tab is titled for the secondmate on the code root's Orca worktree"
   assert_present "$VIEW_DIR/session-orca-sm-on" "the spawn created the tab's view session"
@@ -291,8 +289,8 @@ test_missing_identity_keeps_fresh_spawn_unbadged() {
   spawn_secondmate missing-identity sm-missing on allowlist missing
   expect_code 0 "$STATUS" "a missing Orca identity must not fail the secondmate spawn: $OUT"
   assert_equals "" "$(meta sm-missing orca_view_handle)" "an unbadged tab is not recorded"
-  assert_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
-    "a tab without an identity is closed"
+  assert_no_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
+    "a tab without an identity stays open for the operator"
   install_env_probe "$FAKEBIN"
   seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$PANE_LOG")" "$(cat "$LAUNCH_LOG")") \
     || fail "the launch after missing identity failed to run"
@@ -431,10 +429,8 @@ test_relaunch_replaces_the_tab() {
   relaunch_secondmate relaunch-on sm-re on
   expect_code 0 "$STATUS" "a secondmate relaunch with the switch on should succeed: $OUT"
   assert_equals term-1 "$(meta sm-re orca_view_handle)" "the fresh tab replaces the recorded one"
-  assert_equals 1 "$(meta sm-re orca_view_owned)" \
-    "the reattached view session the previous tab created stays this feature's to remove"
-  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
-    "the previous tab is closed once the relaunch went through"
+  assert_no_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
+    "the previous tab is left open once the relaunch went through"
   assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" "the fresh tab stays open"
   [ ! -s "$VIEW_DIR/killed" ] || fail "a relaunch must keep the view session the fresh tab reattached: $(cat "$VIEW_DIR/killed")"
   install_env_probe "$FAKEBIN"
@@ -443,22 +439,9 @@ test_relaunch_replaces_the_tab() {
   seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$VIEW_DIR/keys")" "$launch") \
     || fail "the replacement launch failed to run: $seen"
   assert_contains "$seen" "pane=tab-1:leaf" "the replacement agent badges the fresh tab"
-  pass "relaunch: opens a fresh tab, forwards its identity, then closes the previous tab and keeps the view session"
+  pass "relaunch: opens a fresh tab, forwards its identity, and leaves the previous tab open and keeps the view session"
 }
 
-test_relaunch_closes_distinct_prior_view() {
-  relaunch_secondmate relaunch-distinct sm-distinct on '' '' '' orca-sm-distinct-s-other
-  expect_code 0 "$STATUS" "relaunch with a distinct prior view should succeed: $OUT"
-  assert_equals orca-sm-distinct "$(meta sm-distinct orca_view_session)" \
-    "the replacement tab records its new view"
-  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
-    "the replaced tab is closed"
-  assert_grep "kill-session -t =orca-sm-distinct-s-other" "$VIEW_DIR/killed" \
-    "the owned prior view is removed"
-  assert_no_grep "kill-session -t =orca-sm-distinct$" "$VIEW_DIR/killed" \
-    "the new view remains"
-  pass "relaunch removes its distinct owned prior view after closing the old tab"
-}
 
 test_aborted_relaunch_keeps_prior_tab_record() {
   local seen
@@ -466,13 +449,12 @@ test_aborted_relaunch_keeps_prior_tab_record() {
   [ "$STATUS" -ne 0 ] || fail "launch staging failure must abort the relaunch"
   assert_contains "$OUT" "refusing to stage the launch command" \
     "the relaunch reached staging after opening and publishing the new tab"
-  assert_equals term-0 "$(meta sm-abort orca_view_handle)" "the surviving tab is recorded"
+  assert_equals term-0 "$(meta sm-abort orca_view_handle)" "the record still names the tab whose identity the surviving pane uses"
   assert_equals orca-sm-abort "$(meta sm-abort orca_view_session)" "the surviving view is recorded"
-  assert_equals 1 "$(meta sm-abort orca_view_owned)" "the surviving view keeps its ownership"
-  assert_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
-    "abort closes the replacement tab"
+  assert_no_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
+    "abort leaves the replacement tab open"
   assert_no_grep "terminal close --terminal term-0" "$VIEW_DIR/orca.log" \
-    "abort keeps the prior tab open for teardown"
+    "abort keeps the prior tab open for the operator"
   assert_no_grep 'tab-1:leaf' "$VIEW_DIR/keys" \
     "launch staging failure sends no replacement identity into the pane"
   install_identity_probe "$FAKEBIN"
@@ -480,7 +462,7 @@ test_aborted_relaunch_keeps_prior_tab_record() {
     || fail "the surviving pane's identity could not be checked"
   assert_equals "pane=tab-0:leaf tab=tab-0 worktree=wt-1 endpoint=/hooks/endpoint.env env=production version=1" "$seen" \
     "the surviving pane keeps all six fields of the prior tab identity"
-  pass "aborted relaunch closes its new tab and restores the surviving tab record"
+  pass "aborted relaunch leaves both tabs open"
 }
 
 test_post_export_abort_keeps_replacement_tab() {
@@ -491,35 +473,14 @@ test_post_export_abort_keeps_replacement_tab() {
     "the relaunch reached readiness after sending the new identity"
   assert_equals term-1 "$(meta sm-post orca_view_handle)" "the exported tab remains recorded"
   assert_equals orca-sm-post "$(meta sm-post orca_view_session)" "the exported view remains recorded"
-  assert_equals 1 "$(meta sm-post orca_view_owned)" "the exported view retains ownership"
   assert_grep 'tab-1:leaf' "$VIEW_DIR/keys" "the new identity was sent to the pane"
-  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
-    "abort closes the superseded tab"
+  assert_no_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
+    "abort leaves the superseded tab open"
   assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" \
     "abort keeps the tab bound to the surviving pane"
-  pass "post-export relaunch abort retains the new tab and closes the prior tab"
+  pass "post-export relaunch abort retains the new tab and leaves the prior tab open"
 }
 
-test_post_export_abort_closes_distinct_prior_view() {
-  FM_KIMI_READY_POLLS=1 FM_KIMI_POLL_INTERVAL=0 \
-    relaunch_secondmate relaunch-post-distinct sm-post-distinct on '' '' kimi orca-sm-post-distinct-s-other
-  [ "$STATUS" -ne 0 ] || fail "Kimi readiness failure must abort the relaunch"
-  assert_contains "$OUT" "kimi did not show a verified ready signal" \
-    "the relaunch reached readiness after sending the new identity"
-  assert_equals term-1 "$(meta sm-post-distinct orca_view_handle)" \
-    "the replacement tab remains recorded"
-  assert_equals orca-sm-post-distinct "$(meta sm-post-distinct orca_view_session)" \
-    "the replacement view remains recorded"
-  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
-    "the superseded tab is closed"
-  assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" \
-    "the replacement tab remains open"
-  assert_grep "kill-session -t =orca-sm-post-distinct-s-other" "$VIEW_DIR/killed" \
-    "the owned prior view is removed"
-  assert_no_grep "kill-session -t =orca-sm-post-distinct$" "$VIEW_DIR/killed" \
-    "the replacement view remains"
-  pass "post-export abort keeps the new tab and removes its distinct owned prior view"
-}
 
 test_post_export_fresh_abort_keeps_only_tab() {
   FM_KIMI_READY_POLLS=1 FM_KIMI_POLL_INTERVAL=0 \
@@ -664,8 +625,7 @@ EOF
   assert_equals orca-dev-s-beta-1 "$(meta dev orca_view_session)" "respawn creates its own view"
   assert_equals @1 "$(cat "$VIEW_DIR/option-orca-dev-s-beta")" "respawn leaves the other secondmate's view target alone"
   assert_no_grep 'kill-session' "$VIEW_DIR/killed" "replacement cleanup never kills the rejected recycled view"
-  assert_grep 'terminal close --terminal term-old' "$VIEW_DIR/orca.log" "replacement closes its own old tab while leaving the recycled session alone"
-  assert_equals 1 "$(meta dev orca_view_owned)" "ownership is assigned to the newly created view only"
+  assert_no_grep 'terminal close --terminal term-old' "$VIEW_DIR/orca.log" "replacement leaves both the old tab and recycled session alone"
   pass "respawn: a recycled prior view name cannot retarget another secondmate's view"
 }
 
@@ -683,29 +643,11 @@ EOF
   spawn_secondmate recorded-owner dev-s-beta on '' '' beta
   expect_code 0 "$STATUS" "another owner's view must not block respawn: $OUT"
   assert_equals orca-dev-s-beta-s-beta "$(meta dev-s-beta orca_view_session)" \
-    "a view recorded as owned by another secondmate is never adopted"
+    "a view recorded for another secondmate is never adopted"
   assert_absent "$VIEW_DIR/option-orca-dev-s-beta" "the other owner's untracked view is untouched"
   pass "respawn: creates a distinct view when another secondmate owns the recorded prior name"
 }
 
-test_teardown_does_not_kill_recycled_view() {
-  local out status
-  spawn_secondmate teardown-recycled sm-teardown on
-  expect_code 0 "$STATUS" "the teardown fixture must spawn: $OUT"
-  printf '@1\n' > "$VIEW_DIR/option-orca-sm-teardown"
-  printf 'off\n' > "$HOME_DIR/config/orca-view-tabs"
-  : > "$VIEW_DIR/killed"
-  out=$(PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" \
-    FM_FAKE_VIEW_DIR="$VIEW_DIR" FM_FAKE_PANE_PATH="$CASE_DIR/sm" \
-    FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
-    TMUX=fake,1,0 "$TEARDOWN" sm-teardown --force 2>&1)
-  status=$?
-  expect_code 0 "$status" "switch-off teardown should finish: $out"
-  assert_no_grep 'kill-session' "$VIEW_DIR/killed" "teardown never kills another task's recycled view"
-  assert_equals @1 "$(cat "$VIEW_DIR/option-orca-sm-teardown")" "teardown leaves the other task's tracking intact"
-  assert_grep 'terminal close --terminal term-1 --tab --json' "$VIEW_DIR/orca.log" "teardown closes only its recorded Orca tab"
-  pass "teardown: switch-off cleanup leaves a recycled view belonging to another task intact"
-}
 
 test_incomplete_identity_keeps_prior_tab() {
   local seen launch
@@ -713,8 +655,8 @@ test_incomplete_identity_keeps_prior_tab() {
   expect_code 0 "$STATUS" "an incomplete identity must not fail relaunch: $OUT"
   assert_equals term-0 "$(meta sm-incomplete orca_view_handle)" \
     "the previous tab stays recorded when replacement identity is incomplete"
-  assert_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
-    "the unbadged replacement tab is closed"
+  assert_no_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
+    "the unbadged replacement tab stays open"
   assert_no_grep "terminal close --terminal term-0" "$VIEW_DIR/orca.log" \
     "the previous tab remains open"
   [ ! -s "$VIEW_DIR/killed" ] || fail "the prior tab's view session must remain"
@@ -737,7 +679,6 @@ test_relaunch_adopts_a_secondmate_launched_before_the_switch() {
   expect_code 0 "$STATUS" "relaunching a secondmate launched before the switch should succeed: $OUT"
   assert_equals term-1 "$(meta sm-adopt orca_view_handle)" "the relaunch records its fresh tab"
   assert_equals orca-sm-adopt "$(meta sm-adopt orca_view_session)" "the hand-opened tab's view session is reused"
-  assert_equals 0 "$(meta sm-adopt orca_view_owned)" "a view session this feature did not create is never owned"
   assert_no_grep "terminal close" "$VIEW_DIR/orca.log" "no tab is closed, so a hand-opened tab stays open"
   [ ! -s "$VIEW_DIR/killed" ] || fail "no view session may be removed: $(cat "$VIEW_DIR/killed")"
   install_env_probe "$FAKEBIN"
@@ -754,21 +695,57 @@ test_relaunch_with_switch_off_keeps_the_tab() {
   expect_code 0 "$STATUS" "a secondmate relaunch with the switch off should succeed: $OUT"
   assert_equals term-0 "$(meta sm-keep orca_view_handle)" "the recorded tab stays recorded"
   [ ! -s "$VIEW_DIR/orca.log" ] || fail "no Orca call may happen with the switch off: $(cat "$VIEW_DIR/orca.log")"
-  pass "relaunch with the switch off keeps the recorded tab for cleanup and makes no Orca call"
+  pass "relaunch with the switch off keeps the recorded tab for the operator and makes no Orca call"
 }
 
 # The window-gone recovery respawns a secondmate over its existing record; its
-# previous tab, whose view ended with the window, is replaced and closed.
+# previous tab is left open while the recorded handle is replaced.
 test_respawn_replaces_the_previous_tab() {
   printf 'window=firstmate:fm-sm-back\nendpoint_task_id=sm-back\nkind=secondmate\norca_view_handle=term-0\norca_view_session=orca-sm-back\norca_view_owned=1\n' \
     > "$TMP_ROOT/respawn.prior-meta"
   spawn_secondmate respawn sm-back on
   expect_code 0 "$STATUS" "a secondmate respawn with the switch on should succeed: $OUT"
   assert_equals term-1 "$(meta sm-back orca_view_handle)" "the fresh tab replaces the recorded one"
-  assert_equals 1 "$(meta sm-back orca_view_owned)" "the recreated view session is owned"
-  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
-    "the previous tab is closed once the respawn went through"
-  pass "respawn: a fresh tab replaces the previous one, which is closed"
+  assert_no_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
+    "the previous tab is left open once the respawn went through"
+  pass "respawn: a fresh tab replaces the previous one, which stays open"
+}
+
+test_views_are_never_automatically_closed() {
+  local out status child childhome
+  spawn_secondmate never-close sm-retain on
+  expect_code 0 "$STATUS" "the cleanup fixture must spawn: $OUT"
+  : > "$VIEW_DIR/orca-down"
+  out=$(PATH="$FAKEBIN:$PATH" FM_FAKE_VIEW_DIR="$VIEW_DIR" \
+    FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
+    "$ROOT/bin/fm-orca-view.sh" open \
+    --target firstmate:fm-sm-retain --view-session orca-failed 2>&1)
+  status=$?
+  rm -f "$VIEW_DIR/orca-down"
+  expect_code 3 "$status" "a failed open reports Orca refusal: $out"
+  # Forced parent teardown traverses this child record too.
+  child="$CASE_DIR/sm/state/child.meta"
+  mkdir -p "$(dirname "$child")"
+  childhome="$CASE_DIR/nested-home"
+  make_secondmate_home "$childhome" child
+  printf 'kind=secondmate\nwindow=firstmate:fm-child\nworktree=%s\nproject=%s\nhome=%s\norca_view_handle=term-child\norca_view_session=orca-child\norca_view_owned=1\n' \
+    "$childhome" "$childhome" "$childhome" > "$child"
+  printf 'off\n' > "$HOME_DIR/config/orca-view-tabs"
+  out=$(PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" \
+    FM_FAKE_VIEW_DIR="$VIEW_DIR" FM_FAKE_PANE_PATH="$CASE_DIR/sm" \
+    FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
+    TMUX=fake,1,0 "$TEARDOWN" sm-retain --force 2>&1)
+  status=$?
+  expect_code 0 "$status" "switch-off recursive teardown must finish: $out"
+  [ ! -e "$child" ] || fail "recursive cleanup did not visit the child record"
+  local log
+  for log in "$TMP_ROOT"/*/view/killed; do
+    assert_no_grep 'kill-session' "$log" "open failure, replacement, abort, switch-off and recursive teardown never kill view sessions"
+  done
+  for log in "$TMP_ROOT"/*/view/orca.log; do
+    assert_no_grep 'terminal close' "$log" "Firstmate never closes Orca view tabs"
+  done
+  pass "view lifecycle: no session kill or tab close across open failure, replacement, abort, switch-off and recursive cleanup"
 }
 
 test_switch_absent_changes_nothing
@@ -778,10 +755,8 @@ test_unavailable_orca_steps_aside
 test_missing_identity_keeps_fresh_spawn_unbadged
 test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
-test_relaunch_closes_distinct_prior_view
 test_aborted_relaunch_keeps_prior_tab_record
 test_post_export_abort_keeps_replacement_tab
-test_post_export_abort_closes_distinct_prior_view
 test_post_export_fresh_abort_keeps_only_tab
 test_cross_home_view_name_collision
 test_derived_view_name_collision
@@ -789,7 +764,7 @@ test_same_group_view_name_alias
 test_base_session_is_not_a_view_candidate
 test_recycled_prior_view_is_not_reused
 test_another_recorded_owner_is_not_adopted
-test_teardown_does_not_kill_recycled_view
 test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab
+test_views_are_never_automatically_closed

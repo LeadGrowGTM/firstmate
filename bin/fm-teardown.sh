@@ -15,8 +15,8 @@
 # the one site where --force overrides it, and bin/fm-backend.sh's
 # fm_backend_kill owns what each backend can prove about its own close - an
 # already-exited endpoint is not a failure and stays silent.
-# A recorded Orca view tab (config/orca-view-tabs) is closed after the endpoint
-# through bin/fm-orca-view.sh; that close never refuses or fails the cleanup.
+# Orca view tabs (config/orca-view-tabs) are left for the operator.
+# Firstmate never closes view tabs or kills their grouped sessions.
 # Removing state/<id>.meta and landing the backlog transition are one step, not
 # two: bin/fm-backlog-transition-lib.sh owns that invariant, and both halves run
 # under the task's own meta lock before this script reports success. Because the
@@ -3435,15 +3435,6 @@ endpoint_close_refusal() {  # <subject> <backend> <target> <honors-force>
   return 1
 }
 
-teardown_close_orca_view() {
-  local record=$1 handle
-  handle=$(meta_value "$record" orca_view_handle)
-  [ -n "$handle" ] || return 0
-  "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$handle" \
-    --view-session "$(meta_value "$record" orca_view_session)" \
-    --target "$(meta_value "$record" window)" || true
-}
-
 cleanup_firstmate_home_children() {
   local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_return_rc child_busy_gen child_owner_rc
   sub_state="$home/state"
@@ -3546,7 +3537,6 @@ cleanup_firstmate_home_children() {
     retire_busy_state "$sub_state" "$child_id" "$child_busy_gen" || return 1
     status_retire_presentation_task "$sub_state" "$child_id" || return 1
     fm_wake_queue_prune_task "$sub_state" "$child_id" "$child_t" 2>/dev/null || true
-    teardown_close_orca_view "$child_meta"
     fm_backlog_atomic_transition remove "$sub_state/$child_id.meta" "task record" "$sub_state" || return 1
     rm -f "$sub_state/$child_id.turn-ended" "$sub_state/$child_id.progress" \
       "$(fm_wake_signal_seen_path "$sub_state" "$sub_state/$child_id.turn-ended")" \
@@ -3950,10 +3940,6 @@ elif [ "$BACKEND" != orca ] && [ "$TEARDOWN_WINDOWLESS" != 1 ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" \
     || endpoint_close_refusal "$ID" "$BACKEND" "$T" 1 || exit 1
 fi
-# The Orca view tab spawn opened for this task (config/orca-view-tabs), closed
-# by its recorded handle; close verifies the view still tracks this task.
-# Every Orca failure leaves a one-line note and the cleanup goes on.
-teardown_close_orca_view "$META"
 if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   if [ "$(fm_backend_herdr_pane_agent_state "$HERDR_PRESENTATION_SESSION" "$HERDR_PRESENTATION_PANE")" = dead ]; then
     rm -f "$HERDR_PRESENTATION_JOURNAL"
