@@ -106,6 +106,7 @@ set -u
 log=${FM_FAKE_TREEHOUSE_LOG:?}
 printf 'HOME=%s\n' "${HOME-}" >> "$log"
 printf 'args=%s\n' "$*" >> "$log"
+printf 'call=%s\t%s\n' "$*" "$(pwd -P)" >> "$log"
 case "$*" in
   'get --lease --lease-holder '*)
     printf 'gitmarker=%s\n' "$(git config --global --get fm.marker 2>/dev/null)" >> "$log"
@@ -349,6 +350,8 @@ test_spawn_that_stops_after_the_lease_returns_it() {
   [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "a stopped spawn published a task record"
   assert_exact_line "args=return --force $own" "$tree_log" \
     "a launch that stopped before publishing its record left its lease behind"
+  assert_exact_line "$(printf 'call=return --force %s\t%s' "$own" "$CASE_HOME/projects/widget")" "$tree_log" \
+    "the lease was not returned from the project clone that acquired it"
   pass "a launch that stops after leasing returns the lease"
 }
 

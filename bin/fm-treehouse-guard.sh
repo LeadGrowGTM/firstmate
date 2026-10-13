@@ -232,6 +232,10 @@ measure_treehouse_root() {  # <resolved-root> <display-root>
   [ -n "$root" ] || return 0
   [ -d "$root" ] || return 0
   out=$(fm_run_timed "$PRUNE_SECS" du -sk "$root" 2>/dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    append_finding "size of $display could not be measured (du exited $rc)"
+    return 0
+  fi
   kib=$(printf '%s\n' "$out" | awk 'NR == 1 { print $1 }')
   case "$kib" in
     ''|*[!0-9]*)

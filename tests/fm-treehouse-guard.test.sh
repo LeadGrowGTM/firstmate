@@ -467,11 +467,35 @@ test_sweep_reports_unresolvable_default_and_per_home_roots() {
   pass "both existing unreadable roots report an unmeasurable size"
 }
 
+test_sweep_rejects_partial_du_totals_for_both_roots() {
+  local world home pool out
+  world=$(make_world partial-du)
+  home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$pool/.treehouse"
+  cat > "$world/fakebin/du" <<'SH'
+#!/usr/bin/env bash
+printf '4096\t%s\n' "${@: -1}"
+exit 3
+SH
+  chmod +x "$world/fakebin/du"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "partial du sweep failed: $out"
+  assert_equals "treehouse-guard: size of $world/user/.treehouse could not be measured (du exited 3); size of $pool/.treehouse could not be measured (du exited 3)" "$out" \
+    "a numeric partial du total was accepted for either root"
+  pass "partial du totals fail size measurement for both roots"
+}
+
 test_prune_runs_only_the_safe_prune_from_the_project
 test_prune_also_prunes_a_present_per_home_pool
 test_sweep_sizes_a_present_per_home_pool_once
 test_sweep_sizes_linked_and_nested_roots_once
 test_sweep_reports_unresolvable_default_and_per_home_roots
+test_sweep_rejects_partial_du_totals_for_both_roots
 test_prune_refuses_a_directory_that_is_not_a_clone_root
 test_prune_failure_warns_and_exits_nonzero
 test_prune_bound_is_reported_as_a_prune_that_did_not_finish
