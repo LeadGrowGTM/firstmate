@@ -92,6 +92,12 @@ ready=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" bash "$ROOT/bin/fm-inbox
 out=$(run_daily --eligible "$bound_pid" "$bound_identity")
 assert_contains "$out" 'eligible' 'delivered note does not require its exited watcher'
 assert_equals 1 "$(count_wakes)" 'delivery recheck writes no wake'
+printf 'S1\n' > "$home/state/.lock-session"
+rc=0
+out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
+expect_code 3 "$rc" 'a new session id cannot receive a note queued without one'
+assert_contains "$out" 'different main session holds the lock' 'sidecar appearance drops the old note'
+rm "$home/state/.lock-session"
 touch "$home/state/.last-watcher-beat"
 out=$(run_daily)
 assert_contains "$out" 'replay' 'same Toronto day retry replays note'
@@ -128,6 +134,29 @@ touch "$sub/.fm-secondmate-home"
 FM_HOME="$sub" bash "$CASCADE" --record-pass >/dev/null
 [ ! -e "$sub/state/.last-stow-primary-pass" ] || fail 'secondmate cannot record primary pass'
 pass 'the existing cascade retains secondmate scope'
+
+home="$TMP_ROOT/session-home"
+mkdir -p "$home/state" "$home/data" "$home/config"
+printf '%s\n' "$holder_pid" > "$home/state/.lock"
+printf 'S1\n' > "$home/state/.lock-session"
+touch "$home/state/.last-watcher-beat"
+out=$(run_daily)
+assert_contains "$out" 'queued' 'a live session with a recorded id receives a note'
+notes=$(FM_HOME="$home" bash "$ROOT/bin/fm-inbox.sh" list)
+read -r bound_pid bound_identity < <(printf '%s\n' "$notes" | python3 -c 'import re,sys; match = re.search(r"--eligible ([0-9]+) ([0-9a-f]{64})", sys.stdin.read()); print(*match.groups()) if match else sys.exit(1)')
+out=$(run_daily --eligible "$bound_pid" "$bound_identity")
+assert_contains "$out" 'eligible' 'unchanged recorded session id remains eligible'
+printf 'S2\n' > "$home/state/.lock-session"
+rc=0
+out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
+expect_code 3 "$rc" 'rekeyed session cannot use the old note'
+assert_contains "$out" 'different main session holds the lock' 'rekey drops the old note'
+rm "$home/state/.lock-session"
+rc=0
+out=$(run_daily --eligible "$bound_pid" "$bound_identity") || rc=$?
+expect_code 3 "$rc" 'disappearing session id cannot use the old note'
+assert_contains "$out" 'different main session holds the lock' 'sidecar disappearance drops the old note'
+pass 'session binding follows recorded id changes and presence'
 
 # Validate copyable units through systemd itself without installing/enabling.
 if command -v systemd-analyze >/dev/null 2>&1; then

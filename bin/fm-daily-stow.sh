@@ -81,7 +81,16 @@ PY
 LOCK_PID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["lock"]["pid"])' <<< "$READY")
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
-HOLDER_IDENTITY=$(fm_pid_identity "$LOCK_PID" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())') \
+# shellcheck source=bin/fm-session-lock-lib.sh
+. "$SCRIPT_DIR/fm-session-lock-lib.sh"
+SESSION_IDENTITY=absent
+if [ -e "$STATE/.lock-session" ] || [ -L "$STATE/.lock-session" ]; then
+  SESSION_IDENTITY=$(fm_session_lock_recorded_session_id "$STATE") \
+    || skip 'main session identity is unavailable'
+  SESSION_IDENTITY="present:$SESSION_IDENTITY"
+fi
+HOLDER_IDENTITY=$({ fm_pid_identity "$LOCK_PID" && printf '\0%s' "$SESSION_IDENTITY"; } \
+  | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())') \
   || skip 'main session identity is unavailable'
 if [ "$MODE" = eligible ]; then
   [ "$HOLDER_IDENTITY" = "$BOUND_IDENTITY" ] || skip 'different main session holds the lock'
