@@ -1,0 +1,4 @@
+SCENARIO open PR observed at newer head than recorded metadata
+{"checked":false,"final":false,"head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","actor":"fleet","reason":"contribution not recently checked"}
+SCENARIO terminal PR retains its final observed head
+{"checked":true,"final":true,"head":"dddddddddddddddddddddddddddddddddddddddd","actor":"nobody","reason":"forge reports closed"}

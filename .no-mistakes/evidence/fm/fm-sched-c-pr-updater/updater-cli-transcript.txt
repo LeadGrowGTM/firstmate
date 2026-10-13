@@ -1,0 +1,26 @@
+SCENARIO off by default
+PUT count: 0
+SCENARIO accepted guarded request
+pr-autoupdate: accepted https://github.com/o/r/pull/1: update accepted; validation owner must observe resulting head
+{"coverage_complete":false,"receipt":{"result":"accepted","reason":"update accepted; validation owner must observe resulting head","old_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","base_sha":"cccccccccccccccccccccccccccccccccccccccc","requested_at":10000,"accepted_at":10000,"pending":false}}
+task metadata head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+PUT count: 1
+pr-autoupdate: deferred https://github.com/o/r/pull/1: accepted update awaits validation owner
+PUT count after repeat check: 1
+SCENARIO queue race before write
+pr-autoupdate: deferred https://github.com/o/r/pull/1: merge queued
+{"coverage_complete":false,"receipt":{"result":"deferred","reason":"merge queued","pending":false}}
+PUT count: 0
+SCENARIO uncertain write outcome
+pr-autoupdate: incomplete https://github.com/o/r/pull/1: update request failed or uncertain; re-observe without repeated write
+{"coverage_complete":false,"receipt":{"result":"incomplete","reason":"update request failed or uncertain; re-observe without repeated write","pending":true,"old_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","base_sha":"cccccccccccccccccccccccccccccccccccccccc"}}
+pr-autoupdate: incomplete https://github.com/o/r/pull/1: request outcome uncertain; validation owner must resolve
+PUT count after repeat check: 1
+SCENARIO readiness invalidated, then restored by validation owner
+{"checked":true,"actor":"fleet","reason":"checks green; merge is authorized by delivery posture","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+pr-autoupdate: accepted https://github.com/o/r/pull/1: update accepted; validation owner must observe resulting head
+{"checked":false,"actor":"fleet","reason":"branch update evidence requires fresh head validation","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+{"checked":true,"actor":"fleet","reason":"checks green; merge is authorized by delivery posture","head":"dddddddddddddddddddddddddddddddddddddddd"}
+SCENARIO long queue reaches last owned PR after two-hour refresh
+{"next":"https://github.com/o/r/pull/125","remaining":25,"coverage_complete":false}
+{"first_sweep_url":"https://github.com/o/r/pull/125","last_sweep_url":"https://github.com/o/r/pull/126","removed_url_present":false,"last_old_pr_result":"incomplete","coverage_complete":false}

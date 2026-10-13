@@ -1,0 +1,37 @@
+SCENARIO exact write grant absent
+pr-autoupdate: deferred https://github.com/o/r/pull/1: head branch write not authorized
+{"result":"deferred","reason":"head branch write not authorized"}
+PUT count: 0
+SCENARIO worker retains custody
+pr-autoupdate: deferred https://github.com/o/r/pull/1: worker active or readiness unconfirmed
+{"result":"deferred","reason":"worker active or readiness unconfirmed"}
+PUT count: 0
+SCENARIO canonical owner changes before publication
+pr-autoupdate: incomplete https://github.com/o/r/pull/1: canonical owners changed before update
+{"result":"incomplete","reason":"canonical owners changed before update"}
+PUT count: 0
+SCENARIO definitive HTTP 422 then fresh ready head
+pr-autoupdate: incomplete https://github.com/o/r/pull/1: update refused with HTTP 422; re-observe PR before retry
+{"result":"incomplete","reason":"update refused with HTTP 422; re-observe PR before retry","pending":false,"old_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+pr-autoupdate: accepted https://github.com/o/r/pull/1: update accepted; validation owner must observe resulting head
+{"result":"accepted","reason":"update accepted; validation owner must observe resulting head","pending":false,"old_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+PUT count after re-observation: 2
+SCENARIO comparison current, unknown, and positive conflict
+{"condition":"current","coverage_complete":true,"receipt":{"result":"current","reason":"base reachable from head"}}
+PUT count: 0
+pr-autoupdate: incomplete https://github.com/o/r/pull/1: mergeability unknown
+{"condition":"unknown","coverage_complete":false,"receipt":{"result":"incomplete","reason":"mergeability unknown"}}
+PUT count: 0
+pr-autoupdate: conflict https://github.com/o/r/pull/1: forge positively reports conflict
+{"condition":"conflict","coverage_complete":false,"receipt":{"result":"conflict","reason":"forge positively reports conflict"}}
+PUT count: 0
+SCENARIO draft and closed PRs
+pr-autoupdate: deferred https://github.com/o/r/pull/1: draft
+{"condition":"draft","coverage_complete":false,"receipt":{"result":"deferred","reason":"draft"}}
+PUT count: 0
+{"condition":"closed","coverage_complete":true,"receipt":{"result":"terminal","reason":"closed or merged"}}
+PUT count: 0
+SCENARIO pipeline owns branch
+pr-autoupdate: deferred https://github.com/o/r/pull/1: pipeline custody present or unconfirmed
+{"result":"deferred","reason":"pipeline custody present or unconfirmed"}
+PUT count: 0
