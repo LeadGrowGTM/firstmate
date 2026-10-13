@@ -553,7 +553,7 @@ No live guard refreshes this, because the record only gains a `bridgeSessionId` 
 ## Claude claude.ai publishing tools
 
 Verified 2026-10-13 on Claude Code 2.1.296.
-`bin/fm-spawn.sh` adds `--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs` to every Claude launch, directly before `--settings`.
+`bin/fm-spawn.sh` adds `--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs` to standard and raw Claude launches, directly before `--settings`.
 The installed binary defines the Artifact tool family as exactly `Artifact`, `ArtifactComments`, `ArtifactData`, and `ArtifactCheck`; `ArtifactCheck` was gated off for the signed-in account (`verify=false preview=false` in the debug log) but is denied with its family.
 A headless `claude -p` session lists none of the four, so only an interactive launch can show the effect.
 
@@ -567,7 +567,7 @@ claude --disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mc
 Without the flag the session listed `Artifact`, `ArtifactComments`, `ArtifactData`, and eight `mcp__claude_ai_Claude_Docs__*` tools.
 With the flag it listed `NONE`, the positional prompt still arrived as the first message, and a follow-up `ToolSearch` for `select:Artifact,ArtifactComments,ArtifactData,mcp__claude_ai_Claude_Docs__create` returned `No matching deferred tools found`, and the debug log recorded that select as failed with none of the four names found.
 
-`tests/fm-spawn-dispatch-profile.test.sh` and `tests/fm-secondmate-harness.test.sh` pin the flag in the ship, scout, and secondmate launch shapes against a fake claude; only a live launch like the one above shows the tools are actually removed, so repeat it after a Claude Code upgrade that may rename them.
+`tests/fm-spawn-dispatch-profile.test.sh` and `tests/fm-secondmate-harness.test.sh` pin the flag in standard and raw ship, scout, and secondmate launch shapes against a fake claude; only a live launch like the one above shows the tools are actually removed, so repeat it after a Claude Code upgrade that may rename them.
 
 ## Pi seeded-secondmate project trust
 

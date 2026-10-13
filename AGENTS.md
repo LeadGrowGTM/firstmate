@@ -49,7 +49,7 @@ This repo is a shared template, while `.env`, `data/`, `state/`, `config/`, `pro
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
 Never add an agent name as a commit co-author.
 Use `gh-axi` for GitHub and `chrome-devtools-axi` for browser work; consult current help rather than memorizing flags.
-Present visual or review pages through compatible `lavish-axi` or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs, which `bin/fm-spawn.sh` disables for every Claude session it launches.
+Present visual or review pages through compatible `lavish-axi` or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs, which `bin/fm-spawn.sh` disables for standard and raw Claude launches.
 Plain report files and chat text remain available.
 
 ## 2. Layout and state

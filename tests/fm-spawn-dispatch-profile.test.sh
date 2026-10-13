@@ -488,6 +488,40 @@ test_active_dispatch_profile_allows_raw_launch_command() {
   pass "active crew-dispatch profile allows the raw launch-command escape hatch"
 }
 
+test_raw_claude_launch_denies_publishing_tools_and_keeps_prompt() {
+  local kind rec id sm out status launch args_log actual expected raw
+  expected=$(printf '%s\n' --disallowedTools 'Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs' --settings '{}' --model haiku 'A positional prompt')
+  for kind in ship scout secondmate; do
+    id="raw-claude-$kind-z15"
+    rec=$(make_spawn_case "raw-claude-$kind" claude "$id")
+    read_case_record "$rec"
+    cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+    chmod +x "$FAKEBIN_DIR/claude"
+    raw="CLAUDE_DEBUG=claude claude --model haiku 'A positional prompt'"
+    case "$kind" in
+      ship) out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$raw") ;;
+      scout) out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$raw" --scout) ;;
+      secondmate)
+        sm="$CASE_DIR/secondmate-home"
+        make_seeded_secondmate_home "$sm" "$id"
+        out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" "$raw" --secondmate)
+        ;;
+    esac
+    status=$?
+    expect_code 0 "$status" "$kind raw Claude launch should succeed: $out"
+    launch=$(cat "$LAUNCH_LOG")
+    args_log="$CASE_DIR/claude-args.log"
+    FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+      || fail "$kind raw Claude launch command failed"
+    actual=$(cat "$args_log")
+    [ "$actual" = "$expected" ] || fail "$kind raw Claude arguments changed"$'\n'"expected: $expected"$'\n'"actual: $actual"
+  done
+  pass "raw Claude ship, scout, and secondmate launches deny publishing tools and keep the prompt positional"
+}
+
 test_chained_raw_launch_strips_ai_trailer_in_every_step() {
   local rec id out status launch body
   id=chained-raw-z15
@@ -2229,6 +2263,7 @@ test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness
 test_active_dispatch_profile_allows_positional_harness
 test_active_dispatch_profile_allows_raw_launch_command
+test_raw_claude_launch_denies_publishing_tools_and_keeps_prompt
 test_chained_raw_launch_strips_ai_trailer_in_every_step
 test_claude_threads_model_and_effort
 test_codex_threads_model_and_effort
