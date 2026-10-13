@@ -354,7 +354,7 @@
 #   active from the start; `auto` launches with `--permission-mode auto` alone,
 #   leaving bypass unreachable, for a captain who refuses bypass mode entirely.
 #   Every other part of the claude launch is unchanged. The token is the
-#   file's whitespace-trimmed content; any other
+#   file's content with all whitespace removed; any other
 #   value, or an unreadable file, refuses the spawn before any endpoint,
 #   worktree, or record exists and names the accepted values. The file is read
 #   on every spawn and relaunch, so a change reaches the next launch without a

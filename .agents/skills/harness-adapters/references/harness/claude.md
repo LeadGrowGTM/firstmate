@@ -12,7 +12,7 @@ Busy hooks verified 2026-07-28 on Claude Code 2.1.220.
 | Skill | `/<skill>`, for example `/no-mistakes`. |
 | Model | `--model <model>`; discover through the interactive `/model` picker, with alias or full-name shape documented by `claude --help`. |
 | Effort | `--effort <low\|medium\|high\|xhigh\|max>`, verified on 2.1.196. |
-| Permissions | `--allow-dangerously-skip-permissions --permission-mode auto` by default (auto mode on, bypass reachable through shift+tab), `--dangerously-skip-permissions` under `config/claude-permission-mode=bypass`, or `--permission-mode auto` alone under `auto`; the default shape [verified on 2.1.296](../../../../../docs/verification/runtime-backends.md#claude-permission-mode). See [`Claude permission mode`](../../../../../docs/configuration.md#claude-permission-mode-configclaude-permission-mode) for the launch grant and configuration. |
+| Permissions | See [`Claude permission mode`](../../../../../docs/configuration.md#claude-permission-mode-configclaude-permission-mode) for launch flags, the task-channel grant, and configuration; the default flag combination was [verified on 2.1.296](../../../../../docs/verification/runtime-backends.md#claude-permission-mode). |
 | Remote Control | A secondmate launch or relaunch carries `--remote-control 'fm-<id>'` unless `config/claude-remote-control` is `off`; a ship or scout launch never does. See [Remote Control](#remote-control). |
 
 ## Workspace trust

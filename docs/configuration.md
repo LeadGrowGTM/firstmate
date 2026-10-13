@@ -849,7 +849,7 @@ The optional local, gitignored `config/claude-permission-mode` selects the permi
 
 ### Accepted values and refusals
 
-The token is the file's whitespace-trimmed content.
+The token is the file's content with all whitespace removed.
 
 | Token | Launch permission flags |
 | --- | --- |
