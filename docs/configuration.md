@@ -1476,7 +1476,7 @@ Inventory coverage names the observed surfaces and explicitly leaves session vis
 Instruction excerpts disclose truncation while their digest covers the full file.
 First inventory observations are explicit baselines rather than historical change claims.
 
-The current secondmate registry supplies domain id/home/scope context for every bundle.
+When present, the current secondmate registry supplies domain id/home/scope/host context; an absent registry is recorded with no domains.
 All collected sources remain available to scope judgment, including effects that cross department boundaries; collection does not assign repositories exclusively to one mate.
 Repository events include active linked contribution observations when available, without limiting repository-wide discovery.
 The collector makes no model calls, parent requests, or review cards on complete unchanged observations.
