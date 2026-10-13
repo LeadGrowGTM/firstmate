@@ -212,6 +212,18 @@ for project in "${projects[@]+"${projects[@]}"}"; do
     note "cannot resolve project lock: $project"; continue
   }
   fm_lock_try_acquire "$project_lock" || continue
+  retained_pool_task=
+  for retained_meta in "$STATE"/*.meta; do
+    [ -f "$retained_meta" ] && [ ! -L "$retained_meta" ] || continue
+    retained_kind=$(fm_meta_get "$retained_meta" kind)
+    case "$retained_kind" in ''|ship|scout) ;; *) continue ;; esac
+    retained_copy=$(fm_meta_get "$retained_meta" worktree)
+    if fm_treehouse_pool_slot "$project" "$retained_copy"; then
+      retained_pool_task=${retained_meta##*/}
+      retained_pool_task=${retained_pool_task%.meta}
+      break
+    fi
+  done
   # Keep the lock in this process: lock ownership uses the actual process id.
   rc=0
   (
@@ -256,7 +268,9 @@ for project in "${projects[@]+"${projects[@]}"}"; do
     done < "$TMP/prune-before"
     printf '%s\n' "$count" > "$TMP/stale"
     prune_rc=0
-    FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune --locked "$project" || prune_rc=$?
+    if [ -z "$retained_pool_task" ]; then
+      FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune --locked "$project" || prune_rc=$?
+    fi
     count=0
     for path in "${prune_paths[@]+"${prune_paths[@]}"}"; do
       if [ ! -e "$path" ] && [ ! -L "$path" ]; then count=$((count + 1)); fi
@@ -274,6 +288,7 @@ for project in "${projects[@]+"${projects[@]}"}"; do
     note "prune skipped for $project: prunable registration still present: $(cat "$TMP/prune-skipped")"
     rm -f -- "$TMP/prune-skipped"
   fi
+  [ -z "$retained_pool_task" ] || note "pool prune skipped for $project: retained task $retained_pool_task has a pool copy"
   [ "$rc" = 0 ] || note "prune failed for $project: $(reason "$TMP/prune-output")"
 done
 if [ "$workers" -gt 0 ] || [ "$copies" -gt 0 ] || [ "$stale" -gt 0 ] || [ -n "$findings" ]; then

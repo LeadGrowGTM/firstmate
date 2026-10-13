@@ -46,6 +46,9 @@ case "$1" in
     [ "$*" = 'prune --yes' ] || exit 1
     [ ! -f "$FIXTURE/slow-prune" ] || sleep 6
     [ ! -f "$FIXTURE/prune-fail" ] || { echo 'prune refused' >&2; exit 1; }
+    if [ -f "$FIXTURE/prune-held" ]; then
+      git -C "$FIXTURE/projects/project" worktree remove --force "$(cat "$FIXTURE/prune-held")"
+    fi
     if [ -d "$FIXTURE/pool" ]; then
       git -C "$FIXTURE/projects/project" worktree remove "$FIXTURE/pool"
     fi
@@ -81,11 +84,12 @@ FAKE
 }
 
 add_worker() {
-  local home=$1 kind=${2:-ship}
-  git -C "$home/projects/project" worktree add -qb fm/task "$home/worker" main
+  local home=$1 kind=${2:-ship} copy
+  copy=${3:-$home/worker}
+  git -C "$home/projects/project" worktree add -qb fm/task "$copy" main
   fm_write_meta "$home/state/task.meta" \
     window=firstmate:fm-task endpoint_task_id=task \
-    "worktree=$home/worker" "project=$home/projects/project" \
+    "worktree=$copy" "project=$home/projects/project" \
     "kind=$kind" branch=fm/task mode=no-mistakes spawn_gen=sweep-test
   echo 'done: complete' > "$home/state/task.status"
 }
@@ -515,6 +519,24 @@ test_decisions_secondmates_and_unknown_kept() {
   pass 'sweep keeps open decisions, secondmates, and unreadable endpoints'
 }
 
+test_retained_pool_copy_skips_prune() {
+  local home out copy
+  home=$(make_home retained-pool)
+  copy="$home/treehouse-pool/slot/project"
+  mkdir -p "$home/treehouse-pool/slot"
+  printf '{}\n' > "$home/treehouse-pool/treehouse-state.json"
+  add_worker "$home" ship "$copy"
+  printf 'needs-decision [key=choice]: waiting\nworking: preparing evidence\n' > "$home/state/task.status"
+  printf '%s\n' "$copy" > "$home/prune-held"
+  out=$(sweep "$home")
+  assert_contains "$out" "pool prune skipped for $home/projects/project: retained task task has a pool copy" 'retained pool skip reported'
+  assert_present "$home/state/task.meta" 'captain-held task record kept'
+  assert_present "$copy/file" 'captain-held clean pool copy kept'
+  assert_absent "$home/treehouse-calls" 'retained project pool never pruned'
+  assert_equals 1 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" 'retained pool skip stays one line'
+  pass 'sweep preserves a captain-held worker pool copy'
+}
+
 test_recorded_pr_kept_until_merged() {
   local home out
   home=$(make_home open-pr); add_worker "$home"
@@ -842,6 +864,7 @@ test_generated_wiring_exact_and_edited
 test_late_work_kept
 test_missing_copy_remote_branch_kept_until_merged
 test_decisions_secondmates_and_unknown_kept
+test_retained_pool_copy_skips_prune
 test_recorded_pr_kept_until_merged
 test_scout_gates_and_work_kept
 test_stale_registration_and_live_copy
