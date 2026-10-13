@@ -408,6 +408,7 @@ test_relaunch_replaces_the_tab() {
 }
 
 test_aborted_relaunch_keeps_prior_tab_record() {
+  local seen
   FM_FAKE_STAGE_FAIL=1 relaunch_secondmate relaunch-abort sm-abort on
   [ "$STATUS" -ne 0 ] || fail "launch staging failure must abort the relaunch"
   assert_contains "$OUT" "refusing to stage the launch command" \
@@ -419,8 +420,13 @@ test_aborted_relaunch_keeps_prior_tab_record() {
     "abort closes the replacement tab"
   assert_no_grep "terminal close --terminal term-0" "$VIEW_DIR/orca.log" \
     "abort keeps the prior tab open for teardown"
-  assert_no_grep 'tab-1:leaf' "$VIEW_DIR/literal" \
-    "launch staging failure does not replace the surviving pane's identity"
+  assert_no_grep 'tab-1:leaf' "$VIEW_DIR/keys" \
+    "launch staging failure sends no replacement identity into the pane"
+  install_identity_probe "$FAKEBIN"
+  seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$VIEW_DIR/keys")" codex) \
+    || fail "the surviving pane's identity could not be checked"
+  assert_equals "pane=tab-0:leaf tab=tab-0 worktree=wt-1 endpoint=/hooks/endpoint.env env=production version=1" "$seen" \
+    "the surviving pane keeps all six fields of the prior tab identity"
   pass "aborted relaunch closes its new tab and restores the surviving tab record"
 }
 
@@ -446,13 +452,47 @@ test_cross_home_view_name_collision() {
   mkdir -p "$TMP_ROOT/cross-dotted/view"
   : > "$TMP_ROOT/cross-dotted/view/session-orca-sm-cross"
   printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-orca-sm-cross"
+  : > "$TMP_ROOT/cross-dotted/view/session-orca-sm-cross-h-6f746865722e62617365"
+  printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-orca-sm-cross-h-6f746865722e62617365"
   spawn_secondmate cross-dotted sm-cross on '' '' other.base
   expect_code 0 "$STATUS" "a dotted base session should also open a distinct view: $OUT"
-  assert_equals orca-sm-cross-h-6f746865722e62617365 "$(meta sm-cross orca_view_session)" \
+  assert_equals orca-sm-cross-h-6f746865722e62617365-1 "$(meta sm-cross orca_view_session)" \
     "a dotted base session has a deterministic valid view name"
-  assert_present "$VIEW_DIR/session-orca-sm-cross-h-6f746865722e62617365" \
+  assert_present "$VIEW_DIR/session-orca-sm-cross-h-6f746865722e62617365-1" \
     "the dotted home creates its own grouped view"
   pass "same secondmate id in different base sessions gets a distinct Orca view"
+}
+
+test_derived_view_name_collision() {
+  local candidate
+  mkdir -p "$TMP_ROOT/derived-collision/view"
+  for candidate in orca-dev orca-dev-s-beta; do
+    : > "$TMP_ROOT/derived-collision/view/session-$candidate"
+    printf 'firstmate\n' > "$TMP_ROOT/derived-collision/view/group-$candidate"
+  done
+  spawn_secondmate derived-collision dev on '' '' beta
+  expect_code 0 "$STATUS" "a collision with the derived name should still open a tab: $OUT"
+  assert_equals orca-dev-s-beta-1 "$(meta dev orca_view_session)" \
+    "the first available numbered name is selected"
+  assert_present "$VIEW_DIR/session-orca-dev-s-beta-1" \
+    "the tab gets its own view instead of reusing the foreign view"
+  for candidate in orca-dev orca-dev-s-beta; do
+    assert_present "$VIEW_DIR/session-$candidate" "the foreign $candidate view survives"
+  done
+
+  mkdir -p "$TMP_ROOT/derived-exhausted/view"
+  for candidate in orca-dev orca-dev-s-beta orca-dev-s-beta-{1..5}; do
+    : > "$TMP_ROOT/derived-exhausted/view/session-$candidate"
+    printf 'firstmate\n' > "$TMP_ROOT/derived-exhausted/view/group-$candidate"
+  done
+  spawn_secondmate derived-exhausted dev on '' '' beta
+  expect_code 0 "$STATUS" "exhausted view names should not fail the agent spawn: $OUT"
+  assert_equals "" "$(meta dev orca_view_handle)" "no foreign tab is recorded"
+  assert_equals 1 "$(printf '%s\n' "$OUT" | grep -cF 'note: no available Orca view session name for dev in beta')" \
+    "exhaustion reports one note"
+  assert_no_grep 'terminal create' "$VIEW_DIR/orca.log" \
+    "Orca receives no create when every candidate belongs to another base"
+  pass "derived name collisions use numbered views or step aside after a bounded search"
 }
 
 test_incomplete_identity_keeps_prior_tab() {
@@ -528,6 +568,7 @@ test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
 test_aborted_relaunch_keeps_prior_tab_record
 test_cross_home_view_name_collision
+test_derived_view_name_collision
 test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab
