@@ -15,6 +15,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and [Claude Remote Control](#claude-remote-control-configclaude-remote-control) |
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity) and [worktree pool guard](#worktree-pool-guard) |
 | Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
+| Opt-in recurring task intake | [Recurring intake](#recurring-intake-configschedulesjson) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
 ## FM_HOME
@@ -1436,7 +1437,7 @@ Worker profiles are omitted from task-type snapshots so current routing still go
 `intent` is the authorized recurring task description, not authority for additional external actions.
 The string fields are nonempty single lines of at most 4096 characters.
 Daily-local cadence requires exactly `kind`, valid 24-hour `at` (`HH:MM`), and an IANA `timezone`.
-An interval cadence instead requires exactly `{"kind":"interval","seconds":7200}`, with integer seconds from 60 through 31536000; interval slots use UTC epoch arithmetic.
+An interval cadence instead requires exactly `kind` and integer `seconds` from 60 through 31536000 (for example, `{"kind":"interval","seconds":7200}`); interval slots use UTC epoch arithmetic.
 Unknown fields, duplicate ids, invalid timezone data, unsafe files, or malformed entries refuse the entire check before new publication.
 The configuration is bounded to 1 MiB and the journal to 16 MiB, including frozen brief snapshots; both must be regular single-link files.
 Commands, credentials, accounts, harnesses, worker models and vendor trigger ids are not accepted fields.
@@ -1444,7 +1445,7 @@ The owning supervisor uses current routing and quota evidence at intake rather t
 
 Due occurrences are filed or reused through [`bin/fm-tasks-axi.sh`](../bin/fm-tasks-axi.sh) as ordinary Queued items containing the frozen brief pointer and occurrence digest.
 The existing task lifecycle owns supervisor judgement, dispatch, capacity and completion; no new skill or always-loaded rule is needed.
-Disabling or disarming prevents further recurring intake and preserves already filed tasks under that lifecycle.
+Disabling a schedule prevents new detections, while disarming removes its automatic watcher check; both preserve already filed tasks under that lifecycle.
 An attempted task that disappears from the active backlog is retained pending for ordinary custody reconciliation, including a task completed and archived between polls, rather than recreated.
 Activation requires a separate approved home-local configuration and explicit check arming; this feature supplies no branch-write or operational-update authority.
 Enqueue-only intake does not implement worker failover, PR updates, or domain collection.

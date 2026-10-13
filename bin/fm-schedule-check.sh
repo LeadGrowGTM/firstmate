@@ -14,7 +14,10 @@
 # state/.schedule-occurrences.json retains each job's latest occurrence and a
 # snapshot of its intent. Keys are <id>:daily:<YYYY-MM-DD> or
 # <id>:interval:<UTC-start>-<UTC-end>.
-# A deterministic sched-<digest> task id survives replay and configuration edits.
+# A deterministic sched-<digest> task id survives replay of the same occurrence.
+# Schedule edits retain completed identities while their time windows remain
+# reachable; interval identities include the UTC window, and daily identities
+# remain until that date has ended in every possible timezone.
 # detected means frozen intent; enqueued means a verified ordinary backlog row;
 # dispatched and completed are observed from that same row's In flight and Done
 # states. Filing a task or publishing a wake never implies successful completion.
