@@ -1,0 +1,14 @@
+ok - fm-gate-refuse-lib: refuses when NO_MISTAKES_GATE is set
+ok - fm-gate-refuse-lib: refuses when NO_MISTAKES_GATE is set empty
+ok - fm-gate-refuse-lib: refuses from a gate worktree via git-common-dir (marker unset)
+ok - fm-gate-refuse-lib: no-op for a normal session (neither signal, set -eu clean)
+ok - fm-gate-refuse-lib: marked lab home permitted in a gate; unmarked home or an override stay refused
+ok - fm-lab-home: create mints marked stock homes only on fresh empty dirs; anything else is refused
+primary
+fm-afk-launch: daemon launched in detached tmux session 'fm-afk-daemon-2137078946-2278736-11002-1791930881', supervising primary:0
+fm-afk-launch: away-posture record archived at /tmp/fm-gate-refuse.uUhHIb/deep/long-directory-segment/long-directory-segment/long-directory-segment/long-directory-segment/long-directory-segment/long-directory-segment/lab-home/state/afk-contracts/1791930879.afk-contract
+fm-afk-launch: away mode stopped; daemon terminal torn down, .afk cleared, and the posture record archived
+ok - fm-lab-home: a primary starts on a private short tmux socket from a long lab path and teardown removes it
+ok - fm-spawn: refuses on marker and gate-worktree backstop; a normal crew spawn is unaffected
+ok - fm-send: refuses on marker and gate-worktree backstop; a normal steer uses the inbox
+ok - fm-teardown: refuses on marker and gate-worktree backstop; a normal teardown is unaffected

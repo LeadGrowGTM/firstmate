@@ -1,0 +1,14 @@
+independent sentinel: alive
+lab session: alive
+lab socket: /tmp/fml.sGKL1N/tmux-1000/fm-lab
+fm-lab-home: lab private named tmux socket is not selected
+missing selector refused
+fm-lab-home: lab private named tmux socket is not selected
+foreign selector refused
+fm-lab-home: tmux requires a command, not socket options
+foreign explicit socket refused
+sentinel after refusals: alive
+fm-lab-home: refusing teardown: cannot confirm the lab tmux server has stopped
+live lab teardown refused
+lab socket directory removed: yes
+sentinel after lab cleanup: alive
