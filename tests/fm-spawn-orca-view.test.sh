@@ -395,6 +395,7 @@ SH
   printf '%s' "$sm" > "$VIEW_DIR/cwd"
   : > "$VIEW_DIR/session-$prior_view"
   printf 'fmses\n' > "$VIEW_DIR/group-$prior_view"
+  [ -n "$untracked" ] || printf '@0\n' > "$VIEW_DIR/option-$prior_view"
   {
     echo "window=fmses:fm-$id"
     echo "endpoint_task_id=$id"
@@ -660,6 +661,8 @@ EOF
   expect_code 0 "$STATUS" "a recycled prior view must not block respawn: $OUT"
   assert_equals orca-dev-s-beta-1 "$(meta dev orca_view_session)" "respawn creates its own view"
   assert_equals @1 "$(cat "$VIEW_DIR/option-orca-dev-s-beta")" "respawn leaves the other secondmate's view target alone"
+  assert_no_grep 'kill-session' "$VIEW_DIR/killed" "replacement cleanup never kills the rejected recycled view"
+  assert_no_grep 'terminal close --terminal term-old' "$VIEW_DIR/orca.log" "replacement cleanup leaves the rejected prior view alone"
   assert_equals 1 "$(meta dev orca_view_owned)" "ownership is assigned to the newly created view only"
   pass "respawn: a recycled prior view name cannot retarget another secondmate's view"
 }
@@ -671,7 +674,6 @@ test_another_recorded_owner_is_not_adopted() {
   printf 'beta\n' > "$view/group-orca-dev-s-beta"
   cat > "$TMP_ROOT/recorded-owner.other-meta" <<EOF
 kind=secondmate
-backend=tmux
 orca_view_session=orca-dev-s-beta
 orca_view_owned=1
 EOF
