@@ -1002,6 +1002,37 @@ resolve_relaunch_profile() {
   if [ "$TARGET_EFFORT" = ultra ]; then
     "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" || return 1
   fi
+  if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+    local executable=
+    case "$TARGET_HARNESS" in
+    cursor)
+      # shellcheck source=bin/fm-cursor-lib.sh
+      . "$SCRIPT_DIR/fm-cursor-lib.sh"
+      executable=$(fm_cursor_resolve_binary 2>/dev/null || true)
+      ;;
+    kimi|rovo)
+      executable=$(command -v "$TARGET_HARNESS" 2>/dev/null || true)
+      if [ ! -x "$executable" ]; then
+        case "$TARGET_HARNESS" in
+        kimi) executable="${HOME:-}/.kimi-code/bin/kimi" ;;
+        rovo) executable="${HOME:-}/.local/bin/rovo" ;;
+        esac
+      fi
+      ;;
+    *) executable=$(command -v "$TARGET_HARNESS" 2>/dev/null || true) ;;
+    esac
+    if [ ! -x "$executable" ]; then
+      FM_LAUNCH_OUTCOME=worker-unavailable
+      FM_LAUNCH_OUTCOME_REASON=selected-executable-missing-before-stop
+      FM_OUTCOME_HARNESS=$TARGET_HARNESS
+      MODEL=$TARGET_MODEL
+      EFFORT=$TARGET_EFFORT
+      MODE=$(fm_meta_get "$META" mode)
+      YOLO=$(fm_meta_get "$META" yolo)
+      echo "error: selected $TARGET_HARNESS executable is unavailable before stopping $ID" >&2
+      return 1
+    fi
+  fi
   # The launch owner applies this home's worker account pin too, but only after
   # the old agent has been stopped, so a pin that no longer resolves or is
   # signed out must refuse here, while nothing has changed yet.
@@ -1016,6 +1047,11 @@ resolve_relaunch_profile() {
     if [ "$account_status" = 10 ]; then
       FM_LAUNCH_OUTCOME=worker-unavailable
       FM_LAUNCH_OUTCOME_REASON=selected-account-check-refused-before-stop
+    elif [ "$account_status" = 11 ]; then
+      FM_LAUNCH_OUTCOME=uncertain
+      FM_LAUNCH_OUTCOME_REASON=selected-account-check-inconclusive-before-stop
+    fi
+    if [ "$account_status" = 10 ] || [ "$account_status" = 11 ]; then
       FM_OUTCOME_HARNESS=$TARGET_HARNESS
       MODEL=$TARGET_MODEL
       EFFORT=$TARGET_EFFORT

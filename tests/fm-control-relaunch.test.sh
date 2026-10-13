@@ -2748,7 +2748,43 @@ test_scheduled_control_receipts() {
   pass "control receipts bind live confirmation and preserve late-launch uncertainty"
 }
 
+test_scheduled_control_preflight_keeps_worker_live() {
+  local dir out rc receipt id=rl-preflight-missing
+  dir=$(new_case preflight-missing "$id")
+  add_ship_task "$dir" "$id" claude
+  receipt="$dir/outcome.json"
+  cp "$dir/home/state/$id.meta" "$dir/meta-before"
+  out=$(PATH="$(dirname "$(command -v jq)"):/usr/bin:/bin" FM_SPAWN_OUTCOME_FILE="$receipt" \
+    run_control "$dir" "$id" relaunch --harness opencode --note "continue on selected replacement"); rc=$?
+  expect_code 1 "$rc" "a missing replacement executable must refuse before stopping the worker: $out"
+  jq -e '.outcome == "worker-unavailable" and .reason == "selected-executable-missing-before-stop" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "a missing replacement executable must permit another selected candidate"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "the prior worker stopped for a missing replacement"
+  [ ! -s "$dir/fake/literal" ] || fail "a missing replacement sent lifecycle input"
+  cmp -s "$dir/meta-before" "$dir/home/state/$id.meta" || fail "a missing replacement changed the task record"
+
+  dir=$(new_case preflight-unknown rl-preflight-unknown)
+  add_ship_task "$dir" rl-preflight-unknown claude
+  mkdir -p "$dir/home/config" "$dir/work"
+  printf '%s\n' "$dir/work" > "$dir/home/config/claude-account"
+  cat > "$dir/fakebin/claude" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then exit 124; fi
+exit 0
+SH
+  chmod +x "$dir/fakebin/claude"
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_control "$dir" rl-preflight-unknown relaunch --note "continue after account check"); rc=$?
+  expect_code 1 "$rc" "an inconclusive replacement account check must refuse: $out"
+  jq -e '.outcome == "uncertain" and .reason == "selected-account-check-inconclusive-before-stop" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "an inconclusive replacement account check must block reselection"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "an inconclusive account check stopped the prior worker"
+  [ ! -s "$dir/fake/literal" ] || fail "an inconclusive account check sent lifecycle input"
+  pass "scheduled continuation distinguishes missing CLI from inconclusive account before stopping"
+}
+
 test_scheduled_control_receipts
+test_scheduled_control_preflight_keeps_worker_live
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint

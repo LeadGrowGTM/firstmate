@@ -2619,6 +2619,9 @@ else
   if [ "$ACCOUNT_CHECK_STATUS" = 10 ]; then
     FM_LAUNCH_OUTCOME=worker-unavailable
     FM_LAUNCH_OUTCOME_REASON=selected-account-check-refused
+  elif [ "$ACCOUNT_CHECK_STATUS" = 11 ]; then
+    FM_LAUNCH_OUTCOME=uncertain
+    FM_LAUNCH_OUTCOME_REASON=selected-account-check-inconclusive
   fi
   exit 1
 fi

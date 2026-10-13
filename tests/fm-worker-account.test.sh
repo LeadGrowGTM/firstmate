@@ -181,6 +181,54 @@ test_claude_pin_refuses_a_signed_out_root_despite_an_ambient_login() {
   pass "a Claude pin refuses a signed-out root even when the invoking process has a usable login and API key"
 }
 
+test_account_probe_receipts_distinguish_unavailable_and_inconclusive() {
+  local out rc receipt
+  new_case claude-receipts claude
+  mkdir -p "$CASE/work"
+  printf '%s\n' "$CASE/work" > "$HOME_DIR/config/claude-account"
+  receipt="$HOME_DIR/state/signed-out.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" spawn_ship acct-proven); rc=$?
+  expect_code 1 "$rc" "a signed-out Claude account must refuse"
+  jq -e '.outcome == "worker-unavailable" and .reason == "selected-account-check-refused"' "$receipt" >/dev/null \
+    || fail "a proven signed-out account must permit reselection"
+
+  cat > "$FAKEBIN/claude" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then sleep 2; exit 0; fi
+exit 0
+SH
+  chmod +x "$FAKEBIN/claude"
+  receipt="$HOME_DIR/state/timeout.json"
+  out=$(FM_WORKER_ACCOUNT_CHECK_SECONDS=1 FM_SPAWN_OUTCOME_FILE="$receipt" spawn_ship acct-timeout); rc=$?
+  expect_code 1 "$rc" "a timed-out Claude auth check must refuse"
+  assert_contains "$out" "sign-in check was inconclusive" "the timeout must report unknown feasibility"
+  jq -e '.outcome == "uncertain" and .reason == "selected-account-check-inconclusive"' "$receipt" >/dev/null \
+    || fail "a timed-out Claude auth check must block reselection"
+  assert_absent "$HOME_DIR/state/acct-timeout.meta" "a timed-out check must not publish a worker"
+
+  new_case pi-inconclusive pi
+  mkdir -p "$CASE/pi-work"
+  printf '%s\nopenai-codex\n' "$CASE/pi-work" > "$HOME_DIR/config/pi-account"
+  cat > "$FAKEBIN/pi" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --help) exit 0 ;;
+  auth) printf '{"status":"error","reason":"probe_failed"}\n'; exit 1 ;;
+  --list-models) exit 1 ;;
+esac
+exit 0
+SH
+  chmod +x "$FAKEBIN/pi"
+  receipt="$HOME_DIR/state/inconclusive.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" spawn_ship acct-pi-inconclusive --model openai-codex/gpt-6); rc=$?
+  expect_code 1 "$rc" "inconclusive Pi checks must refuse"
+  assert_contains "$out" "sign-in check was inconclusive" "Pi probe failure must report unknown feasibility"
+  jq -e '.outcome == "uncertain" and .reason == "selected-account-check-inconclusive"' "$receipt" >/dev/null \
+    || fail "inconclusive Pi checks must block reselection"
+  assert_absent "$HOME_DIR/state/acct-pi-inconclusive.meta" "inconclusive Pi checks must not publish a worker"
+  pass "account receipts distinguish proven unavailability from inconclusive Claude and Pi probes"
+}
+
 test_claude_ordinary_pin_unsets_the_config_root() {
   local out rc id=acct-ordinary
   new_case ordinary claude
@@ -387,6 +435,7 @@ test_local_secondmate_reads_the_launching_home_pin() {
 test_absent_pin_keeps_the_launch_unchanged
 test_claude_pin_selects_the_root_and_sheds_ambient_credentials
 test_claude_pin_refuses_a_signed_out_root_despite_an_ambient_login
+test_account_probe_receipts_distinguish_unavailable_and_inconclusive
 test_claude_ordinary_pin_unsets_the_config_root
 test_malformed_pins_refuse_before_launch
 test_pi_pin_selects_the_root_and_the_declared_provider
