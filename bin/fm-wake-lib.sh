@@ -1591,7 +1591,8 @@ fm_treehouse_same_clone() {  # <project-dir> <worktree>
 
 # Treehouse keys its default pool by directory name plus origin, so two homes
 # that clone one origin can be offered the same copy. A home handed another
-# clone's copy leases from its own pool under the user state directory.
+# clone's copy attempts a lease using a per-home folder under the user state
+# directory; a clone-local root can redirect Treehouse elsewhere.
 # The folder is the home's name plus the first 6 hex digits of its physical
 # path's sha256, so two homes with one folder name stay apart.
 fm_treehouse_home_pool() {  # <fm-home>
@@ -1619,9 +1620,10 @@ fm_treehouse_home_pool() {  # <fm-home>
   printf '%s/firstmate/%s-%s\n' "${state%/}" "$base" "${hex:0:6}"
 }
 
-# Run treehouse against this home's own pool, from the caller's directory,
-# under a hard bound and with stdin detached. Treehouse has no root flag and
-# reads its root from HOME, so HOME names the pool folder for treehouse alone:
+# Run treehouse from the caller's directory using this home's pool folder,
+# under a hard bound and with stdin detached. A clone-local root can override
+# the folder. Treehouse has no root flag and reads its default root from HOME,
+# so HOME names the pool folder for treehouse alone:
 # bin/treehouse-git/git leads PATH and hands every git process the operator's
 # HOME back, so a fetch still finds the operator's git config and credential
 # helpers. A fetch that would prompt fails instead of waiting on a terminal.

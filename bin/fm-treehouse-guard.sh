@@ -21,11 +21,11 @@
 # never passes --all, --prune-orphans, --include-unlanded, --include-in-use,
 # or --include-leased, and never runs any other treehouse command.
 #
-# `prune <project-dir>` runs that safe prune for one project's pool, and for
-# that clone's pool in this home's own pool folder (bin/fm-wake-lib.sh's
-# fm_treehouse_home_pool, under the user state directory) when one exists
-# there.  bin/fm-teardown.sh calls it after a successful cleanup.  It refuses a
-# directory that is not the root of its own git clone, because treehouse
+# `prune <project-dir>` runs that safe prune for one project's pool, then
+# attempts a second prune when a slot exists in the computed per-home pool
+# folder (bin/fm-wake-lib.sh's fm_treehouse_home_pool). A clone-local root can
+# redirect the second call. bin/fm-teardown.sh calls it after successful cleanup.
+# It refuses a directory that is not the root of its own git clone, because treehouse
 # resolves the pool from the working directory and would otherwise act on the
 # enclosing repository.  It runs under the shared Treehouse project lock
 # (fm_treehouse_project_lock_path), so it never overlaps a launch or cleanup
@@ -34,10 +34,10 @@
 # skipped silently, exit 0.  Any other prune that did not run prints one
 # `warning:` line and exits 1, which a caller is free to ignore.
 #
-# `sweep` does the daily work for this home only.  It runs that prune for each
+# `sweep` checks this home's projects daily. It runs that prune for each
 # clone root under this home's projects directory.  Treehouse keys the default pool by
-# directory name plus origin; a launch that is handed another clone's copy
-# from it leases from this home's own pool instead.
+# directory name plus origin; a launch handed another clone's copy attempts
+# a lease using this home's per-home pool folder instead.
 # Git still refuses to remove a copy another clone owns.  The sweep then
 # measures the operator's default and per-home folder roots, and
 # reports when one holds more than 5 GB.  One finding line is written to
@@ -163,7 +163,8 @@ prune_project() {  # <project-dir> <caller-holds-lock:0|1>
   return "$rc"
 }
 
-# Prune this home's own pool when a slot for this clone exists there.
+# Attempt a second prune when a slot for this clone exists in the computed
+# per-home folder. A clone-local root can redirect the call.
 # Returns 0 when there is nothing to prune or the prune ran. On failure
 # PRUNE_HOME_NOTE says why.
 prune_home_pool() {  # <project-dir>

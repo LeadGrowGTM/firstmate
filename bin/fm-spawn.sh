@@ -278,10 +278,10 @@
 #   A worktree registered to another clone is not this project's copy, even when
 #   treehouse offers it from a pool keyed only by directory name and origin.
 #   When `treehouse get` hands the pane another clone's copy, the launch leaves
-#   that subshell, which returns the copy, and leases from this home's own pool
-#   instead (bin/fm-wake-lib.sh's fm_treehouse_home_pool, under the user
-#   state directory). A lease that is still another clone is returned and the
-#   launch stops. Relaunch resumes in the recorded worktree whichever clone it
+#   that subshell, which returns the copy, and attempts a lease using this
+#   home's pool folder (bin/fm-wake-lib.sh's fm_treehouse_home_pool, under the user
+#   state directory). A lease that is still another clone is not returned and
+#   the launch stops. Relaunch resumes in the recorded worktree whichever clone it
 #   belongs to. Orca and secondmate launches do not use this pool.
 #   That worktree isolation is proven only at launch. Every ship or scout pane therefore
 #   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
