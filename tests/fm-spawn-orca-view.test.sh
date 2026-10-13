@@ -627,6 +627,19 @@ test_same_group_view_name_alias() {
   pass "same-group view aliases cannot retarget another secondmate's tab"
 }
 
+test_base_session_is_not_a_view_candidate() {
+  local view="$TMP_ROOT/base-view-collision/view"
+  mkdir -p "$view"
+  : > "$view/session-orca-dev"
+  printf 'orca-dev\n' > "$view/group-orca-dev"
+  spawn_secondmate base-view-collision dev on '' '' orca-dev
+  expect_code 0 "$STATUS" "a base-name collision must not block spawn: $OUT"
+  assert_equals orca-dev-s-orca-dev "$(meta dev orca_view_session)" \
+    "spawn chooses a distinct view rather than the base"
+  assert_absent "$VIEW_DIR/option-orca-dev" "spawn never installs tracking on its base"
+  pass "spawn: refuses the base itself as a view candidate and opens a distinct view"
+}
+
 test_incomplete_identity_keeps_prior_tab() {
   local seen launch
   relaunch_secondmate relaunch-incomplete sm-incomplete on '' incomplete
@@ -706,6 +719,7 @@ test_post_export_fresh_abort_keeps_only_tab
 test_cross_home_view_name_collision
 test_derived_view_name_collision
 test_same_group_view_name_alias
+test_base_session_is_not_a_view_candidate
 test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab

@@ -5384,6 +5384,7 @@ ORCA_VIEW_IDENTITY_FILE=
 ORCA_VIEW_EXPORT=
 orca_view_name_usable() {
   local group recorded_window target_window
+  [ "$1" != "$SES" ] || return 1
   if ! tmux has-session -t "=$1" 2>/dev/null; then
     return 0
   fi

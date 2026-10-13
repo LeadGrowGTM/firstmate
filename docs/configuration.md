@@ -841,6 +841,8 @@ It prefers `orca-<id>` and chooses a distinct name when an occupied candidate be
 An eligible existing session, such as one a hand-opened tab created, is reused rather than duplicated.
 The view session tracks the window by its stable tmux window id, never by index or name, and returns to it whenever it is moved off it, such as after a relaunch or another window closes.
 When the secondmate's window itself is gone, the view ends and the tab says so rather than showing another session.
+If the original base is gone or its name has been reused by an unrelated session, the hook instead removes its tracking and preserves the surviving agent windows.
+The base session itself is never accepted as a view or given view tracking.
 The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate as working, waiting on you, or done on that tab.
 Waiting covers a permission prompt and a question the agent asks.
 Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
