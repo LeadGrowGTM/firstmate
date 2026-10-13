@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # Queue a daily /stow for an explicitly selected live primary home.
-# Usage: fm-daily-stow.sh [--eligible|--help]
+# Usage: fm-daily-stow.sh [--eligible <lock-pid> <holder-identity>|--help]
 #
-# The opt-in timer runs at 02:00 America/Toronto. Delivery uses fm-inbox note,
+# The opt-in timer runs at 01:30 America/Toronto. Delivery uses fm-inbox note,
 # which saves one durable check wake, never terminal keys or lifecycle control.
 # The primary handles it at a normal checkpoint and uses its existing cascade.
-# --eligible performs the same read-only guards without queueing a note; the
-# recipient rechecks these guards before doing delayed work.
+# --eligible rechecks the bound live session and read-only delivery guards.
 #
-# Skip (exit 0, with a reason) unless fm-inbox ready proves a live primary and
-# healthy wake consumer in present posture. Away/quiet records and a secondmate
-# home also skip. A primary pass recorded by fm-stow-cascade --record-pass in
+# Skip (exit 0, with a reason) unless fm-inbox ready proves a live primary and,
+# when queueing, a healthy wake consumer in present posture. Away/quiet records
+# and a secondmate home also skip. A primary pass recorded by fm-stow-cascade --record-pass in
 # state/.last-stow-primary-pass within 20 hours skips, including a future stamp.
 # An unreadable or malformed stamp fails closed. Missing stamps allow a pass.
 # --eligible exits 3 for a skip, so the recipient can distinguish eligibility.
@@ -30,7 +29,15 @@ case "${1:-}" in
   '') ;;
   *) usage >&2; exit 2 ;;
 esac
-[ "$#" -le 1 ] || { usage >&2; exit 2; }
+if [ "$MODE" = eligible ]; then
+  [ "$#" -eq 3 ] || { usage >&2; exit 2; }
+  BOUND_PID=$2
+  BOUND_IDENTITY=$3
+  case "$BOUND_PID" in ''|*[!0-9]*) usage >&2; exit 2 ;; esac
+  case "$BOUND_IDENTITY" in ''|*[!0-9a-f]*) usage >&2; exit 2 ;; esac
+else
+  [ "$#" -le 1 ] || { usage >&2; exit 2; }
+fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -n "${FM_HOME:-}" ] && [ -d "$FM_HOME" ] \
   || { echo 'error: FM_HOME must explicitly name the main operational home' >&2; exit 1; }
@@ -47,7 +54,7 @@ skip() {
 [ ! -e "$STATE/.afk" ] && [ ! -e "$STATE/.afk-contract" ] \
   || skip 'away or quiet mode is active'
 READY=$("$SCRIPT_DIR/fm-inbox.sh" ready)
-REASON=$(python3 - "$READY" "$STATE/.last-stow-primary-pass" "$(date +%s)" <<'PY'
+REASON=$(python3 - "$READY" "$STATE/.last-stow-primary-pass" "$(date +%s)" "$MODE" "${BOUND_PID:-}" <<'PY'
 import json, pathlib, sys
 ready = json.loads(sys.argv[1])
 stamp = pathlib.Path(sys.argv[2])
@@ -55,7 +62,9 @@ if ready['posture']['state'] != 'present':
     print('away/quiet posture or posture unknown')
 elif ready['lock']['state'] != 'held' or ready['lock']['live_harness'] is not True:
     print('no proven live main session')
-elif ready['can_receive'] is not True:
+elif sys.argv[4] == 'eligible' and ready['lock']['pid'] != int(sys.argv[5]):
+    print('different main session holds the lock')
+elif sys.argv[4] == 'queue' and ready['can_receive'] is not True:
     print('main wake consumer is not proven healthy')
 elif stamp.exists() or stamp.is_symlink():
     try:
@@ -69,11 +78,17 @@ elif stamp.exists() or stamp.is_symlink():
 PY
 )
 [ -z "$REASON" ] || skip "$REASON"
+LOCK_PID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["lock"]["pid"])' <<< "$READY")
+# shellcheck source=bin/fm-wake-lib.sh
+. "$SCRIPT_DIR/fm-wake-lib.sh"
+HOLDER_IDENTITY=$(fm_pid_identity "$LOCK_PID" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())') \
+  || skip 'main session identity is unavailable'
 if [ "$MODE" = eligible ]; then
+  [ "$HOLDER_IDENTITY" = "$BOUND_IDENTITY" ] || skip 'different main session holds the lock'
   echo 'daily-stow: eligible'
   exit 0
 fi
 REQUEST_ID="daily-stow:$(TZ=America/Toronto date +%F)"
-printf -v ELIGIBLE_CMD 'FM_HOME=%q %q --eligible' "$FM_HOME" "$SCRIPT_DIR/fm-daily-stow.sh"
+printf -v ELIGIBLE_CMD 'FM_HOME=%q %q --eligible %q %q' "$FM_HOME" "$SCRIPT_DIR/fm-daily-stow.sh" "$LOCK_PID" "$HOLDER_IDENTITY"
 "$SCRIPT_DIR/fm-inbox.sh" note --request-id "$REQUEST_ID" -- \
   "Scheduled daily stow: at the next safe checkpoint after current work, run $ELIGIBLE_CMD. If it exits 0, invoke /stow in this live session, including its existing secondmate cascade. If it skips, leave the scheduled pass undone. Never interrupt in-flight work or start a fresh worker for this request."
