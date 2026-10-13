@@ -21,7 +21,8 @@
 # (the mtime of its status, turn-ended, and meta files and its inbox) is old
 # enough and bin/fm-crew-state.sh reads it as:
 #   done     after FM_IDLE_EXIT_DONE_SECS   (default 600, ten minutes)
-#   parked   after FM_IDLE_EXIT_PARKED_SECS (default 3600, one hour)
+#   parked   on an open decision after FM_IDLE_EXIT_PARKED_SECS (default 3600,
+#            one hour)
 # Every other state is left alone: working, paused, blocked, failed, and
 # unknown keep their supervision. A secondmate and a remotely placed task are
 # never touched.
@@ -53,6 +54,7 @@ CREW_STATE_BIN="${FM_IDLE_EXIT_CREW_STATE_BIN:-$SCRIPT_DIR/fm-crew-state.sh}"
 CONTROL_BIN="${FM_IDLE_EXIT_CONTROL_BIN:-$SCRIPT_DIR/fm-control.sh}"
 STATE_READ_SECS=8
 CONTROL_START_BUDGET_SECS=12
+CONTROL_SECS=12
 MAX_LINE=1000
 
 # shellcheck source=bin/fm-pr-lib.sh
@@ -63,6 +65,8 @@ MAX_LINE=1000
 . "$SCRIPT_DIR/fm-check-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-classify-lib.sh
+. "$SCRIPT_DIR/fm-classify-lib.sh"
 
 usage() {
   sed -n '2,39{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
@@ -128,7 +132,7 @@ record_write() {  # <id> <activity> <outcome>
   local tmp
   [ -d "$RECORD_DIR" ] && [ ! -L "$RECORD_DIR" ] || mkdir -m 700 "$RECORD_DIR" 2>/dev/null || return 1
   tmp=$(umask 077; mktemp "$RECORD_DIR/.$1.XXXXXX" 2>/dev/null) || return 1
-  if ! printf '%s\n%s\n' "$2" "$3" > "$tmp" || ! mv -f -- "$tmp" "$RECORD_DIR/$1"; then
+  if [ -d "$RECORD_DIR/$1" ] || ! printf '%s\n%s\n' "$2" "$3" > "$tmp" || ! mv -f -- "$tmp" "$RECORD_DIR/$1"; then
     rm -f -- "$tmp"
     return 1
   fi
@@ -150,13 +154,29 @@ crew_state() {  # <id>
     fm_run_timed "$STATE_READ_SECS" "$CREW_STATE_BIN" "$1" 2>/dev/null </dev/null) || return 1
   out=${out%%$'\n'*}
   case "$out" in
-    'state: '*) out=${out#state: }; printf '%s\n' "${out%% *}" ;;
+    'state: '*) printf '%s\n' "$out" ;;
     *) return 1 ;;
   esac
 }
 
+parked_on_decision() {  # <state-line> <status-file>
+  local line=$1 part rest
+  case "$line" in
+    *' · source: status-log · '*) status_has_open_needs_decision "$2"; return ;;
+    *' · source: run-step · '*) ;;
+    *) return 1 ;;
+  esac
+  rest="$line · "
+  while [ -n "$rest" ]; do
+    part=${rest%% · *}
+    rest=${rest#* · }
+    [ "$part" = "$FM_GATE_HUMAN_DECISION" ] && return 0
+  done
+  return 1
+}
+
 run_check() {
-  local meta id kind activity now started age state limit out rc line=
+  local meta id kind activity now started age state state_line limit out rc left line=
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || return 0
   prune_records
   now=$(now_epoch)
@@ -175,18 +195,23 @@ run_check() {
     age=$((now - activity))
     [ "$age" -ge "$DONE_SECS" ] || continue
     record_matches "$id" "$activity" && continue
-    state=$(crew_state "$id") || continue
+    state_line=$(crew_state "$id") || continue
+    state=${state_line#state: }
+    state=${state%% *}
     case "$state" in
       done) limit=$DONE_SECS ;;
-      parked) limit=$PARKED_SECS ;;
+      parked) parked_on_decision "$state_line" "$STATE/$id.status" || continue; limit=$PARKED_SECS ;;
       *) continue ;;
     esac
     [ "$age" -ge "$limit" ] || continue
+    left=$((27 - (SECONDS - started)))
+    [ "$left" -ge 1 ] || break
+    [ "$left" -le "$CONTROL_SECS" ] || left=$CONTROL_SECS
     rc=0
-    out=$(FM_HOME="$FM_HOME" "$CONTROL_BIN" "$id" exit --only-if-idle 2>&1 </dev/null) || rc=$?
+    out=$(FM_HOME="$FM_HOME" fm_run_timed "$left" "$CONTROL_BIN" "$id" exit --only-if-idle 2>&1 </dev/null) || rc=$?
     case "$rc" in
       0)
-        record_write "$id" "$activity" "${out%% *}" || true
+        record_write "$id" "$activity" "${out%% *}" || { line="could not record exit of $id"; break; }
         case "$out" in
           stopped*) line="exited $id ($state, idle $((age / 60))m); endpoint, worktree, and work kept" ;;
           *) continue ;;
@@ -194,8 +219,12 @@ run_check() {
         ;;
       3) continue ;;
       *)
-        record_write "$id" "$activity" failed || true
-        line="exit of $id ($state, idle $((age / 60))m) failed: ${out%%$'\n'*}"
+        record_write "$id" "$activity" failed || { line="could not record failed exit of $id"; break; }
+        if fm_timed_out "$rc"; then
+          line="exit of $id ($state, idle $((age / 60))m) timed out after ${left}s"
+        else
+          line="exit of $id ($state, idle $((age / 60))m) failed: ${out%%$'\n'*}"
+        fi
         ;;
     esac
     break

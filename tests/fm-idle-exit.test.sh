@@ -10,7 +10,8 @@
 # What these pin:
 #   1. A done task idle past ten minutes is exited, with exactly
 #      `<id> exit --only-if-idle`, and reported on one line.
-#   2. A parked task waits an hour; a fresher one is left alone.
+#   2. A parked task with an open decision waits an hour; a worker-owned gate
+#      is left alone.
 #   3. Working, paused, blocked, failed, and unknown tasks, secondmates, and
 #      remote tasks are never exited, and young tasks are not even read.
 #   4. One exit per run; the next run takes the next candidate.
@@ -33,7 +34,8 @@ cat > "$FAKE_STATE" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$FIXTURES/state-reads.log"
 s=$(cat "$FIXTURES/$1.state" 2>/dev/null) || s=unknown
-printf 'state: %s · source: pane · fixture\n' "$s"
+detail=$(cat "$FIXTURES/$1.detail" 2>/dev/null) || detail='source: pane · fixture'
+printf 'state: %s · %s\n' "$s" "$detail"
 FAKE
 chmod +x "$FAKE_STATE"
 
@@ -99,6 +101,9 @@ test_parked_task_waits_an_hour() {
   local home out
   home=$(make_home parked)
   add_task "$home" p1 parked 1800
+  printf 'needs-decision [key=review]: waiting for Mitch\n' > "$home/state/p1.status"
+  echo 'source: status-log · waiting for Mitch' > "$home/fixtures/p1.detail"
+  fm_touch_epoch $((NOW - 1800)) "$home/state/p1.status"
   out=$(run_check "$home")
   [ -z "$out" ] || fail "a parked task idle 30 minutes should be left: $out"
   assert_equals '' "$(log "$home" control)" "no exit before an hour"
@@ -106,6 +111,21 @@ test_parked_task_waits_an_hour() {
   out=$(run_check "$home")
   assert_equals 'idle-exit: exited p1 (parked, idle 61m); endpoint, worktree, and work kept' "$out" "parked exit line"
   pass "fm-idle-exit: a parked task is exited after an idle hour"
+}
+
+test_parked_gate_requires_human_decision() {
+  local home out
+  home=$(make_home gate)
+  add_task "$home" own parked 7200
+  echo 'source: run-step · parked at fix_review · run: r1' > "$home/fixtures/own.detail"
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "worker-owned gate should stay active: $out"
+  assert_equals '' "$(log "$home" control)" "worker-owned gate was exited"
+  add_task "$home" human parked 7200
+  echo 'source: run-step · parked at fix_review · ask-user: authority decision · run: r2' > "$home/fixtures/human.detail"
+  out=$(run_check "$home")
+  assert_contains "$out" 'exited human (parked' "human gate should be exited"
+  pass "fm-idle-exit: only a human-owned parked gate is exited"
 }
 
 test_other_states_and_kinds_are_never_exited() {
@@ -163,6 +183,16 @@ test_busy_turn_is_left_and_failure_reported_once() {
   pass "fm-idle-exit: a busy turn is left running and a failed exit is reported once"
 }
 
+test_record_failure_is_reported() {
+  local home out
+  home=$(make_home record-failure)
+  add_task "$home" t1 done 7200
+  mkdir -p "$home/state/.idle-exit/t1"
+  out=$(run_check "$home")
+  assert_contains "$out" 'idle-exit: could not record exit of t1' "record failure must be visible"
+  pass "fm-idle-exit: a failed record write is reported"
+}
+
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
   local home out
   home=$(make_home arm)
@@ -183,8 +213,10 @@ test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
 
 test_done_task_is_exited_after_ten_minutes
 test_parked_task_waits_an_hour
+test_parked_gate_requires_human_decision
 test_other_states_and_kinds_are_never_exited
 test_one_exit_per_run_and_records_stop_reprobing
 test_busy_turn_is_left_and_failure_reported_once
+test_record_failure_is_reported
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it
 pass "fm-idle-exit"

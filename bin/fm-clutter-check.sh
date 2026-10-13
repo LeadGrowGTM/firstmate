@@ -16,14 +16,14 @@
 # machine-wide, so `arm` refuses in a secondmate home: arm it in the root home.
 #
 # Conditions reported, joined into the one line:
-#   orphans    a gemini -y hello, chrome-devtools-mcp, headless Chrome, or
-#              lavish-axi process older than FM_CLUTTER_ORPHAN_SECS (default
-#              3600) whose parent is PID 1 or a `systemd --user` subreaper,
-#              which is where an exited session's children land
+#   pools      treehouse worktree pools under FM_CLUTTER_POOLS_ROOT (default
+#              ~/.treehouse) total over FM_CLUTTER_POOLS_MB (default 5120)
 #   worktrees  the no-mistakes pipeline copies under FM_CLUTTER_WORKTREES_ROOT
 #              (default ~/.no-mistakes/worktrees) total over
-#              FM_CLUTTER_WORKTREES_MB (default 20480), or one copy is over
+#              FM_CLUTTER_WORKTREES_MB (default 20480), or one run copy is over
 #              FM_CLUTTER_COPY_MB (default 3072)
+#   logs       no-mistakes logs under FM_CLUTTER_LOGS_ROOT (default
+#              ~/.no-mistakes/logs) total over FM_CLUTTER_LOGS_MB (default 5120)
 #   root       the Linux root filesystem has more than FM_CLUTTER_ROOT_USED_MB
 #              (default 153600) in use
 #   windows    /mnt/c has less than FM_CLUTTER_WINDOWS_FREE_PCT (default 10)
@@ -35,7 +35,7 @@
 # acts. Measuring every pipeline copy at once can outlast the watcher's
 # per-check bound, so each copy's size is cached in state/.clutter-check/sizes
 # and a poll measures the copies not yet sized within a budget of
-# FM_CLUTTER_MEASURE_BUDGET_SECS (default 18, at most 20) seconds; a copy that
+# FM_CLUTTER_MEASURE_BUDGET_SECS (default 14, at most 16) seconds; a copy that
 # outlasts the whole budget is a read failure.
 # The evaluation is due 86400 seconds after the last one; polls inside that day
 # stay silent, a due evaluation waits until every copy has a size measured
@@ -59,8 +59,11 @@ RECORD_SCHEMA=fm-clutter-check-v1
 REGISTER_BIN="$SCRIPT_DIR/fm-check-register.sh"
 MAX_LINE=1000
 INTERVAL=86400
-DF_SECS=5
+DF_SECS=3
+DIR_SECS=2
 WORKTREES_ROOT="${FM_CLUTTER_WORKTREES_ROOT:-$HOME/.no-mistakes/worktrees}"
+POOLS_ROOT="${FM_CLUTTER_POOLS_ROOT:-$HOME/.treehouse}"
+LOGS_ROOT="${FM_CLUTTER_LOGS_ROOT:-$HOME/.no-mistakes/logs}"
 WINDOWS_MOUNT="${FM_CLUTTER_WINDOWS_MOUNT:-/mnt/c}"
 
 # shellcheck source=bin/fm-pr-lib.sh
@@ -93,13 +96,14 @@ whole() {  # <value> <default>
   esac
 }
 
-ORPHAN_SECS=$(whole "${FM_CLUTTER_ORPHAN_SECS:-}" 3600)
 WORKTREES_MB=$(whole "${FM_CLUTTER_WORKTREES_MB:-}" 20480)
 COPY_MB=$(whole "${FM_CLUTTER_COPY_MB:-}" 3072)
+POOLS_MB=$(whole "${FM_CLUTTER_POOLS_MB:-}" 5120)
+LOGS_MB=$(whole "${FM_CLUTTER_LOGS_MB:-}" 5120)
 ROOT_USED_MB=$(whole "${FM_CLUTTER_ROOT_USED_MB:-}" 153600)
 WINDOWS_FREE_PCT=$(whole "${FM_CLUTTER_WINDOWS_FREE_PCT:-}" 10)
-MEASURE_BUDGET_SECS=$(whole "${FM_CLUTTER_MEASURE_BUDGET_SECS:-}" 18)
-[ "$MEASURE_BUDGET_SECS" -ge 1 ] && [ "$MEASURE_BUDGET_SECS" -le 20 ] || MEASURE_BUDGET_SECS=18
+MEASURE_BUDGET_SECS=$(whole "${FM_CLUTTER_MEASURE_BUDGET_SECS:-}" 14)
+[ "$MEASURE_BUDGET_SECS" -ge 1 ] && [ "$MEASURE_BUDGET_SECS" -le 16 ] || MEASURE_BUDGET_SECS=14
 
 now_epoch() {
   case "${FM_CLUTTER_NOW:-}" in
@@ -121,7 +125,7 @@ replace_file() {  # <file> <content>
   local tmp
   record_dir_ready || return 1
   tmp=$(umask 077; mktemp "$RECORD_DIR/.tmp.XXXXXX" 2>/dev/null) || return 1
-  if ! printf '%s' "$2" > "$tmp" || ! mv -f -- "$tmp" "$1"; then
+  if [ -d "$1" ] || ! printf '%s' "$2" > "$tmp" || ! mv -f -- "$tmp" "$1"; then
     rm -f -- "$tmp"
     return 1
   fi
@@ -147,41 +151,22 @@ due_since() {  # <now>
   printf '0\n'
 }
 
-# Orphaned helper processes, as "<label> x<n>" parts joined by ", ".
-orphans() {
-  ps -eo pid=,ppid=,etimes=,args= 2>/dev/null | awk -v min="$ORPHAN_SECS" '
-    {
-      pid = $1; ppid[pid] = $2; age[pid] = $3
-      args = $0
-      sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]+[0-9]+[ \t]+/, "", args)
-      cmd[pid] = args
-    }
-    END {
-      for (pid in cmd) {
-        p = ppid[pid]
-        if (p != 1 && cmd[p] !~ /(^|\/)systemd --user/) continue
-        if (age[pid] < min) continue
-        c = cmd[pid]
-        if (c ~ /gemini -y hello/) label = "gemini -y hello"
-        else if (c ~ /chrome-devtools-mcp/) label = "chrome-devtools-mcp"
-        else if (c ~ /lavish-axi/) label = "lavish-axi"
-        else if (c ~ /chrom(e|ium)/ && c ~ /--headless/) label = "headless chrome"
-        else continue
-        n[label]++
-      }
-      out = ""
-      for (l in n) out = out (out == "" ? "" : ", ") l " x" n[l]
-      print out
-    }'
-}
-
 # Measures the stalest pipeline copies not yet measured since <due> within the
 # budget, rewriting the size cache. Exit status: 0 every copy has a size from
 # since <due>; 1 some copy is still pending or could not be measured.
 measure_copies() {  # <due> <now>
-  local due=$1 now=$2 started=$SECONDS left name mb rc copies cache next="" pending=0 at
-  [ -d "$WORKTREES_ROOT" ] || { replace_file "$SIZES" "" || true; return 0; }
-  copies=$(cd "$WORKTREES_ROOT" 2>/dev/null && for name in *; do [ -d "$name" ] && [ ! -L "$name" ] && printf '%s\n' "$name"; done)
+  local due=$1 now=$2 started=$SECONDS left repo name mb rc copies cache next="" pending=0 at
+  COPY_ERROR=
+  if [ ! -e "$WORKTREES_ROOT" ] && [ ! -L "$WORKTREES_ROOT" ]; then
+    replace_file "$SIZES" "" || COPY_ERROR='read failed: could not write copy sizes'
+    return 0
+  fi
+  copies=$(cd "$WORKTREES_ROOT" 2>/dev/null && for repo in *; do
+    [ -d "$repo" ] && [ ! -L "$repo" ] || continue
+    for name in "$repo"/*; do
+      [ -d "$name" ] && [ ! -L "$name" ] && printf '%s\n' "$name"
+    done
+  done) || { COPY_ERROR="read failed: could not traverse $WORKTREES_ROOT"; return 0; }
   cache=$( [ -f "$SIZES" ] && [ ! -L "$SIZES" ] && cat "$SIZES" 2>/dev/null)
   while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -212,8 +197,20 @@ measure_copies() {  # <due> <now>
   done <<EOF
 $copies
 EOF
-  replace_file "$SIZES" "$next" || true
+  replace_file "$SIZES" "$next" || { COPY_ERROR='read failed: could not write copy sizes'; return 0; }
   [ "$pending" -eq 0 ]
+}
+
+size_finding() {  # <root> <max-mb> <label>
+  local root=$1 max=$2 label=$3 out mb
+  [ ! -e "$root" ] && [ ! -L "$root" ] && return 0
+  [ -d "$root" ] || { echo "read failed: could not size $label"; return 0; }
+  out=$(fm_run_timed "$DIR_SECS" du -sm -- "$root" 2>/dev/null </dev/null) || out=
+  mb=${out%%[!0-9]*}
+  case "$mb" in
+    ''|*[!0-9]*) echo "read failed: could not size $label" ;;
+    *) [ "$mb" -le "$max" ] || echo "$label use $(gb "$mb"), over $(gb "$max")" ;;
+  esac
 }
 
 worktree_findings() {
@@ -250,19 +247,20 @@ disk_findings() {
 }
 
 run_check() {
-  local now due found orph
+  local now due found
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || return 0
   now=$(now_epoch)
   due=$(due_since "$now")
   [ -n "$due" ] || return 0
   measure_copies "$due" "$now" || return 0
-  orph=$(orphans)
   found=$(
-    [ -z "$orph" ] || printf 'orphaned processes older than %sm: %s\n' "$((ORPHAN_SECS / 60))" "$orph"
-    worktree_findings
+    size_finding "$POOLS_ROOT" "$POOLS_MB" 'treehouse worktree pools'
+    if [ -n "$COPY_ERROR" ]; then printf '%s\n' "$COPY_ERROR"; else worktree_findings; fi
+    size_finding "$LOGS_ROOT" "$LOGS_MB" 'archived no-mistakes logs'
     disk_findings
   )
-  replace_file "$RECORD" "$(printf 'schema\t%s\nlast_eval\t%s\n' "$RECORD_SCHEMA" "$now")" || true
+  replace_file "$RECORD" "$(printf 'schema\t%s\nlast_eval\t%s\n' "$RECORD_SCHEMA" "$now")" \
+    || found="${found:+$found$'\n'}read failed: could not write daily record"
   [ -n "$found" ] || return 0
   fm_cap_line "clutter: $(printf '%s\n' "$found" | paste -sd ';' - | sed 's/;/; /g')" "$MAX_LINE"
 }

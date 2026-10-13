@@ -1751,7 +1751,7 @@ It is off until armed.
 
 - It reads each direct ship or scout task in this home, never a secondmate and never a remotely placed task.
 - A task's activity is the newest mtime of its status, turn-ended, and meta files and its inbox.
-- A task that `bin/fm-crew-state.sh` reads as `done` is exited after `FM_IDLE_EXIT_DONE_SECS` (default 600) idle seconds, and one read as `parked` after `FM_IDLE_EXIT_PARKED_SECS` (default 3600).
+- A task that `bin/fm-crew-state.sh` reads as `done` is exited after `FM_IDLE_EXIT_DONE_SECS` (default 600) idle seconds; one read as `parked` is exited after `FM_IDLE_EXIT_PARKED_SECS` (default 3600) only when its status has an open decision or the attributed pipeline gate awaits a human answer.
 - Every other state (working, paused, blocked, failed, unknown) is left alone.
 - The exit is `bin/fm-control.sh <id> exit --only-if-idle`, so a turn that is not idle at the exit point is refused with exit 3 and left running, and the endpoint, worktree, and every uncommitted change are kept.
 - It never tears down, discards, relaunches, or removes a worktree.
@@ -1781,8 +1781,9 @@ Because it reads the whole machine, `arm` refuses in a secondmate home, and it i
 
 The check prints one `clutter:` line, joining every condition past its threshold, and prints nothing otherwise.
 
-- Orphaned helpers: a `gemini -y hello`, `chrome-devtools-mcp`, headless Chrome, or `lavish-axi` process older than `FM_CLUTTER_ORPHAN_SECS` (default 3600) whose parent is PID 1 or a `systemd --user` subreaper, which is where an exited session's children land.
-- No-mistakes pipeline copies under `FM_CLUTTER_WORKTREES_ROOT` (default `~/.no-mistakes/worktrees`) totalling more than `FM_CLUTTER_WORKTREES_MB` (default 20480), or a single copy over `FM_CLUTTER_COPY_MB` (default 3072).
+- Treehouse worktree pools under `FM_CLUTTER_POOLS_ROOT` (default `~/.treehouse`) totalling more than `FM_CLUTTER_POOLS_MB` (default 5120).
+- No-mistakes pipeline copies under `FM_CLUTTER_WORKTREES_ROOT` (default `~/.no-mistakes/worktrees`) totalling more than `FM_CLUTTER_WORKTREES_MB` (default 20480), or a single repository/run copy over `FM_CLUTTER_COPY_MB` (default 3072).
+- Archived no-mistakes logs under `FM_CLUTTER_LOGS_ROOT` (default `~/.no-mistakes/logs`) totalling more than `FM_CLUTTER_LOGS_MB` (default 5120).
 - The Linux root filesystem with more than `FM_CLUTTER_ROOT_USED_MB` (default 153600) in use.
 - `/mnt/c` with less than `FM_CLUTTER_WINDOWS_FREE_PCT` (default 10) percent free.
 - A measurement that could not finish, because a check that cannot see is not quiet.
@@ -1790,9 +1791,9 @@ The check prints one `clutter:` line, joining every condition past its threshold
 **Cadence**
 
 - An evaluation is due 24 hours after the last one; polls inside that day stay silent, and a condition that persists is reported again at each due evaluation.
-- Sizing every pipeline copy at once can outlast `FM_CHECK_TIMEOUT`, so each copy's size is cached in `state/.clutter-check/sizes` and a poll sizes the copies not yet measured within a budget of `FM_CLUTTER_MEASURE_BUDGET_SECS` (default 18, at most 20) seconds.
+- Sizing every pipeline copy at once can outlast `FM_CHECK_TIMEOUT`, so each copy's size is cached in `state/.clutter-check/sizes` and a poll sizes the copies not yet measured within a budget of `FM_CLUTTER_MEASURE_BUDGET_SECS` (default 14, at most 16) seconds.
 - A due evaluation waits until every copy has a size from since it fell due, and a copy that outlasts the whole budget is reported as a read failure rather than blocking every poll.
-- Each `df` is bounded to 5 seconds.
+- Each `df` is bounded to 3 seconds, and the pool and log measurements are each bounded to 2 seconds.
 
 **Arm and disarm**
 
