@@ -27,14 +27,16 @@
 . "$(dirname "${BASH_SOURCE[0]}")/fm-timeout-lib.sh"
 
 fm_wsl_interop_probe() {  # <socket>
+  local timeout=${FM_WSL_INTEROP_TIMEOUT:-3}
+  case "$timeout" in '' | 0* | *[!0-9]*) timeout=3 ;; esac
   if [ -n "${FM_WSL_INTEROP_PROBE:-}" ]; then
-    WSL_INTEROP=$1 fm_run_timed "${FM_WSL_INTEROP_TIMEOUT:-3}" "$FM_WSL_INTEROP_PROBE" </dev/null >/dev/null 2>&1
+    WSL_INTEROP=$1 fm_run_timed "$timeout" "$FM_WSL_INTEROP_PROBE" </dev/null >/dev/null 2>&1
     return
   fi
   local cmd
   cmd=$(command -v cmd.exe 2>/dev/null) || cmd=/mnt/c/Windows/System32/cmd.exe
   [ -x "$cmd" ] || return 1
-  (cd / && WSL_INTEROP=$1 fm_run_timed "${FM_WSL_INTEROP_TIMEOUT:-3}" "$cmd" /c exit 0 </dev/null >/dev/null 2>&1)
+  (cd / && WSL_INTEROP=$1 fm_run_timed "$timeout" "$cmd" /c exit 0 </dev/null >/dev/null 2>&1)
 }
 
 fm_wsl_live_interop() {

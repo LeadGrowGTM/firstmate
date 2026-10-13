@@ -38,10 +38,11 @@ case "$*" in
   *'#{window_index}'*)
     n=0
     while IFS= read -r w; do
-      printf '%s\t%s\t@%s\n' "$n" "$w" "$n"
+      printf '%s\t%s\t%s\n' "$n" "$w" "${FM_FAKE_TARGET_WINDOW_ID:-@$n}"
       n=$((n + 1))
     done < "$D/windows"
     exit 0 ;;
+  *'#{window_id}'*) printf '%s\n' "${FM_FAKE_TARGET_WINDOW_ID:-@0}"; exit 0 ;;
   *'#{session_name}'*)
     [ "${FM_FAKE_VIEW_LOOKUP_FAIL:-}" != 1 ] || exit 1
     if [ -n "${FM_FAKE_BASE_SESSION:-}" ]; then
@@ -73,6 +74,27 @@ case "$*" in
   *'#{socket_path}'*) printf '/tmp/fm-fake-socket\n'; exit 0 ;;
 esac
 case "${1:-}" in
+  show-options|set-option)
+    view=
+    option=
+    value=
+    for a in "$@"; do
+      case "$a" in
+        =orca-*: ) view=${a#=}; view=${view%:} ;;
+        @fm_view_window) option=1 ;;
+      esac
+      value=$a
+    done
+    [ "$option" = 1 ] && [ -n "$view" ] || exec "$here/tmux.base" "$@"
+    if [ "$1" = show-options ]; then
+      [ -e "$D/option-$view" ] || exit 1
+      cat "$D/option-$view"
+    elif [ "$value" = @fm_view_window ]; then
+      rm -f "$D/option-$view"
+    else
+      printf '%s\n' "$value" > "$D/option-$view"
+    fi
+    exit 0 ;;
   new-window) printf '%s\n' "$*" >> "$D/new-windows"; exec "$here/tmux.base" "$@" ;;
   has-session)
     for a in "$@"; do
@@ -538,6 +560,37 @@ test_derived_view_name_collision() {
   pass "derived name collisions use numbered views or step aside after a bounded search"
 }
 
+test_same_group_view_name_alias() {
+  local first_view second_view candidate
+  first_view="$TMP_ROOT/same-group-first/view"
+  second_view="$TMP_ROOT/same-group-second/view"
+  mkdir -p "$first_view" "$second_view"
+  : > "$first_view/session-orca-dev"
+  printf 'otherbase\n' > "$first_view/group-orca-dev"
+  spawn_secondmate same-group-first dev on '' '' beta
+  expect_code 0 "$STATUS" "the dev secondmate should open its derived view: $OUT"
+  assert_equals orca-dev-s-beta "$(meta dev orca_view_session)" \
+    "dev uses the derived name when its primary name belongs to another base"
+  assert_equals @0 "$(cat "$VIEW_DIR/option-orca-dev-s-beta")" \
+    "dev's view records its original target window"
+  for candidate in orca-dev-s-beta orca-dev-s-beta-s-beta orca-dev-s-beta-s-beta-1; do
+    : > "$second_view/session-$candidate"
+    printf 'beta\n' > "$second_view/group-$candidate"
+    printf '@0\n' > "$second_view/option-$candidate"
+  done
+  FM_FAKE_TARGET_WINDOW_ID=@1 spawn_secondmate same-group-second dev-s-beta on '' '' beta
+  expect_code 0 "$STATUS" "a secondmate with the derived name as its ID should open its own view: $OUT"
+  assert_equals orca-dev-s-beta-s-beta-2 "$(meta dev-s-beta orca_view_session)" \
+    "occupied primary, derived, and numbered views of another window are skipped"
+  for candidate in orca-dev-s-beta orca-dev-s-beta-s-beta orca-dev-s-beta-s-beta-1; do
+    assert_equals @0 "$(cat "$VIEW_DIR/option-$candidate")" \
+      "a different secondmate's view target stays unchanged"
+  done
+  assert_equals @1 "$(cat "$VIEW_DIR/option-orca-dev-s-beta-s-beta-2")" \
+    "the new view tracks this secondmate's window"
+  pass "same-group view aliases cannot retarget another secondmate's tab"
+}
+
 test_incomplete_identity_keeps_prior_tab() {
   local seen launch
   relaunch_secondmate relaunch-incomplete sm-incomplete on '' incomplete
@@ -614,6 +667,7 @@ test_post_export_abort_keeps_replacement_tab
 test_post_export_fresh_abort_keeps_only_tab
 test_cross_home_view_name_collision
 test_derived_view_name_collision
+test_same_group_view_name_alias
 test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab

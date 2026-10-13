@@ -246,7 +246,9 @@ orca_env() {
 }
 
 orca_call() {
-  (cd / && fm_run_timed "${FM_ORCA_VIEW_TIMEOUT:-60}" "$ORCA_CLI" "$@" </dev/null 2>&1)
+  local timeout=${FM_ORCA_VIEW_TIMEOUT:-60}
+  case "$timeout" in '' | 0* | *[!0-9]*) timeout=60 ;; esac
+  (cd / && fm_run_timed "$timeout" "$ORCA_CLI" "$@" </dev/null 2>&1)
 }
 
 cmd_command() {

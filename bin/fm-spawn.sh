@@ -5442,12 +5442,19 @@ fi
 ORCA_VIEW_IDENTITY_FILE=
 ORCA_VIEW_EXPORT=
 orca_view_name_usable() {
-  local group
+  local group recorded_window target_window
   if ! tmux has-session -t "=$1" 2>/dev/null; then
     return 0
   fi
   group=$(tmux display-message -p -t "=$1:" '#{session_group}' 2>/dev/null) || return 1
-  [ "$group" = "$SES" ]
+  [ "$group" = "$SES" ] || return 1
+  [ "$1" != "$ORCA_VIEW_PRIOR_SESSION" ] || return 0
+  if recorded_window=$(tmux show-options -v -t "=$1:" @fm_view_window 2>/dev/null); then
+    target_window=$(tmux display-message -p -t "$T" '#{window_id}' 2>/dev/null) || return 1
+    [ -n "$target_window" ] && [ "$recorded_window" = "$target_window" ]
+  else
+    [ "$1" = "orca-$ID" ]
+  fi
 }
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
   ORCA_VIEW_NAME="orca-$ID"
@@ -6148,9 +6155,7 @@ else
 fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
-    if [ "$ORCA_VIEW_IDENTITY_SENT" = 1 ]; then
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its launched agent and Orca tab remain recorded at $STATE/$ID.meta for reconciliation" >&2
-    elif spawn_fresh_commit_rollback; then
+    if spawn_fresh_commit_rollback; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
