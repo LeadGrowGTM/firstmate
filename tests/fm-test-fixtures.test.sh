@@ -379,22 +379,21 @@ printf 'contact\n' >> "$FM_TEST_CONTACT_LOG"
 exit 0
 SH
   chmod +x "$recorder"
-  (
-    FM_TEST_TMUX_REAL="$recorder"
-    FM_TEST_CONTACT_LOG="$dir/contact.log"
-    export FM_TEST_TMUX_REAL FM_TEST_CONTACT_LOG
-    unset FM_TEST_TMUX_OWNER
-    . "$ROOT/tests/tmux-helpers.sh" || exit 1
-    trap fm_test_tmux_cleanup EXIT
-    if tmux -S "$sentinel" list-sessions >/dev/null 2>&1; then exit 1; fi
-    if tmux -vS "$sentinel" kill-server >/dev/null 2>&1; then exit 1; fi
-    if tmux -vS"$sentinel" kill-server >/dev/null 2>&1; then exit 1; fi
-    if tmux -vL default kill-server >/dev/null 2>&1; then exit 1; fi
-    if tmux -vLdefault kill-server >/dev/null 2>&1; then exit 1; fi
-    if tmux -T test kill-server >/dev/null 2>&1; then exit 1; fi
-    if TMUX_TMPDIR="$sentinel_dir" tmux -L operator list-sessions >/dev/null 2>&1; then exit 1; fi
-    [ ! -e "$FM_TEST_CONTACT_LOG" ]
-  ) || fail 'foreign socket refusal contacted the real tmux command'
+  FM_TEST_TMUX_REAL="$recorder" FM_TEST_CONTACT_LOG="$dir/contact.log" \
+    bash -s -- "$ROOT" "$sentinel" "$sentinel_dir" <<'SH' \
+    || fail 'foreign socket refusal contacted the real tmux command'
+unset FM_TEST_TMUX_OWNER
+. "$1/tests/tmux-helpers.sh" || exit 1
+trap fm_test_tmux_cleanup EXIT
+if tmux -S "$2" list-sessions >/dev/null 2>&1; then exit 1; fi
+if tmux -vS "$2" kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -vS"$2" kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -vL default kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -vLdefault kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -T test kill-server >/dev/null 2>&1; then exit 1; fi
+if TMUX_TMPDIR="$3" tmux -L operator list-sessions >/dev/null 2>&1; then exit 1; fi
+[ ! -e "$FM_TEST_CONTACT_LOG" ]
+SH
   if tmux -L default list-sessions 2>"$dir/default.err"; then fail 'default name accepted'; fi
   assert_grep 'default or invalid' "$dir/default.err" 'default selector did not refuse'
   if tmux -S "$dir/default" list-sessions 2>"$dir/path.err"; then fail 'default socket path accepted'; fi
