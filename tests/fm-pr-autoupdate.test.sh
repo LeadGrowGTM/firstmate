@@ -46,7 +46,11 @@ case "$method:$path" in
       count=$(cat "$FIXTURES/race")
       printf '%s\n' "$((count + 1))" > "$FIXTURES/race"
       if [ "$count" -gt 0 ]; then
-        jq '.head.sha="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"' "$FIXTURES/core.json" > "$FIXTURES/core.new"
+        if [ -e "$FIXTURES/core-transition" ]; then
+          cp "$FIXTURES/core-transition" "$FIXTURES/core.new"
+        else
+          jq '.head.sha="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"' "$FIXTURES/core.json" > "$FIXTURES/core.new"
+        fi
         mv "$FIXTURES/core.new" "$FIXTURES/core.json"
       fi
     fi
@@ -190,6 +194,35 @@ run "$home" >/dev/null
 assert_equals incomplete "$(result "$home")" 'later local head read leaves incomplete receipt'
 assert_equals 'local head unavailable' "$(jq -r --arg url "$URL" '.receipts[$url].reason' "$home/state/pr-autoupdate.json")" 'local read failure has explicit reason'
 assert_equals 0 "$(put_count "$home")" 'local read failure prevents publication'
+
+for phase in prewrite postchecks; do
+  for state in queued draft closed; do
+    home=$(world "${phase}_${state}")
+    if [ "$phase" = postchecks ]; then
+      run "$home" >/dev/null
+      set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+      set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+    fi
+    case "$state" in
+      queued) jq '.mergeable_state="queued"' "$home/fixtures/core.json" > "$home/fixtures/core-transition"; expected=deferred ;;
+      draft) jq '.draft=true' "$home/fixtures/core.json" > "$home/fixtures/core-transition"; expected=deferred ;;
+      closed) jq '.state="closed"' "$home/fixtures/core.json" > "$home/fixtures/core-transition"; expected=terminal ;;
+    esac
+    printf '0\n' > "$home/fixtures/race"
+    run "$home" >/dev/null
+    assert_equals "$expected" "$(result "$home")" "$phase $state records observed eligibility"
+    if [ "$phase" = prewrite ]; then
+      assert_equals 0 "$(put_count "$home")" "$state before publication prevents write"
+    else
+      assert_equals 1 "$(put_count "$home")" "$state after checks prevents a second write"
+      assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_A" "$state after checks preserves ready metadata"
+      jq -e --arg url "$URL" '.receipts[$url] | has("result_head") | not' "$home/state/pr-autoupdate.json" >/dev/null || fail "$state after checks cannot confirm updated head"
+    fi
+    if [ "$state" != closed ]; then
+      assert_equals false "$(jq '.coverage_complete' "$home/state/pr-autoupdate.json")" "$phase $state leaves coverage unfinished"
+    fi
+  done
+done
 
 home=$(world base_advanced)
 run "$home" >/dev/null

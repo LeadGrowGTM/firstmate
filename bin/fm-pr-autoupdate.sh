@@ -250,6 +250,9 @@ core_read() {
     and has("mergeable") and (.mergeable == null or (.mergeable | type == "boolean"))
     and (.mergeable_state | type == "string")' "$TMP/core" >/dev/null 2>&1 || { REASON='incomplete PR response'; return 1; }
   HEAD=$(jq -r '.head.sha' "$TMP/core"); BASE=$(jq -r '.base.sha' "$TMP/core")
+  if [ "$(jq -r '.state' "$TMP/core")" != open ] || [ "$(jq -r '.merged' "$TMP/core")" = true ]; then PENDING=false; RESULT=terminal; REASON='closed or merged'; return 1; fi
+  if [ "$(jq -r '.draft' "$TMP/core")" = true ]; then RESULT=deferred; REASON='draft'; return 1; fi
+  if [ "$(jq -r '.auto_merge != null or .mergeable_state == "queued"' "$TMP/core")" = true ]; then RESULT=deferred; REASON='queued or auto-merge enabled'; return 1; fi
 }
 compare() { # captured base head
   api GET "/repos/$PROJECT/compare/$1...$2" > "$TMP/compare" || { REASON='comparison unavailable'; return 1; }
@@ -269,9 +272,6 @@ process_pr() {
     lock "$lock_path" || { REASON='task metadata busy'; return 0; }
   done
   core_read || return 0
-  if [ "$(jq -r '.state' "$TMP/core")" != open ] || [ "$(jq -r '.merged' "$TMP/core")" = true ]; then PENDING=false; RESULT=terminal; REASON='closed or merged'; return 0; fi
-  if [ "$(jq -r '.draft' "$TMP/core")" = true ]; then RESULT=deferred; REASON='draft'; return 0; fi
-  if [ "$(jq -r '.auto_merge != null or .mergeable_state == "queued"' "$TMP/core")" = true ]; then RESULT=deferred; REASON='queued or auto-merge enabled'; return 0; fi
   if ! printf '%s' "$CFG" | jq -e --slurpfile core "$TMP/core" --arg url "$URL" \
     'any(.write_scope[]; .pr == $url and .head_repo == $core[0].head.repo.full_name and .head_ref == $core[0].head.ref)' >/dev/null; then
     RESULT=deferred; REASON='head branch write not authorized'; return 0
@@ -355,7 +355,7 @@ process_pr() {
   core_read || return 0
   if ! jq -e --slurpfile first "$TMP/first-core" '
     def guarded: {state,merged,draft,head:{sha:.head.sha,ref:.head.ref,repo:.head.repo.full_name},
-      base:{sha:.base.sha,ref:.base.ref,repo:.base.repo.full_name},auto_merge,mergeable}; guarded == ($first[0] | guarded)' "$TMP/core" >/dev/null; then REASON='PR changed before update'; return 0; fi
+      base:{sha:.base.sha,ref:.base.ref,repo:.base.repo.full_name},auto_merge,mergeable,mergeable_state}; guarded == ($first[0] | guarded)' "$TMP/core" >/dev/null; then REASON='PR changed before update'; return 0; fi
   [ $((DEADLINE - $(date +%s))) -ge 4 ] || { REASON='segment budget exhausted before publication'; return 0; }
   RECEIPT=$(jq -cn --arg head "$expected" --arg base "$previous" --slurpfile core "$TMP/core" \
     '{old_head:$head,base_sha:$base,base_ref:$core[0].base.ref,head_ref:$core[0].head.ref,head_repo:$core[0].head.repo.full_name,pending:true}')
