@@ -984,8 +984,10 @@ test_ship_and_scout_route_surfaces_through_lavish_or_html() {
       FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" firstmate --mode no-mistakes >/dev/null 2>&1
     fi
     brief="$home/data/$id/brief.md"
-    assert_grep 'Present every visual, report, or review surface through lavish-axi or a local HTML page, never the claude.ai Artifact tool or claude.ai Docs.' "$brief" \
-      "$kind brief did not route visual, report, and review surfaces away from claude.ai"
+    assert_grep 'Present visual or review pages through lavish-axi or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs.' "$brief" \
+      "$kind brief did not route visual or review pages away from claude.ai"
+    assert_grep 'Plain report files and chat text remain available.' "$brief" \
+      "$kind brief did not preserve plain reports and chat text"
   done
   pass "fm-brief.sh: ship and scout briefs route surfaces through lavish-axi or a local HTML page"
 }

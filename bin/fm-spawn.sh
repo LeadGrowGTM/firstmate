@@ -2117,10 +2117,10 @@ launch_template() {
   # leaves the other in force. Both are per-launch, scoped to this invocation only,
   # and never touch the captain's global ~/.claude/settings.json.
   # --disallowedTools removes the claude.ai publishing tools from every
-  # Firstmate-launched Claude session, so its visual, report, and review
-  # surfaces go through lavish-axi or a local HTML page instead: the Artifact
+  # Firstmate-launched Claude session, so its visual or review pages go
+  # through lavish-axi or a local HTML page instead: the Artifact
   # tool family (Artifact, ArtifactComments, ArtifactData, ArtifactCheck, the
-  # names Claude Code 2.1.296 defines) and the claude.ai Docs connector
+  # names Claude Code 2.1.296 defines) and the cloud-published claude.ai Docs connector
   # (mcp__claude_ai_Claude_Docs, every tool of that server). The option is
   # variadic, so it must be followed by another option, never the positional
   # doorbell; it sits directly before --settings. Per-launch only; the

@@ -678,11 +678,13 @@ else
   SETUP_BASE="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch."
 fi
 
-# Rule 3 of both task contracts. Visual, report, and review surfaces go
-# through lavish-axi or a local HTML page; fm-spawn.sh also disables the
-# claude.ai Artifact and Docs tools for a Claude worker.
+# Rule 3 of both task contracts keeps visual or review pages on lavish-axi
+# or local HTML while allowing plain report files and chat text.
+# fm-spawn.sh disables the claude.ai Artifact tool and cloud-published
+# claude.ai Docs for a Claude worker.
 TOOLS_RULE='3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
-   Present every visual, report, or review surface through lavish-axi or a local HTML page, never the claude.ai Artifact tool or claude.ai Docs.'
+   Present visual or review pages through lavish-axi or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs.
+   Plain report files and chat text remain available.'
 
 if [ "$KIND" = scout ]; then
 if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then

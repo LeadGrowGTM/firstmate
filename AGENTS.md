@@ -48,7 +48,9 @@ When any crewmate is live, delegate changes to shared tracked material rather th
 This repo is a shared template, while `.env`, `data/`, `state/`, `config/`, `projects/`, and `.no-mistakes/` are captain-private and gitignored.
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
 Never add an agent name as a commit co-author.
-Use `gh-axi` for GitHub, `chrome-devtools-axi` for browser work, and compatible `lavish-axi` or a local HTML page for every visual, report, or review surface, never the claude.ai Artifact tool or claude.ai Docs, which `bin/fm-spawn.sh` disables for every Claude session it launches; consult current help rather than memorizing flags.
+Use `gh-axi` for GitHub and `chrome-devtools-axi` for browser work; consult current help rather than memorizing flags.
+Present visual or review pages through compatible `lavish-axi` or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs, which `bin/fm-spawn.sh` disables for every Claude session it launches.
+Plain report files and chat text remain available.
 
 ## 2. Layout and state
 
