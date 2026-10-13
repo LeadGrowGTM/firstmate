@@ -6,8 +6,9 @@
 # arm binds a generated shim through fm-check-register.sh; disarm removes only
 # that shim/trust, preserving receipts and unfinished operations for recovery.
 #
-# Each sweep snapshots the canonical contribution ownership set, including saved
-# links. One URL is processed per poll, shared owners together. The journal at
+# Each segment refreshes canonical contribution ownership, including saved links,
+# and publication rechecks the selected owner set. One URL is processed per poll,
+# shared owners together. The journal at
 # state/pr-autoupdate.json records the queue, coverage, and head-bound receipts.
 # A sweep starts at most once per 7200 seconds; unfinished coverage continues
 # on normal watcher polls. No repository-wide discovery or other-home reads.
@@ -32,7 +33,9 @@
 # PUT blindly. A later GET plus compare must prove a changed head contains the
 # captured base. Final publication and confirmation recheck head-bound queue
 # membership. Confirmation stores checks bound to the new head, rereads the head
-# after checks, then updates pr_head under the metadata locks. This
+# after checks, then updates pr_head under the metadata locks. Already-published
+# owner metadata can recover against the unchanged captured local head.
+# Confirmed local-head evidence survives subsequent request refusals. This
 # command never grants readiness, review, or merge authority.
 # Ambiguous requests remain pending for inspection even across disarm/re-arm.
 # It never changes local Git refs, rebases, force-pushes, launches repair workers,
@@ -168,21 +171,27 @@ else
   printf '%s\n' '{"schema":"fm-pr-autoupdate.v1","started":0,"queue":[],"sweep_urls":[],"receipts":{},"coverage_complete":false}' > "$TMP/journal"
 fi
 save() { write_json "$JOURNAL" "$TMP/journal"; }
-LAST=$(jq '.started' "$TMP/journal")
-if [ "$LAST" = 0 ] || [ "$NOW" -lt "$LAST" ] || [ $((NOW - LAST)) -ge 7200 ]; then
-  bounded "$SCRIPT_DIR/fm-fleet-snapshot.sh" --contribution-input > "$TMP/input" || fail 'owned task inventory unavailable'
-  bounded "$SCRIPT_DIR/fm-contributions.sh" snapshot "$TMP/input" --all > "$TMP/owned" || fail 'contribution inventory unavailable'
+read_owners() {
+  bounded "$SCRIPT_DIR/fm-fleet-snapshot.sh" --contribution-input > "$TMP/input" || { REASON='owned task inventory unavailable'; return 1; }
+  bounded "$SCRIPT_DIR/fm-contributions.sh" snapshot "$TMP/input" --all > "$TMP/owned" || { REASON='contribution inventory unavailable'; return 1; }
   jq -e '.unreadable_records == 0 and (.rows | type == "array")
-    and all(.rows[]; (.tasks | type == "array" and length > 0))' "$TMP/owned" >/dev/null || fail 'saved contribution coverage incomplete'
-  jq -e '.backlog.present == true and (.tasks | type == "array")' "$TMP/input" >/dev/null || fail 'owned task coverage incomplete'
-  jq --slurpfile owned "$TMP/owned" --slurpfile input "$TMP/input" --argjson now "$NOW" '
+    and all(.rows[]; (.tasks | type == "array" and length > 0))' "$TMP/owned" >/dev/null || { REASON='saved contribution coverage incomplete'; return 1; }
+  jq -e '.backlog.present == true and (.tasks | type == "array")' "$TMP/input" >/dev/null || { REASON='owned task coverage incomplete'; return 1; }
+  jq -n --slurpfile owned "$TMP/owned" --slurpfile input "$TMP/input" '
     ([$owned[0].rows[] | select(.kind == "pr") | . as $row | .tasks[] | {url:$row.url,task:.}]
       + [$input[0].tasks[] | select(.kind != "secondmate" and (.pr.url | type == "string" and contains("/c/"))) | {url:.pr.url,task:.id}]
-      | unique_by([.url,.task]) | group_by(.url) | map({url:.[0].url,owners:map(.task)})) as $current |
+      | unique_by([.url,.task]) | group_by(.url) | map({url:.[0].url,owners:map(.task)}))' > "$TMP/owners"
+}
+LAST=$(jq '.started' "$TMP/journal")
+[ "$LAST" = 0 ] || [ "$NOW" -lt "$LAST" ] || [ $((NOW - LAST)) -ge 7200 ] \
+  || [ "$(jq '.queue | length' "$TMP/journal")" -gt 0 ] || exit 0
+read_owners || fail "$REASON"
+if [ "$LAST" = 0 ] || [ "$NOW" -lt "$LAST" ] || [ $((NOW - LAST)) -ge 7200 ]; then
+  jq --slurpfile current "$TMP/owners" --argjson now "$NOW" '
     (.queue | map(.url)) as $unfinished |
     .started=$now | .coverage_complete=false |
-    .queue=([$unfinished[] as $url | $current[] | select(.url == $url)]
-      + [$current[] | . as $entry | select(($unfinished | index($entry.url)) == null)]) |
+    .queue=([$unfinished[] as $url | $current[0][] | select(.url == $url)]
+      + [$current[0][] | . as $entry | select(($unfinished | index($entry.url)) == null)]) |
     .sweep_urls=(.queue | map(.url)) |
     if (.queue | length) == 0 then .coverage_complete=true else . end' "$TMP/journal" > "$TMP/new"
   mv "$TMP/new" "$TMP/journal"; save
@@ -191,7 +200,7 @@ fm_pr_regular_destination_on_device_or_absent "$FAILURE" "$DEVICE" || fail 'unsa
 rm -f -- "$FAILURE"
 [ "$(jq '.queue | length' "$TMP/journal")" -gt 0 ] || exit 0
 URL=$(jq -r '.queue[0].url' "$TMP/journal")
-OWNERS=$(jq -r '.queue[0].owners[]' "$TMP/journal")
+OWNERS=$(jq -r --arg url "$URL" '.[] | select(.url == $url) | .owners[]' "$TMP/owners")
 RESULT=incomplete
 REASON='unavailable evidence'
 PENDING=false
@@ -277,6 +286,7 @@ process_pr() {
   [ "$FM_PR_PROVIDER" = github ] || { RESULT=deferred; REASON='unsupported forge'; return 0; }
   PROJECT=$FM_PR_PATH; NUMBER=$FM_PR_NUMBER
   lock "$STATE/.pr-autoupdate-$FM_PR_OWNER-$FM_PR_REPO-$NUMBER.lock" || { REASON='PR lock busy'; return 0; }
+  [ -n "$OWNERS" ] || { RESULT=deferred; REASON='PR no longer owned'; return 0; }
   for id in $OWNERS; do
     fm_pr_task_id_valid "$id" || { REASON='invalid owner'; return 0; }
     lock "$STATE/.control-$id.lock" || { REASON='task control busy'; return 0; }
@@ -296,15 +306,16 @@ process_pr() {
     local_head=$(bounded git -C "$(meta_value "$meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
     if [ "$PENDING" = true ]; then
       if [ "$local_head" != "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] \
-        || [ "$(meta_value "$meta" pr_head)" != "$(printf '%s' "$RECEIPT" | jq -r '.old_head')" ]; then
+        || { [ "$(meta_value "$meta" pr_head)" != "$(printf '%s' "$RECEIPT" | jq -r '.old_head')" ] \
+          && [ "$(meta_value "$meta" pr_head)" != "$HEAD" ]; }; then
         [ "$local_head" = "$HEAD" ] && [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] \
           || { REASON='local head changed since refresh'; return 0; }
       fi
     else
       [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] || { REASON='recorded ready head changed'; return 0; }
       if [ "$local_head" != "$HEAD" ]; then
-        [ "$(printf '%s' "$RECEIPT" | jq -r '.result_head // ""')" = "$HEAD" ] \
-          && [ "$local_head" = "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] \
+        [ "$(printf '%s' "$RECEIPT" | jq -r '.confirmed.head // .result_head // ""')" = "$HEAD" ] \
+          && [ "$local_head" = "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.confirmed.local_heads[$id] // .local_heads[$id] // ""')" ] \
           || { REASON='local head changed since refresh'; return 0; }
       fi
     fi
@@ -344,7 +355,7 @@ process_pr() {
       write_json "$meta" "$TMP/meta"
     done
     RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --slurpfile checks "$TMP/checks" --arg head "$HEAD" \
-      '. + {result_head:$head,checks:{head:$head,check_runs:$checks[0].check_runs},validation:"unconfirmed; no merge authority"}')
+      '. + {result_head:$head,confirmed:{head:$head,local_heads:.local_heads},checks:{head:$head,check_runs:$checks[0].check_runs},validation:"unconfirmed; no merge authority"}')
     PENDING=false
     if [ "$closing_behind" -gt 0 ]; then
       RESULT=incomplete; REASON='captured base integrated but current base advanced'; return 0
@@ -365,8 +376,13 @@ process_pr() {
     def guarded: {state,merged,draft,head:{sha:.head.sha,ref:.head.ref,repo:.head.repo.full_name},
       base:{sha:.base.sha,ref:.base.ref,repo:.base.repo.full_name},auto_merge,mergeable,mergeable_state}; guarded == ($first[0] | guarded)' "$TMP/core" >/dev/null; then REASON='PR changed before update'; return 0; fi
   [ $((DEADLINE - $(date +%s))) -ge 4 ] || { REASON='segment budget exhausted before publication'; return 0; }
-  proposed_receipt=$(jq -cn --arg head "$expected" --arg base "$previous" --slurpfile core "$TMP/core" \
-    '{old_head:$head,base_sha:$base,base_ref:$core[0].base.ref,head_ref:$core[0].head.ref,head_repo:$core[0].head.repo.full_name,pending:true}')
+  read_owners || return 0
+  [ "$(jq -r --arg url "$URL" '.[] | select(.url == $url) | .owners[]' "$TMP/owners")" = "$OWNERS" ] \
+    || { REASON='canonical owners changed before update'; return 0; }
+  custody || { RESULT=deferred; return 0; }
+  proposed_receipt=$(jq -cn --arg head "$expected" --arg base "$previous" --argjson receipt "$RECEIPT" --slurpfile core "$TMP/core" \
+    '{old_head:$head,base_sha:$base,base_ref:$core[0].base.ref,head_ref:$core[0].head.ref,head_repo:$core[0].head.repo.full_name,pending:true,
+      confirmed:($receipt.confirmed // (if $receipt.result_head != null then {head:$receipt.result_head,local_heads:$receipt.local_heads} else null end))}')
   for id in $OWNERS; do
     local_head=$(bounded git -C "$(meta_value "$STATE/$id.meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
     proposed_receipt=$(printf '%s' "$proposed_receipt" | jq -c --arg id "$id" --arg head "$local_head" '.local_heads[$id]=$head')

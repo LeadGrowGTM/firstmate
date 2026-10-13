@@ -337,6 +337,9 @@ test_observed_replacement_refreshes_verdict() {
   with_home "$home" "$ROOT/bin/fm-contributions.sh" verdict delivery https://github.com/o/r/pull/8 "$HEAD_B" \
     https://github.com/o/r/pull/8#issuecomment-100 maintainer 'awaiting maintainer' \
     || fail 'could not record verdict on the observed replacement'
+  bearings "$home" | jq -e '.contributions.checked == 0 and .contributions.counts.fleet == 1' >/dev/null \
+    || fail 'a new observed head counted as checked against older ready metadata'
+  sed -i "s/pr_head=$HEAD_A/pr_head=$HEAD_B/" "$home/state/delivery.meta"
   bearings "$home" | jq -e '.contributions.checked == 1 and .contributions.stale_verdicts == 0
     and .contributions.counts.maintainer == 1 and .contributions.counts.fleet == 0' >/dev/null \
     || fail 'a current forge observation did not refresh a verdict on its observed head'

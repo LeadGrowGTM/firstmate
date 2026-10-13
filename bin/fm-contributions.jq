@@ -38,7 +38,7 @@ def known($input; $saved):
   | map(select(. as $pair | any($retired[]; . == $pair) | not));
 def latest_checks:
   group_by(.name) | map(sort_by([(.started_at // ""),(.id // 0)]) | last);
-def projected($input; $saved; $now; $max_age):
+def projected($input; $saved; $now; $max_age; $updates):
   known($input; $saved) as $known
   | [$known[] as $k
     | ([$saved[] | select(.task == $k.task) | .records[] | select(.url == $k.url)] | first) as $record
@@ -52,11 +52,15 @@ def projected($input; $saved; $now; $max_age):
     | ($record.observation // {}) as $o
     | (if $record.error == null and $record.observation != null and ($o.head | sha) then $o.head else null end) as $observed_head
     | (($record.checked_at // "") | try fromdateiso8601 catch null) as $checked
+    | ($updates.receipts[$k.url] // {}) as $update
+    | ($record.kind == "pr" and ($updates.unavailable or $update.pending == true
+        or (($update.observed_head | sha) and $update.checked_at >= ($checked // 0)
+          and $update.observed_head != $observed_head))) as $updating
     # A merged or closed observation is final; poll never re-reads it, so it never expires.
     | ($record.error == null and ($o.state | IN("merged","closed"))) as $final
     | (($final or ($checked != null and ($now - $checked) >= 0 and ($now - $checked) <= $max_age))
        and (if $record.kind == "pr" then $observed_head != null
-            and ($final or $recorded_head == null or $observed_head == $recorded_head)
+            and ($final or (($updating | not) and ($recorded_head == null or $observed_head == $recorded_head)))
             else $record.error == null and $record.observation != null end)
        and ($k.url | startswith("https://github.com/"))) as $fresh
     | (($o.checks // []) | latest_checks) as $checks
@@ -76,6 +80,7 @@ def projected($input; $saved; $now; $max_age):
          if $fresh then {actor:"nobody",reason:("forge reports " + $o.state)}
          else {actor:"fleet",reason:"terminal observation needs refresh"} end
        elif $hold != null then {actor:"captain",reason:$hold.hold_reason,hold:$hold.id}
+       elif $updating then {actor:"fleet",reason:"branch update evidence requires fresh head validation"}
        elif $fresh | not then {actor:"fleet",reason:($record.error // "contribution not recently checked")}
        elif $stale then {actor:"fleet",reason:"STALE maintainer verdict; reassess the current head"}
        elif ($record.pending | length) > 0 then {actor:"fleet",reason:"incoming maintainer signal needs triage"}

@@ -67,6 +67,9 @@ case "$method:$path" in
     fi ;;
   GET:/repos/o/r/commits/*/check-runs*) payload=$(cat "$FIXTURES/checks.json") ;;
   POST:/graphql)
+    if [ -e "$FIXTURES/owned-transition" ]; then
+      mv "$FIXTURES/owned-transition" "$FIXTURES/owned.json"
+    fi
     queue="$FIXTURES/queue.json"
     if [ -e "$FIXTURES/queue-race" ] && [ "$(cat "$FIXTURES/queue-race")" -ge 2 ]; then
       queue="$FIXTURES/queue-transition"
@@ -141,6 +144,93 @@ run() {
 set_fixture() { jq "$3" "$1/fixtures/$2.json" > "$1/fixtures/new"; mv "$1/fixtures/new" "$1/fixtures/$2.json"; }
 put_count() { if [ -e "$1/fixtures/calls" ]; then awk '/^api PUT / {n++} END {print n+0}' "$1/fixtures/calls"; else printf '0\n'; fi; }
 result() { jq -r --arg url "$URL" '.receipts[$url].result' "$1/state/pr-autoupdate.json"; }
+
+regression_owner() {
+  local home
+  home=$(world refreshed_owner)
+  touch "$home/fixtures/put-422"
+  run "$home" >/dev/null
+  rm "$home/fixtures/put-422"
+  set_fixture "$home" owned '.rows += [{task:"other",url:"https://github.com/o/r/pull/1",kind:"pr"}]'
+  cp "$home/state/task.meta" "$home/state/other.meta"
+  printf 'mode=no-mistakes\n' >> "$home/state/other.meta"
+  run "$home" >/dev/null
+  assert_equals 1 "$(put_count "$home")" 'new owner custody prevents another write within the sweep'
+  home=$(world publication_owner_race)
+  cp "$home/state/task.meta" "$home/state/other.meta"
+  jq '.rows += [{task:"other",url:"https://github.com/o/r/pull/1",kind:"pr"}]' "$home/fixtures/owned.json" > "$home/fixtures/owned-transition"
+  run "$home" >/dev/null
+  assert_equals 0 "$(put_count "$home")" 'final ownership refresh prevents publication after a new owner appears'
+  assert_equals 'canonical owners changed before update' "$(jq -r --arg url "$URL" '.receipts[$url].reason' "$home/state/pr-autoupdate.json")" 'owner change is visible and remains queued'
+}
+regression_refusal() {
+  local home
+  home=$(world confirmed_then_422)
+  run "$home" >/dev/null
+  set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+  set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+  run "$home" >/dev/null
+  set_fixture "$home" core '.base.sha="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"'
+  set_fixture "$home" compare '.behind_by=1 | .status="diverged"'
+  touch "$home/fixtures/put-422"
+  run "$home" check 17200 >/dev/null
+  assert_equals false "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'definitive refusal settles request'
+  rm "$home/fixtures/put-422"
+  run "$home" check 17200 >/dev/null
+  assert_equals 3 "$(put_count "$home")" 'confirmed local-head evidence survives later refusal and permits reobserved retry'
+}
+regression_confirmation() {
+  local home
+  home=$(world interrupted_confirmation)
+  cp "$home/state/task.meta" "$home/state/other.meta"
+  set_fixture "$home" owned '.rows[0].tasks=["task","other"]'
+  run "$home" >/dev/null
+  set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+  set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+  # Persisted crash state: one owner's metadata was published, the other and
+  # pending receipt still contain the captured head. No process is killed.
+  sed -i "s/pr_head=$HEAD_A/pr_head=$HEAD_B/" "$home/state/task.meta"
+  run "$home" >/dev/null
+  assert_equals updated "$(result "$home")" 'partially published confirmation recovers'
+  assert_contains "$(cat "$home/state/other.meta")" "pr_head=$HEAD_B" 'recovery completes every owner metadata update'
+  assert_equals false "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'recovered confirmation settles receipt'
+  assert_equals 1 "$(put_count "$home")" 'confirmation recovery sends no repeated update'
+}
+regression_readiness() {
+  local home
+  home=$(world pending_readiness)
+  mkdir -p "$home/data/task"
+  jq -n --arg url "$URL" --arg head "$HEAD_A" '{schema:"fm-contributions.v1",task:"task",records:[{url:$url,kind:"pr",checked_at:"2026-10-13T10:00:00Z",error:null,seen:[],pending:[],observation:{state:"open",head:$head,draft:false,mergeable:"mergeable",can_merge:true,review_decision:"APPROVED",checks:[{name:"ci",status:"completed",conclusion:"success"}],reviews:[],events:[]}}]}' > "$home/data/task/contributions.json"
+  chmod 600 "$home/data/task/contributions.json"
+  set_fixture "$home" input '.tasks[0].pr.head="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" | .tasks[0].merge_authority="away"'
+  run "$home" >/dev/null
+  env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:01:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+  jq -e '.rows[0].checked == false and .rows[0].actor == "fleet" and .rows[0].reason != "checks green; merge is authorized by delivery posture"' "$home/fixtures/projected.json" >/dev/null || fail 'pending publication retained green readiness'
+  set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+  set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+  set_fixture "$home" checks '.total_count=101'
+  run "$home" >/dev/null
+  env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:01:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+  jq -e '.rows[0].checked == false and .rows[0].actor == "fleet"' "$home/fixtures/projected.json" >/dev/null || fail 'changed head awaiting confirmation retained green readiness'
+  jq --arg url "$URL" '.receipts[$url].pending=false | .receipts[$url].checked_at=1791885720' "$home/state/pr-autoupdate.json" > "$home/fixtures/journal"
+  mv "$home/fixtures/journal" "$home/state/pr-autoupdate.json"
+  chmod 600 "$home/state/pr-autoupdate.json"
+  env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:02:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+  jq -e '.rows[0].checked == false' "$home/fixtures/projected.json" >/dev/null || fail 'newer changed-head evidence retained green readiness without pending publication'
+  jq --arg head "$HEAD_B" '.records[0].observation.head=$head | .records[0].checked_at="2026-10-13T10:03:00Z"' "$home/data/task/contributions.json" > "$home/fixtures/record"
+  mv "$home/fixtures/record" "$home/data/task/contributions.json"
+  set_fixture "$home" input '.tasks[0].pr.head="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+  env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:03:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+  jq -e '.rows[0].checked == true' "$home/fixtures/projected.json" >/dev/null || fail 'a later current-head observation could not restore readiness'
+  printf '%s\n' '{}' > "$home/state/pr-autoupdate.json"
+  env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:03:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+  jq -e '.rows[0].checked == false and .complete == false' "$home/fixtures/projected.json" >/dev/null || fail 'unreadable updater evidence retained readiness'
+}
+regression_failed=0
+for regression in regression_owner regression_refusal regression_confirmation regression_readiness; do
+  if ! ("$regression"); then regression_failed=1; fi
+done
+[ "$regression_failed" = 0 ] || fail 'custody and receipt regression failures'
 
 home=$(world off)
 rm "$home/config/pr-autoupdate.json"
