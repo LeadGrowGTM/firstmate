@@ -704,6 +704,13 @@ REBUILDING_SESSION_PID=$(fm_harness_ancestry_pid 2>/dev/null || true)
 print_agents_refresh_if_required "$REBUILDING_SESSION_PID"
 
 if [ "$READ_ONLY" -eq 0 ]; then
+  if [ -n "${TMUX_PANE:-}" ]; then
+    "$SCRIPT_DIR/fm-statusbar.sh" label "$TMUX_PANE" firstmate primary \
+      "${FM_PRIMARY_HARNESS:-claude}" "${FM_PRIMARY_MODEL:-${CLAUDE_MODEL:-Claude}}" \
+      "${FM_PRIMARY_EFFORT:-${CLAUDE_CODE_EFFORT_LEVEL:-default}}" "$FM_HOME" >/dev/null 2>&1 || true
+    "$SCRIPT_DIR/fm-statusbar.sh" sync >/dev/null 2>&1 || true
+    "$SCRIPT_DIR/fm-statusbar.sh" apply >/dev/null 2>&1 || true
+  fi
   if [ "$REEMIT" -eq 0 ]; then
     rm -f "$COMPLETION_FILE" 2>/dev/null || true
   fi

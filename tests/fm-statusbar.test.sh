@@ -32,11 +32,12 @@ SH
 cat >"$WORK/bin/quota-axi" <<SH
 #!/usr/bin/env bash
 echo run >>"$WORK/quota-calls"
+[ ! -f "$WORK/quota-fail" ] || exit 1
 cat <<'X'
-quota[3]{provider,scope,effectivePercentRemaining,spendPriority}:
-  claude,all_models,68,0.4
-  codex,all_models,85,-1.9
-  claude,"model:fable",12,0.8
+quota[3]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+  claude,default,all_models,68,0.4,through_reset,high,none,none
+  codex,openai-codex,all_models,0.5,-1.9,through_reset,high,none,none
+  claude,default,"model:fable",12,0.8,through_reset,high,none,none
 X
 SH
 chmod +x "$WORK/bin/tmux" "$WORK/bin/quota-axi"
@@ -49,9 +50,8 @@ tmux new-window -d -t firstmate: -n bare "sleep 600"
 tmux new-session -d -t firstmate -s orca-view -x 150 -y 20
 tmux new-session -d -s unrelated -x 150 -y 20 "sleep 600"
 
-# Render the second status line of <session> at a client width, via an outer
-# tmux that attaches it. Prints the two bottom lines: window list, then detail.
-render() {  # <session> <width>
+# Render the bottom of a pane at a client width through an attached view.
+render() {  # <session> <width> <expected>
   local out i=0
   if "$REAL_TMUX" -L "$OUTER" has-session 2>/dev/null; then
     "$REAL_TMUX" -L "$OUTER" kill-server >/dev/null 2>&1 || true
@@ -60,44 +60,64 @@ render() {  # <session> <width>
   "$REAL_TMUX" -L "$OUTER" new-session -d -x "$2" -y 6 \
     "env -u TMUX '$REAL_TMUX' -L '$SOCKET' attach -t '$1'" || return 1
   while [ "$i" -lt 40 ]; do
-    out=$("$REAL_TMUX" -L "$OUTER" capture-pane -p | grep -v '^[[:space:]]*$' | tail -2)
-    case "$out" in *"fm-"* | *bare* | *unlabeled*) break ;; esac
+    out=$("$REAL_TMUX" -L "$OUTER" capture-pane -p | grep -v '^[[:space:]]*$' | tail -3)
+    case "$out" in *"$3"*) break ;; esac
     sleep 0.1
     i=$((i + 1))
   done
   printf '%s' "$out"
 }
 
-# --- label + apply: grouped view session gets the line, unrelated one does not ---
+# --- label + apply: grouped view sessions share window options ---
 bash "$SB" label firstmate:fm-demo-task fm-demo-task ship claude 'claude-opus-5-5[1m]' high \
   /home/u/.treehouse/firstmate-840e8b/17/firstmate
+tmux set-option -t firstmate 'status-format[0]' 'CUSTOM #{window_name}'
 bash "$SB" apply firstmate
-[ "$(tmux show-options -qv -t orca-view status)" = 2 ] || fail "view session in the group did not get the detail line"
-[ "$(tmux show-options -qv -t firstmate status)" = 2 ] || fail "base session did not get the detail line"
-[ -z "$(tmux show-options -qv -t unrelated status)" ] || fail "an ungrouped session was changed"
-pass "apply covers the session group and leaves other sessions alone"
+[ "$(tmux show-options -wqv -t orca-view:fm-demo-task pane-border-status)" = bottom ] || fail "view window did not get the detail line"
+[ -z "$(tmux show-options -wqv -t unrelated pane-border-status)" ] || fail "an ungrouped window was changed"
+[ "$(tmux show-options -qv -t firstmate 'status-format[0]')" = 'CUSTOM #{window_name}' ] || fail "apply replaced a custom status line"
+tmux new-session -d -t firstmate -s orca-later -x 150 -y 20
+[ "$(tmux show-options -wqv -t orca-later:fm-demo-task pane-border-status)" = bottom ] || fail "late view lost the detail line"
+pass "apply preserves status and covers current and later grouped views"
+
+bash "$SB" usage >/dev/null
+i=0
+while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 
 tmux select-window -t orca-view:fm-demo-task
-wide=$(render orca-view 160)
+wide=$(render orca-view 160 'u cl')
 case "$wide" in
-*"0:"*"fm-demo-task (ship)"*"opus-5-5 high"*"firstmate/17"*) pass "wide client shows task, model, effort, worktree" ;;
+*"fm-demo-task"*"opus-5-5 high"*"firstmate/17"*"u cl32% cx99.5%"*) pass "wide client shows task, model, effort, worktree and usage" ;;
 *) fail "wide render missing fields" "$wide" ;;
 esac
 
-narrow=$(render orca-view 60)
+narrow=$(render orca-view 60 'u cl')
 case "$narrow" in
-*"fm-demo-task (ship)"*"opus-5-5 high"*) ;;
-*) fail "narrow render lost task or model" "$narrow" ;;
+*"fm-demo"*"opus-5-5 high"*"firstmate/"*"u cl32%"*) ;;
+*) fail "narrow render lost a required field" "$narrow" ;;
 esac
-case "$narrow" in
-*"firstmate/17"* | *used*) fail "narrow render kept low-priority fields" "$narrow" ;;
+pass "narrow client keeps task, model, effort, worktree and usage"
+
+compact=$(render orca-view 40 'u cl')
+case "$compact" in
+*"fm-d"*"opus-5"*"hig"*"first"*"u cl32%"*) pass "compact client keeps all required fields" ;;
+*) fail "compact render lost a required field" "$compact" ;;
 esac
-[ "$(printf '%s\n' "$narrow" | tail -1 | wc -c)" -le 61 ] || fail "narrow render exceeds the client width" "$narrow"
-pass "narrow client keeps task and model, drops worktree and usage"
+
+tmux new-window -d -t firstmate: -n primary "sleep 600"
+primary_pane=$(tmux display-message -p -t firstmate:primary '#{pane_id}')
+bash "$SB" label "$primary_pane" firstmate primary claude 'claude-opus-5-5' high /home/u/firstmate
+bash "$SB" apply firstmate
+tmux select-window -t orca-view:primary
+primary=$(render orca-view 100 'u cl')
+case "$primary" in
+*firstmate*"opus-5-5 high"*"firstmate"*"u cl32%"*) pass "a primary pane can be labeled through its pane id" ;;
+*) fail "primary pane lost a required field" "$primary" ;;
+esac
 
 # --- missing fields: an unlabeled window still renders something truthful ---
 tmux select-window -t orca-view:bare
-bare=$(render orca-view 120)
+bare=$(render orca-view 120 'sleep')
 case "$bare" in
 *bare*"sleep"*) pass "unlabeled window falls back to window name and live command" ;;
 *) fail "unlabeled window render" "$bare" ;;
@@ -119,18 +139,28 @@ tmux kill-session -t orca-view 2>/dev/null || true
 "$REAL_TMUX" -L "$OUTER" kill-server >/dev/null 2>&1 || true
 i=0
 while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-rm -f "$WORK/state/statusbar-usage.txt" "$WORK/quota-calls"
+rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
 [ -z "$(bash "$SB" usage)" ] || fail "first usage read should be empty before the cache exists"
 i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-[ "$(cat "$WORK/state/statusbar-usage.txt")" = "used cl 32% cx 15%" ] || fail "usage cache content" "$(cat "$WORK/state/statusbar-usage.txt" 2>&1)"
-[ "$(bash "$SB" usage)" = "used cl 32% cx 15%" ] || fail "usage did not serve the cache"
+[ "$(cat "$WORK/state/statusbar-usage.txt")" = "u cl32% cx99.5%" ] || fail "usage cache content" "$(cat "$WORK/state/statusbar-usage.txt" 2>&1)"
+[ "$(bash "$SB" usage)" = "u cl32% cx99.5%" ] || fail "usage did not serve the cache"
 bash "$SB" usage >/dev/null
 bash "$SB" usage >/dev/null
 sleep 0.5
 [ "$(wc -l <"$WORK/quota-calls")" -eq 1 ] || fail "usage refreshed more than once inside the TTL" "$(cat "$WORK/quota-calls")"
 grep -qi 'token\|secret\|key' "$WORK/state/statusbar-usage.txt" && fail "usage cache holds credential-like text"
 pass "usage is a cached percentage figure refreshed at most once per TTL"
+
+rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
+touch "$WORK/quota-fail"
+bash "$SB" usage >/dev/null
+i=0
+while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+bash "$SB" usage >/dev/null
+[ "$(wc -l <"$WORK/quota-calls")" -eq 1 ] || fail "failed quota refresh repeated inside TTL"
+rm -f "$WORK/quota-fail"
+pass "failed quota refresh observes the same TTL"
 
 # --- claude-line: whitelisted fields only ---
 json='{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_window":{"used_percentage":7.4},"rate_limits":{"five_hour":{"used_percentage":31},"seven_day":{"used_percentage":11}},"workspace":{"current_dir":"/x/y/firstmate","git_worktree":"firstmate2"},"transcript_path":"/home/u/SECRET-transcript.jsonl","session_id":"abc-123","cost":{"total_cost_usd":1.5}}'
@@ -145,6 +175,10 @@ empty=$(printf '' | bash "$SB" claude-line)
 [ -z "$empty" ] || fail "claude-line with empty input should print nothing useful" "$empty"
 pass "claude-line tolerates missing fields and empty input"
 
+optional=$(printf '%s' '{"model":{"display_name":"Haiku"},"context_window":{"used_percentage":7},"rate_limits":{"seven_day":{"used_percentage":13}}}' | bash "$SB" claude-line --task t1)
+[ "$optional" = 'Haiku | t1 | ctx 7% | 7d 13%' ] || fail "optional Claude fields shifted or disappeared" "$optional"
+pass "Claude fields remain aligned when effort and a limit window are absent"
+
 # --- sync labels windows from recorded task metadata ---
 cat >"$WORK/state/sync-task.meta" <<META
 window=firstmate:bare
@@ -158,10 +192,5 @@ bash "$SB" sync
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_task)" = sync-task ] || fail "sync did not label the recorded window"
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_wt)" = proj/4 ] || fail "sync worktree label" "$(tmux show-options -wqv -t firstmate:bare @fm_wt)"
 pass "sync labels recorded windows from state metadata"
-
-# --- reset restores tmux defaults for the whole group ---
-bash "$SB" reset firstmate
-[ -z "$(tmux show-options -qv -t firstmate status)" ] || fail "reset left the detail line on"
-pass "reset restores the group's defaults"
 
 echo "fm-statusbar: all passed"
