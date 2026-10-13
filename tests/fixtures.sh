@@ -328,12 +328,6 @@ fm_test_run_spawn() {
   # A test that needs the set case opts in through FM_TEST_CLAUDE_CONFIG_DIR.
   local spawn_home=$home/user-home
   mkdir -p "$spawn_home"
-  # The operator HOME is nested here for credential isolation, but its pool
-  # must remain outside the Firstmate home just as a real user's pool does.
-  if [ ! -e "$spawn_home/.treehouse" ] && [ ! -L "$spawn_home/.treehouse" ]; then
-    mkdir -p "$home-user-pool"
-    ln -s "$home-user-pool" "$spawn_home/.treehouse"
-  fi
   FM_ROOT_OVERRIDE='' FM_HOME="$home" HOME="$spawn_home" \
     CLAUDE_CONFIG_DIR="${FM_TEST_CLAUDE_CONFIG_DIR:-}" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \

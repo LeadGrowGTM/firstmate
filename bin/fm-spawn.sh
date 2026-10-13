@@ -4654,6 +4654,7 @@ spawn_lease_clone_worktree() {
     return 1
   fi
   SPAWN_PRIVATE_LEASE_PATH=$leased
+  fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$leased"
 }
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
@@ -4692,10 +4693,15 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  fm_treehouse_pool_check "$FM_HOME" "$PROJ_ABS" "$HOME" || exit 1
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
   if ! spawn_wait_isolated_worktree; then
     echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2
+    exit 1
+  fi
+  if ! fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$WT"; then
+    if ! spawn_send_text_line "$WT_TARGET" 'exit' || ! spawn_wait_left_path "$WT"; then
+      echo "error: could not return the refused Treehouse worktree '$WT'; inspect window $T" >&2
+    fi
     exit 1
   fi
   validate_spawn_worktree "treehouse get" "$T"
