@@ -292,21 +292,31 @@ printf '# Skill\n' > "$HOME_DIR/skills/SKILL.md"
 printf 'generated log' > "$HOME_DIR/skills/trace.log"
 printf 'credential marker' > "$HOME_DIR/skills/token.json"
 printf 'private note' > "$HOME_DIR/skills/secret.md"
+printf 'private token payload' > "$HOME_DIR/skills/token.md"
+printf 'private apikey payload' > "$HOME_DIR/skills/apikey.md"
 config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'excluded skill files'
 bundle
 jq -e '.complete and (.evidence | length == 1) and (.evidence[0].path | endswith("/SKILL.md"))' "$OUT" >/dev/null || fail 'skill inventory included an excluded file'
-for bad in trace.log token.json secret.md; do
+for bad in trace.log token.json secret.md token.md apikey.md; do
   assert_no_grep "$bad" "$OUT" "excluded $bad appeared in skill bundle"
   assert_no_grep "$bad" "$HOME_DIR/data/domain-freshness/cursors.json" "excluded $bad appeared in skill cursor"
 done
+rm "$HOME_DIR/skills/SKILL.md"
+ln -s token.md "$HOME_DIR/skills/SKILL.md"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 2 "$STATUS" 'skill alias to token file'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("excluded inventory path")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'skill alias to token file claimed complete coverage'
+assert_no_grep 'private token payload' "$OUT" 'skill alias leaked token content'
+jq -e '.sources.skills.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'skill alias advanced checkpoint'
 
 new_home
 mkdir -p "$HOME_DIR/plugins"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
 printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-for bad in trace.log token.json secret.md; do
+for bad in trace.log token.json secret.md apikey.md; do
   printf 'excluded file' > "$HOME_DIR/plugins/$bad"
   kind=asset
   [ "$bad" != secret.md ] || kind=instruction
@@ -317,7 +327,15 @@ for bad in trace.log token.json secret.md; do
   jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("excluded inventory file")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail "declared $bad was fingerprinted"
   jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "declared $bad advanced checkpoint"
 done
-pass 'skill and declared plugin files exclude logs and credential names'
+ln -s apikey.md "$HOME_DIR/plugins/GUIDE.md"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"GUIDE.md",kind:"instruction"}]}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'plugin alias to apikey file'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("excluded inventory path")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'plugin alias to apikey file claimed complete coverage'
+assert_no_grep 'excluded file' "$OUT" 'plugin alias leaked credential content'
+jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'plugin alias advanced checkpoint'
+pass 'skill and declared plugin aliases exclude credential targets'
 
 new_home
 mkdir -p "$HOME_DIR/plugins/optional"

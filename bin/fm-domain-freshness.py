@@ -394,13 +394,13 @@ def forge(source, previous, now, contributions):
 FORBIDDEN = {'.ssh', '.git', 'credentials', 'credentials.json', '.credentials.json', 'auth.json',
              'secrets', 'clients', 'browser', 'profiles', 'logs', 'state'}
 ASSET_SUFFIXES = {'.md', '.sh', '.py', '.ts', '.tsx', '.js', '.jsx', '.toml', '.yaml', '.yml'}
-SENSITIVE_NAME = re.compile(r'(^|[._-])(tokens?|secrets?|credentials?|cookies?|keys?|dotenv|logs?)([._-]|$)')
+SENSITIVE_NAME = re.compile(r'(^|[._-])((api|access|private|public|ssh|auth)?(tokens?|secrets?|credentials?|cookies?|keys?)|dotenv|logs?)([._-]|$)')
 
 
 def inventory_path(path, roots):
     absolute = Path(path).absolute()
     resolved = absolute.resolve(strict=True)
-    if any(part.lower() in FORBIDDEN or part.lower().startswith('.env') for part in (*absolute.parts, *resolved.parts)):
+    if any(part.lower() in FORBIDDEN or part.lower().startswith('.env') or SENSITIVE_NAME.search(part.lower()) for part in (*absolute.parts, *resolved.parts)):
         raise CoverageError('excluded inventory path')
     if not any(resolved == root or root in resolved.parents for root in roots):
         raise CoverageError('inventory symlink escapes declared safe roots')
@@ -488,7 +488,7 @@ def inventory_snapshot(source):
                 raise CoverageError('skill inventory limit reached')
             entries += len(items)
             for item in sorted(items):
-                if item.name.lower() in FORBIDDEN or item.name.lower().startswith('.env'):
+                if item.name.lower() in FORBIDDEN or item.name.lower().startswith('.env') or SENSITIVE_NAME.search(item.name.lower()):
                     continue
                 resolved = inventory_path(item, roots)
                 if resolved.is_dir():
