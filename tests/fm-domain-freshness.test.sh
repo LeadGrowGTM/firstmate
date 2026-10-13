@@ -266,31 +266,64 @@ mkdir -p "$HOME_DIR/skills/one" "$HOME_DIR/plugins"
 printf 'first script' > "$HOME_DIR/skills/one/run.py"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
 printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-printf 'first template' > "$HOME_DIR/plugins/template.txt"
+printf 'first template' > "$HOME_DIR/plugins/template.toml"
 config "$(jq -nc --arg skills "$HOME_DIR/skills" --arg plugins "$HOME_DIR/plugins" '[
   {id:"skills",kind:"skills",root:$skills},
-  {id:"plugins",kind:"plugin-files",root:$plugins,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"template.txt",kind:"asset"}]}
+  {id:"plugins",kind:"plugin-files",root:$plugins,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"template.toml",kind:"asset"}]}
 ]')"
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'asset baselines'
 printf 'second script' > "$HOME_DIR/skills/one/run.py"
-printf 'second template' > "$HOME_DIR/plugins/template.txt"
+printf 'second template' > "$HOME_DIR/plugins/template.toml"
 collect "$HOME_DIR" 2026-10-14T12:00:00Z
 expect_code 0 "$STATUS" 'asset changes'
 bundle
 jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-change" and .before.kind == "asset" and .after.kind == "asset" and .before.digest != .after.digest and (.after | has("content") | not) and (.after | has("manifest") | not))' "$OUT" >/dev/null || fail 'effective asset change or digest-only evidence missing'
-rm "$HOME_DIR/plugins/template.txt"
+rm "$HOME_DIR/plugins/template.toml"
 collect "$HOME_DIR" 2026-10-15T12:00:00Z
 expect_code 0 "$STATUS" 'removed plugin asset'
 bundle
-jq -e --arg path "$HOME_DIR/plugins/template.txt" '(.evidence | length) == 1 and .evidence[0].path == $path and .evidence[0].before.kind == "asset" and .evidence[0].after == null and .coverage[1].surfaces == ["plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'removed plugin asset did not produce a delta'
+jq -e --arg path "$HOME_DIR/plugins/template.toml" '(.evidence | length) == 1 and .evidence[0].path == $path and .evidence[0].before.kind == "asset" and .evidence[0].after == null and .coverage[1].surfaces == ["plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'removed plugin asset did not produce a delta'
 pass 'skill and plugin assets change digest-only fingerprints'
+
+new_home
+mkdir -p "$HOME_DIR/skills"
+printf '# Skill\n' > "$HOME_DIR/skills/SKILL.md"
+printf 'generated log' > "$HOME_DIR/skills/trace.log"
+printf 'credential marker' > "$HOME_DIR/skills/token.json"
+printf 'private note' > "$HOME_DIR/skills/secret.md"
+config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'excluded skill files'
+bundle
+jq -e '.complete and (.evidence | length == 1) and (.evidence[0].path | endswith("/SKILL.md"))' "$OUT" >/dev/null || fail 'skill inventory included an excluded file'
+for bad in trace.log token.json secret.md; do
+  assert_no_grep "$bad" "$OUT" "excluded $bad appeared in skill bundle"
+  assert_no_grep "$bad" "$HOME_DIR/data/domain-freshness/cursors.json" "excluded $bad appeared in skill cursor"
+done
+
+new_home
+mkdir -p "$HOME_DIR/plugins"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
+for bad in trace.log token.json secret.md; do
+  printf 'excluded file' > "$HOME_DIR/plugins/$bad"
+  kind=asset
+  [ "$bad" != secret.md ] || kind=instruction
+  config "$(jq -nc --arg root "$HOME_DIR/plugins" --arg bad "$bad" --arg kind "$kind" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:$bad,kind:$kind}]}]')"
+  collect "$HOME_DIR" "$NOW"
+  expect_code 2 "$STATUS" "declared excluded $bad"
+  bundle
+  jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("excluded inventory file")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail "declared $bad was fingerprinted"
+  jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "declared $bad advanced checkpoint"
+done
+pass 'skill and declared plugin files exclude logs and credential names'
 
 new_home
 mkdir -p "$HOME_DIR/plugins/optional"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
 printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/template.txt",kind:"asset"}]}]')"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/template.toml",kind:"asset"}]}]')"
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'initially absent plugin asset'
 bundle
@@ -355,7 +388,12 @@ for optional_kind in instruction plugin-version asset; do
   mkdir -p "$HOME_DIR/plugins/optional"
   printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
   printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
-  config "$(jq -nc --arg root "$HOME_DIR/plugins" --arg kind "$optional_kind" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/entry.txt",kind:$kind}]}]')"
+  case "$optional_kind" in
+    instruction) optional_path=optional/entry.md ;;
+    plugin-version) optional_path=optional/entry.json ;;
+    asset) optional_path=optional/entry.toml ;;
+  esac
+  config "$(jq -nc --arg root "$HOME_DIR/plugins" --arg kind "$optional_kind" --arg path "$optional_path" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:$path,kind:$kind}]}]')"
   collect "$HOME_DIR" "$NOW"
   expect_code 0 "$STATUS" "$optional_kind absent under directory"
   rmdir "$HOME_DIR/plugins/optional"
@@ -407,7 +445,7 @@ pass 'merged PR includes every paginated file and base/head metadata'
 new_home
 config '[{"id":"forge","kind":"repository","repo":"ACME/WIDGETS"}]'
 mkdir -p "$HOME_DIR/data/owned"
-printf '%s\n' '{"schema":"fm-contributions.v1","task":"owned","records":[{"url":"https://github.com/AcMe/WidGets/pull/30","kind":"pr","observation":{"state":"merged"}}]}' > "$HOME_DIR/data/owned/contributions.json"
+printf '%s\n' '{"schema":"fm-contributions.v1","task":"owned","records":[{"url":"https://github.com/AcMe/WidGets/pull/30","kind":"pr","pending":[],"seen":[],"observation":null}]}' > "$HOME_DIR/data/owned/contributions.json"
 pr 30 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 issue 31 2026-10-13T11:00:00Z | jq -s . > "$FEED/issues-1.json"
 detail 30 2026-10-13T11:00:00Z 4 > "$FEED/detail-30.json"
@@ -434,6 +472,29 @@ jq -e --arg sha "$HEAD_SHA" '(.evidence | length) == 2 and
     .files[2].instruction.before.content == "# Removed" and .files[2].instruction.after == null and
     .files[3].instruction.before.content == "# Old name" and .files[3].instruction.after.content == "# New name"))' "$OUT" >/dev/null || fail 'canonical casing or instruction content missing'
 pass 'canonical repository casing and changed instruction revisions retain provenance'
+
+new_home
+config "$repo_sources"
+pr 32 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 32 2026-10-13T11:00:00Z 4 > "$FEED/detail-32.json"
+merge_history 32
+{ pr_file skills/added.md added; pr_file skills/copied.md copied skills/source.md; pr_file skills/removed.md removed; pr_file skills/new.md renamed skills/old.md; } | jq -s . > "$FEED/files-32-1.json"
+tree_content "$PARENT_TREE" skills/added.md '# Already added'
+tree_content "$MERGE_TREE" skills/added.md '# Merged addition'
+tree_content "$PARENT_TREE" skills/copied.md '# Existing copy'
+tree_content "$MERGE_TREE" skills/copied.md '# Merged copy'
+tree_content "$PARENT_TREE" skills/removed.md '# Before removal'
+tree_content "$MERGE_TREE" skills/removed.md '# Kept by merge'
+tree_content "$PARENT_TREE" skills/old.md '# Before rename'
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'merge history differs from PR file statuses'
+bundle
+jq -e '.complete and (.evidence[0].files | length == 4) and
+  .evidence[0].files[0].instruction.before.content == "# Already added" and .evidence[0].files[0].instruction.after.content == "# Merged addition" and
+  .evidence[0].files[1].instruction.before.content == "# Existing copy" and .evidence[0].files[1].instruction.after.content == "# Merged copy" and
+  .evidence[0].files[2].instruction.before.content == "# Before removal" and .evidence[0].files[2].instruction.after.content == "# Kept by merge" and
+  .evidence[0].files[3].instruction.before.content == "# Before rename" and .evidence[0].files[3].instruction.after == null' "$OUT" >/dev/null || fail 'effective merge history did not determine instruction before and after'
+pass 'merge history determines instruction content across PR statuses'
 
 new_home
 config "$repo_sources"
@@ -540,7 +601,7 @@ pass 'single-parent history rejects ambiguous multi-commit rebases'
 new_home
 config "$repo_sources"
 mkdir -p "$HOME_DIR/data/owned"
-printf '%s\n' '{"schema":"fm-contributions.v1","task":"owned","records":[{"url":"https://github.com/acme/widgets/pull/12","kind":"pr","checked_at":"2026-10-13T11:30:00Z","error":null,"observation":{"head":"0123456789012345678901234567890123456789","state":"merged","draft":false,"mergeable":"mergeable"}}]}' > "$HOME_DIR/data/owned/contributions.json"
+printf '%s\n' '{"schema":"fm-contributions.v1","task":"owned","records":[{"url":"https://github.com/acme/widgets/pull/12","kind":"pr","pending":[],"seen":[],"checked_at":"2026-10-13T11:30:00Z","error":null,"observation":{"head":"0123456789012345678901234567890123456789","state":"merged","draft":false,"mergeable":"mergeable","can_merge":true,"review_decision":"APPROVED","checks":[],"reviews":[],"events":[]}}]}' > "$HOME_DIR/data/owned/contributions.json"
 pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 12 2026-10-13T11:00:00Z 0 > "$FEED/detail-12.json"
 collect "$HOME_DIR" "$NOW"
@@ -553,12 +614,12 @@ new_home
 config "$repo_sources"
 mkdir -p "$HOME_DIR/data/active" "$HOME_DIR/data/retired"
 jq -n '{schema:"fm-contributions.v1",task:"active",records:[
-  {url:"https://github.com/acme/widgets/pull/12",kind:"pr",checked_at:"2026-10-13T11:30:00Z",error:null,observation:{head:"0123456789012345678901234567890123456789",state:"merged",draft:false,mergeable:"mergeable"}},
-  {url:"https://github.com/acme/widgets/issues/13",kind:"issue",checked_at:"2026-10-13T11:31:00Z",error:null,observation:{state:"open",ready:true}}
+  {url:"https://github.com/acme/widgets/pull/12",kind:"pr",pending:[],seen:[],checked_at:"2026-10-13T11:30:00Z",error:null,observation:{head:"0123456789012345678901234567890123456789",state:"merged",draft:false,mergeable:"mergeable",can_merge:true,review_decision:"APPROVED",checks:[],reviews:[],events:[]}},
+  {url:"https://github.com/acme/widgets/issues/13",kind:"issue",pending:[],seen:[],checked_at:"2026-10-13T11:31:00Z",error:null,observation:{state:"open",ready:true,checks:[],reviews:[],events:[]}}
 ]}' > "$HOME_DIR/data/active/contributions.json"
 jq -n '{schema:"fm-contributions.v1",task:"retired",records:[
-  {url:"https://github.com/acme/widgets/pull/12",kind:"pr",retired:{actor:"captain",reason:"settled",at:"2026-10-13T10:00:00Z"},observation:{state:"merged"}},
-  {url:"https://github.com/acme/widgets/issues/13",kind:"issue",retired:{actor:"captain",reason:"settled",at:"2026-10-13T10:00:00Z"},observation:{state:"open",ready:false}}
+  {url:"https://github.com/acme/widgets/pull/12",kind:"pr",pending:[],seen:[],retired:{actor:"captain",reason:"settled",at:"2026-10-13T10:00:00Z"},observation:null},
+  {url:"https://github.com/acme/widgets/issues/13",kind:"issue",pending:[],seen:[],retired:{actor:"captain",reason:"settled",at:"2026-10-13T10:00:00Z"},observation:null}
 ]}' > "$HOME_DIR/data/retired/contributions.json"
 pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 12 2026-10-13T11:00:00Z 0 > "$FEED/detail-12.json"
@@ -568,6 +629,35 @@ expect_code 0 "$STATUS" 'active PR and issue contributions'
 bundle
 jq -e '(.evidence | length) == 2 and all(.evidence[]; (.linked_contributions | length) == 1 and .linked_contributions[0].task == "active") and (any(.evidence[]; .kind == "merged-pr" and .linked_contributions[0].observation.state == "merged")) and (any(.evidence[]; .kind == "new-issue" and .linked_contributions[0].observation.ready == true))' "$OUT" >/dev/null || fail 'active contribution links or issue readiness missing'
 pass 'PR and issue events reuse only active linked observations'
+
+new_home
+config "$repo_sources"
+mkdir -p "$HOME_DIR/data/owned"
+jq -n '{schema:"fm-contributions.v1",task:"owned",records:[
+  {url:"https://github.com/acme/widgets/issues/13",kind:"issue",pending:[],seen:[],checked_at:"2026-10-13T11:30:00Z",error:null,observation:{state:"open",ready:true,checks:[],reviews:[],events:[]}},
+  {url:"https://github.com/acme/widgets/pull/12",kind:"pr",pending:[],seen:[],checked_at:"2026-10-13T11:30:00Z",error:null,observation:{head:"0123456789012345678901234567890123456789",state:"merged",draft:false,mergeable:"mergeable",can_merge:true,review_decision:"APPROVED",checks:[],reviews:[],events:[]}}
+]}' > "$TMP_ROOT/linked-good.json"
+for bad in issue_ready issue_state url kind checked_at error pr_head pr_state pr_draft pr_mergeable; do
+  case "$bad" in
+    issue_ready) filter='.records[0].observation.ready = "yes"' ;;
+    issue_state) filter='.records[0].observation.state = "pending"' ;;
+    url) filter='.records[0].url = "not-a-link"' ;;
+    kind) filter='.records[0].kind = "pr"' ;;
+    checked_at) filter='.records[0].checked_at = "yesterday"' ;;
+    error) filter='.records[0].error = true' ;;
+    pr_head) filter='.records[1].observation.head = "bad"' ;;
+    pr_state) filter='.records[1].observation.state = "pending"' ;;
+    pr_draft) filter='.records[1].observation.draft = "false"' ;;
+    pr_mergeable) filter='.records[1].observation.mergeable = "yes"' ;;
+  esac
+  jq "$filter" "$TMP_ROOT/linked-good.json" > "$HOME_DIR/data/owned/contributions.json"
+  collect "$HOME_DIR" "$NOW"
+  expect_code 2 "$STATUS" "invalid linked $bad"
+  bundle
+  jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("durable contribution")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail "invalid linked $bad reached evidence"
+  jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "invalid linked $bad advanced checkpoint"
+done
+pass 'malformed durable linked observations fail repository coverage'
 
 new_home
 config "$repo_sources"
@@ -706,6 +796,64 @@ bundle
 jq -e '.complete == false and .coverage[0].complete == false and (.coverage[0].reason | test("symlink|root")) and (.evidence | length == 0)' "$OUT" >/dev/null || fail 'unsafe symlink was not failed coverage'
 pass 'unsafe inventory symlink fails coverage'
 
+mkdir -p "$TMP_ROOT/race-hook"
+cat > "$TMP_ROOT/race-hook/sitecustomize.py" <<'PY'
+import os
+from pathlib import Path
+
+original_resolve = Path.resolve
+original_scandir = os.scandir
+target = os.environ.get('FM_RACE_TARGET')
+seen = 0
+
+def resolve(self, *args, **kwargs):
+    global seen
+    result = original_resolve(self, *args, **kwargs)
+    if target and os.fspath(self) == target:
+        seen += 1
+        if seen == int(os.environ['FM_RACE_AFTER']):
+            if os.environ['FM_RACE_MODE'] == 'directory':
+                os.rename(target, target + '.original')
+            else:
+                os.unlink(target)
+            os.symlink(os.environ['FM_RACE_OUTSIDE'], target)
+    return result
+
+def scandir(path):
+    if target and not isinstance(path, int) and os.fspath(path) == target and os.path.islink(target):
+        Path(os.environ['FM_RACE_MARKER']).write_text('outside directory scanned')
+    return original_scandir(path)
+
+Path.resolve = resolve
+os.scandir = scandir
+PY
+new_home
+mkdir -p "$HOME_DIR/plugins" "$HOME_DIR/clients"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
+printf '# Public guidance\n' > "$HOME_DIR/plugins/GUIDE.md"
+printf '# Private client guidance\n' > "$HOME_DIR/clients/private.md"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"GUIDE.md",kind:"instruction"}]}]')"
+FM_RACE_TARGET="$HOME_DIR/plugins/GUIDE.md" FM_RACE_OUTSIDE="$HOME_DIR/clients/private.md" FM_RACE_AFTER=1 FM_RACE_MODE=file FM_RACE_MARKER="$TMP_ROOT/race-marker" PYTHONPATH="$TMP_ROOT/race-hook" collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'inventory file replaced after validation'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'replaced inventory file claimed complete coverage'
+assert_no_grep 'Private client guidance' "$OUT" 'replaced file leaked client content'
+jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'replaced inventory file advanced checkpoint'
+
+new_home
+mkdir -p "$HOME_DIR/skills" "$HOME_DIR/clients/private"
+printf '# Public guidance\n' > "$HOME_DIR/skills/SKILL.md"
+printf '# Private client guidance\n' > "$HOME_DIR/clients/private/SKILL.md"
+config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
+FM_RACE_TARGET="$HOME_DIR/skills" FM_RACE_OUTSIDE="$HOME_DIR/clients/private" FM_RACE_AFTER=4 FM_RACE_MODE=directory FM_RACE_MARKER="$TMP_ROOT/race-marker" PYTHONPATH="$TMP_ROOT/race-hook" collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'inventory directory replaced after validation'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'replaced inventory directory claimed complete coverage'
+assert_absent "$TMP_ROOT/race-marker" 'collector scanned a replaced client directory'
+jq -e '.sources.skills == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'replaced inventory directory advanced checkpoint'
+pass 'opened inventory files and directories resist replacement'
+
 for root_field in root symlink_roots; do
   new_home
   mkdir -p "$HOME_DIR/skills"
@@ -732,6 +880,21 @@ bundle
 jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("skill inventory limit"))' "$OUT" >/dev/null || fail 'non-Markdown directory entries bypassed inventory limit'
 jq -e '.sources.skills == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'oversized skill directory advanced checkpoint'
 pass 'every skill directory entry counts toward the inventory bound'
+
+new_home
+mkdir -p "$HOME_DIR/skills"
+deep_path="$HOME_DIR/skills"
+for number in $(seq 1 257); do
+  deep_path="$deep_path/d"
+  mkdir "$deep_path"
+done
+config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'deep skill directory'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("skill inventory depth limit")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'deep skill directory omitted incomplete coverage'
+jq -e '.sources.skills == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'deep skill directory advanced checkpoint'
+pass 'deep skill traversal fails coverage within its bound'
 
 new_home
 printf '%s\n' '- design - Design operations (host: local; root: /srv/design; home: /srv/design/home; scope: design and research; projects: app; added 2026-10-01)' \
@@ -783,19 +946,19 @@ bundle
 jq -e '.coverage[0].baseline and .evidence[0].kind == "inventory-baseline" and .evidence[0].before == null and .evidence[0].after.content == "# Different root\n"' "$OUT" >/dev/null || fail 'remote root reconfiguration reused old before state'
 printf '%s\n' '{"plugins":{}}' > "$REMOTE_HOME/skills-new/manifest.json"
 printf '%s\n' '{"enabledPlugins":{}}' > "$REMOTE_HOME/skills-new/enabled.json"
-printf 'first asset' > "$REMOTE_HOME/skills-new/first.txt"
-printf 'second asset' > "$REMOTE_HOME/skills-new/second.txt"
-jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"first.txt",kind:"asset"},{path:"optional.json",kind:"plugin-version"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+printf 'first asset' > "$REMOTE_HOME/skills-new/first.toml"
+printf 'second asset' > "$REMOTE_HOME/skills-new/second.toml"
+jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"first.toml",kind:"asset"},{path:"optional.json",kind:"plugin-version"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
 FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-17T12:00:00Z
 expect_code 0 "$STATUS" 'remote plugin file baseline'
 bundle
 jq -e '.coverage[0].baseline and .coverage[0].surfaces == ["asset","plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'remote observed surfaces included absent optional file'
-jq '.sources[0].files[2].path = "second.txt"' "$REMOTE_HOME/config/domain-freshness.json" > "$REMOTE_HOME/config/domain-freshness-next.json"
+jq '.sources[0].files[2].path = "second.toml"' "$REMOTE_HOME/config/domain-freshness.json" > "$REMOTE_HOME/config/domain-freshness-next.json"
 mv "$REMOTE_HOME/config/domain-freshness-next.json" "$REMOTE_HOME/config/domain-freshness.json"
 FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-18T12:00:00Z
 expect_code 0 "$STATUS" 'reconfigured remote file list'
 bundle
-jq -e '.coverage[0].baseline and all(.evidence[]; .kind == "inventory-baseline" and .before == null) and any(.evidence[]; .path | endswith("second.txt"))' "$OUT" >/dev/null || fail 'remote file-list reconfiguration reused old before state'
+jq -e '.coverage[0].baseline and all(.evidence[]; .kind == "inventory-baseline" and .before == null) and any(.evidence[]; .path | endswith("second.toml"))' "$OUT" >/dev/null || fail 'remote file-list reconfiguration reused old before state'
 pass 'fake parent transport returns bounded remote inventory and preserves failed cursor'
 jq -n '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"skills",root:"/.."}]}' > "$REMOTE_HOME/config/domain-freshness.json"
 FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-19T12:00:00Z

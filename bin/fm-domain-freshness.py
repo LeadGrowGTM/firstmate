@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -141,13 +142,54 @@ def linked_observations(home):
         for row in record['records']:
             if not isinstance(row, dict):
                 raise CoverageError('invalid durable contribution row')
-            if row.get('retired') is not None:
-                continue
+            url, kind = row.get('url'), row.get('kind')
+            github = re.fullmatch(r'https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/(pull|issues)/[1-9]\d*', url or '') if isinstance(url, str) else None
+            gitlab = re.fullmatch(r'https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+/-/merge_requests/[1-9]\d*', url or '') if isinstance(url, str) else None
+            if kind not in ('pr', 'issue') or not (github or gitlab) or (github and (github[1] == 'pull') != (kind == 'pr')) or (gitlab and kind != 'pr'):
+                raise CoverageError('invalid durable contribution link')
+            if (not isinstance(row.get('pending'), list) or not isinstance(row.get('seen'), list) or
+                any(not isinstance(item, dict) or not isinstance(item.get('token'), str) or not item['token'] for item in row['pending']) or
+                any(not isinstance(item, str) for item in row['seen']) or
+                (row.get('notified') is not None and (not isinstance(row['notified'], list) or any(not isinstance(item, str) for item in row['notified'])))):
+                raise CoverageError('invalid durable contribution row')
+            if row.get('checked_at') is not None:
+                try:
+                    instant(row['checked_at'])
+                except ValueError as error:
+                    raise CoverageError('invalid durable contribution check time') from error
+            if row.get('error') is not None and not isinstance(row['error'], str):
+                raise CoverageError('invalid durable contribution error')
+            retired = row.get('retired')
+            if retired is not None:
+                if not isinstance(retired, dict) or retired.get('actor') != 'captain' or not isinstance(retired.get('reason'), str) or not retired['reason']:
+                    raise CoverageError('invalid durable contribution retirement')
+                try:
+                    instant(retired.get('at'))
+                except ValueError as error:
+                    raise CoverageError('invalid durable contribution retirement') from error
+            verdict = row.get('verdict')
+            if verdict is not None and (not isinstance(verdict, dict) or not forge_sha(verdict.get('head')) or
+                                        not isinstance(verdict.get('source'), str) or verdict.get('actor') not in ('captain', 'fleet', 'maintainer', 'nobody') or
+                                        not isinstance(verdict.get('summary'), str)):
+                raise CoverageError('invalid durable contribution verdict')
             observed = row.get('observation')
-            if observed is not None and not isinstance(observed, dict):
+            if observed is not None and (not isinstance(observed, dict) or observed.get('state') not in ('open', 'closed', 'merged') or
+                                         any(not isinstance(observed.get(field), list) for field in ('checks', 'reviews', 'events')) or
+                                         any(not isinstance(check, dict) or not isinstance(check.get('name'), str) or not check['name'] or
+                                             not isinstance(check.get('status'), str) or (check.get('conclusion') is not None and not isinstance(check['conclusion'], str))
+                                             for check in observed.get('checks', []))):
                 raise CoverageError('invalid durable contribution observation')
-            fields = ('head', 'state', 'draft', 'mergeable') if row.get('kind') == 'pr' else ('state', 'ready')
-            result.setdefault(str(row.get('url')).casefold(), []).append({'task': record['task'], 'checked_at': row.get('checked_at'),
+            if observed is not None and kind == 'pr' and (not forge_sha(observed.get('head')) or type(observed.get('draft')) is not bool or
+                                                         observed.get('mergeable') not in ('mergeable', 'conflicting', 'unknown') or
+                                                         type(observed.get('can_merge')) is not bool or
+                                                         observed.get('review_decision') not in ('', 'APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED')):
+                raise CoverageError('invalid durable PR observation')
+            if observed is not None and kind == 'issue' and type(observed.get('ready')) is not bool:
+                raise CoverageError('invalid durable issue observation')
+            if retired is not None:
+                continue
+            fields = ('head', 'state', 'draft', 'mergeable') if kind == 'pr' else ('state', 'ready')
+            result.setdefault(url.casefold(), []).append({'task': record['task'], 'checked_at': row.get('checked_at'),
                 'error': row.get('error'), 'observation': None if observed is None else
                 {key: observed.get(key) for key in fields}})
     return result
@@ -337,8 +379,6 @@ def forge(source, previous, now, contributions):
                                 raise CoverageError('missing renamed PR instruction path')
                             before = merged_instruction(base_repo, trees[0], old_path)
                             after = merged_instruction(base_repo, trees[1], file['filename'])
-                            if (before is None) != (file['status'] in ('added', 'copied')) or (after is None) != (file['status'] == 'removed'):
-                                raise CoverageError('inconsistent merged PR instruction status')
                             file['instruction'] = {'before': before, 'after': after}
                     event.update(base={'repository': base_repo, 'ref': base['ref'], 'sha': base['sha']},
                                  head={'repository': head_repo, 'ref': head.get('ref'), 'sha': head['sha']},
@@ -353,6 +393,8 @@ def forge(source, previous, now, contributions):
 
 FORBIDDEN = {'.ssh', '.git', 'credentials', 'credentials.json', '.credentials.json', 'auth.json',
              'secrets', 'clients', 'browser', 'profiles', 'logs', 'state'}
+ASSET_SUFFIXES = {'.md', '.sh', '.py', '.ts', '.tsx', '.js', '.jsx', '.toml', '.yaml', '.yml'}
+SENSITIVE_NAME = re.compile(r'(^|[._-])(tokens?|secrets?|credentials?|cookies?|keys?|dotenv|logs?)([._-]|$)')
 
 
 def inventory_path(path, roots):
@@ -363,6 +405,29 @@ def inventory_path(path, roots):
     if not any(resolved == root or root in resolved.parents for root in roots):
         raise CoverageError('inventory symlink escapes declared safe roots')
     return resolved
+
+
+def inventory_fd(path, roots, flags):
+    resolved = inventory_path(path, roots)
+    parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in resolved.parts[1:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        return os.open(resolved.name, flags | os.O_NOFOLLOW, dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
+def inventory_file_allowed(path, kind):
+    if any(part.lower().startswith('.env') or SENSITIVE_NAME.search(part.lower()) for part in path.parts):
+        return False
+    if kind == 'instruction':
+        return path.suffix.lower() == '.md'
+    if kind == 'asset':
+        return path.suffix.lower() in ASSET_SUFFIXES or path.name.lower() == 'manifest.json'
+    return True
 
 
 def projection(value, kind):
@@ -404,15 +469,21 @@ def inventory_snapshot(source):
         visited = set()
         entries = 0
 
-        def walk(directory):
+        def walk(directory, depth):
             nonlocal entries
+            if depth >= 256:
+                raise CoverageError('skill inventory depth limit reached')
             actual = inventory_path(directory, roots)
             if actual in visited:
                 raise CoverageError('duplicate or cyclic skill symlink')
             visited.add(actual)
             remaining = 2000 - entries
-            with os.scandir(directory) as listing:
-                items = [Path(item.path) for item in itertools.islice(listing, remaining + 1)]
+            fd = inventory_fd(directory, roots, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with os.scandir(fd) as listing:
+                    items = [directory / item.name for item in itertools.islice(listing, remaining + 1)]
+            finally:
+                os.close(fd)
             if len(items) > remaining:
                 raise CoverageError('skill inventory limit reached')
             entries += len(items)
@@ -421,22 +492,31 @@ def inventory_snapshot(source):
                     continue
                 resolved = inventory_path(item, roots)
                 if resolved.is_dir():
-                    walk(item)
+                    walk(item, depth + 1)
                 elif resolved.is_file():
-                    paths.append((item, 'instruction' if item.suffix.lower() == '.md' else 'asset'))
-        walk(root)
+                    kind = 'instruction' if item.suffix.lower() == '.md' else 'asset'
+                    if inventory_file_allowed(item, kind):
+                        paths.append((item, kind))
+        walk(root, 0)
     else:
         paths = [(root / item['path'], item['kind']) for item in source['files']]
     records = {}
     for path, kind in paths:
+        if not inventory_file_allowed(path, kind):
+            raise CoverageError('excluded inventory file')
         if source['kind'] == 'plugin-files' and kind in ('instruction', 'plugin-version', 'asset') and not path.exists() and not path.is_symlink():
-            if not inventory_path(path.parent, roots).is_dir():
-                raise CoverageError('optional inventory parent unavailable')
+            try:
+                os.close(inventory_fd(path.parent, roots, os.O_RDONLY | os.O_DIRECTORY))
+            except OSError as error:
+                raise CoverageError('optional inventory parent unavailable') from error
             continue
-        resolved = inventory_path(path, roots)
-        if not resolved.is_file() or resolved.stat().st_size > 1048576:
-            raise CoverageError('inventory file unavailable or exceeds 1 MiB')
-        content = resolved.read_bytes()
+        fd = inventory_fd(path, roots, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise CoverageError('inventory file unavailable')
+            content = handle.read(1048577)
+        if len(content) > 1048576:
+            raise CoverageError('inventory file exceeds 1 MiB')
         if kind == 'instruction':
             text = content.decode('utf-8')
             metadata = {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content),

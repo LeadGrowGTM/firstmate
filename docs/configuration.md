@@ -1471,6 +1471,7 @@ Forge feed pages are read twice with a fixed internal 20-page bound; a changed f
 
 The `plugin-files` file kinds are `plugin-manifest` (installed `plugins` records with version/scope metadata), `plugin-enablement` (the effective `enabledPlugins` boolean map), `plugin-version` (name/version), `instruction` (content digest and bounded text), and `asset` (digest and byte count only).
 Only those manifest fields are retained; unrelated settings fields are excluded from fingerprints and evidence.
+Skill and plugin assets are limited to Markdown, shell, Python, TypeScript, JavaScript, TOML, YAML, and exact `manifest.json` files; credential-like and log names are excluded even when declared.
 Inventory coverage names the observed surfaces and explicitly leaves session visibility unmeasured; a cache version alone does not establish effective installation or enablement.
 Instruction excerpts disclose truncation while their digest covers the full file.
 First inventory observations are explicit baselines rather than historical change claims.
