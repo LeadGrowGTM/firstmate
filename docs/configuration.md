@@ -1713,6 +1713,45 @@ Arm the check once per home with `bin/fm-tool-update-check.sh arm`.
 - So a budget larger than that timeout allows is cut down to what fits instead of being refused, and the cut is reported in the report line.
 - A budget that is not a whole number from 1 to 120 is still refused outright.
 
+## Direct-PR freshness (config/pr-autoupdate.json)
+
+The optional home-local `config/pr-autoupdate.json` enables [`bin/fm-pr-autoupdate.sh`](../bin/fm-pr-autoupdate.sh).
+An absent file or `enabled: false` keeps the updater off, and no startup path arms it automatically.
+This file is not inherited to child homes.
+Each home owns only its explicitly linked task PRs; the script header and help own cadence, receipts, continuation, locks, and failure handling.
+
+```json
+{
+  "enabled": false,
+  "write_scope": []
+}
+```
+
+The object accepts exactly `enabled` (boolean) and `write_scope` (array).
+Each grant has exactly `pr` (a canonical GitHub PR URL), `head_repo` (`owner/repository`), and `head_ref` (the exact task branch).
+A grant permits base-into-head updates of that PR only while its observed head repository and branch still match.
+Fork heads require their own exact grant; repository-wide and implicit default-branch grants are unsupported.
+For example, an approved grant can be `{"pr":"https://github.com/example/repo/pull/123","head_repo":"example/repo","head_ref":"fm/example-task"}`.
+Unknown keys and malformed grants refuse rather than broadening scope.
+
+Activation is a separate approval for the exact home and branch-write scope.
+Updates write remote commits and may trigger CI, notifications, compute spend, deployment, or publication workflows.
+Exclude any branch whose workflow has an unapproved outward effect until that effect has explicit approval.
+After approval, set `enabled: true` with the exact grants and invoke `bin/fm-pr-autoupdate.sh arm` with explicit `FM_HOME`.
+The authenticated shim runs through the existing watcher; no cron, host timer, pinned model, or worker subscription is needed.
+`disarm` removes that shim and trust binding while preserving pending receipts.
+`status` prints the coverage journal without contacting the forge.
+
+Direct-PR ships need their canonical task metadata, recorded ready head, clean task copy, idle/done worker, and positive absence of pipeline custody.
+The updater uses `gh-axi`, `jq`, Git, and the installed no-mistakes read surface to establish those preconditions.
+Pipeline-owned tasks are deferred pending a pipeline-native freshness feature; an unknown owner, unavailable read, partial check response, or unsupported forge remains visibly incomplete.
+Successful integration records the current head and its checks; it requires validation on that head and grants no review or merge authority.
+The existing contribution observer owns verdict freshness and the merge command reads current checks.
+
+Fixture regression: `bash bin/fm-test-run.sh tests/fm-pr-autoupdate.test.sh`.
+This regression exercises local doubles and does not prove live GitHub asynchronous update behavior.
+Live write verification requires a separately authorized disposable PR before enabling real fleet writes.
+
 ## Boat spend check (config/boat-spend.json)
 
 `config/boat-spend.json` is an optional local, gitignored file that turns on the daily Boat spend check.
