@@ -70,7 +70,7 @@
 # key, title and that copy. Missing option values become option-1, option-2, etc.;
 # a recommended label is converted to its unique value. Optional origin and repo
 # preserve ownership links. It previews by default; --apply holds tasks only in
-# this home, never removes the input, and skips closed tasks on repeat runs.
+# this home, never removes the input, and skips already-held or resolved tasks.
 # orphans reports <origin> TAB <key> for each open needs-decision without a local
 # captain-held task: the key's exact/legacy task or the originating work task.
 # It is read-only and fails rather than calling an unreadable backlog empty.
@@ -1983,8 +1983,7 @@ list_has_line() {  # <newline-separated-list> <value>
 }
 
 command_migrate_options() (
-  local input=${1:-} apply=0 migration_dir entries entry id title origin repo reason copy i=0 state existing
-  local source_stamp body hold_set hold_reason
+  local input=${1:-} apply=0 migration_dir entries entry id title origin repo reason copy i=0 state existing hold_kind
   local -a args
   [ "$#" -ge 1 ] && [ "$#" -le 2 ] || { usage >&2; exit 2; }
   if [ "$#" -eq 2 ]; then
@@ -2003,10 +2002,6 @@ command_migrate_options() (
         and ((has("repo") | not) or (.repo | type == "string" and length > 0 and (test("[\\r\\n]") | not)))))
     | select((map(.key) | unique | length) == length)
   ' "$input") || fail "invalid legacy decision inventory: $input"
-  source_stamp=$(perl -MPOSIX=strftime -e '
-    my @source = stat($ARGV[0]) or die "cannot stat source\n";
-    print strftime("%Y-%m-%dT%H:%M:%SZ", gmtime($source[9]));
-  ' "$input") || fail "could not read legacy inventory timestamp: $input"
   migration_dir=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/fm-captain-migrate.XXXXXX") || fail "could not create migration scratch"
   trap 'rm -rf -- "$migration_dir"' EXIT
   while IFS= read -r entry; do
@@ -2037,22 +2032,18 @@ command_migrate_options() (
       existing=1
       title=$(show_field_value "$TASK_SHOW_OUTPUT" title)
       state=$(show_field "$TASK_SHOW_OUTPUT" state)
-      if [ "$state" = "done" ] || {
-        [ "$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)" != captain ] \
-          && body_has_resolution_record "$(show_field "$TASK_SHOW_OUTPUT" body)"
-      }; then
+      if [ "$state" = "done" ]; then
         printf 'already-closed: %s\n' "$id"
         continue
       fi
-      if [ "$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)" = captain ]; then
-        body=$(show_field "$TASK_SHOW_OUTPUT" body)
-        hold_set=$(body_hold_set_timestamp "$(show_field_value "$TASK_SHOW_OUTPUT" body)")
-        hold_reason=$(show_field_value "$TASK_SHOW_OUTPUT" hold_reason)
-        if body_has_resolution_record "$body" || [[ "$hold_reason" == fm-hold-v2:* ]] \
-          || { [ -n "$hold_set" ] && [[ "$hold_set" > "$source_stamp" ]]; }; then
-          printf 'skipped: %s (existing captain hold)\n' "$id"
-          continue
-        fi
+      hold_kind=$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)
+      if [ -n "$hold_kind" ] || [ "$(show_field_value "$TASK_SHOW_OUTPUT" held)" = yes ]; then
+        printf 'skipped: %s (already held)\n' "$id"
+        continue
+      fi
+      if body_has_resolution_record "$(show_field "$TASK_SHOW_OUTPUT" body)"; then
+        printf 'already-closed: %s\n' "$id"
+        continue
       fi
     elif ! printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$'; then
       fail "could not read migration target $id"

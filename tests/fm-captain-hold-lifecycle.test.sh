@@ -2667,10 +2667,10 @@ EOF
   before=$(tasks_in "$home" show route --full)
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
     || fail "active newer hold migration preview failed"
-  assert_contains "$out" 'skipped: route (existing captain hold)' "preview offered to replace the newer hold"
+  assert_contains "$out" 'skipped: route (already held)' "preview offered to replace the newer hold"
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
     || fail "active newer hold migration apply failed"
-  assert_contains "$out" 'skipped: route (existing captain hold)' "apply replaced the newer hold"
+  assert_contains "$out" 'skipped: route (already held)' "apply replaced the newer hold"
   after=$(tasks_in "$home" show route --full)
   [ "$before" = "$after" ] || fail "migration changed the newer option-free hold or recorded answer"
   json=$(run_bearings "$home" --fields decisions) || fail "could not project the newer hold"
@@ -2685,10 +2685,10 @@ EOF
   before=$(tasks_in "$home" show route --full)
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
     || fail "owned-options migration preview failed"
-  assert_contains "$out" 'skipped: route (existing captain hold)' "preview offered to replace owned options"
+  assert_contains "$out" 'skipped: route (already held)' "preview offered to replace owned options"
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
     || fail "owned-options migration apply failed"
-  assert_contains "$out" 'skipped: route (existing captain hold)' "apply replaced owned options"
+  assert_contains "$out" 'skipped: route (already held)' "apply replaced owned options"
   after=$(tasks_in "$home" show route --full)
   [ "$before" = "$after" ] || fail "migration changed the owned options, answer, or hold timestamp"
   json=$(run_bearings "$home" --fields decisions) || fail "could not project owned options"
@@ -2699,32 +2699,40 @@ EOF
   pass "bare-array migration preserves released answers and newer owned or option-free holds"
 }
 
-test_migration_compares_existing_hold_to_source_age() {
-  local home before after out
-  home=$(make_home migration-source-age)
-  cat > "$home/captain-decisions.json" <<'EOF'
-{"decisions":[{"key":"newer","title":"Newer task","about":"Old copy","decide":"Old question","options":[{"label":"Old"}]},{"key":"older","title":"Older task","about":"Imported copy","decide":"Imported question","options":[{"label":"Imported"}]}]}
+test_migration_skips_already_held_tasks() {
+  local home plain_before copy_before out preview_skips apply_skips
+  home=$(make_home migration-already-held)
+  cat > "$home/current-options.json" <<'EOF'
+{"about":"Current route","decide":"Choose east","options":[{"value":"east","label":"East"}]}
 EOF
-  touch -t 202401010000 "$home/captain-decisions.json"
-  FM_CAPTAIN_HOLD_NOW=2025-01-01T00:00:00Z run_captain "$home" hold newer \
-    --title 'Newer task' --reason 'Current question' >/dev/null || fail "could not create newer hold"
-  FM_CAPTAIN_HOLD_NOW=2023-01-01T00:00:00Z run_captain "$home" hold older \
-    --title 'Older task' --reason 'Old question' >/dev/null || fail "could not create older hold"
-  before=$(tasks_in "$home" show newer --full)
+  run_captain "$home" hold plain --title 'Plain task' --reason 'Current plain call' >/dev/null \
+    || fail "could not create the option-free hold"
+  run_captain "$home" hold copied --title 'Copied task' --reason 'Current copied call' \
+    --options-file "$home/current-options.json" >/dev/null || fail "could not create the copied hold"
+  tasks_in "$home" add unheld 'Unheld task' --repo sample >/dev/null \
+    || fail "could not create the unheld task"
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"plain","title":"Plain task","about":"Old plain","decide":"Old plain call","options":[{"label":"Old"}]},{"key":"copied","title":"Copied task","about":"Old copied","decide":"Old copied call","options":[{"label":"Old"}]},{"key":"unheld","title":"Legacy title","about":"Imported","decide":"Choose","options":[{"label":"Imported"}]}]}
+EOF
+  plain_before=$(tasks_in "$home" show plain --full)
+  copy_before=$(tasks_in "$home" show copied --full)
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
-    || fail "source-age migration preview failed"
-  assert_contains "$out" 'skipped: newer (existing captain hold)' "preview offered to replace a newer hold"
-  assert_contains "$out" 'would-hold: older Older task' "preview skipped an older hold needing import"
+    || fail "already-held migration preview failed"
+  preview_skips=$(printf '%s\n' "$out" | grep '^skipped:')
+  assert_contains "$preview_skips" 'skipped: plain (already held)' "preview offered to replace the option-free hold"
+  assert_contains "$preview_skips" 'skipped: copied (already held)' "preview offered to replace the copied hold"
+  assert_contains "$out" 'would-hold: unheld Unheld task' "preview skipped an unheld task"
   out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
-    || fail "source-age migration apply failed"
-  assert_contains "$out" 'skipped: newer (existing captain hold)' "apply replaced a newer hold"
-  assert_contains "$out" 'held: older' "apply failed to import copy onto an older hold"
-  after=$(tasks_in "$home" show newer --full)
-  [ "$before" = "$after" ] || fail "migration changed the newer hold"
-  after=$(tasks_in "$home" show older --full)
-  assert_contains "$after" 'fm-hold-v2:' "migration did not import options onto the older hold"
+    || fail "already-held migration apply failed"
+  apply_skips=$(printf '%s\n' "$out" | grep '^skipped:')
+  [ "$preview_skips" = "$apply_skips" ] || fail "preview and apply disagreed on already-held tasks"
+  assert_contains "$out" 'held: unheld' "apply failed to import onto the unheld task"
+  [ "$plain_before" = "$(tasks_in "$home" show plain --full)" ] \
+    || fail "migration changed the option-free hold"
+  [ "$copy_before" = "$(tasks_in "$home" show copied --full)" ] \
+    || fail "migration changed the copied hold"
   assert_present "$home/captain-decisions.json" "migration removed its source inventory"
-  pass "migration preserves holds newer than its source and imports older holds"
+  pass "migration skips already-held tasks with and without option copy"
 }
 
 test_migration_rejects_unreadable_target() {
@@ -5106,7 +5114,7 @@ test_hold_options_share_atomic_reason
 test_refused_hold_keeps_prior_reason_and_options
 test_legacy_option_migration_is_explicit_and_idempotent
 test_released_legacy_migration_stays_resolved
-test_migration_compares_existing_hold_to_source_age
+test_migration_skips_already_held_tasks
 test_migration_rejects_unreadable_target
 test_migration_recommendation_prefers_unique_legacy_label
 test_open_status_orphans_reach_drain
