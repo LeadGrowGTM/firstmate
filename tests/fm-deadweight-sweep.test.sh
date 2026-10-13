@@ -174,6 +174,21 @@ test_ignored_work_kept() {
   pass 'sweep preserves ignored operator files'
 }
 
+test_flagged_tracked_edits_kept() {
+  local home out flag
+  for flag in assume-unchanged skip-worktree; do
+    home=$(make_home "flag-$flag"); add_worker "$home"
+    echo hidden-edit >> "$home/worker/file"
+    git -C "$home/worker" update-index "--$flag" file
+    assert_equals '' "$(git -C "$home/worker" status --porcelain --untracked-files=all --ignored)" "$flag hides the edit from status"
+    out=$(sweep "$home")
+    assert_contains "$out" 'flagged assume-unchanged or skip-worktree' "$flag refusal reported"
+    assert_present "$home/state/task.meta" "$flag record kept"
+    assert_grep hidden-edit "$home/worker/file" "$flag edit kept"
+  done
+  pass 'sweep refuses copies with assume-unchanged or skip-worktree paths'
+}
+
 test_generated_wiring_exact_and_edited() {
   local harness home out path state_real
   for harness in claude opencode; do
@@ -331,6 +346,27 @@ test_stale_registration_and_live_copy() {
   assert_contains "$inventory" "$home/live" 'live registration kept'
   assert_present "$home/live/file" 'live copy kept'
   pass 'sweep prunes proven missing registrations and keeps live registrations'
+}
+
+test_present_prunable_registration_skips_prune() {
+  local home out inventory
+  home=$(make_home present-prunable)
+  git -C "$home/projects/project" worktree add -q --detach "$home/stale" main
+  git -C "$home/projects/project" worktree add -q --detach "$home/present" main
+  # These are disposable test repositories, not the shared worker pool.
+  rm -rf -- "$home/stale"
+  rm -f -- "$home/present/.git"
+  inventory=$(git -C "$home/projects/project" worktree list --porcelain)
+  assert_contains "$inventory" "worktree $home/present"$'\n''HEAD' 'present copy is still registered'
+  assert_equals 2 "$(printf '%s\n' "$inventory" | grep -c '^prunable')" 'git marks the present copy prunable too'
+  out=$(sweep "$home")
+  assert_contains "$out" "prune skipped for $home/projects/project: prunable registration still present: $home/present" 'skipped prune reported'
+  assert_contains "$out" '0 stale registrations' 'nothing counted as pruned'
+  inventory=$(git -C "$home/projects/project" worktree list --porcelain)
+  assert_contains "$inventory" "$home/present" 'present registration kept'
+  assert_contains "$inventory" "$home/stale" 'missing registration kept while prune is unsafe'
+  assert_present "$home/present/file" 'present copy kept'
+  pass 'sweep skips repository-wide prune while any prunable copy is present'
 }
 
 test_pool_prune_count_and_failure() {
@@ -504,12 +540,14 @@ test_detached_sweep_survives_watcher_timeout() {
 test_clean_stopped_and_idempotence
 test_changes_kept
 test_ignored_work_kept
+test_flagged_tracked_edits_kept
 test_generated_wiring_exact_and_edited
 test_missing_copy_remote_branch_kept_until_merged
 test_decisions_secondmates_and_unknown_kept
 test_recorded_pr_kept_until_merged
 test_scout_gates_and_work_kept
 test_stale_registration_and_live_copy
+test_present_prunable_registration_skips_prune
 test_pool_prune_count_and_failure
 test_guard_cannot_force
 test_pipeline_and_captain_hold_kept

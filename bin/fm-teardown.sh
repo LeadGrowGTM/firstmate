@@ -188,6 +188,8 @@
 #   live agents, and inconclusive endpoint reads exit 3 without cleanup.
 #   Active or gated pipelines are also retained. Scout copies additionally
 #   pass the ordinary dirty/landed checks instead of the scratch exemption.
+#   A copy with any tracked path flagged assume-unchanged or skip-worktree is
+#   refused, since status cannot show edits hidden behind those flags.
 #   It cannot be combined with --force. All ordinary safety gates still apply.
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
@@ -1969,7 +1971,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -1982,6 +1984,16 @@ validate_worktree_teardown_safety() {
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
     if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored 2>/dev/null); then
       echo "REFUSED: cannot inspect worktree $WT for uncommitted changes." >&2
+      return 1
+    fi
+    # Status hides edits to tracked paths flagged assume-unchanged (lowercase
+    # tag) or skip-worktree (S), so refuse rather than trust it.
+    if ! flagged=$(git -C "$WT" ls-files -v 2>/dev/null); then
+      echo "REFUSED: cannot inspect worktree $WT for flagged tracked paths." >&2
+      return 1
+    fi
+    if printf '%s\n' "$flagged" | grep -qE '^([a-z]|S) '; then
+      echo "REFUSED: worktree $WT has tracked paths flagged assume-unchanged or skip-worktree; needs a human look." >&2
       return 1
     fi
   elif ! dirty_raw=$(git -C "$WT" status --porcelain "--untracked-files=$untracked" 2>/dev/null); then

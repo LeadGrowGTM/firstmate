@@ -25,7 +25,8 @@
 # Missing legacy incarnation records are reported as ordinary refusals.
 #
 # For clone roots under this home's projects directory, prune stale git
-# registrations only after a NUL-delimited inventory proves a missing path.
+# registrations only after a NUL-delimited inventory proves every registration
+# git marks prunable is absent; otherwise skip the prune and report the path.
 # Hold the shared project lock during inventory/pruning and delegate pool
 # deletion to fm-treehouse-guard.sh's safe prune. Never scan other homes or
 # remove a copy directly. Counts reflect registered paths actually removed;
@@ -221,12 +222,24 @@ for project in "${projects[@]+"${projects[@]}"}"; do
   rc=0
   (
     inventory "$project" "$TMP/prune-before" || exit 1
-    missing=0
+    # git prunes every registration it marks prunable, including a present
+    # copy whose .git pointer is missing, so prune only when all are absent.
+    candidates=0 present='' path=''
     while IFS= read -r -d '' field; do
-      case "$field" in worktree\ *) path=${field#worktree } ;; *) continue ;; esac
-      if [ ! -e "$path" ] && [ ! -L "$path" ]; then missing=1; fi
+      case "$field" in
+        '') path= ;;
+        worktree\ *) path=${field#worktree } ;;
+        prunable|prunable\ *)
+          candidates=$((candidates + 1))
+          if [ "${path#/}" = "$path" ] || [ -e "$path" ] || [ -L "$path" ]; then
+            present=${present:-${path:-unknown path}}
+          fi
+          ;;
+      esac
     done < "$TMP/prune-before"
-    if [ "$missing" = 1 ]; then
+    if [ -n "$present" ]; then
+      printf '%s\n' "$present" > "$TMP/prune-skipped"
+    elif [ "$candidates" -gt 0 ]; then
       git -C "$project" worktree prune --expire now || exit 1
     fi
     inventory "$project" "$TMP/prune-after" || exit 1
@@ -247,6 +260,10 @@ for project in "${projects[@]+"${projects[@]}"}"; do
   project_lock=
   [ ! -f "$TMP/stale" ] || stale=$((stale + $(cat "$TMP/stale")))
   rm -f -- "$TMP/stale"
+  if [ -f "$TMP/prune-skipped" ]; then
+    note "prune skipped for $project: prunable registration still present: $(cat "$TMP/prune-skipped")"
+    rm -f -- "$TMP/prune-skipped"
+  fi
   [ "$rc" = 0 ] || note "prune failed for $project: $(reason "$TMP/prune-output")"
 done
 for path in "${copies_before[@]+"${copies_before[@]}"}"; do
