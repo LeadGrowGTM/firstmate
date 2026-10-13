@@ -175,7 +175,17 @@ result=$(bash "$home/bin/fm-targets.sh" --json)
 printf '%s' "$result" | jq -e '.targets[] | select(.id=="open_prs") | .limit==10 and .gap==0' >/dev/null || fail 'partial target overrides'
 rm "$home/config/targets.json"
 rm "$home/config/idle-sweep.json"
-sweep
+printf 'fm-lab-home v1\n' > "$home/.fm-lab-home"
+printf '/tmp/fml.test00\n' > "$home/state/.fm-lab-tmux-dir"
+if sweep 2> "$TMP_ROOT/error"; then fail 'lab sweep without its private tmux socket was accepted'; fi
+grep -Fq 'lab private tmux socket is not selected' "$TMP_ROOT/error" || fail 'lab socket refusal reason'
+no_starts 'lab sweep cannot dispatch through the default tmux server'
+if TMUX_TMPDIR=/tmp/fml.test00 TMUX=/tmp/tmux-other/default,0,0 sweep 2> "$TMP_ROOT/error"; then
+  fail 'lab sweep from a foreign tmux pane was accepted'
+fi
+no_starts 'lab sweep cannot dispatch from another tmux server'
+TMUX_TMPDIR=/tmp/fml.test00 TMUX="/tmp/fml.test00/tmux-$(id -u)/default,0,0" sweep
+rm "$home/.fm-lab-home" "$home/state/.fm-lab-tmux-dir"
 [ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 3 ] || fail 'default sweep did not start prepared backlog work'
 [ "$(head -1 "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = red ] || fail 'tagged red task did not outrank ordinary backlog'
 [ "$(sed -n '2p' "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = ordinary ] || fail 'untagged work did not follow backlog order'

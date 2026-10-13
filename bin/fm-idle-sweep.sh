@@ -19,6 +19,27 @@ case "${1:-}" in
   *) echo 'usage: fm-idle-sweep.sh' >&2; exit 2 ;;
 esac
 fm_targets_init
+# A marked lab must address its private tmux server even when the sweep is
+# invoked from a host shell instead of a lab pane.
+if [ -e "$FM_HOME/.fm-lab-home" ] || [ -L "$FM_HOME/.fm-lab-home" ]; then
+  lab_socket_record="$FM_HOME/state/.fm-lab-tmux-dir"
+  [ -f "$lab_socket_record" ] && [ ! -L "$lab_socket_record" ] || {
+    echo 'fm-idle-sweep: lab tmux socket record is missing' >&2; exit 2;
+  }
+  lab_socket_dir=$(cat "$lab_socket_record") || exit 2
+  [[ "$lab_socket_dir" =~ ^/tmp/fml\.[A-Za-z0-9]{6}$ ]] || {
+    echo 'fm-idle-sweep: lab tmux socket record is invalid' >&2; exit 2;
+  }
+  [ "${TMUX_TMPDIR:-}" = "$lab_socket_dir" ] || {
+    echo 'fm-idle-sweep: lab private tmux socket is not selected' >&2; exit 2;
+  }
+  if [ -n "${TMUX:-}" ]; then
+    case "${TMUX%%,*}" in
+      "$lab_socket_dir"/tmux-"$(id -u)"/*) ;;
+      *) echo 'fm-idle-sweep: current tmux pane is outside the lab' >&2; exit 2 ;;
+    esac
+  fi
+fi
 idle_config() {
   if [ ! -e "$CONFIG/idle-sweep.json" ] && [ ! -L "$CONFIG/idle-sweep.json" ]; then
     printf '%s\n' '{"enabled":true,"steps":[]}'
