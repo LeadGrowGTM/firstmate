@@ -19,20 +19,22 @@ case "${1:-}" in
   *) echo 'usage: fm-idle-sweep.sh' >&2; exit 2 ;;
 esac
 fm_targets_init
-config='{"enabled":true,"steps":[]}'
-if [ -e "$CONFIG/idle-sweep.json" ]; then
+idle_config() {
+  if [ ! -e "$CONFIG/idle-sweep.json" ] && [ ! -L "$CONFIG/idle-sweep.json" ]; then
+    printf '%s\n' '{"enabled":true,"steps":[]}'
+    return
+  fi
   jq -se 'length == 1 and (.[0] | type == "object" and (keys - ["enabled","steps"] | length == 0) and
-  (if has("enabled") then (.enabled | type) == "boolean" else true end) and
-  (if has("steps") then (.steps | type) == "array" else true end) and
-  ([(.steps // [])[].id] | length) == ([(.steps // [])[].id] | unique | length) and
-  all((.steps // [])[]; type == "object" and (keys - ["id","target","mode","reversible"] | length == 0) and
-    (.id | type) == "string" and (.id | test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
-    .reversible == true and
-    (.target as $t | ["red_default_branches","open_prs","stale_backlog","backlog"] | index($t)) != null and
-    (.mode as $m | ["no-mistakes","direct-PR","local-only","scout"] | index($m)) != null))
-  ' "$CONFIG/idle-sweep.json" >/dev/null || { echo 'fm-idle-sweep: invalid configuration' >&2; exit 2; }
-  config=$(jq -c '{enabled:(if has("enabled") then .enabled else true end),steps:(.steps // [])}' "$CONFIG/idle-sweep.json")
-fi
+    (if has("enabled") then (.enabled | type) == "boolean" else true end) and
+    (if has("steps") then (.steps | type) == "array" else true end) and
+    ([(.steps // [])[].id] | length) == ([(.steps // [])[].id] | unique | length) and
+    all((.steps // [])[]; type == "object" and (keys - ["id","target"] | length == 0) and
+      (.id | type) == "string" and (.id | test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
+      (.target as $t | ["red_default_branches","open_prs","stale_backlog","backlog"] | index($t)) != null))
+  ' "$CONFIG/idle-sweep.json" >/dev/null &&
+    jq -c '{enabled:(if has("enabled") then .enabled else true end),steps:(.steps // [])}' "$CONFIG/idle-sweep.json"
+}
+config=$(idle_config) || { echo 'fm-idle-sweep: invalid configuration' >&2; exit 2; }
 [ "$(printf '%s' "$config" | jq -r .enabled)" = true ] || exit 0
 # Independently linted runtime owners, loaded only when running.
 # shellcheck source=/dev/null
@@ -80,29 +82,31 @@ quota_clear() {
   ' >/dev/null
 }
 quota_clear || exit 0
-targets=$(fm_targets_collect "$snapshot")
+target_deadline=$(($(date +%s) + 120))
+remaining=$((target_deadline - $(date +%s)))
+[ "$remaining" -gt 0 ] || exit 1
+targets=$(fm_run_timed "$remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || exit 1
 # Red-branch evidence must be complete before a lower-priority task may start.
 printf '%s' "$targets" | jq -e '.targets[] | select(.id == "red_default_branches") | .gap != null' >/dev/null || exit 0
 candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" --argjson config "$config" '
+  def row_target:
+    [.body_lines[] | select(startswith("Idle target: ")) | ltrimstr("Idle target: ")] as $tags |
+    if ($tags | length) == 0 then "backlog"
+    elif ($tags | length) == 1 and (["red_default_branches","open_prs","stale_backlog"] | index($tags[0])) != null
+    then $tags[0] else null end;
   [$snapshot.backlog.records[] |
     select(.structured and (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
       .state == "queued" and .hold_reason == null and
       .hold_kind == null and (.unresolved_blocker_ids | length) == 0 and
       (.kind == null or .kind == "task" or .kind == "ship" or .kind == "scout")) |
     . as $row |
-    ([$config.steps[] | select(.id == $row.id)][0] //
-      {id:$row.id,mode:null,target:
-        (if any($targets.repos[]; .project == $row.repo and .red_default_branches == 1) and
-            any($targets.targets[]; .id == "red_default_branches" and .gap != null and .gap > 0)
-         then "red_default_branches"
-         elif ($targets.stale_ids | index($row.id)) != null and
-            any($targets.targets[]; .id == "stale_backlog" and .gap != null and .gap > 0)
-         then "stale_backlog" else "backlog" end)}) as $step |
-    select($step.target == "backlog" or any($targets.targets[]; .id == $step.target and .gap != null and .gap > 0)) |
-    select($step.target != "red_default_branches" or any($targets.repos[]; .project == $row.repo and .red_default_branches == 1)) |
-    select($step.target != "stale_backlog" or ($targets.stale_ids | index($row.id)) != null) |
-    $step + {repo:$row.repo,order:$row.order,row:$row,rank:
-      (if $step.target == "red_default_branches" then 0 elif $step.target == "backlog" then 2 else 1 end)}]
+    ([$config.steps[] | select(.id == $row.id)][0].target // ($row | row_target)) as $target |
+    select($target != null) |
+    select($target == "backlog" or any($targets.targets[]; .id == $target and .gap != null and .gap > 0)) |
+    select($target != "red_default_branches" or any($targets.repos[]; .project == $row.repo and .red_default_branches == 1)) |
+    select($target != "stale_backlog" or ($targets.stale_ids | index($row.id)) != null) |
+    {id:$row.id,target:$target,repo:$row.repo,order:$row.order,row:$row,rank:
+      (if $target == "red_default_branches" then 0 elif $target == "backlog" then 2 else 1 end)}]
   | sort_by(.rank,.order)
 ')
 started=()
@@ -111,7 +115,7 @@ while IFS= read -r candidate; do
   [ "${#started[@]}" -lt 3 ] || break
   id=$(printf '%s' "$candidate" | jq -r .id)
   project=$(printf '%s' "$candidate" | jq -r '.repo // ""')
-  mode=$(printf '%s' "$candidate" | jq -r '.mode // ""')
+  target_kind=$(printf '%s' "$candidate" | jq -r .target)
   # Local clone names cannot be paths or shell programs; no cross-home work.
   case "$project" in ''|.*|*[!A-Za-z0-9._-]*) continue ;; esac
   [ -d "$PROJECTS/$project" ] && [ ! -L "$PROJECTS/$project" ] || continue
@@ -120,27 +124,36 @@ while IFS= read -r candidate; do
   [ ! -L "$DATA/$id" ] || continue
   [ -f "$brief" ] && [ ! -L "$brief" ] || continue
   quota_clear || break
-  if [ -e "$CONFIG/idle-sweep.json" ]; then
-    [ "$(jq -c '{enabled:(if has("enabled") then .enabled else true end),steps:(.steps // [])}' "$CONFIG/idle-sweep.json")" = "$config" ] || break
-  else
-    [ "$config" = '{"enabled":true,"steps":[]}' ] || break
+  if [ "$target_kind" != backlog ]; then
+    remaining=$((target_deadline - $(date +%s)))
+    [ "$remaining" -gt 0 ] || { failed=1; break; }
+    latest_targets=$(fm_run_timed "$remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || { failed=1; break; }
   fi
+  current_config=$(idle_config) || { failed=1; break; }
+  [ "$current_config" = "$config" ] || break
+  fm_targets_init || { failed=1; break; }
   current=$(fm_targets_backlog) || { failed=1; break; }
   printf '%s' "$current" | jq -e --argjson candidate "$candidate" \
     'any(.backlog.records[]; .structured and .id == $candidate.id and . == $candidate.row)' >/dev/null || continue
+  if [ "$target_kind" != backlog ]; then
+    printf '%s' "$latest_targets" | jq -e --argjson candidate "$candidate" --argjson limits "$TARGET_LIMITS" '
+      any(.targets[]; .id == $candidate.target and .limit == $limits[$candidate.target] and .gap != null and .gap > 0) and
+      ($candidate.target != "red_default_branches" or
+        any(.repos[]; .project == $candidate.repo and .red_default_branches == 1)) and
+      ($candidate.target != "stale_backlog" or (.stale_ids | index($candidate.id)) != null)
+    ' >/dev/null || continue
+  fi
   spec=$(fm_brief_task_heading_body "$brief" '## Firstmate spec')
   printf '%s\n' "$spec" | grep -Fxq 'Never merge, deploy, spend money, contact a client, answer a captain decision, or alter a captain-held item.' || continue
   printf '%s\n' "$spec" | grep -Fxq 'If the task needs one of those actions, report needs-decision to firstmate and stop.' || continue
-  if [ -z "$mode" ]; then
-    if [ "$(printf '%s' "$candidate" | jq -r '.row.kind // ""')" = scout ]; then
-      mode=scout
-    else
-      mode=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$brief" | head -n 1)
-    fi
-  fi
-  case "$mode" in no-mistakes|direct-PR|local-only|scout) ;; *) continue ;; esac
   brief_mode=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$brief" | head -n 1)
-  [ "$mode" = scout ] || [ "$mode" = "$brief_mode" ] || continue
+  if [ "$(printf '%s' "$candidate" | jq -r '.row.kind // ""')" = scout ]; then
+    [ -z "$brief_mode" ] || [ "$brief_mode" = scout ] || continue
+    mode=scout
+  else
+    mode=$brief_mode
+    case "$mode" in no-mistakes|direct-PR|local-only) ;; *) continue ;; esac
+  fi
   flags=(--mode "$mode" --yolo off)
   if [ "$mode" = scout ]; then
     flags=(--scout)

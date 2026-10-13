@@ -19,7 +19,7 @@ fm_targets_init() {
   CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
   PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
   TARGET_LIMITS='{"open_prs":4,"red_default_branches":0,"stale_backlog":0,"stale_days":14}'
-  if [ -e "$CONFIG/targets.json" ]; then
+  if [ -e "$CONFIG/targets.json" ] || [ -L "$CONFIG/targets.json" ]; then
     jq -se 'length == 1 and (.[0] | type == "object" and
       (keys - ["open_prs","red_default_branches","stale_backlog","stale_days"] | length == 0) and
       all(.[]; type == "number" and . >= 0 and . == floor) and

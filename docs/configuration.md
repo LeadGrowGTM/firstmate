@@ -198,16 +198,15 @@ Missing forge or observation evidence remains unknown.
 Portable behavior fixtures live in `tests/fm-idle-sweep.test.sh`.
 
 An absent `config/idle-sweep.json` uses the default targets and considers every prepared queued task with a reversible brief and delivery contract.
-The file can switch the sweep off or override a named step's target and mode:
+An indented `Idle target: red_default_branches`, `Idle target: open_prs`, or `Idle target: stale_backlog` line in a backlog row associates that task with one standing target; an untagged row remains ordinary backlog work.
+The file can switch the sweep off or override a named step's target:
 
 ```json
 {
   "enabled": true,
   "steps": [
-    {"id": "fix-ci", "target": "red_default_branches", "mode": "no-mistakes", "reversible": true},
-    {"id": "prepare-pr-review", "target": "open_prs", "mode": "scout", "reversible": true},
-    {"id": "refresh-old-task", "target": "stale_backlog", "mode": "scout", "reversible": true},
-    {"id": "next-feature", "target": "backlog", "mode": "no-mistakes", "reversible": true}
+    {"id": "fix-ci", "target": "red_default_branches"},
+    {"id": "prepare-pr-review", "target": "open_prs"}
   ]
 }
 ```
@@ -222,10 +221,12 @@ If the task needs one of those actions, report needs-decision to firstmate and s
 ```
 
 Set `enabled: false` to stop future automatic batches; existing workers continue normally.
-Each override requires a unique safe task ID, `reversible: true`, a target from the example, and a concrete mode of `no-mistakes`, `direct-PR`, `local-only`, or `scout` that agrees with its prepared brief.
+Each override requires a unique safe task ID and a target of `red_default_branches`, `open_prs`, `stale_backlog`, or `backlog`.
+The sweep derives scout delivery from a scout row and ship delivery from the brief's `Delivery contract: mode=` line.
 Unknown fields and malformed overrides are refused.
-The named backlog row supplies the local project clone and must be unheld, unblocked, queued ordinary work with no metadata record or open task decision.
+Each backlog row supplies the local project clone and must be unheld, unblocked, queued ordinary work with no metadata record or open task decision.
 Targeted work runs only while its gap is positive; red-branch work must name a red project and stale-backlog work must name a stale row.
+Before targeted dispatch, the sweep rechecks the target's current gap and project or row match.
 An open-PR step should prepare a review or fix, since meeting that target may still require a captain-approved merge.
 
 The sweep starts a batch only when no ordinary worker is live and all effective Codex account windows report known, fresh remaining quota strictly above 15 percent.
@@ -234,7 +235,7 @@ Unmeasured red-branch evidence holds the batch rather than allowing backlog work
 Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the prepared delivery mode, and yolo off; backend refusals stop the batch without a fallback.
 The sweep reads briefs without editing them and refuses work whose prepared brief lacks the reversible-work boundary above.
 Successful starts produce one named status line in `state/idle-sweep.status`; concurrent heartbeat invocations share a local lock, and existing task metadata prevents redispatch.
-The watcher bounds the entire heartbeat sweep to 120 seconds and surfaces a refusal if it stalls.
+Target collection has a shared 120 second budget across the batch; a started `bin/fm-spawn.sh` launch runs to completion under its own lifecycle guards.
 A configuration or dispatch failure returns a normal `check: idle-sweep` wake to supervision.
 Script headers and help own the executable mechanics.
 

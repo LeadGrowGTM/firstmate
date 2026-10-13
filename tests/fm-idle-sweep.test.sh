@@ -21,13 +21,15 @@ cat > "$TMP_ROOT/fakebin/gh-axi" <<'SH'
 string() { printf 'api_response:\n  body: %s\n  truncated: false\n' "$1"; }
   case "$2" in
   user) string fixture-user ;;
-  search/issues*) echo 7 ;;
+  search/issues*) if [ -n "${TEST_PR_COUNT_FILE:-}" ]; then cat "$TEST_PR_COUNT_FILE"; else echo 7; fi ;;
   repos/example/repo) string main ;;
   */commits/main) string abc123 ;;
   */status) string success ;;
   */check-runs*)
     [ "${TEST_FORGE_UNKNOWN:-0}" = 0 ] || exit 1
-    if [ "$TEST_RED" = 1 ]; then
+    red_value=$TEST_RED
+    [ -z "${TEST_RED_FILE:-}" ] || red_value=$(cat "$TEST_RED_FILE")
+    if [ "$red_value" = 1 ]; then
       echo 1
     else
       echo 0
@@ -74,18 +76,13 @@ If the task needs one of those actions, report needs-decision to firstmate and s
 BOUNDARY
 }
 for id in ordinary held captain red extra extra2 extra3 flight; do add_task "$id"; done
+perl -0pi -e 's/(^[-*] \[ \] red - [^\n]*)/$1\n  Idle target: red_default_branches/m' "$home/data/backlog.md"
 bash "$home/bin/fm-tasks-axi.sh" hold held --reason 'on hold' >/dev/null
 bash "$home/bin/fm-tasks-axi.sh" hold captain --kind captain --reason 'captain call' >/dev/null
 bash "$home/bin/fm-tasks-axi.sh" start flight >/dev/null
 cat > "$home/config/idle-sweep.json" <<'JSON'
 {"enabled":true,"steps":[
- {"id":"ordinary","target":"backlog","mode":"no-mistakes","reversible":true},
- {"id":"held","target":"backlog","mode":"no-mistakes","reversible":true},
- {"id":"captain","target":"backlog","mode":"no-mistakes","reversible":true},
- {"id":"extra","target":"backlog","mode":"no-mistakes","reversible":true},
- {"id":"extra2","target":"backlog","mode":"no-mistakes","reversible":true},
- {"id":"extra3","target":"backlog","mode":"no-mistakes","reversible":true},
- {"id":"red","target":"red_default_branches","mode":"no-mistakes","reversible":true}]}
+ {"id":"extra3","target":"open_prs"}]}
 JSON
 sweep() { bash "$home/bin/fm-idle-sweep.sh" > "$TMP_ROOT/out"; }
 no_starts() { [ ! -s "$TEST_SPAWN_LOG" ] || fail "$1"; pass "$1"; }
@@ -147,8 +144,9 @@ rm "$home/config/targets.json"
 rm "$home/config/idle-sweep.json"
 sweep
 [ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 3 ] || fail 'default sweep did not start prepared backlog work'
-[ "$(head -1 "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = ordinary ] || fail 'default sweep did not use backlog order'
-pass 'absent configuration starts prepared reversible backlog work'
+[ "$(head -1 "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = red ] || fail 'tagged red task did not outrank ordinary backlog'
+[ "$(sed -n '2p' "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = ordinary ] || fail 'untagged work did not follow backlog order'
+pass 'absent configuration prioritizes tagged targets before ordinary backlog'
 for id in ordinary held captain red extra extra2 extra3 flight; do rm -f "$home/state/$id.meta"; done
 : > "$TEST_SPAWN_LOG"
 : > "$home/state/idle-sweep.status"
@@ -174,9 +172,9 @@ bash "$home/bin/fm-tasks-axi.sh" update ordinary --title 'Changed work' >/dev/nu
 result=$(bash "$home/bin/fm-targets.sh" --json)
 printf '%s' "$result" | jq -e '.targets[] | select(.id=="stale_backlog") | .current==null and .gap==null' >/dev/null || fail 'changed row stale age'
 pass 'changed row invalidates previously observed stale age'
-jq '.steps[0].reversible=false' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
-if sweep 2> "$TMP_ROOT/error"; then fail 'unsafe enrollment must be refused'; fi
-pass 'non-reversible enrollment is refused'
+jq '.steps[0].mode="scout"' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
+if sweep 2> "$TMP_ROOT/error"; then fail 'mode override must be refused'; fi
+pass 'mode override is refused'
 cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 for id in ordinary held captain extra extra2 extra3 flight; do
   printf 'kind=crewmate\nwindow=fm-%s\n' "$id" > "$home/state/$id.meta"
@@ -195,6 +193,7 @@ sweep
 cmp -s "$home/data/backlog.md" "$TMP_ROOT/backlog-before-race" && fail 'row race fixture did not change the backlog'
 pass 'a project changed during quota read cannot dispatch from old target evidence'
 cp "$TMP_ROOT/backlog-before-race" "$home/data/backlog.md"
+cp "$home/data/red/brief.md" "$TMP_ROOT/red-brief"
 cat > "$TMP_ROOT/change-brief" <<'SH'
 #!/usr/bin/env bash
 printf "# Task\n## Captain's intent\nFix the fixture.\n## Firstmate spec\nBoundary withdrawn.\n" > "$FM_HOME/data/red/brief.md"
@@ -204,7 +203,65 @@ rm -f "$TEST_QUOTA_CALLS"
 sweep
 [ ! -s "$TEST_SPAWN_LOG" ] || fail 'brief with withdrawn boundary dispatched'
 pass 'a brief boundary withdrawn during quota read prevents dispatch'
+cp "$TMP_ROOT/red-brief" "$home/data/red/brief.md"
+export TEST_RED_FILE="$TMP_ROOT/red-value" TEST_PR_COUNT_FILE="$TMP_ROOT/pr-count"
+printf '1\n' > "$TEST_RED_FILE"
+printf '7\n' > "$TEST_PR_COUNT_FILE"
+cat > "$TMP_ROOT/clear-red" <<'SH'
+#!/usr/bin/env bash
+printf '0\n' > "$TEST_RED_FILE"
+SH
+TEST_QUOTA_HOOK="$TMP_ROOT/clear-red"
+rm -f "$TEST_QUOTA_CALLS"
+sweep
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'green default branch dispatched tagged red work'
+pass 'a red target that clears during quota read prevents dispatch'
+printf '1\n' > "$TEST_RED_FILE"
+printf 'kind=crewmate\nwindow=fm-red\n' > "$home/state/red.meta"
+rm -f "$home/state/extra3.meta"
+cat > "$TMP_ROOT/clear-pr-gap" <<'SH'
+#!/usr/bin/env bash
+printf '4\n' > "$TEST_PR_COUNT_FILE"
+SH
+TEST_QUOTA_HOOK="$TMP_ROOT/clear-pr-gap"
+rm -f "$TEST_QUOTA_CALLS"
+sweep
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'closed open-PR gap dispatched targeted work'
+pass 'an open-PR gap that closes during quota read prevents dispatch'
+printf '7\n' > "$TEST_PR_COUNT_FILE"
+cat > "$TMP_ROOT/change-target-limit" <<'SH'
+#!/usr/bin/env bash
+printf '{"open_prs":10}\n' > "$FM_HOME/config/targets.json"
+SH
+TEST_QUOTA_HOOK="$TMP_ROOT/change-target-limit"
+rm -f "$TEST_QUOTA_CALLS"
+sweep
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'changed target limit dispatched obsolete targeted work'
+pass 'a changed target limit is rechecked before dispatch'
+rm -f "$home/config/targets.json"
+cat > "$TMP_ROOT/dangle-idle-config" <<'SH'
+#!/usr/bin/env bash
+rm "$FM_HOME/config/idle-sweep.json"
+ln -s missing-idle-config "$FM_HOME/config/idle-sweep.json"
+SH
+TEST_QUOTA_HOOK="$TMP_ROOT/dangle-idle-config"
+rm -f "$TEST_QUOTA_CALLS"
+if sweep 2> "$TMP_ROOT/error"; then fail 'configuration withdrawn during quota read was accepted'; fi
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'withdrawn configuration dispatched work'
+rm "$home/config/idle-sweep.json"
+cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 unset TEST_QUOTA_HOOK TEST_QUOTA_CALLS
+rm "$home/config/idle-sweep.json"
+ln -s missing-idle-config "$home/config/idle-sweep.json"
+if sweep 2> "$TMP_ROOT/error"; then fail 'dangling idle configuration enabled the sweep'; fi
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'dangling idle configuration dispatched work'
+rm "$home/config/idle-sweep.json"
+cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
+ln -s missing-target-config "$home/config/targets.json"
+if sweep 2> "$TMP_ROOT/error"; then fail 'dangling target configuration used default limits'; fi
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'dangling target configuration dispatched work'
+rm "$home/config/targets.json"
+pass 'dangling idle and target configuration paths refuse dispatch'
 # Exercise the actual watcher heartbeat hook and its normal wake path without
 # launching a worker or touching a real terminal backend.
 # shellcheck source=tests/wake-helpers.sh

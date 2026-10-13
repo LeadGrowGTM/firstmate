@@ -187,8 +187,6 @@ WATCH_HOME_EXISTED=0
 . "$SCRIPT_DIR/fm-push-transition-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
-# shellcheck source=bin/fm-timeout-lib.sh
-. "$SCRIPT_DIR/fm-timeout-lib.sh"
 # Only for the arm-time check on FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS below;
 # the per-cycle reconcile itself runs as a separate process.
 # shellcheck source=bin/fm-procevent-lib.sh
@@ -3283,7 +3281,7 @@ EOF
   if [ "$(age_of "$STATE/.last-heartbeat")" -ge "$hb" ]; then
     # The sweep shares this heartbeat across primary harnesses and
     # runtime backends; its own evidence gates fail closed without a new daemon.
-    if ! fm_run_timed 120 bash "$SCRIPT_DIR/fm-idle-sweep.sh"; then
+    if ! bash "$SCRIPT_DIR/fm-idle-sweep.sh"; then
       triage_log "idle sweep refused; inspect its configuration or evidence"
       fm_wake_append check idle-sweep "check: idle-sweep refused; inspect configuration or dispatch evidence" || exit 1
       touch "$STATE/.last-heartbeat"
