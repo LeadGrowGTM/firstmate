@@ -1,0 +1,2 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0
+spawned live-scout harness=claude kind=scout window=primary:fm-live-scout worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0/pool/.treehouse/project-28203e/1/project

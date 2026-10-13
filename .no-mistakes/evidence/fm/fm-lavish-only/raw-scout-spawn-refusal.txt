@@ -1,0 +1,11 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: project entry for /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0/project in /home/mitch/.claude.json already declined external CLAUDE.md imports; refusing to override that consent. To recover, remove hasClaudeMdExternalIncludesApproved and hasClaudeMdExternalIncludesWarningShown from that project entry and approve the imports dialog interactively once
+error: refusing to pre-register Claude trust: could not record trust for '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0/pool/.treehouse/project-28203e/1/project' and project '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0/project' in '/home/mitch/.claude.json'
+error: could not pre-register Claude workspace trust for /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0/pool/.treehouse/project-28203e/1/project; refusing to launch a claude worker that would wedge on the trust dialog; inspect window primary:fm-raw-scout

@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE
+
+
+❯ For validation, inspect only your actual available tool list. Reply with exact tool names containing Artifact or
+  starting mcp__claude_ai_Claude_Docs. If there are none, reply NONE. Do not call tools, run commands, or change files.
+
+● Artifact-related tools (Artifact itself, plus deferred ArtifactComments and ArtifactData):
+
+  - Artifact
+  - ArtifactComments (deferred, loads via ToolSearch)
+  - ArtifactData (deferred, loads via ToolSearch)
+
+  Claude Docs tools (mcp__claude_ai_Claude_Docs__*):
+
+  - mcp__claude_ai_Claude_Docs__batch
+  - mcp__claude_ai_Claude_Docs__guide
+  - mcp__claude_ai_Claude_Docs__update
+  - mcp__claude_ai_Claude_Docs__create (deferred)
+  - mcp__claude_ai_Claude_Docs__delete (deferred)
+  - mcp__claude_ai_Claude_Docs__export (deferred)
+  - mcp__claude_ai_Claude_Docs__query (deferred)
+  - mcp__claude_ai_Claude_Docs__read (deferred)
+
+  No tools were called and no files were changed.
+
+✻ Sautéed for 4s · done 11:19 AM
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

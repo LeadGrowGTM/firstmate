@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE
+
+
+❯ For validation, inspect only your actual available tool list. Reply with exact tool names containing Artifact or
+  starting mcp__claude_ai_Claude_Docs. If there are none, reply NONE. Do not call tools, run commands, or change files.
+
+● NONE
+
+✻ Cogitated for 7s · done 11:18 AM
+
+❯ Attempt a read-only ToolSearch for select:ArtifactComments,mcp__claude_ai_Claude_Docs__create and report whether
+  either tool can be loaded. Do not call any publishing tool or change files.
+
+● Neither tool can be loaded. The ToolSearch lookup for select:ArtifactComments,mcp__claude_ai_Claude_Docs__create
+  returned "No matching deferred tools found," so neither ArtifactComments nor mcp__claude_ai_Claude_Docs__create is
+  available in this session. I did not call any publishing tool or change any files.
+
+✻ Sautéed for 3s · done 11:19 AM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

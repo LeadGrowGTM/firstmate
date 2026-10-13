@@ -1,0 +1,40 @@
+       1 # Scout report: available publishing tools
+       3 Task `live-scout`, 2026-10-13. Read-only inventory. No publishing tool was called and no project file wa
+         s changed.
+       4
+       6
+       7 1. Read the launch brief and checked the steering inbox (empty, only `handled/`).
+         n project.") and `treehouse.toml`. `git remote -v` prints nothing.
+       9 3. Ran `command -v` for common publishing CLIs. Presence on PATH only; none was executed, so authenticat
+         ion state is unverified.
+         nvoke the tool).
+     … +59 lines
+
+  Ran 2 shell commands
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ For validation, inspect only your actual Claude tool roster. List exact available names containing Artifact or
+  starting mcp__claude_ai_Claude_Docs. If none, reply NONE. Do not inspect command-line programs, call tools, or modify
+  files.
+
+● NONE
+
+  No tool in my roster, loaded or deferred, has a name containing Artifact or starting with mcp__claude_ai_Claude_Docs.
+
+  Two near-misses, neither of which is a matching tool:
+  - Claude Docs server: its instructions are present in my context, but it exposes no tools in my roster.
+  - Skills: artifact-design, artifact-diagramming and artifact-capabilities are skill names, not tools.
+
+  This means the report I wrote at
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TV4J45EF7VNEK9NRX3E7DE/.l.fbbgv0/data/live-scout/report.md
+  overstates one item: it lists the Claude Docs MCP as a session tool that creates and edits cloud docs. I have not
+  corrected it, since you said not to modify files.
+
+  The interrupt also landed before I appended the done line to the status file, so that is still outstanding.
+
+✻ Crunched for 8s · done 11:22 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
