@@ -293,10 +293,26 @@ test_owner_grouped_numbered_decisions() {
     and (.stats[] | select(.label == "need you") | .n) == 2
     and .calls[0].submitDisabled == false and .calls[2].submitDisabled == true
     and (.calls[0].text | contains("Keeps compatibility") and contains("recommendRoute A") and contains("Queue answer"))
-    and (.calls[1].text | contains("No recommendation recorded"))
+    and (.calls[1].text | contains("Missing recommendation") and contains("ask firstmate to supply it"))
     and (.calls[2].text | contains("mate/remote") and contains("owner home"))
     and (.stale | contains("Old choice") and contains("Linked PR closed") and contains("does not resolve tasks"))
   ' >/dev/null || fail "decision layout did not render its complete owner inventory: $out"
   pass "decisions are numbered, grouped, ranked, visible and separate from stale candidates"
 }
 test_owner_grouped_numbered_decisions
+
+test_incomplete_decision_guidance_is_visible() {
+  local home out
+  home=$(make_home incomplete-decision)
+  out=$(render_board "$home" '[]' '[]' 0 0 '[
+    {"key":"missing","owner":"(main)","type":"decision","repo":"sample","title":"Undetailed choice","options":[],"allow_freeform":true}
+  ]')
+  printf '%s' "$out" | jq -e '
+    .error == "" and [.calls[].title] == ["D1 · Undetailed choice"]
+    and (.calls[0].text | contains("Missing options and consequences - ask firstmate to supply them")
+      and contains("Missing recommendation - ask firstmate to supply it"))
+    and .calls[0].submitDisabled == false
+  ' >/dev/null || fail "incomplete decision guidance was hidden or presented as complete: $out"
+  pass "incomplete decision guidance remains visible and plainly marked"
+}
+test_incomplete_decision_guidance_is_visible

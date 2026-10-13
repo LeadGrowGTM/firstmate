@@ -492,7 +492,9 @@ __FM_BEARINGS_BOARD_DATA__
       if (item.decide) ctx.appendChild(ctxRow("decide", item.decide));
       if (item.detail) ctx.appendChild(ctxRow("context", item.detail));
       var recommended = item.options.find(function (o) { return o.value === item.recommend_value; });
-      ctx.appendChild(ctxRow("recommend", recommended ? recommended.label : "No recommendation recorded"));
+      if (item.options.every(function (o) { return o.value === "reconcile"; }))
+        ctx.appendChild(ctxRow("options", "Missing options and consequences - ask firstmate to supply them"));
+      ctx.appendChild(ctxRow("recommend", recommended ? recommended.label : "Missing recommendation - ask firstmate to supply it"));
       pad.appendChild(ctx);
     }
 

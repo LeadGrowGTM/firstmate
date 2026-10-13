@@ -3446,7 +3446,11 @@ EOF
   {
     printf '## In flight\n\n## Queued\n'
     for i in {1..25}; do
-      printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i" "$i"
+      if [ "$i" -eq 1 ]; then
+        printf -- '- [ ] remote-%s - SAME  subject (repo: firstmate) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i"
+      else
+        printf -- '- [ ] remote-%s - Remote choice %s (repo: sample) (kind: captain) (hold: Options A and B with their consequences) (hold-kind: captain)\n' "$i" "$i"
+      fi
       printf '  Captain hold set: 2026-07-11T10:00:00Z\n'
     done
     printf '\n## Done\n'
@@ -3456,14 +3460,17 @@ EOF
   printf '%s' "$json" | jq -e '
     (.decision_layout | length) == 30
     and (.decision_layout_unavailable | length) == 0
-    and .decision_layout[0].number == "D1" and .decision_layout[0].key == "major"
+    and .decision_layout[0].key == "major"
     and (.decision_layout[0].reason | endswith("before rollout"))
+    and (.decision_layout | all(.[]; has("number") | not))
     and (.decision_layout | any(.key == "older" and .origin == "finished"
-      and .stale_reason == "Origin completed with a newer hold on the same subject"))
-    and (.decision_layout | any(.key == "newer" and .stale_reason == null))
+      and .stale_reason == "Duplicate open captain hold for the same repo and title"))
+    and (.decision_layout | any(.key == "newer"
+      and .stale_reason == "Duplicate open captain hold for the same repo and title"))
+    and (.decision_layout | any(.owner == "mate" and .key == "remote-1"
+      and .stale_reason == "Duplicate open captain hold for the same repo and title"))
     and (.decision_layout | any(.key == "merged-call" and .stale_reason == "Linked PR already merged"))
     and ([.decision_layout[] | select(.owner == "mate")] | length) == 25
-    and ([.decision_layout[].number] | unique | length) == 30
     and ([.decision_layout[] | select(.reason | contains("invent another"))] | length) == 0
   ' >/dev/null || fail "detailed decision inventory lost structured calls or inferred prose: $json"
   toon=$(run "$home" "$fakebin" --fields decisions)

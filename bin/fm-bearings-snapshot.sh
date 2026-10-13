@@ -170,7 +170,7 @@ Opt-in surfaces: --fields bodies|paths|actions|endpoints|decisions, --all-in-fli
   --all-decisions (all open decisions and captain holds in the bounded snapshot),
   --all-secondmates, --all-landed, --all-reports, --all-queued, --all-recorded-prs,
   --all-unhealthy, --all-pr-repos, --include-prs (adds candidate_prs).
---fields decisions adds the numbered owner-grouped decision_layout and unavailable
+--fields decisions adds the owner-grouped decision_layout and unavailable
   owner coverage. It includes deferred calls, preserves full hold reasons, and flags
   stale candidates without resolving them or reading reports. Priority ranks
   critical/P0, high/P1, normal/unknown, low/P3 within each owner.
@@ -397,6 +397,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
     | if $n <= 0 then ""
       elif length > $n then (if $n == 1 then "…" else (.[:($n - 1)] + "…") end)
       else . end;
+  def normalized_decision_title: ascii_downcase | gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
   def live_captain_call: .hold_bucket == "live";
   def projected_deferred_hold:
     .hold_bucket != null and .hold_bucket != "live";
@@ -682,7 +683,13 @@ MODEL=$(printf '%s' "$SNAP" | jq \
         | sort_by([.owner, (if .priority == "critical" or .priority == "P0" then 0
                            elif .priority == "high" or .priority == "P1" then 1
                            elif .priority == "low" or .priority == "P3" then 3 else 2 end), .id])
-        | to_entries | map(.value + {number:("D" + ((.key + 1) | tostring))})),
+        | . as $calls
+        | map(. as $call
+          | if (.repo != null and .repo != "") and any($calls[];
+              .id != $call.id and .repo == $call.repo
+              and (.title | normalized_decision_title) == ($call.title | normalized_decision_title))
+            then .stale_reason = (.stale_reason // "Duplicate open captain hold for the same repo and title")
+            else . end)),
        decision_layout_unavailable:([if $snap.backlog.present != true then
          {owner:"(main)", reason:"Structured backlog unavailable"} else empty end]
          + [$snap.secondmate_current.records[]?
