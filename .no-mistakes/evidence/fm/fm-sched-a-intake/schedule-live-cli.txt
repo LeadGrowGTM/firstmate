@@ -1,0 +1,24 @@
+Before opt-in: no journal
+Published journal: {"detected_at": 1791889200, "enqueued_at": 1791889200, "key": "freshness:daily:2026-10-13", "state": "enqueued", "task_id": "sched-e2edd57008f480c04f3b9f67"}
+Ordinary backlog task:
+task:
+  id: sched-e2edd57008f480c04f3b9f67
+  title: Recurring freshness (2026-10-13)
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: scout
+  repo: firstmate
+  priority: "-"
+  created: 2026-10-13
+  closed: "-"
+  deps: none
+  links: none
+  body: "schedule-occurrence: freshness:daily:2026-10-13\nbrief: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP58KBEJC6W54HVS56PED/.schedule-live.5c_1lqtz/data/sched-e2edd57008f480c04f3b9f67/schedule-brief.md\nfrozen-brief-sha256: 64062d3d812464cb3ae4b24d6898b8bd83373eb91abd72164b91dcf184a69cdc\ndelivery intent: scout"
+Wake event:
+1791920667	1	check	queued-task:sched-e2edd57008f480c04f3b9f67	check: queued task sched-e2edd57008f480c04f3b9f67 in backlog; brief=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAP58KBEJC6W54HVS56PED/.schedule-live.5c_1lqtz/data/sched-e2edd57008f480c04f3b9f67/schedule-brief.md
+Wake count after replay: 1
