@@ -2631,6 +2631,45 @@ EOF
   pass "migration previews by default, retains the side file, and never resurrects answered calls"
 }
 
+test_released_legacy_migration_stays_resolved() {
+  local home before after out json
+  home=$(make_home released-option-migration)
+  cat > "$home/captain-decisions.json" <<'EOF'
+[{"key":"route","title":"Choose route","about":"Routing","decide":"Choose","options":[{"label":"North"}]}]
+EOF
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") || fail "bare-array migration preview failed"
+  assert_contains "$out" 'would-hold: route Choose route' "bare-array migration did not preview the new task"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null \
+    || fail "bare-array migration apply failed"
+  printf 'North please\n' > "$home/answer.txt"
+  run_captain "$home" answer route --decision-file "$home/answer.txt" --release >/dev/null \
+    || fail "could not release the imported call"
+  before=$(tasks_in "$home" show route --full)
+  assert_contains "$before" 'state: queued' "release closed the work item"
+  assert_contains "$before" 'held: no' "release left the imported call held"
+  assert_contains "$before" 'Resolution mode: released' "release lost its resolution record"
+  assert_contains "$before" 'North please' "release lost the captain answer"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "released migration preview failed"
+  assert_contains "$out" 'already-closed: route' "preview offered to reopen a released call"
+  assert_not_contains "$out" 'would-hold: route' "preview treated the released call as open"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json" --apply) \
+    || fail "released migration retry failed"
+  assert_contains "$out" 'already-closed: route' "apply reopened a released call"
+  after=$(tasks_in "$home" show route --full)
+  [ "$before" = "$after" ] || fail "migration retry changed the released task or answer"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the released call"
+  printf '%s' "$json" | jq -e '.decision_layout | any(.key == "route") | not' >/dev/null \
+    || fail "released migration retry restored a decision card: $json"
+  assert_present "$home/captain-decisions.json" "migration removed its bare-array source"
+  run_captain "$home" hold route --reason 'Choose a fresh route' >/dev/null \
+    || fail "could not begin a newer hold lifecycle"
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "active newer hold migration preview failed"
+  assert_contains "$out" 'would-hold: route Choose route' "historical release hid an active newer hold"
+  pass "bare-array migration leaves released calls resolved and recognizes newer active holds"
+}
+
 test_migration_rejects_unreadable_target() {
   local home before out mode
   home=$(make_home migration-read-error)
@@ -5009,6 +5048,7 @@ SH
 test_hold_options_share_atomic_reason
 test_refused_hold_keeps_prior_reason_and_options
 test_legacy_option_migration_is_explicit_and_idempotent
+test_released_legacy_migration_stays_resolved
 test_migration_rejects_unreadable_target
 test_migration_recommendation_prefers_unique_legacy_label
 test_open_status_orphans_reach_drain
