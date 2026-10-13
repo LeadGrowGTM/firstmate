@@ -2670,6 +2670,54 @@ SH
   pass "migration rejects backend read errors in preview and apply"
 }
 
+test_migration_recommendation_prefers_unique_legacy_label() {
+  local home before after out json encoded
+  home=$(make_home migration-label-collision)
+  cat > "$home/captain-decisions.json" <<'EOF'
+{"decisions":[{"key":"collision","title":"Choose option","about":"Routing","decide":"Choose one","options":[{"label":"Other"},{"label":"option-1"}],"recommended":"option-1"}]}
+EOF
+  before=$(cat "$home/data/backlog.md")
+  out=$(run_captain "$home" migrate-options "$home/captain-decisions.json") \
+    || fail "migration collision preview failed"
+  assert_contains "$out" 'would-hold: collision Choose option' "migration collision preview omitted the task"
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "migration collision preview changed the backlog"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null \
+    || fail "migration collision apply failed"
+  before=$(tasks_in "$home" show collision --full)
+  encoded=$(printf '%s\n' "$before" | sed -n 's/^  hold_reason: //p' | jq -Rr '
+    (if startswith("\"") then fromjson else . end)
+    | select(startswith("fm-hold-v2:")) | ltrimstr("fm-hold-v2:")
+  ')
+  [ -n "$encoded" ] || fail "migration did not store the options on the hold"
+  printf '%s' "$encoded" | perl -MMIME::Base64=decode_base64 -0777 -ne 'print decode_base64($_)' | jq -e '
+    .decision.recommended == "option-2"
+    and [.decision.options[] | {value,label}] ==
+      [{value:"option-1",label:"Other"},{value:"option-2",label:"option-1"}]
+  ' >/dev/null || fail "migration stored the wrong recommended option"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project migrated collision"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "collision" and .recommended == "option-2"
+      and [.options[] | {value,label}] ==
+        [{value:"option-1",label:"Other"},{value:"option-2",label:"option-1"}])
+  ' >/dev/null || fail "migration recommended the generated value instead of the legacy label: $json"
+  run_captain "$home" migrate-options "$home/captain-decisions.json" --apply >/dev/null \
+    || fail "migration collision retry failed"
+  after=$(tasks_in "$home" show collision --full)
+  [ "$before" = "$after" ] || fail "migration collision retry changed the held task"
+  assert_present "$home/captain-decisions.json" "migration removed the source inventory"
+
+  cat > "$home/ambiguous.json" <<'EOF'
+{"decisions":[{"key":"should-not-hold","title":"Valid first","about":"Routing","decide":"Choose one","options":[{"label":"First"}]},{"key":"ambiguous","title":"Ambiguous","about":"Routing","decide":"Choose one","options":[{"label":"Same"},{"label":"Same"}],"recommended":"Same"}]}
+EOF
+  before=$(cat "$home/data/backlog.md")
+  if run_captain "$home" migrate-options "$home/ambiguous.json" --apply >/dev/null 2>&1; then
+    fail "migration accepted an ambiguous legacy recommendation"
+  fi
+  [ "$before" = "$(cat "$home/data/backlog.md")" ] || fail "ambiguous migration partially held tasks"
+  assert_present "$home/ambiguous.json" "migration removed the ambiguous source inventory"
+  pass "migration resolves legacy labels before generated values and rejects ambiguous labels"
+}
+
 test_open_status_orphans_reach_drain() {
   local home out
   home=$(make_home status-orphans)
@@ -4962,6 +5010,7 @@ test_hold_options_share_atomic_reason
 test_refused_hold_keeps_prior_reason_and_options
 test_legacy_option_migration_is_explicit_and_idempotent
 test_migration_rejects_unreadable_target
+test_migration_recommendation_prefers_unique_legacy_label
 test_open_status_orphans_reach_drain
 test_secondmate_hold_relays_are_not_local_orphans
 test_hold_reason_round_trips_awkward_characters

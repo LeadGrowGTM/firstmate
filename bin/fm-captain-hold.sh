@@ -2010,10 +2010,11 @@ command_migrate_options() (
       .options |= [to_entries[] | .value + {value:(.value.value // ("option-" + ((.key + 1) | tostring)))}]
       | if has("recommended") and (.recommended != null) then
           .recommended as $r
-          | if any(.options[]; .value == $r) then .
-            else ([.options[] | select(.label == $r) | .value]) as $matches
-              | if ($matches | length) == 1 then .recommended = $matches[0]
-                else error("recommended must name a unique option") end
+          | ([.options[] | select(.label == $r) | .value]) as $matches
+          | if ($matches | length) == 1 then .recommended = $matches[0]
+            elif ($matches | length) > 1 then error("recommended must name a unique option")
+            elif any(.options[]; .value == $r) then .
+            else error("recommended must name a unique option")
             end
         else del(.recommended) end
       | {about,decide,options} + with_entries(select(.key == "recommended" or .key == "report" or .key == "pr_url"))
