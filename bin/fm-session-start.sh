@@ -744,7 +744,7 @@ if [ "$READ_ONLY" -eq 0 ]; then
     fi
   fi
   "$SCRIPT_DIR/fm-statusbar.sh" sync >/dev/null 2>&1 || true
-  [ -z "$PRIMARY_FLEET_SESSION" ] || "$SCRIPT_DIR/fm-statusbar.sh" apply "$PRIMARY_FLEET_SESSION" >/dev/null 2>&1 || true
+  [ -z "$PRIMARY_FLEET_SESSION" ] || "$SCRIPT_DIR/fm-statusbar.sh" apply --primary "$PRIMARY_FLEET_SESSION" >/dev/null 2>&1 || true
   if [ "$REEMIT" -eq 0 ]; then
     rm -f "$COMPLETION_FILE" 2>/dev/null || true
   fi

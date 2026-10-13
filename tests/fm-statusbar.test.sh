@@ -113,7 +113,7 @@ statusbar "$SB" "$SOCKET_PATH" label firstmate:numeric-home numeric-home claude 
 tmux set-option -t firstmate 'status-format[0]' 'CUSTOM #{window_name}'
 statusbar "$SB" "$SOCKET_PATH" apply firstmate
 if out=$(statusbar "$SB" "$SOCKET_PATH" apply 2>&1); then fail "apply accepted an implicit session"; fi
-[ "$out" = 'usage: fm-statusbar.sh apply <session>' ] || fail "apply did not request an explicit session" "$out"
+[ "$out" = 'usage: fm-statusbar.sh apply [--primary] <session>' ] || fail "apply did not request an explicit session" "$out"
 [ "$(tmux show-options -wqv -t orca-view:fm-demo-task pane-border-status)" = bottom ] || fail "view window did not get the detail line"
 [ -z "$(tmux show-options -wqv -t unrelated pane-border-status)" ] || fail "an ungrouped window was changed"
 [ "$(tmux show-options -qv -t firstmate 'status-format[0]')" = 'CUSTOM #{window_name}' ] || fail "apply replaced a custom status line"
@@ -452,6 +452,41 @@ statusbar "$SB" "$SOCKET_PATH" sync
 tmux select-window -t orca-later:bare
 unknown=$(render orca-later 100 'u ?')
 case "$unknown" in *'u ?'*sync-task*'?'*'?'*proj/4*) pass "metadata defaults render as unknown facts" ;; *) fail "metadata default rendered as a fact" "$unknown" ;; esac
+
+# --- fleet: live worker and second-mate counts from recorded task metadata ---
+FLEET_STATE="$WORK/fleet-state"
+mkdir -p "$FLEET_STATE"
+tmux new-window -d -t firstmate: -n fm-live-crew "sleep 600"
+tmux new-window -d -t firstmate: -n fm-live-second "sleep 600"
+printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$FLEET_STATE/crew-a.meta"
+printf 'window=firstmate:fm-gone-crew\nkind=ship\n' >"$FLEET_STATE/crew-gone.meta"
+printf 'window=firstmate:fm-live-second\nkind=secondmate\n' >"$FLEET_STATE/second-a.meta"
+printf 'window=remote:second-r\nkind=secondmate\nbackend=remote\n' >"$FLEET_STATE/second-r.meta"
+printf 'window=remote:crew-r\nkind=scout\nbackend=remote\n' >"$FLEET_STATE/crew-r.meta"
+fleet=$(FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" fleet)
+[ "$fleet" = "crew 2 | 2nd 2" ] || fail "fleet counted wrong" "$fleet"
+rm -f "$FLEET_STATE"/*.meta
+fleet=$(FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" fleet)
+[ "$fleet" = "crew 0 | 2nd 0" ] || fail "empty fleet counted wrong" "$fleet"
+pass "fleet counts live workers and second mates from metadata"
+
+printf 'window=firstmate:fm-live-crew\nkind=ship\nsecret=DO_NOT_DISPLAY\n' >"$FLEET_STATE/crew-a.meta"
+printf 'window=firstmate:fm-live-second\nkind=secondmate\n' >"$FLEET_STATE/second-a.meta"
+FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" apply --primary firstmate
+left=$(tmux show-options -t firstmate -v status-left)
+case "$left" in *"fleet"*) pass "apply --primary puts the fleet count in status-left" ;; *) fail "status-left lacks fleet count" "$left" ;; esac
+other=$(tmux show-options -t orca-later -v status-left)
+case "$other" in *"fleet"*) pass "grouped view session shares the fleet count" ;; *) fail "view session lacks fleet count" "$other" ;; esac
+
+tmux new-session -d -t firstmate -s fleet-later
+[ "$(tmux show-options -t fleet-later -v status-left)" = "$left" ] || fail "late view lost fleet count"
+bound=$(FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" fleet firstmate)
+[ "$bound" = 'crew 1 | 2nd 1' ] || fail "fleet used ambient home instead of session state" "$bound"
+tmux set-option -u -t fleet-later 'status-format[0]'
+fleet_render=$(render fleet-later 100 'crew 1 | 2nd 1')
+case "$fleet_render" in *'crew 1 | 2nd 1'*) ;; *) fail "fleet job failed to render on its private socket" "$fleet_render" ;; esac
+case "$fleet_render" in *DO_NOT_DISPLAY*) fail "fleet exposed an unrelated metadata value" ;; esac
+pass "fleet count binds to the primary home and survives later views"
 
 # --- persistent config: preserve user settings and survive server restart ---
 config="$WORK/user tmux.conf"
