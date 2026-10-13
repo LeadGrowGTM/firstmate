@@ -1,0 +1,4 @@
+Custom pool: project/1
+Ordinary numeric parent: firstmate
+Persistent style after restart: bg=colour234,fg=colour250
+Config check: statusbar: sourced by /tmp/fm-lab.5mGO0o/user tmux.conf

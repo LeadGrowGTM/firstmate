@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Private tmux before and after</title>
+<style>body{background:#10151d;color:#e6edf3;font:16px system-ui;margin:32px} h2{margin:28px 0 8px} p{color:#a5b0bb} pre{font:14px/1.35 monospace;white-space:pre;overflow:auto;padding:18px;border:1px solid #46505c;border-radius:8px} .before{background:#173c19;color:#e6ffe6} .after{background:#1c1c1c;color:#e5e5e5}</style>
+<h1>Fleet status bar on a private tmux socket</h1><p>Exact text captured from an attached tmux client before and after installing the tracked startup snippet and restarting the private server. Colors represent the reported tmux status styles.</p>
+<h2>Before: stock server</h2><p>status-style: bg=green,fg=black</p><pre class="before">
+
+
+
+
+
+
+
+
+[firstmate0:task*                                                         &quot;The-GOAT&quot; 17:28 13-Oct-26
+</pre>
+<h2>After: configured server restart</h2><p>status-style: bg=colour234,fg=colour250</p><pre class="after">
+
+
+
+
+
+
+
+──u cl:default32%|fm-demo-task | opus high | project/1──────────────────────────────────────────────
+ 0:task   1:ordinary                            u cl:default32%|fm-demo-task | opus high | project/1
+</pre></html>
