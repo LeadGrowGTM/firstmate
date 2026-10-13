@@ -154,6 +154,14 @@ assert_equals '' "$OUT" 'disabled configuration must be silent'
 pass 'absent and disabled configuration are silent'
 
 new_home
+printf '%s\n' '{"version":true,"enabled":true,"sources":[]}' > "$HOME_DIR/config/domain-freshness.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 1 "$STATUS" 'boolean config version'
+assert_grep 'config requires version:1' "$TMP_ROOT/stderr" 'boolean config version was accepted'
+assert_absent "$HOME_DIR/data/domain-freshness" 'invalid config wrote collector state'
+pass 'configuration version requires an integer'
+
+new_home
 mkdir -p "$HOME_DIR/skills"
 printf '# Available\n' > "$HOME_DIR/skills/SKILL.md"
 jq -n --arg root "$HOME_DIR/skills" '{version:1,enabled:false,sources:[{id:"skills",kind:"skills",root:$root}]}' > "$HOME_DIR/config/domain-freshness.json"
@@ -218,7 +226,7 @@ pass 'inventory baseline, change, removal and unchanged silence'
 
 new_home
 mkdir -p "$HOME_DIR/plugins"
-printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"user"}]},"token":"secret-one"}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"user","projectPath":"/clients/example/private-campaign","installPath":"/clients/example/private-campaign/install"}]},"token":"secret-one"}' > "$HOME_DIR/plugins/manifest.json"
 printf '%s\n' '{"enabledPlugins":{"demo":true},"token":"secret-one"}' > "$HOME_DIR/plugins/enabled.json"
 config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}]}]')"
 collect "$HOME_DIR" "$NOW"
@@ -226,6 +234,11 @@ bundle
 jq -e '.evidence | length == 2 and (all(.[]; .kind == "inventory-baseline"))' "$OUT" >/dev/null || fail 'plugin baseline absent'
 assert_no_grep 'secret-one' "$OUT" 'irrelevant manifest field persisted in bundle'
 assert_no_grep 'secret-one' "$HOME_DIR/data/domain-freshness/cursors.json" 'irrelevant manifest field persisted in cursor'
+assert_no_grep 'private-campaign' "$OUT" 'client path persisted in bundle'
+assert_no_grep 'private-campaign' "$HOME_DIR/data/domain-freshness/cursors.json" 'client path persisted in cursor'
+FM_HOME="$HOME_DIR" bash "$COLLECTOR" inventory plugins > "$TMP_ROOT/inventory.json" 2> "$TMP_ROOT/inventory-stderr"
+expect_code 0 "$?" 'plugin inventory with client path'
+assert_no_grep 'private-campaign' "$TMP_ROOT/inventory.json" 'client path persisted in inventory'
 printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"user"}]},"token":"secret-two"}' > "$HOME_DIR/plugins/manifest.json"
 printf '%s\n' '{"enabledPlugins":{"demo":true},"token":"secret-two"}' > "$HOME_DIR/plugins/enabled.json"
 collect "$HOME_DIR" 2026-10-14T12:00:00Z

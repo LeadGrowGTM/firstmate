@@ -1469,7 +1469,7 @@ A remote source needs a corresponding configured `skills` or `plugin-files` sour
 A change to that source's root or file list starts a fresh baseline.
 Forge feed pages are read twice with a fixed internal 20-page bound; a changed feed or exhausted bound fails coverage.
 
-The `plugin-files` file kinds are `plugin-manifest` (installed `plugins` records with version/scope/path metadata), `plugin-enablement` (the effective `enabledPlugins` boolean map), `plugin-version` (name/version), `instruction` (content digest and bounded text), and `asset` (digest and byte count only).
+The `plugin-files` file kinds are `plugin-manifest` (installed `plugins` records with version/scope metadata), `plugin-enablement` (the effective `enabledPlugins` boolean map), `plugin-version` (name/version), `instruction` (content digest and bounded text), and `asset` (digest and byte count only).
 Only those manifest fields are retained; unrelated settings fields are excluded from fingerprints and evidence.
 Inventory coverage names the observed surfaces and explicitly leaves session visibility unmeasured; a cache version alone does not establish effective installation or enablement.
 Instruction excerpts disclose truncation while their digest covers the full file.

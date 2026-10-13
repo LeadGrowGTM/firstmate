@@ -388,7 +388,7 @@ def projection(value, kind):
         for entry in entries:
             if not isinstance(entry, dict) or not isinstance(entry.get('version'), str):
                 raise CoverageError('missing installed plugin version')
-            result[name].append({key: entry.get(key) for key in ['version', 'scope', 'projectPath', 'installPath']})
+            result[name].append({key: entry.get(key) for key in ['version', 'scope']})
         result[name].sort(key=lambda item: json.dumps(item, sort_keys=True))
     return {'plugins': result}
 
@@ -488,7 +488,7 @@ def remote_inventory(source, home):
 
 
 def validate_config(config):
-    if not isinstance(config, dict) or config.get('version') != 1 or type(config.get('enabled')) is not bool:
+    if not isinstance(config, dict) or type(config.get('version')) is not int or config['version'] != 1 or type(config.get('enabled')) is not bool:
         raise ValueError('config requires version:1 and boolean enabled')
     if 'max_pages' in config:
         raise ValueError('max_pages is unsupported')
