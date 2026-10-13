@@ -324,8 +324,8 @@ def merged_instruction(repo, entries, path, unavailable_ok=False):
         return {'availability': 'content unavailable'}
 
 
-def forge(source, previous, now, contributions):
-    start = instant(previous['checkpoint']) if previous else now - dt.timedelta(days=1)
+def forge(source, previous, now, contributions, first_start=None):
+    start = instant(previous['checkpoint']) if previous else first_start or now - dt.timedelta(days=1)
     lower = start - dt.timedelta(seconds=300) if previous else start
     seen = {key.casefold(): value for key, value in previous.get('seen', {}).items()} if previous else {}
     events = []
@@ -490,6 +490,10 @@ def inventory_snapshot(source):
                     if resolved.name != 'SKILL.md' or not resolved.is_file():
                         raise CoverageError('skill instruction unavailable')
                     paths.append((item, 'instruction'))
+                elif item.is_symlink():
+                    target = inventory_path(item, roots)
+                    if stat.S_ISDIR(target.stat().st_mode):
+                        walk(item, depth + 1)
                 elif item.is_dir():
                     walk(item, depth + 1)
         walk(root, 0)
@@ -644,6 +648,13 @@ def main():
         cursor = load(cursor_path) if cursor_path.exists() else {'version': 1, 'sources': {}}
         if cursor.get('version') != 1 or not isinstance(cursor.get('sources'), dict):
             raise ValueError('invalid collector cursor')
+        attempts = cursor.setdefault('attempts', {})
+        if not isinstance(attempts, dict):
+            raise ValueError('invalid attempted windows')
+        for attempted in attempts.values():
+            if not isinstance(attempted, dict) or not isinstance(attempted.get('binding'), str):
+                raise ValueError('invalid attempted window')
+            instant(attempted.get('window_start'))
         for saved in cursor['sources'].values():
             if not isinstance(saved, dict) or not isinstance(saved.get('binding'), str):
                 raise ValueError('invalid source cursor')
@@ -677,9 +688,21 @@ def main():
                 if previous and instant(previous['checkpoint']) > now:
                     raise CoverageError('clock precedes successful checkpoint')
                 if source['kind'] == 'repository':
+                    first_start = None
+                    if not previous:
+                        attempted = cursor['attempts'].get(key)
+                        if not attempted or attempted['binding'] != binding:
+                            attempted = {'binding': binding, 'window_start': iso(now - dt.timedelta(days=1))}
+                            candidate = {**cursor, 'attempts': {**cursor['attempts'], key: attempted}}
+                            if encoded_size(candidate) > MAX_JSON_BYTES:
+                                raise CoverageError('cursor exceeds read limit')
+                            cursor = candidate
+                        first_start = instant(attempted['window_start'])
+                        if first_start > now:
+                            raise CoverageError('clock precedes attempted window')
                     if contribution_error is not None:
                         raise CoverageError('durable contributions unavailable: ' + str(contribution_error))
-                    saved, events, detail = forge(source, previous, now, contributions)
+                    saved, events, detail = forge(source, previous, now, contributions, first_start)
                 elif source['kind'] == 'unavailable':
                     raise CoverageError(source['reason'])
                 elif source['kind'] == 'remote-inventory':
@@ -687,6 +710,8 @@ def main():
                 else:
                     saved, events, detail = inventory_changes(inventory_snapshot(source), previous, now)
                 candidate = {**cursor, 'sources': {**cursor['sources'], key: {**saved, 'binding': binding}}}
+                if source['kind'] == 'repository':
+                    candidate['attempts'] = {id_: value for id_, value in cursor['attempts'].items() if id_ != key}
                 if encoded_size(candidate) > MAX_JSON_BYTES:
                     raise CoverageError('cursor exceeds read limit')
                 cursor = candidate

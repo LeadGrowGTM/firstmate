@@ -23,6 +23,8 @@
 #
 # data/domain-freshness/cursors.json stores per-source successful checkpoints,
 # delivered forge identities and inventory baselines, separately from proposals.
+# Its attempts map retains first repository window starts and source bindings
+# independently until success, including after a source binding changes.
 # Bundle publication precedes atomic cursor publication under an exclusive lock;
 # a crash may replay evidence but cannot advance past an unpublished bundle.
 # The advisory lock releases on process death; its stable file remains on disk.

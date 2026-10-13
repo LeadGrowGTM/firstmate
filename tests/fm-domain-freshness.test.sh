@@ -809,6 +809,27 @@ bundle
 jq -e '.complete == false and .coverage[0].complete == false and (.coverage[0].reason | test("symlink|root")) and (.evidence | length == 0)' "$OUT" >/dev/null || fail 'unsafe symlink was not failed coverage'
 pass 'unsafe inventory symlink fails coverage'
 
+new_home
+mkdir -p "$HOME_DIR/skills" "$HOME_DIR/external/linked-skill"
+printf '# Linked instruction\n' > "$HOME_DIR/external/linked-skill/SKILL.md"
+ln -s "$HOME_DIR/external/linked-skill" "$HOME_DIR/skills/linked-skill"
+config "$(jq -nc --arg root "$HOME_DIR/skills" --arg allowed "$HOME_DIR/external" '[{id:"skills",kind:"skills",root:$root,symlink_roots:[$allowed]}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'linked skill baseline'
+mv "$HOME_DIR/external/linked-skill" "$HOME_DIR/external/unavailable-skill"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 2 "$STATUS" 'dangling skill directory link'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'unavailable linked skill was treated as a removal'
+jq -e '.sources.skills.checkpoint == "2026-10-13T12:00:00Z" and .sources.skills.inventory["linked-skill/SKILL.md"].content == "# Linked instruction\n"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'dangling skill directory advanced or lost its baseline'
+rm "$HOME_DIR/skills/linked-skill"
+collect "$HOME_DIR" 2026-10-15T12:00:00Z
+expect_code 0 "$STATUS" 'deleted skill directory link'
+bundle
+jq -e '.complete and .evidence[0].before.content == "# Linked instruction\n" and .evidence[0].after == null' "$OUT" >/dev/null || fail 'deleted skill link did not produce a removal'
+jq -e '.sources.skills.checkpoint == "2026-10-15T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'deleted skill link did not checkpoint'
+pass 'dangling skill directory retains coverage gap while deleted link is a removal'
+
 mkdir -p "$TMP_ROOT/race-hook"
 cat > "$TMP_ROOT/race-hook/sitecustomize.py" <<'PY'
 import os
@@ -1020,6 +1041,44 @@ bundle
 jq -e '.sources.forge.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'failed page advanced success'
 assert_grep 'per_page=100&page=2' "$FEED/requests" 'PR feed second page was not attempted'
 pass 'failed PR feed page retains previous successful window'
+
+for attempt_mode in first binding-reset; do
+  new_home
+  config "$repo_sources"
+  if [ "$attempt_mode" = binding-reset ]; then
+    collect "$HOME_DIR" "$NOW"
+    expect_code 0 "$STATUS" 'checkpoint before repository binding reset'
+    config '[{"id":"forge","kind":"repository","repo":"acme/gadgets"}]'
+    ATTEMPT_TIME=2026-10-14T12:00:00Z
+    WINDOW_START=2026-10-13T12:00:00Z
+    EVENT_TIME=2026-10-13T13:00:00Z
+    EVENT_REPO=gadgets
+    RETRY_TIME=2026-10-17T12:00:00Z
+  else
+    ATTEMPT_TIME=$NOW
+    WINDOW_START=2026-10-12T12:00:00Z
+    EVENT_TIME=2026-10-13T11:00:00Z
+    EVENT_REPO=widgets
+    RETRY_TIME=2026-10-16T12:00:00Z
+  fi
+  printf '/repos/acme/%s/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1\n' "$EVENT_REPO" > "$FEED/fail"
+  collect "$HOME_DIR" "$ATTEMPT_TIME"
+  expect_code 2 "$STATUS" "$attempt_mode first attempted window failure"
+  jq -e --arg start "$WINDOW_START" '.attempts.forge.window_start == $start' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$attempt_mode failure did not retain attempted window"
+  if [ "$attempt_mode" = binding-reset ]; then
+    jq -e '.sources.forge.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'binding reset failure advanced old success'
+  else
+    jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'first attempt failure saved a success cursor'
+  fi
+  rm "$FEED/fail"
+  issue 58 "$EVENT_TIME" | jq --arg repo "$EVENT_REPO" '.html_url = ("https://github.com/acme/" + $repo + "/issues/58")' | jq -s . > "$FEED/issues-1.json"
+  collect "$HOME_DIR" "$RETRY_TIME"
+  expect_code 0 "$STATUS" "$attempt_mode delayed recovery"
+  bundle
+  jq -e --arg start "$WINDOW_START" --arg when "$EVENT_TIME" '.complete and .coverage[0].window_start == $start and .evidence[0].created_at == $when' "$OUT" >/dev/null || fail "$attempt_mode retry lost original-window evidence"
+  jq -e --arg now "$RETRY_TIME" '.sources.forge.checkpoint == $now and .attempts.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$attempt_mode recovery did not finish attempted window"
+done
+pass 'first failure and binding reset retain attempted window across multi-day retry'
 
 for feed_kind in pulls issues; do
   new_home
