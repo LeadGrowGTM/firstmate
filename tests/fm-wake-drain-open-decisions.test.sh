@@ -294,8 +294,7 @@ test_pr_gated_decision_is_flagged_with_its_close_command() {
   pass "an open decision gated on one merged or closed PR is flagged with its exact close command"
 }
 
-# A PR number ends at a URL boundary: /pull/24abc is not PR 24, in the note and
-# in the offline merge record alike.
+# A PR number ends at a URL boundary in the note and offline merge record alike.
 test_pr_url_must_end_at_a_boundary() {
   local dir state out map task
   dir=$(make_case pr-url-boundary)
@@ -309,6 +308,8 @@ test_pr_url_must_end_at_a_boundary() {
     printf 'https://github.com/o/r/pull/80 fail\n'
   } > "$map"
   printf 'needs-decision [key=s1]: merge https://github.com/o/r/pull/24abc now?\n' > "$state/t-suffix.status"
+  printf 'needs-decision [key=s2]: merge https://github.com/o/r/pull/24+abc now?\n' > "$state/t-plus.status"
+  printf 'needs-decision [key=s3]: merge https://github.com/o/r/pull/24%%20 now?\n' > "$state/t-percent.status"
   printf 'needs-decision [key=b1]: merge https://github.com/o/r/pull/24\n' > "$state/t-bare.status"
   printf 'needs-decision [key=p1]: see https://github.com/o/r/pull/24/files first\n' > "$state/t-path.status"
   printf 'needs-decision [key=h1]: see https://github.com/o/r/pull/24#x first\n' > "$state/t-hash.status"
@@ -316,11 +317,15 @@ test_pr_url_must_end_at_a_boundary() {
   printf 'done [key=merged-t-record]: merged t-record https://github.com/o/r/pull/80abc\n' >> "$state/t-record.status"
   printf 'needs-decision [key=r2]: merge https://github.com/o/r/pull/81?\n' > "$state/t-record2.status"
   printf 'done [key=merged-t-record2]: merged t-record2 https://github.com/o/r/pull/81.\n' >> "$state/t-record2.status"
+  printf 'needs-decision [key=r3]: merge https://github.com/o/r/pull/82?\n' > "$state/t-record-plus.status"
+  printf 'done [key=merged-t-record-plus]: merged t-record-plus https://github.com/o/r/pull/82+abc\n' >> "$state/t-record-plus.status"
+  printf 'needs-decision [key=r4]: merge https://github.com/o/r/pull/83?\n' > "$state/t-record-percent.status"
+  printf 'done [key=merged-t-record-percent]: merged t-record-percent https://github.com/o/r/pull/83%%20\n' >> "$state/t-record-percent.status"
 
   PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
     FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with suffixed PR URLs"
 
-  for task in t-suffix t-record; do
+  for task in t-suffix t-plus t-percent t-record t-record-plus t-record-percent; do
     if grep -A1 -F "$task [key=" "$out" | grep -F '  ^ PR ' >/dev/null; then
       fail "$task was flagged from a PR number with a trailing suffix: $(cat "$out")"
     fi
@@ -334,6 +339,31 @@ test_pr_url_must_end_at_a_boundary() {
   grep -A1 -F 't-record2 [key=r2]' "$out" | grep -F "bin/fm-send.sh t-record2 --resolve-key r2 'PR https://github.com/o/r/pull/81 merged'" >/dev/null \
     || fail "a merge record ending in punctuation did not count: $(cat "$out")"
   pass "a PR URL counts only when its number ends at a URL boundary"
+}
+
+test_repeated_pr_url_with_another_pr_is_ambiguous() {
+  local dir state out map
+  dir=$(make_case pr-url-repeated)
+  state="$dir/state"
+  out="$dir/drain.out"
+  map="$dir/gh.map"
+  make_fake_gh "$dir/fakebin"
+  : > "$dir/gh.log"
+  printf 'https://github.com/o/r/pull/24 merged\n' > "$map"
+  printf 'needs-decision [key=two]: choose https://github.com/o/r/pull/24 or https://github.com/o/r/pull/25 then https://github.com/o/r/pull/24\n' > "$state/t-repeated.status"
+
+  PATH="$dir/fakebin:$PATH" FM_FAKE_GH_LOG="$dir/gh.log" FM_FAKE_GH_MAP="$map" \
+    FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain failed with repeated PR URLs"
+
+  grep -F 't-repeated [key=two] needs-decision:' "$out" >/dev/null \
+    || fail "the ambiguous decision was not listed: $(cat "$out")"
+  if grep -F '  ^ PR ' "$out" >/dev/null; then
+    fail "a decision naming two PRs was flagged: $(cat "$out")"
+  fi
+  if grep -E 'pr view https://github.com/o/r/pull/(24|25) ' "$dir/gh.log" >/dev/null; then
+    fail "a decision naming two PRs triggered a lookup: $(cat "$dir/gh.log")"
+  fi
+  pass "a repeated PR URL does not hide another PR in the same decision"
 }
 
 test_captain_hold_pr_uses_owning_home_close_path() {
@@ -623,6 +653,7 @@ test_buried_decision_surfaces_on_the_empty_queue_fast_path
 test_status_symlink_is_not_followed
 test_pr_gated_decision_is_flagged_with_its_close_command
 test_pr_url_must_end_at_a_boundary
+test_repeated_pr_url_with_another_pr_is_ambiguous
 test_captain_hold_pr_uses_owning_home_close_path
 test_pr_lookups_are_capped_and_bounded
 test_pr_decisions_over_lookup_cap_are_counted
