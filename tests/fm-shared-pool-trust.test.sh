@@ -286,7 +286,7 @@ test_spawn_labels_treehouses_own_error_when_the_lease_fails() {
   pass "a failed lease reports treehouse's own error under its label"
 }
 
-test_spawn_refuses_a_leased_worktree_of_the_other_clone() {
+test_spawn_refuses_a_configured_foreign_lease_without_returning_it() {
   local id=pool-foreign-refuse case_dir=$TMP_ROOT/spawn-refuse
   local foreign leased pane_log tree_log out status=0
   prepare_spawn_home "$case_dir" "$id"
@@ -294,6 +294,10 @@ test_spawn_refuses_a_leased_worktree_of_the_other_clone() {
   leased=$case_dir/shared-pool/2/widget
   add_worktree "$case_dir/other/projects/widget" "$foreign"
   add_worktree "$case_dir/other/projects/widget" "$leased"
+  printf 'root = "%s"\n' "$case_dir/shared-pool" \
+    > "$CASE_HOME/projects/widget/treehouse.toml"
+  printf 'root = "%s"\n' "$case_dir/shared-pool" \
+    > "$case_dir/other/projects/widget/treehouse.toml"
   pane_log=$case_dir/pane.log
   tree_log=$case_dir/treehouse.log
   : > "$pane_log"
@@ -305,11 +309,14 @@ test_spawn_refuses_a_leased_worktree_of_the_other_clone() {
   assert_contains "$out" "another clone" "the refusal did not say the worktree is another clone"
   assert_contains "$out" "$leased" "the refusal did not name the worktree"
   assert_contains "$out" "$CASE_HOME/projects/widget" "the refusal did not name the spawning project"
-  assert_exact_line "args=return --force $leased" "$tree_log" \
-    "the lease this spawn took was not returned"
+  assert_grep "args=get --lease --lease-holder $id" "$tree_log" \
+    "the fallback lease was not requested"
+  assert_no_grep "args=return" "$tree_log" \
+    "spawn returned a copy owned by the other clone"
+  [ -d "$leased" ] || fail "spawn removed the other clone's leased copy"
   assert_no_grep "cd -- " "$pane_log" "the pane was moved into the other clone's worktree"
   [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "refused spawn published a task record"
-  pass "a lease of the other clone is returned and the launch stops"
+  pass "a configured foreign lease is refused without returning the other clone's copy"
 }
 
 test_spawn_that_stops_after_the_lease_returns_it() {
@@ -502,7 +509,7 @@ test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
 test_shasum_only_path_names_the_pool_from_the_home
 test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
 test_spawn_labels_treehouses_own_error_when_the_lease_fails
-test_spawn_refuses_a_leased_worktree_of_the_other_clone
+test_spawn_refuses_a_configured_foreign_lease_without_returning_it
 test_spawn_that_stops_after_the_lease_returns_it
 test_spawn_keeps_lease_after_dispatch_rollback_with_open_endpoint
 test_spawn_keeps_the_shared_copy_of_its_own_clone

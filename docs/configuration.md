@@ -1188,9 +1188,47 @@ The one effect on the other home's pool is that treehouse resets the idle copy i
 Treehouse reads the pool location from `HOME`, so that lease and its prune run treehouse with `HOME` set to the pool folder, while every git process it starts keeps the operator's `HOME`, git configuration, and credential helpers.
 The user-level treehouse configuration therefore does not apply to this pool; a `treehouse.toml` in the clone still does.
 The lease is bounded by `FM_SPAWN_TREEHOUSE_LEASE_SECS` (default 600), and a fetch that would prompt for credentials fails instead of waiting.
-A launch that still cannot get a worktree of its own clone stops before the worker starts, and a lease taken by a launch that stops is returned.
+A launch that still cannot get a worktree of its own clone stops before the worker starts.
+If a clone-local `treehouse.toml` root redirects the fallback lease to another clone's copy, the launch refuses it and does not force-return that foreign copy; a stopped launch returns only a lease of its own clone.
+The attempted `get --lease` may already have marked that foreign copy leased, so the refusal leaves its Treehouse state for the pool owner to inspect.
 Git still refuses to remove a worktree from a clone that does not own it, so a shared pool is not cleared by the other home.
 The daily sweep prunes and sizes this home's own pool when it is under the per-home pool folder.
+
+For the website-genie Legion clone, the immediate workaround is a clone-local root outside every Firstmate home; it has not been applied by this change.
+The supervisor can use these commands only after confirming that no `treehouse.toml` already exists at the clone root:
+
+```sh
+clone=/home/mitch/fm-homes/website-genie/projects/legion
+root=/home/mitch/.local/state/firstmate/website-genie-a8edb5/legion-treehouse
+if [ -e "$clone/treehouse.toml" ] || [ -L "$clone/treehouse.toml" ]; then
+  printf '%s\n' 'treehouse.toml already exists; inspect it before changing this clone' >&2
+else
+  printf '%s\n' "root = \"$root\"" > "$clone/treehouse.toml"
+  grep -qxF 'treehouse.toml' "$clone/.git/info/exclude" || printf '%s\n' 'treehouse.toml' >> "$clone/.git/info/exclude"
+fi
+```
+
+This makes Treehouse use that root for this clone and leaves the other home's copy when the interactive subshell exits; tasks already running in another home's copy stay there and can still be relaunched there.
+The other home's pool keeps its copy, and Firstmate does not return or prune `/home/mitch/.treehouse/legion-3179a0`.
+Do not use `/home/mitch/fm-homes/website-genie/state/legion-treehouse` as the root because it sits inside the home.
+To undo the workaround after confirming that these commands created the file, run:
+
+```sh
+clone=/home/mitch/fm-homes/website-genie/projects/legion
+rm -- "$clone/treehouse.toml"
+```
+
+If the exclude line was newly added by the workaround, remove that exact line too:
+
+```sh
+python3 - "$clone/.git/info/exclude" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+path.write_text(''.join(line for line in path.read_text().splitlines(keepends=True) if line.rstrip('\r\n') != 'treehouse.toml'))
+PY
+```
 
 ### Copies outside the guard
 

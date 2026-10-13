@@ -1481,7 +1481,8 @@ spawn_abort_cleanup() {
   if [ -n "$SPAWN_PRIVATE_LEASE_PATH" ] &&
     [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] &&
     { [ "$SPAWN_LAUNCH_SENT" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; }; then
-    if [ "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" != "$PROJ_ABS_REAL" ]; then
+    if fm_treehouse_same_clone "$PROJ_ABS" "$SPAWN_PRIVATE_LEASE_PATH" &&
+      [ "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" != "$PROJ_ABS_REAL" ]; then
       if ! treehouse return --force "$SPAWN_PRIVATE_LEASE_PATH" >/dev/null 2>&1; then
         echo "warning: could not return the per-home treehouse lease at $SPAWN_PRIVATE_LEASE_PATH" >&2
       fi
