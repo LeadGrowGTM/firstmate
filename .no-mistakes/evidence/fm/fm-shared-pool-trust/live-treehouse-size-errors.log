@@ -1,0 +1,4 @@
+treehouse-guard: size of /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VF9181VGB1T0V7NS5ZVSSW/.fm-live-size.S8yvFf/operator/.treehouse could not be measured (du exited 1); size of /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VF9181VGB1T0V7NS5ZVSSW/.fm-live-size.S8yvFf/state/firstmate/home-873b1b/.treehouse could not be measured (du exited 1)
+both_nonzero_du_results_reported=yes
+treehouse-guard: size of /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VF9181VGB1T0V7NS5ZVSSW/.fm-live-size.S8yvFf/operator/.treehouse could not be measured (root could not be resolved); size of /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VF9181VGB1T0V7NS5ZVSSW/.fm-live-size.S8yvFf/state/firstmate/home-873b1b/.treehouse could not be measured (root could not be resolved)
+both_unresolvable_roots_reported=yes
