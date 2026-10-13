@@ -648,13 +648,16 @@ def main():
         cursor = load(cursor_path) if cursor_path.exists() else {'version': 1, 'sources': {}}
         if cursor.get('version') != 1 or not isinstance(cursor.get('sources'), dict):
             raise ValueError('invalid collector cursor')
-        attempts = cursor.setdefault('attempts', {})
+        attempts_path = directory / 'attempts.json'
+        attempts = load(attempts_path) if attempts_path.exists() else cursor.get('attempts', {})
         if not isinstance(attempts, dict):
             raise ValueError('invalid attempted windows')
         for attempted in attempts.values():
             if not isinstance(attempted, dict) or not isinstance(attempted.get('binding'), str):
                 raise ValueError('invalid attempted window')
             instant(attempted.get('window_start'))
+        cursor.pop('attempts', None)
+        completed_attempts = set()
         for saved in cursor['sources'].values():
             if not isinstance(saved, dict) or not isinstance(saved.get('binding'), str):
                 raise ValueError('invalid source cursor')
@@ -690,16 +693,17 @@ def main():
                 if source['kind'] == 'repository':
                     first_start = None
                     if not previous:
-                        attempted = cursor['attempts'].get(key)
+                        attempted = attempts.get(key)
                         if not attempted or attempted['binding'] != binding:
                             attempted = {'binding': binding, 'window_start': iso(now - dt.timedelta(days=1))}
-                            candidate = {**cursor, 'attempts': {**cursor['attempts'], key: attempted}}
-                            if encoded_size(candidate) > MAX_JSON_BYTES:
+                            pending = {**attempts, key: attempted}
+                            if encoded_size(pending) > MAX_JSON_BYTES:
                                 raise CoverageError('cursor exceeds read limit')
-                            cursor = candidate
+                            attempts = pending
                         first_start = instant(attempted['window_start'])
                         if first_start > now:
                             raise CoverageError('clock precedes attempted window')
+                        publish(attempts_path, attempts)
                     if contribution_error is not None:
                         raise CoverageError('durable contributions unavailable: ' + str(contribution_error))
                     saved, events, detail = forge(source, previous, now, contributions, first_start)
@@ -710,11 +714,11 @@ def main():
                 else:
                     saved, events, detail = inventory_changes(inventory_snapshot(source), previous, now)
                 candidate = {**cursor, 'sources': {**cursor['sources'], key: {**saved, 'binding': binding}}}
-                if source['kind'] == 'repository':
-                    candidate['attempts'] = {id_: value for id_, value in cursor['attempts'].items() if id_ != key}
                 if encoded_size(candidate) > MAX_JSON_BYTES:
                     raise CoverageError('cursor exceeds read limit')
                 cursor = candidate
+                if source['kind'] == 'repository':
+                    completed_attempts.add(key)
                 coverage.append({'id': key, 'kind': source['kind'], 'complete': True, **detail})
                 evidence.extend({'source': key, **event} for event in events)
             except (CoverageError, OSError, ValueError, KeyError, TypeError) as error:
@@ -730,6 +734,7 @@ def main():
         else:
             publish(output, bundle)
         publish(cursor_path, cursor)
+        publish(attempts_path, {key: value for key, value in attempts.items() if key not in completed_attempts})
         if evidence or not complete:
             print(output)
         return 0 if complete else 2

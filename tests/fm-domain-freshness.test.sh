@@ -1064,7 +1064,7 @@ for attempt_mode in first binding-reset; do
   printf '/repos/acme/%s/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1\n' "$EVENT_REPO" > "$FEED/fail"
   collect "$HOME_DIR" "$ATTEMPT_TIME"
   expect_code 2 "$STATUS" "$attempt_mode first attempted window failure"
-  jq -e --arg start "$WINDOW_START" '.attempts.forge.window_start == $start' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$attempt_mode failure did not retain attempted window"
+  jq -e --arg start "$WINDOW_START" '.forge.window_start == $start' "$HOME_DIR/data/domain-freshness/attempts.json" >/dev/null || fail "$attempt_mode failure did not retain attempted window"
   if [ "$attempt_mode" = binding-reset ]; then
     jq -e '.sources.forge.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'binding reset failure advanced old success'
   else
@@ -1076,9 +1076,71 @@ for attempt_mode in first binding-reset; do
   expect_code 0 "$STATUS" "$attempt_mode delayed recovery"
   bundle
   jq -e --arg start "$WINDOW_START" --arg when "$EVENT_TIME" '.complete and .coverage[0].window_start == $start and .evidence[0].created_at == $when' "$OUT" >/dev/null || fail "$attempt_mode retry lost original-window evidence"
-  jq -e --arg now "$RETRY_TIME" '.sources.forge.checkpoint == $now and .attempts.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$attempt_mode recovery did not finish attempted window"
+  jq -e --arg now "$RETRY_TIME" '.sources.forge.checkpoint == $now' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "$attempt_mode recovery did not finish attempted window"
+  jq -e '.forge == null' "$HOME_DIR/data/domain-freshness/attempts.json" >/dev/null || fail "$attempt_mode recovery kept its attempted window"
 done
 pass 'first failure and binding reset retain attempted window across multi-day retry'
+
+for interrupt_mode in first binding-reset after-good; do
+  new_home
+  config "$repo_sources"
+  INTERRUPT_TIME=$NOW
+  WINDOW_START=2026-10-12T12:00:00Z
+  EVENT_TIME=2026-10-13T11:00:00Z
+  EVENT_REPO=widgets
+  if [ "$interrupt_mode" = binding-reset ]; then
+    collect "$HOME_DIR" "$NOW"
+    expect_code 0 "$STATUS" 'checkpoint before interrupted binding reset'
+    config '[{"id":"forge","kind":"repository","repo":"acme/gadgets"}]'
+    INTERRUPT_TIME=2026-10-14T12:00:00Z
+    WINDOW_START=2026-10-13T12:00:00Z
+    EVENT_TIME=2026-10-13T13:00:00Z
+    EVENT_REPO=gadgets
+  elif [ "$interrupt_mode" = after-good ]; then
+    config '[{"id":"good","kind":"repository","repo":"acme/widgets"},{"id":"forge","kind":"repository","repo":"acme/widgets"}]'
+  fi
+  printf '{"coverage":"absent","domains":[]}\n' > "$HOME_DIR/domains.json"
+  python3 - "$ROOT/bin/fm-domain-freshness.py" "$HOME_DIR" "$INTERRUPT_TIME" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location('collector', sys.argv[1])
+collector = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(collector)
+home, clock = sys.argv[2:]
+def interrupt(source, previous, now, contributions, first_start=None):
+    if source['id'] == 'good':
+        return {'checkpoint': collector.iso(now), 'seen': {}}, [], {}
+    raise KeyboardInterrupt('fixture interruption before collection completes')
+collector.forge = interrupt
+sys.argv = ['collector', home, str(Path(home) / 'config/domain-freshness.json'),
+            str(Path(home) / 'domains.json'), clock]
+try:
+    collector.main()
+except KeyboardInterrupt:
+    pass
+else:
+    sys.exit('collector did not reach interrupted repository read')
+PY
+  expect_code 0 "$?" "$interrupt_mode interruption fixture"
+  jq -e --arg start "$WINDOW_START" '.forge.window_start == $start' "$HOME_DIR/data/domain-freshness/attempts.json" >/dev/null || fail "$interrupt_mode interruption lost attempted window"
+  if [ "$interrupt_mode" = binding-reset ]; then
+    jq -e '.sources.forge.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'interruption changed successful checkpoint'
+  else
+    assert_absent "$HOME_DIR/data/domain-freshness/cursors.json" 'interruption published success before its bundle'
+  fi
+  if [ "$interrupt_mode" = after-good ]; then
+    jq -e '.good.window_start == "2026-10-12T12:00:00Z"' "$HOME_DIR/data/domain-freshness/attempts.json" >/dev/null || fail 'later source interruption erased earlier uncheckpointed attempt'
+  fi
+  issue 59 "$EVENT_TIME" | jq --arg repo "$EVENT_REPO" '.html_url = ("https://github.com/acme/" + $repo + "/issues/59")' | jq -s . > "$FEED/issues-1.json"
+  collect "$HOME_DIR" 2026-10-17T12:00:00Z
+  expect_code 0 "$STATUS" "$interrupt_mode interrupted recovery"
+  bundle
+  jq -e --arg start "$WINDOW_START" --arg when "$EVENT_TIME" '.complete and any(.coverage[]; .id == "forge" and .window_start == $start) and any(.evidence[]; .source == "forge" and .created_at == $when)' "$OUT" >/dev/null || fail "$interrupt_mode interrupted retry lost original-window evidence"
+  jq -e 'length == 0' "$HOME_DIR/data/domain-freshness/attempts.json" >/dev/null || fail 'successful interrupted recovery retained completed attempts'
+done
+pass 'interruption retains attempted windows without publishing successful checkpoints'
 
 for feed_kind in pulls issues; do
   new_home
