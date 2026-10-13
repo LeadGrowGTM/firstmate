@@ -641,6 +641,11 @@ fm_backend_source() {  # <name>
   # word-split an unquoted expansion, so a space-separated string is one path.
   case "$name" in
     tmux)
+      # A marked home is permission to use a lab, never the operator socket.
+      # Check before even sourcing the adapter, independently of gate markers.
+      if [ -f "$FM_HOME/.fm-lab-home" ]; then
+        "$FM_BACKEND_LIB_DIR/fm-lab-home.sh" tmux-check "$FM_HOME" || return 1
+      fi
       set -- fm-tmux-lib.sh fm-composer-lib.sh fm-cursor-lib.sh fm-session-lock-lib.sh fm-agent-process-lib.sh fm-gemini-lib.sh
       ;;
     herdr)

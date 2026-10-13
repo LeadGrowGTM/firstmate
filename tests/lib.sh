@@ -38,6 +38,9 @@ umask 022
 # shellcheck source=tests/git-config-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/git-config-helpers.sh"
 
+# shellcheck source=tests/tmux-helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tmux-helpers.sh" || return 1
+
 # Exempt firstmate's own test suite from the gate-lifecycle refusal
 # (bin/fm-gate-refuse-lib.sh). The no-mistakes gate runs this suite FROM a gate
 # worktree - the exact environment that guard refuses - so without this every
@@ -254,6 +257,7 @@ fm_test_cleanup() {
   local d
   fm_test_reap_watchers
   fm_test_reap_procevent_homes
+  fm_test_tmux_cleanup
   for d in "${FM_TEST_CLEANUP_DIRS[@]:-}"; do
     [ -n "$d" ] && fm_test_remove_tree "$d"
   done

@@ -25,7 +25,7 @@ live_lab_cleanup() {
   while read -r pid; do [ -n "$pid" ] && { pkill -P "$pid" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; }; done < "$TMP_ROOT/pids"
   while read -r dir; do
     [ -n "$dir" ] || continue
-    env -u TMUX TMUX_TMPDIR="$dir" tmux kill-server 2>/dev/null
+    env -u TMUX TMUX_TMPDIR="$dir" tmux -L fm-lab kill-server 2>/dev/null
     case "$dir" in /tmp/fml.*) rm -rf "$dir" ;; esac
   done < "$TMP_ROOT/tmux-dirs"
   rm -rf "/tmp/fm-labt$$-mate" "/tmp/fm-labt$$-worker" "/tmp/fm-labt$$-other" /tmp/fm-labt"$$"-*+*
@@ -120,7 +120,7 @@ lab_tmux() {  # <root> <tmux args...>
   local dir
   dir=$(sed -n 's/^tmux_dir=//p' "$1/.fm-live-lab")
   shift
-  env -u TMUX TMUX_TMPDIR="$dir" tmux "$@"
+  env -u TMUX TMUX_TMPDIR="$dir" tmux -L fm-lab "$@"
 }
 
 start_sleeper() {
@@ -180,6 +180,9 @@ pass "primary fails when session start never took the lab lock"
 # checkout a mirrored Claude primary needs.
 WT_CASE="$TMP_ROOT/wtcase"
 fm_git_worktree "$WT_CASE/project" "$WT_CASE/wt" lab-wt
+mkdir "$WT_CASE/wt/state"
+cp "$CH/.fm-lab-home" "$WT_CASE/wt/"
+cp "$CH/state/.fm-lab-tmux-dir" "$WT_CASE/wt/state/"
 cp "$C/.fm-live-lab" "$WT_CASE/.fm-live-lab"
 set_record "$WT_CASE" home "$WT_CASE/wt"
 lab_tmux "$C" new-window -d -t firstmate: -n wtmain -c "$WT_CASE/wt" 'exec sleep 600'

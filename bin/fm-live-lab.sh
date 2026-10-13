@@ -160,15 +160,15 @@ load_lab() {  # <root>: refuse anything up did not build, then load its record
 }
 
 lab_tmux() {
-  [ -n "${TMUX_DIR:-}" ] || return 1
-  env -u TMUX TMUX_TMPDIR="$TMUX_DIR" tmux "$@"
+  "$LAB_HOME_HELPER" tmux "$LAB" "$@"
 }
 
 # The empty-environment base every lab process starts from.
 lab_env_base() {
   printf '%s\n' "HOME=$HOME" "USER=${USER:-$(id -un)}" "LOGNAME=${USER:-$(id -un)}" \
     "PATH=$PATH" "SHELL=${SHELL:-/bin/zsh}" "TERM=xterm-256color" "LANG=${LANG:-en_US.UTF-8}" \
-    "TMUX_TMPDIR=$TMUX_DIR" "FM_BACKEND=tmux" "DISABLE_AUTOUPDATER=1"
+    "TMUX_TMPDIR=$TMUX_DIR" "TMUX=$TMUX_DIR/tmux-$(id -u)/fm-lab,0,0" \
+    "FM_BACKEND=tmux" "DISABLE_AUTOUPDATER=1"
   [ -z "${CLAUDE_DIR:-}" ] || printf '%s\n' "CLAUDE_CONFIG_DIR=$CLAUDE_DIR"
 }
 
@@ -542,7 +542,7 @@ cmd_up() {
 
   TMUX_DIR=$("$LAB_HOME_HELPER" tmux-dir "$LAB") || die "cannot create the private tmux directory"
   echo "tmux_dir=$TMUX_DIR" >> "$ROOT/$RECORD_NAME"
-  lab_run tmux -f /dev/null new-session -d -s firstmate -n lab -x 220 -y 60 -c "$ROOT" || die "cannot start the lab tmux server"
+  lab_run "$LAB_HOME_HELPER" tmux "$LAB" new-session -d -s firstmate -n lab -x 220 -y 60 -c "$ROOT" || die "cannot start the lab tmux server"
   record_launch_pid "$(lab_tmux display-message -p '#{pid}')"
 
   if [ "$mate" = yes ]; then

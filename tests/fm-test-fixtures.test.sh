@@ -26,7 +26,7 @@ test_git_config_isolation() (
   git -C "$dir/caller" config commit.gpgsign false
   cd "$dir/caller" || exit 1
   cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/runner/bin/"
-  cp "$ROOT/tests/git-config-helpers.sh" "$dir/runner/tests/"
+  cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/tmux-helpers.sh" "$dir/runner/tests/"
   fakebin=$(fm_fakebin "$dir/standalone")
   fm_fake_exit0 "$fakebin" pi
   cat > "$fakebin/tmux" <<'SH'
@@ -323,6 +323,58 @@ SH
   pass "agent stand-in: a multicall sleep is refused, and the compiled stand-in survives a harness name"
 )
 
+test_tmux_isolation() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  local dir="$TMP_ROOT/tmux-isolation" sentinel child
+  mkdir -m 700 "$dir"
+  sentinel="$dir/operator"
+  child=
+  cleanup_isolation() {
+    "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
+    [ -z "$child" ] || rm -rf "$child"
+  }
+  trap cleanup_isolation EXIT
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 60' \
+    || fail 'could not start disposable operator sentinel'
+  export TMUX="$sentinel,0,0" TMUX_TMPDIR="$dir"
+  unset FM_TEST_TMUX_OWNER
+  . "$ROOT/tests/tmux-helpers.sh" || fail 'could not isolate inherited tmux'
+  child=$FM_TEST_TMUX_ROOT
+  tmux new-session -d -s lab 'exec sleep 60' || fail 'isolated test server did not start'
+  socket=$(tmux display-message -p '#{socket_path}')
+  [ "$socket" = "$TMUX_TMPDIR/tmux-$(id -u)/fm-test" ] || fail 'bare call did not select the named test server'
+  if tmux has-session -t protected 2>/dev/null; then fail 'test reached inherited operator server'; fi
+  tmux kill-server || fail 'isolated kill-server failed'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'lab killed operator sentinel'
+  if tmux -L default list-sessions 2>"$dir/default.err"; then fail 'default name accepted'; fi
+  assert_grep 'default or invalid' "$dir/default.err" 'default selector did not refuse'
+  if tmux -S "$dir/default" list-sessions 2>"$dir/path.err"; then fail 'default socket path accepted'; fi
+  assert_grep 'default or non-private' "$dir/path.err" 'default path did not refuse'
+  rm -f "$TMUX_TMPDIR/tmux-$(id -u)/fm-test"
+  rmdir "$TMUX_TMPDIR/tmux-$(id -u)" "$TMUX_TMPDIR" || fail 'could not remove unused private socket directory'
+  if tmux new-session -d -s escaped 2>"$dir/missing.err"; then fail 'missing socket directory fell back'; fi
+  assert_grep 'private TMUX_TMPDIR is missing' "$dir/missing.err" 'missing directory did not refuse'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'refusal touched operator sentinel'
+  # The runner must isolate a suite that never sources tests/lib.sh itself.
+  mkdir -p "$dir/runner/bin" "$dir/runner/tests"
+  cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/runner/bin/"
+  cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/tmux-helpers.sh" "$dir/runner/tests/"
+  cat > "$dir/runner/tests/fm-test-run.test.sh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+tmux new-session -d -s standalone 'exec sleep 60'
+[ "$(tmux display-message -p '#{socket_path}')" = "$TMUX_TMPDIR/tmux-$(id -u)/fm-test" ]
+! tmux has-session -t protected 2>/dev/null
+tmux kill-server
+SH
+  TMUX="$sentinel,0,0" TMUX_TMPDIR="$dir" bash "$dir/runner/bin/fm-test-run.sh" \
+    tests/fm-test-run.test.sh > "$dir/runner.log" 2>&1 \
+    || fail "runner let standalone suite escape isolation: $(cat "$dir/runner.log")"
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'standalone suite killed operator sentinel'
+  pass 'tmux test isolation: inherited operator socket survives create/kill and unsafe selectors refuse'
+)
+
+test_tmux_isolation || fail 'tmux fixture isolation'
 test_git_config_isolation || fail "Git fixture config isolation"
 test_agent_standin_survives_a_multicall_sleep || fail "agent stand-in multicall case"
 test_touch_epoch_preserves_repeated_dst_hour
