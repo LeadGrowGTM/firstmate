@@ -441,6 +441,35 @@ wait_for_attached_count() {
   return 1
 }
 
+test_close_keeps_windows_when_base_is_gone() {
+  local replacement base view out handle window pane_pid
+  for replacement in absent recycled; do
+    base="close-base-$replacement"
+    view="close-view-$replacement"
+    "$SHIM/tmux" new-session -d -s "$base" -n agent 'sleep 120' || fail "could not create the base"
+    window=$("$SHIM/tmux" display-message -p -t "=$base:" '#{window_id}')
+    pane_pid=$("$SHIM/tmux" display-message -p -t "=$base:" '#{pane_pid}')
+    out=$(run_view open --target "$base:$window" --view-session "$view") || fail "could not open the view: $out"
+    handle=$(returned_handle "$out")
+    wait_for_attached_count "$view" 1 || fail "the tab did not attach"
+    "$SHIM/tmux" kill-session -t "=$base"
+    assert_equals "$base" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{session_group}')" \
+      "the last surviving group member retains the missing base's name"
+    if [ "$replacement" = recycled ]; then
+      "$SHIM/tmux" new-session -d -s "$base" -n unrelated || fail "could not recycle the base name"
+    fi
+    run_view close --handle "$handle" --view-session "$view" >/dev/null 2>&1 || fail "the tab did not close"
+    "$SHIM/tmux" has-session -t "=$view" 2>/dev/null || fail "closing the last group member killed the surviving agent's session ($replacement base)"
+    assert_equals "$window" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')" \
+      "closing the tab preserves the surviving window"
+    kill -0 "$pane_pid" 2>/dev/null || fail "closing the tab killed the surviving agent process"
+    assert_grep "terminal close --terminal $handle --tab --json" "$ORCA_LOG" "the Orca tab still closes"
+    "$SHIM/tmux" kill-session -t "=$view"
+    [ "$replacement" != recycled ] || "$SHIM/tmux" kill-session -t "=$base"
+  done
+  pass "close: preserves surviving agent windows when the base is gone or its name is recycled"
+}
+
 test_close_keeps_shared_view() {
   local first second first_handle second_handle
   first=$(run_view open --target firstmate:fm-dev --view-session orca-shared) || fail "first shared tab did not open"
@@ -563,5 +592,6 @@ test_unavailable_orca_steps_aside
 test_wsl_uses_live_interop
 test_window_helper
 test_close_keeps_shared_view
+test_close_keeps_windows_when_base_is_gone
 test_close
 test_timeout_defaults

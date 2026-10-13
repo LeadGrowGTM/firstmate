@@ -65,7 +65,10 @@
 #           endpoint file at every hook call.
 # close     closes the tab by its recorded handle, then removes
 #           --view-session when given, only if it is a grouped session that is
-#           not its group's base. Orca refuses to close a pinned tab; that tab
+#           not its group's base and the base still shares its windows.
+#           A surviving view keeps its windows when the base is gone or its
+#           name has been reused by an unrelated session.
+#           Orca refuses to close a pinned tab; that tab
 #           is left open and reported, never unpinned or forced, and its view
 #           session is kept.
 # follow    is what the view session's hook runs: it re-selects the recorded
@@ -398,7 +401,7 @@ cmd_identity() {
 }
 
 cmd_close() {
-  local handle='' view='' out grouped group attached
+  local handle='' view='' out grouped group attached base_group
   while [ $# -gt 0 ]; do
     case "$1" in
     --handle) handle=${2:-}; shift 2 || die_usage "--handle needs a value" ;;
@@ -420,6 +423,8 @@ cmd_close() {
 $(tmux display-message -p -t "=$view:" $'#{session_grouped}\t#{session_group}' 2>/dev/null)
 EOF
   if [ "$grouped" = 1 ] && [ -n "$group" ] && [ "$group" != "$view" ]; then
+    base_group=$(tmux display-message -p -t "=$group:" '#{session_group}' 2>/dev/null) || base_group=
+    [ "$base_group" = "$group" ] || return 0
     attached=$(tmux display-message -p -t "=$view:" '#{session_attached}' 2>/dev/null) || attached=
     [ "$attached" != 0 ] || tmux kill-session -t "=$view" 2>/dev/null || true
   fi
