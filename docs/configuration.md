@@ -1294,7 +1294,7 @@ The optional pool sweep's extra per-home prune and size checks use the pool path
 ### Pool-selection limits
 
 The guard does not retain the pool root selected by an earlier launch.
-Crewmate allocation refuses pools resolved inside the spawning home or project clone before the initial get or fallback lease; [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns resolution and refusal.
+Crewmate allocation refuses pools resolved inside the spawning home or project clone before the initial get or fallback lease, including roots selected by `TREEHOUSE_ROOT`; [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns resolution and refusal.
 If a clone-local `treehouse.toml` root is added after a per-home pool already exists, the guard's extra per-home prune follows the new root and can prune that configured pool twice while leaving the earlier pool unpruned.
 The per-home size check still measures the computed folder and can miss an external configured root.
 If a launch sets `XDG_STATE_HOME` only for that command and the armed watcher runs without it, the watcher computes a different per-home folder and misses the launch's pool during prune and size checks.

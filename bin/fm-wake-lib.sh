@@ -1624,7 +1624,7 @@ _fm_treehouse_path_inside() {  # <path> <root>
 }
 
 # The value of one treehouse.toml root assignment, without its quotes.
-# Returns 1 when the assignment is not a plain quoted or bare value.
+# Returns 1 when the assignment is not a plain quoted value.
 _fm_treehouse_toml_value() {  # <text-after-equals>
   local rest=$1 body
   case "$rest" in
@@ -1637,14 +1637,7 @@ _fm_treehouse_toml_value() {  # <text-after-equals>
       [[ "$rest" =~ ^\'([^\']*)\'[[:space:]]*(#.*)?$ ]] || return 1
       printf '%s\n' "${BASH_REMATCH[1]}"
       ;;
-    *)
-      [[ "$rest" =~ ^([^[:space:]#]+)[[:space:]]*(#.*)?$ ]] || return 1
-      body=${BASH_REMATCH[1]}
-      case "$body" in
-        \{*|\[*|*\"*|*\'*) return 1 ;;
-      esac
-      printf '%s\n' "$body"
-      ;;
+    *) return 1 ;;
   esac
 }
 
@@ -1673,7 +1666,7 @@ _fm_treehouse_unescape() {  # <quoted-body>
 }
 
 # Print a config file's root, or nothing when the file or key is absent.
-# The last root assignment wins. A value that cannot be read fails closed.
+# A value that cannot be read fails closed.
 _fm_treehouse_toml_root() {  # <file>
   local file=$1 line trimmed rest val key found=0
   [ -f "$file" ] || return 0
@@ -1729,6 +1722,10 @@ _fm_treehouse_toml_root() {  # <file>
         *) break ;;
       esac
     done
+    if [ "$found" -eq 1 ]; then
+      printf 'error: ambiguous treehouse root in %s; refusing to place a worker there\n' "$file" >&2
+      return 1
+    fi
     val=$(_fm_treehouse_toml_value "$rest") || {
       printf 'error: could not read the treehouse root in %s; refusing to place a worker there\n' \
         "$file" >&2
@@ -1799,18 +1796,23 @@ _fm_treehouse_expand_env() {  # <text>
 # Relative roots are relative to the clone; environment expansion uses the
 # allocation's HOME. Resolve links before comparing the home and clone boundaries.
 fm_treehouse_pool_check() {  # <fm-home> <project> <treehouse-home>
-  local home project user=$3 config raw expanded base effective boundary label origin name
+  local home project user=$3 config source raw expanded base effective boundary label origin name
   home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
   project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
   [ -n "$user" ] || return 1
   config=$user/.config/treehouse/config.toml
   [ ! -f "$project/treehouse.toml" ] || config=$project/treehouse.toml
   raw=$(_fm_treehouse_toml_root "$config") || return 1
+  source=$config
+  if [ -n "${TREEHOUSE_ROOT:-}" ]; then
+    raw=$TREEHOUSE_ROOT
+    source=TREEHOUSE_ROOT
+  fi
   if [ -z "$raw" ]; then
     base=$user
   else
     expanded=$(HOME=$user _fm_treehouse_expand_env "$raw") || {
-      printf 'error: could not expand the treehouse root in %s; refusing to place a worker there\n' "$config" >&2
+      printf 'error: could not expand the treehouse root in %s; refusing to place a worker there\n' "$source" >&2
       return 1
     }
     case "$expanded" in
