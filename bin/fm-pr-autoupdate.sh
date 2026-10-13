@@ -14,7 +14,7 @@
 # Per-call bounds and a 24-second segment deadline leave watcher timeout margin.
 # Pending requests rotate behind other work and prevent a false complete sweep.
 # Fatal read/config episodes persist in state/.pr-autoupdate-failed until a
-# successful inventory read; unchanged fatal failures emit once.
+# later check reaches journal processing; unchanged fatal failures emit once.
 # Incomplete/deferred/conflict episodes emit once per unchanged URL/head/base
 # result; successful no-op sweeps are silent. status prints the full journal.
 #

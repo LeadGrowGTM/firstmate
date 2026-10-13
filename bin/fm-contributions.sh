@@ -72,6 +72,8 @@
 # A URL whose last good observation is merged or closed is final: it is
 # never re-read, stays fresh, and every owner's saved row converges on that
 # observation, with a stale error beside it cleared.
+# An open PR observation counts as checked only when its head matches the
+# recorded task head, if present; a final PR keeps its observed head if metadata differs.
 # A genuine failure prints its unavailable line only when it starts an episode
 # (no prior owner has an error); a successful read ends the episode.
 # FM_CONTRIBUTIONS_NOW supplies an ISO UTC clock for tests, otherwise UTC now.
