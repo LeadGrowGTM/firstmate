@@ -1,0 +1,5 @@
+absent config: silent, no journal
+disabled config: silent, no journal
+pr-autoupdate: incomplete: saved contribution coverage incomplete
+enabled empty home exit=1
+failure record: saved contribution coverage incomplete

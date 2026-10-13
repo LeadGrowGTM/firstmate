@@ -1,0 +1,3 @@
+{"case":"same_head","checked":true,"actor":"fleet","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reason":"checks green; merge is authorized by delivery posture"}
+{"case":"changed_head","checked":false,"actor":"fleet","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","reason":"contribution not recently checked"}
+{"case":"terminal_head","checked":true,"final":true,"actor":"nobody","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","reason":"forge reports closed"}
