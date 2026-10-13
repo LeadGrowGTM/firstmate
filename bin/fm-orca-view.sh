@@ -395,7 +395,7 @@ cmd_identity() {
 }
 
 cmd_close() {
-  local handle='' view='' out grouped group
+  local handle='' view='' out grouped group attached
   while [ $# -gt 0 ]; do
     case "$1" in
     --handle) handle=${2:-}; shift 2 || die_usage "--handle needs a value" ;;
@@ -417,7 +417,8 @@ cmd_close() {
 $(tmux display-message -p -t "=$view:" $'#{session_grouped}\t#{session_group}' 2>/dev/null)
 EOF
   if [ "$grouped" = 1 ] && [ -n "$group" ] && [ "$group" != "$view" ]; then
-    tmux kill-session -t "=$view" 2>/dev/null || true
+    attached=$(tmux display-message -p -t "=$view:" '#{session_attached}' 2>/dev/null) || attached=
+    [ "$attached" != 0 ] || tmux kill-session -t "=$view" 2>/dev/null || true
   fi
 }
 
