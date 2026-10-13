@@ -1,0 +1,13 @@
+1. Initial targets in isolated home
+{"schema":"fm-targets.v1","targets":[{"id":"red_default_branches","current":0,"limit":0,"gap":0},{"id":"open_prs","current":0,"limit":4,"gap":0},{"id":"stale_backlog","current":null,"limit":0,"gap":null}],"repos":[],"stale_ids":[]}
+2. Enabled sweep observes backlog; quota unavailable, no launch
+ledger=present status=absent
+{"targets":[{"id":"red_default_branches","current":0,"limit":0,"gap":0},{"id":"open_prs","current":0,"limit":4,"gap":0},{"id":"stale_backlog","current":0,"limit":0,"gap":0}],"stale_ids":[]}
+3. Per-home target override
+{"targets":[{"id":"red_default_branches","current":0,"limit":0,"gap":0},{"id":"open_prs","current":0,"limit":0,"gap":0},{"id":"stale_backlog","current":0,"limit":0,"gap":0}]}
+4. Disabled sweep
+exit=0 status=absent
+5. Dangling configuration refuses sweep
+jq: error: Could not open file /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VBDQWV8D8CQFMJYNRAPPHA/.test-idle-live.uGtfDj/config/idle-sweep.json: No such file or directory
+fm-idle-sweep: invalid configuration
+refused=1
