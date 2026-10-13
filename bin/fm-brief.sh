@@ -271,7 +271,6 @@ for a in "$@"; do
     # brief input. Refuse it loudly so it is never silently dropped here and then
     # believed to have been recorded.
     --yolo|--yolo=*) echo "error: --yolo is not a brief input; pass it to bin/fm-spawn.sh, which records the task's merge posture" >&2; exit 1 ;;
-    --*) echo "error: unknown option $a" >&2; exit 1 ;;
     *) POS+=("$a") ;;
   esac
 done

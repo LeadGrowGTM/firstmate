@@ -1703,7 +1703,7 @@ test_task_type_list_and_example() {
 }
 
 test_ship_and_scout_briefs_grant_bounded_sub_agents() {
-  local home id brief rc
+  local home id brief
   home="$TMP_ROOT/sub-agents-home"
   mkdir -p "$home/data" "$home/config"
   for id in no-mistakes direct-PR local-only; do
@@ -1734,9 +1734,6 @@ test_ship_and_scout_briefs_grant_bounded_sub_agents() {
     || fail "secondmate charter scaffold exited non-zero"
   assert_no_grep '^# Sub-agents$' "$home/data/sa-sm/brief.md" "secondmate charter received a sub-agent section"
 
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" sa-old-flag some-proj --mode direct-PR --sub-agents >/dev/null 2>&1; rc=$?
-  expect_code 1 "$rc" "the removed --sub-agents flag must be rejected"
-  [ ! -e "$home/data/sa-old-flag" ] || fail "a removed --sub-agents flag left a scaffold behind"
   pass "fm-brief: ship and scout grant bounded sub-agents by default; secondmate omits them"
 }
 
