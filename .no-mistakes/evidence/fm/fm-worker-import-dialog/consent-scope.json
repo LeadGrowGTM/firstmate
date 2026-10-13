@@ -1,0 +1,12 @@
+{
+  "canonicalProject": {
+    "trust": true,
+    "importApproved": true,
+    "warningShown": true
+  },
+  "workerWorktree": {
+    "trust": true,
+    "importApproved": null,
+    "warningShown": null
+  }
+}
