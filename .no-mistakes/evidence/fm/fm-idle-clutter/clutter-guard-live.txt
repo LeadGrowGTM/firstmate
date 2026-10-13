@@ -1,0 +1,7 @@
+Arm root home: armed: state/clutter.check.sh
+Run registered check against an untraversable existing copy root:
+clutter: WSL root has 166.9 GB in use, over 150.0 GB; read failed: could not traverse /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TSQV1CYN37PF3AS0ECWNQH/.clutter-live.q1bbbR/bad-worktrees
+Secondmate arm refusal:
+fm-clutter-check: this is a secondmate home; the clutter check is machine-wide, arm it in the root home
+Disarm root home: disarmed: state/clutter.check.sh
+Input roots and file preserved: yes

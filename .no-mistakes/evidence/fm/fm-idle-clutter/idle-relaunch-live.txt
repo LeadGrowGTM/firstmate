@@ -1,0 +1,7 @@
+idle exit: idle-exit: exited live-relaunch (done, idle 11m); endpoint, worktree, and work kept
+post-exit foreground: bash
+post-exit pane cwd: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TSQV1CYN37PF3AS0ECWNQH
+relaunching Claude in preserved pane
+relaunch foreground: claude
+relaunch pane cwd: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TSQV1CYN37PF3AS0ECWNQH
+task metadata, status, and unfinished work still present: yes

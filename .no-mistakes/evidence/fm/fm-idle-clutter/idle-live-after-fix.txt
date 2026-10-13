@@ -1,0 +1,14 @@
+=== Finished worker ===
+real worker foreground: claude
+crew state: state: done · source: status-log · lab worker complete
++9 minutes: silent; foreground=claude
++11 minutes with busy semantic state: silent; foreground=claude
++11 minutes after idle event: idle-exit: exited live-done (done, idle 11m); endpoint, worktree, and work kept
+foreground after exit: bash
+recorded outcome: stopped
+same-activity repeat: silent
+metadata, status, and unfinished work preserved: yes
+=== Worker awaiting a decision ===
+crew state: state: parked · source: status-log · choose A or B
++30 minutes: silent; foreground=claude
++61 minutes: idle-exit: exit of live-parked (parked, idle 61m) failed: error: task live-parked's composer visibly holds pending text; refusing to type the /exit exit command because it would concatenate onto that text. Clear or submit the pending text, then retry 'exit'

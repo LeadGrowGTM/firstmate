@@ -1,0 +1,3 @@
+real crew state: state: done · source: status-log · lab worker complete
+checker output at +660s: recorded outcome: fm-gate-refuse:
+worker foreground after check: bash

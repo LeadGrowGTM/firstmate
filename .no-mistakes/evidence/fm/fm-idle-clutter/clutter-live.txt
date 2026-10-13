@@ -1,0 +1,11 @@
+Scenario: clean thresholds, real du/df
+clean_output_end
+Scenario: all threshold categories, real du/df
+clutter: treehouse worktree pools use 0.0 GB, over 0.0 GB; archived no-mistakes logs use 0.0 GB, over 0.0 GB; WSL root has 170.3 GB in use, over 0.0 GB; /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TSQV1CYN37PF3AS0ECWNQH/.clutter-live.pMinyj/windows has 77% free, under 101%; no-mistakes worktrees total 0.0 GB, over 0.0 GB; no-mistakes copies over 0.0 GB: repo/run-a 0.0 GB
+Scenario: repeat inside day is silent
+inside_day_output_end
+Scenario: next due day reports again
+clutter: treehouse worktree pools use 0.0 GB, over 0.0 GB; archived no-mistakes logs use 0.0 GB, over 0.0 GB; WSL root has 170.3 GB in use, over 0.0 GB; /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TSQV1CYN37PF3AS0ECWNQH/.clutter-live.pMinyj/windows has 77% free, under 101%; no-mistakes worktrees total 0.0 GB, over 0.0 GB; no-mistakes copies over 0.0 GB: repo/run-a 0.0 GB
+Persisted evaluation record:
+schema	fm-clutter-check-v1
+last_eval	1792072800Fixture data still exists: yes

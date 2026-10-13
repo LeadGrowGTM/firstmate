@@ -1,0 +1,25 @@
+Worker pane foreground command: claude
+Worker pane excerpt:
+
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 with low effort · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M4TSQV1CYN37PF3AS0ECWNQH
+
+
+
+
+
+
+
+
+g1791904278.95559.25450
+Real crew-state verdict:
+state: done · source: status-log · lab worker complete
+Before ten minutes:
+Agent state before threshold:
+claude
+After ten minutes:
+idle-exit: exit of live-done (done, idle 11m) failed: fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.xsPngZ
+Agent state after threshold:
+claude
+Task metadata and status preserved: yes

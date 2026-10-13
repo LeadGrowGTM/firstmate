@@ -1,0 +1,8 @@
+Claude question in worker pane:
+7:❯ Write exactly this sentence and end your turn: Which should I choose, A or B?
+9:● Which should I choose, A or B?
+crew state: state: parked · source: status-log · choose A or B
++30 minutes: silent; foreground=claude
++61 minutes: idle-exit: exited live-parked (parked, idle 61m); endpoint, worktree, and work kept
+foreground after exit: bash
+decision and unfinished work preserved: yes
