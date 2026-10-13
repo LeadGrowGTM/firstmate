@@ -4,6 +4,7 @@ import base64
 import datetime as dt
 import fcntl
 import hashlib
+import itertools
 import json
 import os
 from pathlib import Path
@@ -120,8 +121,8 @@ def stable_feed(path, ordering, lower):
     return second
 
 
-def linked_observations(home, url):
-    result = []
+def linked_observations(home):
+    result = {}
     data = safe_path(Path(home) / 'data')
     for path in sorted(data.glob('*/contributions.json')):
         record = load(path, 1024 * 1024)
@@ -130,17 +131,19 @@ def linked_observations(home, url):
         for row in record['records']:
             if not isinstance(row, dict):
                 raise CoverageError('invalid durable contribution row')
-            if row.get('url') == url:
-                observed = row.get('observation')
-                if observed is not None and not isinstance(observed, dict):
-                    raise CoverageError('invalid durable contribution observation')
-                result.append({'task': record['task'], 'checked_at': row.get('checked_at'),
-                               'error': row.get('error'), 'observation': None if observed is None else
-                               {key: observed.get(key) for key in ('head', 'state', 'draft', 'mergeable')}})
+            if row.get('retired') is not None:
+                continue
+            observed = row.get('observation')
+            if observed is not None and not isinstance(observed, dict):
+                raise CoverageError('invalid durable contribution observation')
+            fields = ('head', 'state', 'draft', 'mergeable') if row.get('kind') == 'pr' else ('state', 'ready')
+            result.setdefault(row.get('url'), []).append({'task': record['task'], 'checked_at': row.get('checked_at'),
+                'error': row.get('error'), 'observation': None if observed is None else
+                {key: observed.get(key) for key in fields}})
     return result
 
 
-def forge(source, previous, now, home):
+def forge(source, previous, now, contributions):
     start = instant(previous['checkpoint']) if previous else now - dt.timedelta(days=1)
     lower = start - dt.timedelta(seconds=300) if previous else start
     seen = dict(previous.get('seen', {})) if previous else {}
@@ -188,7 +191,8 @@ def forge(source, previous, now, home):
                         raise CoverageError('truncated PR changed-file set')
                     event.update(base={'repository': repo, 'ref': base['ref'], 'sha': base.get('sha')},
                                  head={'repository': (head.get('repo') or {}).get('full_name'), 'ref': head.get('ref'), 'sha': head['sha']},
-                                 files=files, linked_contributions=linked_observations(home, url))
+                                 files=files)
+                event['linked_contributions'] = contributions.get(url, [])
                 events.append(event)
                 seen[key] = when
     # Only identities in the overlap need retention after a complete read.
@@ -245,13 +249,20 @@ def inventory_snapshot(source):
     paths = []
     if source['kind'] == 'skills':
         visited = set()
+        entries = 0
 
         def walk(directory):
+            nonlocal entries
             actual = inventory_path(directory, roots)
             if actual in visited:
                 raise CoverageError('duplicate or cyclic skill symlink')
             visited.add(actual)
-            for item in sorted(directory.iterdir()):
+            remaining = 2000 - entries
+            items = list(itertools.islice(directory.iterdir(), remaining + 1))
+            if len(items) > remaining:
+                raise CoverageError('skill inventory limit reached')
+            entries += len(items)
+            for item in sorted(items):
                 if item.name.lower() in FORBIDDEN or item.name.lower().startswith('.env'):
                     continue
                 resolved = inventory_path(item, roots)
@@ -259,8 +270,6 @@ def inventory_snapshot(source):
                     walk(item)
                 elif item.suffix.lower() == '.md':
                     paths.append((item, 'instruction'))
-                if len(visited) + len(paths) > 2000:
-                    raise CoverageError('skill inventory limit reached')
         walk(root)
     else:
         paths = [(root / item['path'], item['kind']) for item in source['files']]
@@ -407,6 +416,13 @@ def main():
         domains = load(Path(domains_path))
         coverage = []
         evidence = []
+        contributions = {}
+        contribution_error = None
+        if any(source['kind'] == 'repository' for source in config['sources']):
+            try:
+                contributions = linked_observations(home)
+            except (CoverageError, OSError, ValueError, KeyError, TypeError) as error:
+                contribution_error = error
         if domains['coverage'] not in ('complete', 'absent'):
             coverage.append({'id': 'registry', 'complete': False, 'reason': domains['coverage']})
         elif len({row['id'] for row in domains['domains']}) != len(domains['domains']):
@@ -421,7 +437,9 @@ def main():
                 if previous and instant(previous['checkpoint']) > now:
                     raise CoverageError('clock precedes successful checkpoint')
                 if source['kind'] == 'repository':
-                    saved, events, detail = forge(source, previous, now, home)
+                    if contribution_error is not None:
+                        raise CoverageError('durable contributions unavailable: ' + str(contribution_error))
+                    saved, events, detail = forge(source, previous, now, contributions)
                 elif source['kind'] == 'unavailable':
                     raise CoverageError(source['reason'])
                 elif source['kind'] == 'remote-inventory':

@@ -216,6 +216,26 @@ pass 'repository discovery reuses durable linked contribution observation'
 
 new_home
 config "$repo_sources"
+mkdir -p "$HOME_DIR/data/active" "$HOME_DIR/data/retired"
+jq -n '{schema:"fm-contributions.v1",task:"active",records:[
+  {url:"https://github.com/acme/widgets/pull/12",kind:"pr",checked_at:"2026-10-13T11:30:00Z",error:null,observation:{head:"0123456789012345678901234567890123456789",state:"merged",draft:false,mergeable:"mergeable"}},
+  {url:"https://github.com/acme/widgets/issues/13",kind:"issue",checked_at:"2026-10-13T11:31:00Z",error:null,observation:{state:"open",ready:true}}
+]}' > "$HOME_DIR/data/active/contributions.json"
+jq -n '{schema:"fm-contributions.v1",task:"retired",records:[
+  {url:"https://github.com/acme/widgets/pull/12",kind:"pr",retired:{actor:"captain",reason:"settled",at:"2026-10-13T10:00:00Z"},observation:{state:"merged"}},
+  {url:"https://github.com/acme/widgets/issues/13",kind:"issue",retired:{actor:"captain",reason:"settled",at:"2026-10-13T10:00:00Z"},observation:{state:"open",ready:false}}
+]}' > "$HOME_DIR/data/retired/contributions.json"
+pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 12 2026-10-13T11:00:00Z 0 > "$FEED/detail-12.json"
+issue 13 2026-10-13T11:10:00Z | jq -s . > "$FEED/issues-1.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'active PR and issue contributions'
+bundle
+jq -e '(.evidence | length) == 2 and all(.evidence[]; (.linked_contributions | length) == 1 and .linked_contributions[0].task == "active") and (any(.evidence[]; .kind == "merged-pr" and .linked_contributions[0].observation.state == "merged")) and (any(.evidence[]; .kind == "new-issue" and .linked_contributions[0].observation.ready == true))' "$OUT" >/dev/null || fail 'active contribution links or issue readiness missing'
+pass 'PR and issue events reuse only active linked observations'
+
+new_home
+config "$repo_sources"
 pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 12 2026-10-13T11:00:00Z 2 > "$FEED/detail-12.json"
 printf '[{"filename":"src/only","status":"added"}]\n' > "$FEED/files-12-1.json"
@@ -263,6 +283,19 @@ expect_code 2 "$STATUS" 'unsafe inventory symlink'
 bundle
 jq -e '.complete == false and .coverage[0].complete == false and (.coverage[0].reason | test("symlink|root")) and (.evidence | length == 0)' "$OUT" >/dev/null || fail 'unsafe symlink was not failed coverage'
 pass 'unsafe inventory symlink fails coverage'
+
+new_home
+mkdir -p "$HOME_DIR/skills"
+for number in $(seq 1 2001); do
+  : > "$HOME_DIR/skills/resource-$number.png"
+done
+config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'oversized skill directory'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("skill inventory limit"))' "$OUT" >/dev/null || fail 'non-Markdown directory entries bypassed inventory limit'
+jq -e '.sources.skills == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'oversized skill directory advanced checkpoint'
+pass 'every skill directory entry counts toward the inventory bound'
 
 new_home
 printf '%s\n' '- design - Design operations (host: local; root: /srv/design; home: /srv/design/home; scope: design and research; projects: app; added 2026-10-01)' \
