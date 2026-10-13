@@ -87,6 +87,8 @@ bash "$SB" label firstmate:fm-demo-task fm-demo-task claude 'claude-opus-5-5[1m]
   /home/u/.treehouse/firstmate-840e8b/17/firstmate
 tmux set-option -t firstmate 'status-format[0]' 'CUSTOM #{window_name}'
 bash "$SB" apply firstmate
+if out=$(bash "$SB" apply 2>&1); then fail "apply accepted an implicit session"; fi
+[ "$out" = 'usage: fm-statusbar.sh apply <session>' ] || fail "apply did not request an explicit session" "$out"
 [ "$(tmux show-options -wqv -t orca-view:fm-demo-task pane-border-status)" = bottom ] || fail "view window did not get the detail line"
 [ -z "$(tmux show-options -wqv -t unrelated pane-border-status)" ] || fail "an ungrouped window was changed"
 [ "$(tmux show-options -qv -t firstmate 'status-format[0]')" = 'CUSTOM #{window_name}' ] || fail "apply replaced a custom status line"

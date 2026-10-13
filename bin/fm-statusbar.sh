@@ -19,7 +19,7 @@
 #   fm-statusbar.sh sync
 #       Label every tmux window recorded in this home's state/*.meta, for
 #       windows spawned before the labels existed. Idempotent.
-#   fm-statusbar.sh apply [session]
+#   fm-statusbar.sh apply <session>
 #       Turn the detail line on for windows in <session>. Grouped view sessions
 #       share those window options, including views created later.
 #   fm-statusbar.sh usage <window>
@@ -161,8 +161,8 @@ cmd_sync() {
 
 cmd_apply() {
   local ses=${1:-} fmt win group group_id sid member_group target_sid
+  [ "$#" -eq 1 ] && [ -n "$ses" ] || { echo 'usage: fm-statusbar.sh apply <session>' >&2; return 2; }
   command -v tmux >/dev/null 2>&1 || return 0
-  [ -n "$ses" ] || ses=$(tmux display-message -p '#S' 2>/dev/null) || return 0
   fmt=$(fm_sb_format)
   while IFS= read -r win; do
     [ -n "$win" ] || continue

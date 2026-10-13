@@ -1109,8 +1109,8 @@ SH
   PATH="$root/bin:$RUN_PATH" tmux new-window -d -t fleet: -n worker 'sleep 600'
   PATH="$root/bin:$RUN_PATH" tmux new-session -d -s unrelated 'sleep 600'
   pane=$(PATH="$root/bin:$RUN_PATH" tmux display-message -p -t fleet:primary '#{pane_id}')
-  FM_HOME="$root" PATH="$root/bin:$RUN_PATH" bash "$ROOT/bin/fm-statusbar.sh" \
-    label "$pane" secondmate-task codex gpt-6-sol high "$root"
+  FM_HOME="$root" FM_STATE_OVERRIDE="$root/parent-state" PATH="$root/bin:$RUN_PATH" \
+    bash "$ROOT/bin/fm-statusbar.sh" label "$pane" run-statusbar codex gpt-6-sol high "$root"
   cat >"$root/state/worker.meta" <<META
 backend=tmux
 window=fleet:worker
@@ -1121,8 +1121,10 @@ worktree=$root
 META
   out=$(TMUX_PANE="$pane" RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
   assert_not_contains "$out" 'READ-ONLY SESSION' "statusbar fixture failed to acquire its own lock"
-  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_task)" = secondmate-task ] \
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_task)" = run-statusbar ] \
     || fail "session start overwrote a spawned secondmate task"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_state)" = "$root/parent-state" ] \
+    || fail "session start claimed a spawned secondmate label"
   [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_model)" = gpt-6-sol ] \
     || fail "session start overwrote the spawned model"
   [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_effort)" = high ] \
@@ -1144,6 +1146,21 @@ META
     || fail "ordinary primary did not receive its launch model"
   [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_effort)" = xhigh ] \
     || fail "ordinary primary did not receive its launch effort"
+  FM_HOME="$root" PATH="$root/bin:$RUN_PATH" bash "$ROOT/bin/fm-statusbar.sh" \
+    label "$pane" run-statusbar pi xai/grok-4.5 high "$root/old-home"
+  out=$(TMUX_PANE="$pane" FM_PRIMARY_MODEL= FM_PRIMARY_EFFORT= \
+    RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
+  assert_not_contains "$out" 'READ-ONLY SESSION' "relaunched primary fixture lost its lock"
+  [ -z "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_model)" ] \
+    || fail "relaunch kept a stale primary model"
+  [ -z "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_effort)" ] \
+    || fail "relaunch kept stale primary effort"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_provider)" != grok ] \
+    || fail "relaunch kept a stale primary provider"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_account)" != xai ] \
+    || fail "relaunch kept a stale primary account"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_wt)" = run-statusbar ] \
+    || fail "relaunch kept a stale primary worktree"
   PATH="$root/bin:$RUN_PATH" tmux set-option -t fleet status-right ''
   out=$(unset TMUX_PANE; RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
   assert_not_contains "$out" 'READ-ONLY SESSION' "detached statusbar fixture lost its lock"

@@ -714,8 +714,10 @@ if [ "$READ_ONLY" -eq 0 ]; then
       PRIMARY_DISPLAY_MODEL=${PRIMARY_DISPLAY_MODEL:-${CLAUDE_MODEL:-}}
       PRIMARY_DISPLAY_EFFORT=${PRIMARY_DISPLAY_EFFORT:-${CLAUDE_CODE_EFFORT_LEVEL:-}}
     fi
-    if { [ -n "$PRIMARY_DISPLAY_MODEL" ] && [ -n "$PRIMARY_DISPLAY_EFFORT" ]; } \
-      || [ -z "$(tmux show-options -wqv -t "$TMUX_PANE" @fm_task 2>/dev/null)" ]; then
+    PRIMARY_EXISTING_TASK=$(tmux show-options -wqv -t "$TMUX_PANE" @fm_task 2>/dev/null) || PRIMARY_EXISTING_TASK=
+    PRIMARY_EXISTING_STATE=$(tmux show-options -wqv -t "$TMUX_PANE" @fm_state 2>/dev/null) || PRIMARY_EXISTING_STATE=
+    if [ -z "$PRIMARY_EXISTING_TASK" ] \
+      || { [ "$PRIMARY_EXISTING_TASK" = "$PRIMARY_LABEL" ] && [ "$PRIMARY_EXISTING_STATE" = "$STATE" ]; }; then
       "$SCRIPT_DIR/fm-statusbar.sh" label "$TMUX_PANE" "$PRIMARY_LABEL" "$PRIMARY_HARNESS" \
         "$PRIMARY_DISPLAY_MODEL" "$PRIMARY_DISPLAY_EFFORT" "$FM_HOME" >/dev/null 2>&1 || true
     fi
