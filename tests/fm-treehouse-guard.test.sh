@@ -367,6 +367,7 @@ test_sweep_sizes_a_present_per_home_pool_once() {
   local world home pool out
   world=$(make_world per-home-size)
   home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
   pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
     XDG_STATE_HOME="$world/xdg-state" \
     bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
@@ -390,6 +391,7 @@ SH
   assert_equals "treehouse-guard: worktree copies use 6.0 GB under $pool/.treehouse (limit 5 GB)" "$out" \
     "the per-home pool's size was not reported once"
 
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
   pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
     XDG_STATE_HOME="$world/user/.treehouse/xdg-state" \
     bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
