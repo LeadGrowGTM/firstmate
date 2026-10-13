@@ -848,9 +848,9 @@ The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows
 Waiting covers a permission prompt and a question the agent asks.
 Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
 A relaunch, including a worker account switchover, opens a fresh tab and closes the previous one once the relaunch has gone through.
-Replacement leaves a prior view alone if current ownership validation rejects its recorded name.
+The common close command leaves a view alone if its current tracking no longer identifies the calling task's exact tmux target, or that target cannot be resolved.
 If a fresh tab cannot open, the relaunch keeps the previous recorded tab and its identity.
-Cleanup attempts to close the recorded tab, and it removes the view session only when Firstmate created that session, no other client is attached, and the original base session still shares its windows.
+Cleanup attempts to close the recorded tab, and it removes the view session only when it still tracks this task, no other client is attached, and the original base session still shares its windows.
 If the base is gone or its name belongs to an unrelated session, the view survives to keep its agent windows alive.
 Orca refuses to close a pinned tab, so Firstmate leaves a pinned tab open and reports it rather than unpinning it.
 When Orca, its command line, or the Orca project is unavailable, the spawn continues without a new tab and prints one note.

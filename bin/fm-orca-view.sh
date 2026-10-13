@@ -7,7 +7,7 @@
 #   fm-orca-view.sh open --target <session:window> --view-session <name> [--title <text>] [--identity-file <path>]
 #   fm-orca-view.sh window <@N> [--title <text>]
 #   fm-orca-view.sh identity --file <path>
-#   fm-orca-view.sh close --handle <terminal-handle> [--view-session <name>]
+#   fm-orca-view.sh close --handle <terminal-handle> [--view-session <name> --target <session:window>]
 #   fm-orca-view.sh follow --view-session <name> [--socket <path>]
 #
 # Orca shows only its own terminals, so a tmux window becomes visible there when
@@ -52,7 +52,8 @@
 #           `open` with view session `orca-w<N>` and the title
 #           <session>:<window-name> unless --title is given, so it prints the
 #           same three lines and the tab follows the window the same way;
-#           close it with `close --handle <handle> --view-session orca-w<N>`.
+#           close it with `close --handle <handle> --view-session orca-w<N>
+#           --target <session>:<@N>`.
 #           An unknown or malformed id is exit 1 or 2, and an unreachable
 #           Orca is exit 3 with a note saying why, as for every Orca step.
 # identity  waits up to 15 seconds for that file, then prints one
@@ -65,7 +66,9 @@
 #           endpoint file at every hook call.
 # close     closes the tab by its recorded handle, then removes
 #           --view-session when given, only if it is a grouped session that is
-#           not its group's base and the base still shares its windows.
+#           still tracked for the calling task's exact --target, is not its
+#           group's base, and the base still shares its windows. A missing or
+#           mismatched target leaves the session alone with a skip note.
 #           A surviving view keeps its windows when the base is gone or its
 #           name has been reused by an unrelated session.
 #           Orca refuses to close a pinned tab; that tab
@@ -490,11 +493,12 @@ cmd_identity() {
 }
 
 cmd_close() {
-  local handle='' view='' out attached
+  local handle='' view='' target='' out attached expected='' tracked
   while [ $# -gt 0 ]; do
     case "$1" in
     --handle) handle=${2:-}; shift 2 || die_usage "--handle needs a value" ;;
     --view-session) view=${2:-}; shift 2 || die_usage "--view-session needs a value" ;;
+    --target) target=${2:-}; shift 2 || die_usage "--target needs a value" ;;
     *) die_usage "unknown argument: $1" ;;
     esac
   done
@@ -508,6 +512,14 @@ cmd_close() {
     note "Orca did not close view tab $handle: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
   fi
   [ -n "$view" ] || return 0
+  if [ -n "$target" ]; then
+    expected=$(resolve_target "$target" >/dev/null 2>&1 && printf '%s\n' "$WINDOW_ID") || expected=
+  fi
+  tracked=$(tmux show-options -v -t "=$view:" @fm_view_window 2>/dev/null) || tracked=
+  if [ -z "$expected" ] || [ "$tracked" != "$expected" ]; then
+    echo "note: skipped Orca view session $view: current tracking does not identify task target ${target:-unknown}" >&2
+    return 0
+  fi
   if view_base_survives "$view"; then
     attached=$(tmux display-message -p -t "=$view:" '#{session_attached}' 2>/dev/null) || attached=
     [ "$attached" != 0 ] || tmux kill-session -t "=$view" 2>/dev/null || true

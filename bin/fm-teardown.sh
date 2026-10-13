@@ -3215,12 +3215,9 @@ teardown_close_orca_view() {
   local record=$1 handle
   handle=$(meta_value "$record" orca_view_handle)
   [ -n "$handle" ] || return 0
-  if [ "$(meta_value "$record" orca_view_owned)" = 1 ]; then
-    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$handle" \
-      --view-session "$(meta_value "$record" orca_view_session)" || true
-  else
-    "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$handle" || true
-  fi
+  "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$handle" \
+    --view-session "$(meta_value "$record" orca_view_session)" \
+    --target "$(meta_value "$record" window)" || true
 }
 
 cleanup_firstmate_home_children() {
@@ -3716,7 +3713,7 @@ elif [ "$BACKEND" != orca ] && [ "$TEARDOWN_WINDOWLESS" != 1 ]; then
     || endpoint_close_refusal "$ID" "$BACKEND" "$T" 1 || exit 1
 fi
 # The Orca view tab spawn opened for this task (config/orca-view-tabs), closed
-# by its recorded handle; its view session goes only when spawn created it.
+# by its recorded handle; close verifies the view still tracks this task.
 # Every Orca failure leaves a one-line note and the cleanup goes on.
 teardown_close_orca_view "$META"
 if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
