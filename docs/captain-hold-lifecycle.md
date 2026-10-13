@@ -56,6 +56,9 @@ It works in this order:
 5. It verifies the hold and timestamp.
 
 Publishing the stamp first ensures a snapshot cannot observe a newly captain-held task without the timestamp that defines its age.
+Decision option copy lives in that task's body and is projected into Bearings across owning homes.
+[`bin/fm-captain-hold.sh --help`](../bin/fm-captain-hold.sh) owns the option format and dry-run-first legacy import command; the import never deletes its source file.
+The drain flags an open `needs-decision` task/key without a matching local captain-held task, and discloses an unavailable backlog check rather than claiming the home is clear.
 
 Repeat and edge cases:
 
