@@ -11,6 +11,13 @@ SB="$ROOT/bin/fm-statusbar.sh"
 fail() { printf 'not ok - %s\n' "$1" >&2; [ -z "${2:-}" ] || printf '%s\n' "$2" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
+statusbar() {  # <script> <explicit-private-socket> <command> [args...]
+  local script=${1-} socket=${2-}
+  [ -n "$socket" ] || { printf 'statusbar fixture requires an explicit private socket\n' >&2; return 2; }
+  shift 2
+  bash "$script" --socket "$socket" "$@"
+}
+
 command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 REAL_TMUX=$(command -v tmux)
@@ -66,6 +73,12 @@ tmux new-session -d -s firstmate -x 150 -y 20 -n fm-demo-task "sleep 600" || fai
 tmux new-window -d -t firstmate: -n bare "sleep 600"
 tmux new-session -d -t firstmate -s orca-view -x 150 -y 20
 tmux new-session -d -s unrelated -x 150 -y 20 "sleep 600"
+SOCKET_PATH=$(tmux display-message -p -t firstmate '#{socket_path}')
+[ -n "$SOCKET_PATH" ] || fail "scratch server did not expose its private socket"
+if statusbar "$SB" >/dev/null 2>&1; then fail "statusbar helper accepted a missing socket"; fi
+if statusbar "$SB" '' label firstmate:bare refused claude opus high /tmp >/dev/null 2>&1; then
+  fail "statusbar helper accepted an empty socket"
+fi
 
 # Render the bottom of a pane at a client width through an attached view.
 render() {  # <session> <width> <expected>
@@ -86,20 +99,20 @@ render() {  # <session> <width> <expected>
 }
 
 # --- label + apply: grouped view sessions share window options ---
-bash "$SB" label firstmate:fm-demo-task fm-demo-task claude 'claude-opus-5-5[1m]' high \
+statusbar "$SB" "$SOCKET_PATH" label firstmate:fm-demo-task fm-demo-task claude 'claude-opus-5-5[1m]' high \
   /home/u/.treehouse/firstmate-840e8b/17/firstmate
 [ "$(tmux show-options -wqv -t firstmate:fm-demo-task @fm_wt)" = firstmate/17 ] || fail "Treehouse direct label lost its slot"
 mkdir -p "$WORK/slots"
 : >"$WORK/slots/treehouse-state.json"
 tmux new-window -d -t firstmate: -n custom-pool 'sleep 600'
-bash "$SB" label firstmate:custom-pool custom-pool claude opus high "$WORK/slots/1/project"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:custom-pool custom-pool claude opus high "$WORK/slots/1/project"
 [ "$(tmux show-options -wqv -t firstmate:custom-pool @fm_wt)" = project/1 ] || fail "custom Treehouse direct label lost its slot"
 tmux new-window -d -t firstmate: -n numeric-home 'sleep 600'
-bash "$SB" label firstmate:numeric-home numeric-home claude opus high /home/u/homes/2026/firstmate
+statusbar "$SB" "$SOCKET_PATH" label firstmate:numeric-home numeric-home claude opus high /home/u/homes/2026/firstmate
 [ "$(tmux show-options -wqv -t firstmate:numeric-home @fm_wt)" = firstmate ] || fail "ordinary numeric-parent home gained a slot"
 tmux set-option -t firstmate 'status-format[0]' 'CUSTOM #{window_name}'
-bash "$SB" apply firstmate
-if out=$(bash "$SB" apply 2>&1); then fail "apply accepted an implicit session"; fi
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
+if out=$(statusbar "$SB" "$SOCKET_PATH" apply 2>&1); then fail "apply accepted an implicit session"; fi
 [ "$out" = 'usage: fm-statusbar.sh apply <session>' ] || fail "apply did not request an explicit session" "$out"
 [ "$(tmux show-options -wqv -t orca-view:fm-demo-task pane-border-status)" = bottom ] || fail "view window did not get the detail line"
 [ -z "$(tmux show-options -wqv -t unrelated pane-border-status)" ] || fail "an ungrouped window was changed"
@@ -116,28 +129,28 @@ pass "apply preserves custom status and covers current and later grouped views"
 tmux new-session -d -s rename-base -n rename-task 'sleep 600'
 tmux new-session -d -t rename-base -s rename-view
 tmux rename-session -t rename-base renamed-base
-bash "$SB" apply renamed-base
+statusbar "$SB" "$SOCKET_PATH" apply renamed-base
 tmux new-session -d -t renamed-base -s renamed-later
 [ "$(tmux show-options -qv -t renamed-later status-right)" = '#{E:pane-border-format}' ] || fail "renamed group late view missed the detail line"
 pass "renamed groups still format later views"
 
-bash "$SB" usage firstmate:fm-demo-task >/dev/null
+statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task >/dev/null
 i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-selected=$(bash "$SB" usage firstmate:fm-demo-task)
+selected=$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task)
 [ "$selected" = 'u cl:default32%' ] || fail "Claude pane did not select its quota row" "$selected"
 tmux new-window -d -t firstmate: -n fable "sleep 600"
-bash "$SB" label firstmate:fable fable claude fable high /home/u/fable
-[ "$(bash "$SB" usage firstmate:fable)" = 'u cl:default32%' ] || fail "Fable pane showed a model quota as account usage"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:fable fable claude fable high /home/u/fable
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:fable)" = 'u cl:default32%' ] || fail "Fable pane showed a model quota as account usage"
 tmux new-window -d -t firstmate: -n sonnet "sleep 600"
-bash "$SB" label firstmate:sonnet sonnet claude claude-3-5-sonnet high /home/u/sonnet
+statusbar "$SB" "$SOCKET_PATH" label firstmate:sonnet sonnet claude claude-3-5-sonnet high /home/u/sonnet
 [ "$(tmux show-options -wqv -t firstmate:sonnet @fm_model)" = '3-5-sonnet' ] || fail "quota identity changed the short model label"
-[ "$(bash "$SB" usage firstmate:sonnet)" = 'u cl:default32%' ] || fail "Sonnet pane showed a model quota as account usage"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:sonnet)" = 'u cl:default32%' ] || fail "Sonnet pane showed a model quota as account usage"
 tmux new-window -d -t firstmate: -n product "sleep 600"
-bash "$SB" label firstmate:product product claude special-product high /home/u/product
-[ "$(bash "$SB" usage firstmate:product)" = 'u cl:default32%' ] || fail "product quota appeared as account usage"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:product product claude special-product high /home/u/product
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:product)" = 'u cl:default32%' ] || fail "product quota appeared as account usage"
 pass "model and product quotas do not change account-wide usage"
-bash "$SB" apply firstmate
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
 
 tmux select-window -t orca-view:fm-demo-task
 wide=$(render orca-view 160 'u cl:default32%')
@@ -182,14 +195,14 @@ case "$compact" in
 esac
 
 tmux new-window -d -t firstmate: -n codex-home "sleep 600"
-bash "$SB" label firstmate:codex-home cx-home codex gpt-6-sol high /home/u/codex
-bash "$SB" apply firstmate
+statusbar "$SB" "$SOCKET_PATH" label firstmate:codex-home cx-home codex gpt-6-sol high /home/u/codex
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
 tmux select-window -t orca-view:codex-home
 home_usage=$(render orca-view 40 'u cx:codex-home99.5%')
 case "$home_usage" in *'u cx:codex-home99.5%'*) ;; *) fail "native Codex selected another account" "$home_usage" ;; esac
 tmux new-window -d -t firstmate: -n pi-work "sleep 600"
-bash "$SB" label firstmate:pi-work pi-work pi openai-codex-work/gpt-6-sol high /home/u/pi
-bash "$SB" apply firstmate
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-work pi-work pi openai-codex-work/gpt-6-sol high /home/u/pi
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
 tmux select-window -t orca-view:pi-work
 work_usage=$(render orca-view 40 'u cx:openai~ex-work99.5%')
 case "$work_usage" in *'u cx:openai~ex-work99.5%'*) pass "each pane shows its selected account usage" ;; *) fail "Pi selected another account" "$work_usage" ;; esac
@@ -200,67 +213,67 @@ narrow_work=$(render orca-view 60 'u cx:openai~ex-work99.5%')
 case "$narrow_work" in *'u cx:openai~ex-work99.5%'*'gpt-6-sol'*) pass "usage stays visible ahead of variable-width fields" ;; *) fail "narrow account usage or qualified model was clipped" "$narrow_work" ;; esac
 
 tmux new-window -d -t firstmate: -n pi-work2 "sleep 600"
-bash "$SB" label firstmate:pi-work2 pi-work2 pi openai-codex-work2/gpt-6-sol high /home/u/pi
-bash "$SB" apply firstmate
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-work2 pi-work2 pi openai-codex-work2/gpt-6-sol high /home/u/pi
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
 tmux select-window -t orca-view:pi-work2
 work2_usage=$(render orca-view 40 'u cx:openai~x-work299.5%')
 case "$work2_usage" in *'u cx:openai~x-work299.5%'*) ;; *) fail "work and work2 labels collided at equal usage" "$work2_usage" ;; esac
 
 tmux new-window -d -t firstmate: -n pi-home "sleep 600"
-bash "$SB" label firstmate:pi-home pi-home pi openai-codex-home/gpt-6-sol high /home/u/pi
-bash "$SB" apply firstmate
-home2_usage=$(bash "$SB" usage firstmate:pi-home)
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-home pi-home pi openai-codex-home/gpt-6-sol high /home/u/pi
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
+home2_usage=$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-home)
 [ "$home2_usage" = 'u cx:openai~ex-home96%' ] || fail "distinct account keys collapsed into one label" "$home2_usage"
 pass "bounded account labels distinguish two Codex accounts"
 
 tmux new-window -d -t firstmate: -n opencode-usage "sleep 600"
-bash "$SB" label firstmate:opencode-usage opencode-usage opencode openai/gpt-5.6-sol high /home/u/opencode
+statusbar "$SB" "$SOCKET_PATH" label firstmate:opencode-usage opencode-usage opencode openai/gpt-5.6-sol high /home/u/opencode
 [ "$(tmux show-options -wqv -t firstmate:opencode-usage @fm_provider)" = codex ] || fail "OpenCode missed the shared Codex provider"
 [ "$(tmux show-options -wqv -t firstmate:opencode-usage @fm_model)" = gpt-5.6-sol ] || fail "OpenCode model retained an account prefix"
-[ "$(bash "$SB" usage firstmate:opencode-usage)" = 'u cx:default32%' ] || fail "OpenCode missed its Codex quota"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:opencode-usage)" = 'u cx:default32%' ] || fail "OpenCode missed its Codex quota"
 tmux new-window -d -t firstmate: -n opencode-claude "sleep 600"
-bash "$SB" label firstmate:opencode-claude opencode-claude opencode anthropic/claude-3-5-sonnet high /home/u/opencode
-[ "$(bash "$SB" usage firstmate:opencode-claude)" = 'u cl:default32%' ] || fail "OpenCode borrowed another provider or model quota"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:opencode-claude opencode-claude opencode anthropic/claude-3-5-sonnet high /home/u/opencode
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:opencode-claude)" = 'u cl:default32%' ] || fail "OpenCode borrowed another provider or model quota"
 tmux new-window -d -t firstmate: -n opencode-unknown "sleep 600"
-bash "$SB" label firstmate:opencode-unknown opencode-unknown opencode google/gemini high /home/u/opencode
-[ "$(bash "$SB" usage firstmate:opencode-unknown)" = 'u ?' ] || fail "OpenCode borrowed quota for an unknown provider"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:opencode-unknown opencode-unknown opencode google/gemini high /home/u/opencode
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:opencode-unknown)" = 'u ?' ] || fail "OpenCode borrowed quota for an unknown provider"
 pass "OpenCode uses the model provider or reports unknown usage"
 
 tmux new-window -d -t firstmate: -n high-used "sleep 600"
-bash "$SB" label firstmate:high-used high-used pi openai-codex-hi/gpt-6-sol high /home/u/pi
-[ "$(bash "$SB" usage firstmate:high-used)" = 'u cx:openai~odex-hi>99.9%' ] || fail "nonterminal high usage rounded to 100%"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:high-used high-used pi openai-codex-hi/gpt-6-sol high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:high-used)" = 'u cx:openai~odex-hi>99.9%' ] || fail "nonterminal high usage rounded to 100%"
 tmux new-window -d -t firstmate: -n low-used "sleep 600"
-bash "$SB" label firstmate:low-used low-used pi openai-codex-lo/gpt-6-sol high /home/u/pi
-[ "$(bash "$SB" usage firstmate:low-used)" = 'u cx:openai~odex-lo<0.1%' ] || fail "nonterminal low usage rounded to 0%"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:low-used low-used pi openai-codex-lo/gpt-6-sol high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:low-used)" = 'u cx:openai~odex-lo<0.1%' ] || fail "nonterminal low usage rounded to 0%"
 pass "nonterminal usage values remain distinct from endpoints"
 
 tmux new-window -d -t firstmate: -n pinned-claude "sleep 600"
-bash "$SB" label firstmate:pinned-claude pinned-claude claude opus high /home/u/claude /home/u/.claude/settings.json
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pinned-claude pinned-claude claude opus high /home/u/claude /home/u/.claude/settings.json
 [ "$(tmux show-options -wqv -t firstmate:pinned-claude @fm_account)" = default ] || fail "pinned Claude path became a quota account"
-[ "$(bash "$SB" usage firstmate:pinned-claude)" = 'u cl:default32%' ] || fail "pinned Claude missed default quota"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pinned-claude)" = 'u cl:default32%' ] || fail "pinned Claude missed default quota"
 pass "pinned Claude uses the shared default quota lane"
 
 tmux new-window -d -t firstmate: -n pi-fallback "sleep 600"
-bash "$SB" label firstmate:pi-fallback pi-fallback pi anthropic/opus high /home/u/pi
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-fallback pi-fallback pi anthropic/opus high /home/u/pi
 [ "$(tmux show-options -wqv -t firstmate:pi-fallback @fm_account)" = anthropic ] || fail "Pi model prefix did not select its quota lane"
-[ "$(bash "$SB" usage firstmate:pi-fallback)" = 'u cl:default32%' ] || fail "Pi lane did not fall back to the provider default"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-fallback)" = 'u cl:default32%' ] || fail "Pi lane did not fall back to the provider default"
 tmux new-window -d -t firstmate: -n pi-unknown "sleep 600"
-bash "$SB" label firstmate:pi-unknown pi-unknown pi google/gemini high /home/u/pi
-[ "$(bash "$SB" usage firstmate:pi-unknown)" = 'u ?' ] || fail "Pi borrowed quota for an unknown provider"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-unknown pi-unknown pi google/gemini high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-unknown)" = 'u ?' ] || fail "Pi borrowed quota for an unknown provider"
 pass "every quota lane can fall back to its provider default"
 
 tmux new-window -d -t firstmate: -n pi-grok "sleep 600"
-bash "$SB" label firstmate:pi-grok pi-grok pi xai/grok-4.5 high /home/u/pi
-[ "$(bash "$SB" usage firstmate:pi-grok)" = 'u gk:xai80%' ] || fail "Pi xAI model missed its Grok account quota"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-grok pi-grok pi xai/grok-4.5 high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-grok)" = 'u gk:xai80%' ] || fail "Pi xAI model missed its Grok account quota"
 tmux new-window -d -t firstmate: -n oc-grok "sleep 600"
-bash "$SB" label firstmate:oc-grok oc-grok opencode xai/grok-4.5 high /home/u/oc
-[ "$(bash "$SB" usage firstmate:oc-grok)" = 'u gk:default55%' ] || fail "OpenCode xAI model missed Grok quota"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:oc-grok oc-grok opencode xai/grok-4.5 high /home/u/oc
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:oc-grok)" = 'u gk:default55%' ] || fail "OpenCode xAI model missed Grok quota"
 tmux new-window -d -t firstmate: -n pi-signed-grok "sleep 600"
-bash "$SB" label firstmate:pi-signed-grok pi-signed-grok pi-signed xai/grok-4.5 high /home/u/pi-signed
-[ "$(bash "$SB" usage firstmate:pi-signed-grok)" = 'u gk:xai80%' ] || fail "Pi-signed xAI model missed Grok quota"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-signed-grok pi-signed-grok pi-signed xai/grok-4.5 high /home/u/pi-signed
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-signed-grok)" = 'u gk:xai80%' ] || fail "Pi-signed xAI model missed Grok quota"
 tmux new-window -d -t firstmate: -n agy "sleep 600"
-bash "$SB" label firstmate:agy agy agy default high /home/u/agy
-[ "$(bash "$SB" usage firstmate:agy)" = 'u ag:default60%' ] || fail "Agy status usage disappeared with the legacy chooser mapping"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:agy agy agy default high /home/u/agy
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:agy)" = 'u ag:default60%' ] || fail "Agy status usage disappeared with the legacy chooser mapping"
 pass "xAI models and Agy use only their selected status quota lanes"
 
 cat >"$WORK/state/sync-lane.meta" <<META
@@ -272,37 +285,37 @@ account=ordinary
 account_provider=xai
 worktree=/home/u/pi
 META
-bash "$SB" sync
+statusbar "$SB" "$SOCKET_PATH" sync
 [ "$(tmux show-options -wqv -t firstmate:pi-fallback @fm_account)" = openai-codex-work ] || fail "sync used a different quota lane than direct labeling"
 [ "$(tmux show-options -wqv -t firstmate:pi-fallback @fm_provider)" = codex ] || fail "sync let account metadata override the model's provider"
-[ "$(bash "$SB" usage firstmate:pi-fallback)" = 'u cx:openai~ex-work99.5%' ] || fail "synced Pi lane selected another account"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-fallback)" = 'u cx:openai~ex-work99.5%' ] || fail "synced Pi lane selected another account"
 pass "sync and direct labels use the same quota lane"
 
 tmux new-window -d -t firstmate: -n pi-scoped "sleep 600"
-bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-sol high /home/u/pi
-[ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u ?' ] || fail "an unrelated model scope borrowed default account usage"
-bash "$SB" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-astra high /home/u/pi
-[ "$(bash "$SB" usage firstmate:pi-scoped)" = 'u ?' ] || fail "matching model scope appeared as account usage"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-sol high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-scoped)" = 'u ?' ] || fail "an unrelated model scope borrowed default account usage"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-scoped pi-scoped pi openai-codex-scoped/gpt-6-astra high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-scoped)" = 'u ?' ] || fail "matching model scope appeared as account usage"
 pass "model-only accounts stay unknown without account-wide usage"
 
 tmux new-window -d -t firstmate: -n pi-unknown-account "sleep 600"
-bash "$SB" label firstmate:pi-unknown-account pi-unknown-account pi openai-codex-unknown/gpt-6-sol high /home/u/pi
-[ "$(bash "$SB" usage firstmate:pi-unknown-account)" = 'u ?' ] || fail "unknown exact account borrowed default quota"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-unknown-account pi-unknown-account pi openai-codex-unknown/gpt-6-sol high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-unknown-account)" = 'u ?' ] || fail "unknown exact account borrowed default quota"
 awk -F '\t' '$1 == "codex" && $2 == "openai-codex-unknown" && $3 == "?" { found=1 } END { exit !found }' \
   "$WORK/state/statusbar-usage.txt" || fail "unknown exact account vanished from quota cache"
 pass "unknown exact account presence blocks another account's usage"
 
 tmux new-window -d -t firstmate: -n pi-attention-account "sleep 600"
-bash "$SB" label firstmate:pi-attention-account pi-attention-account pi openai-codex-attention/gpt-6-sol high /home/u/pi
-[ "$(bash "$SB" usage firstmate:pi-attention-account)" = 'u ?' ] || fail "attention-only account borrowed default quota"
+statusbar "$SB" "$SOCKET_PATH" label firstmate:pi-attention-account pi-attention-account pi openai-codex-attention/gpt-6-sol high /home/u/pi
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:pi-attention-account)" = 'u ?' ] || fail "attention-only account borrowed default quota"
 awk -F '\t' '$1 == "codex" && $2 == "openai-codex-attention" && $3 == "?" { found=1 } END { exit !found }' \
   "$WORK/state/statusbar-usage.txt" || fail "attention-only account vanished from quota cache"
 pass "attention-only account presence blocks another account's usage"
 
 tmux new-window -d -t firstmate: -n primary "sleep 600"
 primary_pane=$(tmux display-message -p -t firstmate:primary '#{pane_id}')
-bash "$SB" label "$primary_pane" firstmate claude '' '' /home/u/firstmate
-bash "$SB" apply firstmate
+statusbar "$SB" "$SOCKET_PATH" label "$primary_pane" firstmate claude '' '' /home/u/firstmate
+statusbar "$SB" "$SOCKET_PATH" apply firstmate
 tmux select-window -t orca-view:primary
 primary=$(render orca-view 100 'u cl:default32%')
 case "$primary" in
@@ -319,7 +332,7 @@ case "$bare" in
 esac
 
 # --- no secrets, no injection through option values ---
-bash "$SB" label firstmate:bare 'x#(touch '"$WORK"'/pwned)#{pane_title}' claude 'm$(id)' high /tmp
+statusbar "$SB" "$SOCKET_PATH" label firstmate:bare 'x#(touch '"$WORK"'/pwned)#{pane_title}' claude "m\$(id)" high /tmp
 for opt in @fm_task @fm_model; do
   v=$(tmux show-options -wqv -t firstmate:bare "$opt")
   case "$v" in *'#'* | *'$'* | *'{'*) fail "option $opt kept format metacharacters" "$v" ;; esac
@@ -335,14 +348,14 @@ tmux kill-session -t orca-view 2>/dev/null || true
 i=0
 while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
-[ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "first usage read should be unknown before the cache exists"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "first usage read should be unknown before the cache exists"
 i=0
 while [ ! -s "$WORK/state/statusbar-usage.txt" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 awk -F '\t' '$1 == "claude" && $2 == "default" && $3 == 32 && NF == 3 { found=1 } END { exit !found }' "$WORK/state/statusbar-usage.txt" || fail "account-wide usage cache content"
-[ "$(bash "$SB" usage firstmate:fm-demo-task)" = "u cl:default32%" ] || fail "usage did not serve the selected account"
-bash "$SB" usage >/dev/null 2>&1 && fail "usage accepted an implicit target"
-bash "$SB" usage firstmate:fm-demo-task >/dev/null
-bash "$SB" usage firstmate:fm-demo-task >/dev/null
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task)" = "u cl:default32%" ] || fail "usage did not serve the selected account"
+statusbar "$SB" "$SOCKET_PATH" usage >/dev/null 2>&1 && fail "usage accepted an implicit target"
+statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task >/dev/null
+statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task >/dev/null
 sleep 0.5
 [ "$(wc -l <"$WORK/quota-calls")" -eq 1 ] || fail "usage refreshed more than once inside the TTL" "$(cat "$WORK/quota-calls")"
 grep -qi 'token\|secret\|key' "$WORK/state/statusbar-usage.txt" && fail "usage cache holds credential-like text"
@@ -350,26 +363,26 @@ pass "usage is a cached percentage figure refreshed at most once per TTL"
 
 touch -t 200001010000 "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt"
 touch "$WORK/quota-fail"
-[ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "expired quota cache was shown as current"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "expired quota cache was shown as current"
 i=0
 while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-[ "$(bash "$SB" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "failed refresh revived expired quota data"
+[ "$(statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task)" = 'u ?' ] || fail "failed refresh revived expired quota data"
 rm -f "$WORK/quota-fail"
 pass "expired usage stays unknown after a failed refresh"
 
 rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
 touch "$WORK/quota-fail"
-bash "$SB" usage firstmate:fm-demo-task >/dev/null
+statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task >/dev/null
 i=0
 while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-bash "$SB" usage firstmate:fm-demo-task >/dev/null
+statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task >/dev/null
 [ "$(wc -l <"$WORK/quota-calls")" -eq 1 ] || fail "failed quota refresh repeated inside TTL"
 rm -f "$WORK/quota-fail"
 pass "failed quota refresh observes the same TTL"
 
 rm -f "$WORK/state/statusbar-usage.txt" "$WORK/state/.statusbar-usage-attempt" "$WORK/quota-calls"
 touch "$WORK/quota-hang"
-bash "$SB" usage firstmate:fm-demo-task >/dev/null
+statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task >/dev/null
 i=0
 while [ -d "$WORK/state/.statusbar-usage.lock" ] && [ "$i" -lt 135 ]; do sleep 0.1; i=$((i + 1)); done
 [ ! -d "$WORK/state/.statusbar-usage.lock" ] || fail "stalled quota refresh outlived its bound"
@@ -402,7 +415,7 @@ model=gpt-6-sol
 effort=medium
 worktree=/home/u/.treehouse/proj-abc123/4/proj
 META
-bash "$SB" sync
+statusbar "$SB" "$SOCKET_PATH" sync
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_task)" = sync-task ] || fail "sync did not label the recorded window"
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_wt)" = proj/4 ] || fail "sync worktree label" "$(tmux show-options -wqv -t firstmate:bare @fm_wt)"
 pass "sync labels recorded windows from state metadata"
@@ -414,7 +427,7 @@ model=opus
 effort=high
 worktree=$WORK/slots/2/project
 META
-bash "$SB" sync
+statusbar "$SB" "$SOCKET_PATH" sync
 [ "$(tmux show-options -wqv -t firstmate:custom-pool @fm_wt)" = project/2 ] || fail "sync custom Treehouse worktree label"
 
 cat >"$WORK/state/sync-home.meta" <<META
@@ -424,7 +437,7 @@ model=opus
 effort=high
 worktree=/home/u/homes/2026/firstmate
 META
-bash "$SB" sync
+statusbar "$SB" "$SOCKET_PATH" sync
 [ "$(tmux show-options -wqv -t firstmate:numeric-home @fm_task)" = sync-home ] || fail "sync missed the ordinary numeric-parent home"
 [ "$(tmux show-options -wqv -t firstmate:numeric-home @fm_wt)" = firstmate ] || fail "sync gave an ordinary numeric-parent home a slot"
 
@@ -435,7 +448,7 @@ model=default
 effort=default
 worktree=/home/u/.treehouse/proj-abc123/4/proj
 META
-bash "$SB" sync
+statusbar "$SB" "$SOCKET_PATH" sync
 tmux select-window -t orca-later:bare
 unknown=$(render orca-later 100 'u ?')
 case "$unknown" in *'u ?'*sync-task*'?'*'?'*proj/4*) pass "metadata defaults render as unknown facts" ;; *) fail "metadata default rendered as a fact" "$unknown" ;; esac
@@ -470,13 +483,13 @@ while "$REAL_TMUX" -L "$SOCKET" has-session 2>/dev/null && [ "$i" -lt 50 ]; do s
 [ "$(tmux show-options -gqv status-style)" = 'bg=colour234,fg=colour250' ] || fail "theme did not survive server restart"
 [ "$(tmux show-options -gqv status-right)" = '#{E:pane-border-format}' ] || fail "restart lost the status format"
 [ "$(tmux show-options -gqv status-left)" = '' ] || fail "restart kept the stock session bar"
-bash "$WORK/installed repo/bin/fm-statusbar.sh" label restarted persist codex gpt-6-sol high /home/u/project
+statusbar "$WORK/installed repo/bin/fm-statusbar.sh" "$SOCKET_PATH" label restarted persist codex gpt-6-sol high /home/u/project
 printf 'codex\tdefault\t32\n' >"$WORK/state/statusbar-usage.txt"
 # The fixture uses codex-home; seed the account that labeling actually chose.
 printf 'codex\tcodex-home\t32\n' >>"$WORK/state/statusbar-usage.txt"
 # @fm_state binds jobs to the window's home, even if the command is launched
 # from another home's environment.
-other=$(FM_STATE_OVERRIDE="$WORK/other" bash "$SB" usage restarted)
+other=$(FM_STATE_OVERRIDE="$WORK/other" statusbar "$SB" "$SOCKET_PATH" usage restarted)
 [ "$other" = 'u cx:codex-home32%' ] || fail "status job read another home's quota cache" "$other"
 restarted=$(render restarted 120 'u cx:codex-home32%')
 case "$restarted" in *'u cx:codex-home32%'*persist*'gpt-6-sol high'*project*) ;;

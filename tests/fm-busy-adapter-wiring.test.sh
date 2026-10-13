@@ -292,7 +292,7 @@ test_claude_statusline_command_with_spaces() {
   cp -a "$ROOT/bin" "$space_root/bin"
   mkdir -p "$HOME_DIR/user-home"
   out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" \
-    CLAUDE_CONFIG_DIR= FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
+    CLAUDE_CONFIG_DIR='' FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$WT_DIR" TMUX=fake,1,0 \
     PATH="$FAKEBIN_DIR:$PATH" "$space_root/bin/fm-spawn.sh" \

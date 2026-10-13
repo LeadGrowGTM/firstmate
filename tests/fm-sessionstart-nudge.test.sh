@@ -1161,7 +1161,7 @@ META
     || fail "ordinary primary did not receive its launch effort"
   FM_HOME="$root" PATH="$root/bin:$RUN_PATH" bash "$ROOT/bin/fm-statusbar.sh" \
     label "$pane" run-statusbar pi xai/grok-4.5 high "$root/old-home"
-  out=$(TMUX_PANE="$pane" FM_PRIMARY_MODEL= FM_PRIMARY_EFFORT= \
+  out=$(TMUX_PANE="$pane" FM_PRIMARY_MODEL='' FM_PRIMARY_EFFORT='' \
     RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
   assert_not_contains "$out" 'READ-ONLY SESSION' "relaunched primary fixture lost its lock"
   [ -z "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_model)" ] \
