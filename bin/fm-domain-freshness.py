@@ -157,9 +157,8 @@ def instruction_file(path):
     return parts[-1] in ('agents.md', 'claude.md', 'gemini.md', 'skill.md') or ('skills' in parts[:-1] and parts[-1].endswith('.md'))
 
 
-def pr_instruction(repo, path, revision):
-    value = api('/repos/%s/contents/%s?ref=%s' % (repo, quote(path, safe='/'), quote(revision, safe='')))
-    if not isinstance(value, dict) or value.get('type') != 'file' or value.get('encoding') != 'base64' or not isinstance(value.get('content'), str):
+def instruction_excerpt(value):
+    if not isinstance(value, dict) or value.get('encoding') != 'base64' or not isinstance(value.get('content'), str):
         raise CoverageError('invalid PR instruction content')
     try:
         content = base64.b64decode(''.join(value['content'].splitlines()), validate=True)
@@ -170,6 +169,22 @@ def pr_instruction(repo, path, revision):
         raise CoverageError('PR instruction exceeds 1 MiB')
     return {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content),
             'content': excerpt[:4096], 'content_truncated': len(excerpt) > 4096}
+
+
+def pr_instruction(repo, path, revision):
+    value = api('/repos/%s/contents/%s?ref=%s' % (repo, quote(path, safe='/'), quote(revision, safe='')))
+    if not isinstance(value, dict) or value.get('type') != 'file':
+        raise CoverageError('invalid PR instruction content')
+    return instruction_excerpt(value)
+
+
+def pr_instruction_blob(repo, sha):
+    if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
+        raise CoverageError('missing PR instruction blob identity')
+    value = api('/repos/%s/git/blobs/%s' % (repo, sha))
+    if not isinstance(value, dict) or value.get('sha') != sha:
+        raise CoverageError('inconsistent PR instruction blob')
+    return instruction_excerpt(value)
 
 
 def forge(source, previous, now, contributions):
@@ -208,8 +223,11 @@ def forge(source, previous, now, contributions):
                         raise CoverageError('inconsistent merged PR detail')
                     base, head = detail.get('base', {}), detail.get('head', {})
                     base_repo = (base.get('repo') or {}).get('full_name')
+                    head_repo = (head.get('repo') or {}).get('full_name')
                     if not base.get('ref') or not base.get('sha') or not head.get('sha') or not isinstance(base_repo, str) or base_repo.casefold() != repo.casefold():
                         raise CoverageError('missing PR base/head metadata')
+                    if head_repo is not None and (not isinstance(head_repo, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', head_repo)):
+                        raise CoverageError('invalid PR head repository')
                     files = []
                     for file_rows in pages(prefix + '/pulls/' + str(number) + '/files'):
                         for item in file_rows:
@@ -220,12 +238,14 @@ def forge(source, previous, now, contributions):
                             if instruction_file(item['filename']) or (isinstance(old_path, str) and instruction_file(old_path)):
                                 file['instruction'] = {
                                     'before': None if item['status'] == 'added' else pr_instruction(base_repo, old_path, base['sha']),
-                                    'after': None if item['status'] == 'removed' else pr_instruction(actual_repo, item['filename'], head['sha'])}
+                                    'after': None if item['status'] == 'removed' else (
+                                        pr_instruction(head_repo, item['filename'], head['sha']) if head_repo else
+                                        pr_instruction_blob(base_repo, item.get('sha')))}
                             files.append(file)
                     if type(detail.get('changed_files')) is not int or len(files) != detail['changed_files']:
                         raise CoverageError('truncated PR changed-file set')
                     event.update(base={'repository': base_repo, 'ref': base['ref'], 'sha': base['sha']},
-                                 head={'repository': (head.get('repo') or {}).get('full_name'), 'ref': head.get('ref'), 'sha': head['sha']},
+                                 head={'repository': head_repo, 'ref': head.get('ref'), 'sha': head['sha']},
                                  files=files)
                 event['linked_contributions'] = contributions.get(url.casefold(), [])
                 events.append(event)
@@ -312,7 +332,7 @@ def inventory_snapshot(source):
         paths = [(root / item['path'], item['kind']) for item in source['files']]
     records = {}
     for path, kind in paths:
-        if source['kind'] == 'plugin-files' and kind in ('instruction', 'plugin-version') and not path.exists() and not path.is_symlink():
+        if source['kind'] == 'plugin-files' and kind in ('instruction', 'plugin-version', 'asset') and not path.exists() and not path.is_symlink():
             inventory_path(path.parent, roots)
             continue
         resolved = inventory_path(path, roots)

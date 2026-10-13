@@ -43,6 +43,8 @@ case "$path" in
     name=${path#*/contents/}; name=${name%%\?*}; name=${name##*/}
     revision=${path##*ref=}
     file="$FM_FAKE_FEED/content-$revision-$name.json" ;;
+  /repos/*/git/blobs/*)
+    file="$FM_FAKE_FEED/blob-${path##*/}.json" ;;
   /repos/*/pulls/*)
     number=${path##*/}
     file="$FM_FAKE_FEED/detail-$number.json" ;;
@@ -116,6 +118,21 @@ assert_equals '' "$OUT" 'disabled configuration must be silent'
 pass 'absent and disabled configuration are silent'
 
 new_home
+mkdir -p "$HOME_DIR/skills"
+printf '# Available\n' > "$HOME_DIR/skills/SKILL.md"
+jq -n --arg root "$HOME_DIR/skills" '{version:1,enabled:false,sources:[{id:"skills",kind:"skills",root:$root}]}' > "$HOME_DIR/config/domain-freshness.json"
+NO_JQ_BIN="$TMP_ROOT/no-jq-bin"
+BASH_BIN=$(command -v bash)
+mkdir -p "$NO_JQ_BIN"
+ln -s "$(command -v python3)" "$NO_JQ_BIN/python3"
+ln -s "$(command -v dirname)" "$NO_JQ_BIN/dirname"
+PATH="$NO_JQ_BIN" FM_HOME="$HOME_DIR" "$BASH_BIN" "$COLLECTOR" inventory skills > "$TMP_ROOT/inventory.json" 2> "$TMP_ROOT/inventory-stderr"
+expect_code 0 "$?" 'disabled explicit inventory without jq'
+jq -e '.source == "skills" and .inventory["SKILL.md"].content == "# Available\n"' "$TMP_ROOT/inventory.json" >/dev/null || fail 'explicit inventory did not read disabled configured source'
+assert_absent "$HOME_DIR/data/domain-freshness" 'explicit inventory wrote collector state'
+pass 'disabled configured inventory needs Python but not jq'
+
+new_home
 mkdir -p "$HOME_DIR/skills/one"
 printf '# One\n' > "$HOME_DIR/skills/one/SKILL.md"
 config "$(jq -nc --arg root "$HOME_DIR/skills" '[{id:"skills",kind:"skills",root:$root}]')"
@@ -175,7 +192,30 @@ collect "$HOME_DIR" 2026-10-14T12:00:00Z
 expect_code 0 "$STATUS" 'asset changes'
 bundle
 jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-change" and .before.kind == "asset" and .after.kind == "asset" and .before.digest != .after.digest and (.after | has("content") | not) and (.after | has("manifest") | not))' "$OUT" >/dev/null || fail 'effective asset change or digest-only evidence missing'
+rm "$HOME_DIR/plugins/template.txt"
+collect "$HOME_DIR" 2026-10-15T12:00:00Z
+expect_code 0 "$STATUS" 'removed plugin asset'
+bundle
+jq -e --arg path "$HOME_DIR/plugins/template.txt" '(.evidence | length) == 1 and .evidence[0].path == $path and .evidence[0].before.kind == "asset" and .evidence[0].after == null and .coverage[1].surfaces == ["plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'removed plugin asset did not produce a delta'
 pass 'skill and plugin assets change digest-only fingerprints'
+
+new_home
+mkdir -p "$HOME_DIR/plugins/optional"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/template.txt",kind:"asset"}]}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'initially absent plugin asset'
+bundle
+jq -e '.coverage[0].complete and .coverage[0].baseline and .coverage[0].surfaces == ["plugin-enablement","plugin-manifest"] and (.evidence | length) == 2' "$OUT" >/dev/null || fail 'initially absent plugin asset broke baseline'
+rmdir "$HOME_DIR/plugins/optional"
+ln -s "$HOME_DIR/plugins/missing" "$HOME_DIR/plugins/optional"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 2 "$STATUS" 'broken optional asset parent'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'broken optional asset parent claimed complete coverage'
+jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'broken optional asset parent advanced checkpoint'
+pass 'absent assets need an available parent and removals emit deltas'
 
 new_home
 mkdir -p "$HOME_DIR/plugins"
@@ -290,6 +330,48 @@ jq -e '(.evidence | length) == 2 and
     .files[2].instruction.before.content == "# Removed" and .files[2].instruction.after == null and
     .files[3].instruction.before.content == "# Old name" and .files[3].instruction.after.content == "# New name"))' "$OUT" >/dev/null || fail 'canonical casing or instruction content missing'
 pass 'canonical repository casing and changed instruction revisions retain provenance'
+
+new_home
+config "$repo_sources"
+pr 40 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 40 2026-10-13T11:00:00Z 1 | jq '.head.repo.full_name = "contrib/widgets"' > "$FEED/detail-40.json"
+printf '[{"filename":"AGENTS.md","status":"modified"}]\n' > "$FEED/files-40-1.json"
+instruction_content base-sha AGENTS.md '# Base revision'
+instruction_content head-sha AGENTS.md '# Fork revision'
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'fork PR instruction content'
+bundle
+jq -e '.evidence[0].head.repository == "contrib/widgets" and .evidence[0].files[0].instruction.before.content == "# Base revision" and .evidence[0].files[0].instruction.after.content == "# Fork revision"' "$OUT" >/dev/null || fail 'fork instruction content was not captured'
+assert_grep '/repos/contrib/widgets/contents/AGENTS.md?ref=head-sha' "$FEED/requests" 'fork head repository was not queried'
+assert_no_grep '/repos/acme/widgets/contents/AGENTS.md?ref=head-sha' "$FEED/requests" 'fork head read used base repository'
+pass 'fork instruction after content comes from its head repository'
+
+deleted_blob_content='# Deleted fork revision'
+deleted_blob_sha=$(printf '%s' "$deleted_blob_content" | git hash-object --stdin)
+new_home
+config "$repo_sources"
+pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
+jq -n --arg sha "$deleted_blob_sha" '[{filename:"AGENTS.md",status:"added",sha:$sha}]' > "$FEED/files-41-1.json"
+jq -n --arg sha "$deleted_blob_sha" --arg content "$(printf '%s' "$deleted_blob_content" | base64 | tr -d '\n')" '{sha:$sha,encoding:"base64",content:$content}' > "$FEED/blob-$deleted_blob_sha.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'deleted fork blob content'
+bundle
+jq -e '.evidence[0].head.repository == null and .evidence[0].files[0].instruction.before == null and .evidence[0].files[0].instruction.after.content == "# Deleted fork revision"' "$OUT" >/dev/null || fail 'deleted fork instruction blob was not captured'
+assert_grep "/repos/acme/widgets/git/blobs/$deleted_blob_sha" "$FEED/requests" 'deleted fork blob was not queried'
+pass 'deleted fork uses PR file blob when available'
+
+new_home
+config "$repo_sources"
+pr 41 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 41 2026-10-13T11:00:00Z 1 | jq '.head.repo = null' > "$FEED/detail-41.json"
+jq -n --arg sha "$deleted_blob_sha" '[{filename:"AGENTS.md",status:"added",sha:$sha}]' > "$FEED/files-41-1.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'unavailable deleted fork blob'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'unavailable deleted fork blob claimed complete coverage'
+jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'unavailable deleted fork blob advanced checkpoint'
+pass 'unavailable deleted fork blob leaves explicit incomplete coverage'
 
 new_home
 config "$repo_sources"
