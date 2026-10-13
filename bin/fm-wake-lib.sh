@@ -1624,23 +1624,22 @@ fm_treehouse_worktree_check() {  # <fm-home> <project> <worktree>
 }
 
 fm_treehouse_pool_check() {  # <fm-home> <project> <treehouse-home>
-  local home project pool boundary label
+  local home project git origin pool boundary label
   home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
   project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
   [ -n "${3:-}" ] || return 1
-  pool=$(HOME=$3 python3 - "$project" <<'PY'
+  git=$(type -P git) || return 1
+  origin=$("$git" -C "$project" remote get-url origin 2>/dev/null) || origin=$project
+  pool=$(HOME=$3 python3 - "$project" "$origin" <<'PY'
 import hashlib
 import os
 from pathlib import Path
-import subprocess
 import sys
 
 try:
     import tomllib
     project = Path(sys.argv[1])
     user = Path(os.environ["HOME"])
-    if os.environ.get("TREEHOUSE_ROOT"):
-        raise ValueError("TREEHOUSE_ROOT prevents a reliable pool check")
     repo_config = project / "treehouse.toml"
     user_config = user / ".config/treehouse/config.toml"
     config = repo_config if repo_config.exists() else user_config
@@ -1662,11 +1661,7 @@ try:
             base = project / base
     else:
         base = user
-    origin = subprocess.run(
-        ["git", "remote", "get-url", "origin"], cwd=project,
-        capture_output=True, text=True, check=False,
-    )
-    key = origin.stdout.strip() if origin.returncode == 0 else str(project)
+    key = sys.argv[2]
     name = f"{project.name}-{hashlib.sha256(key.encode()).hexdigest()[:6]}"
     print((base / ".treehouse" / name).resolve())
 except (OSError, RuntimeError, ValueError, ImportError) as error:

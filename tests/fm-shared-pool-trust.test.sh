@@ -97,7 +97,9 @@ case "${1:-}" in
             command=$(cat "$pending")
             rm -f "$pending"
             printf '%s\n' "$command" >> "$FM_FAKE_PANE_LOG"
-            if [ "$command" = 'treehouse get' ] && [ -n "${FM_FAKE_TREEHOUSE_INITIAL_PATH:-}" ]; then
+            if { [ "$command" = 'treehouse get' ] ||
+              [ "$command" = "HOME='${FM_TEST_SPAWN_USER_HOME:-}' treehouse get" ]; } \
+              && [ -n "${FM_FAKE_TREEHOUSE_INITIAL_PATH:-}" ]; then
               mkdir -p "$(dirname "$FM_FAKE_TREEHOUSE_INITIAL_PATH")"
               git -C "${FM_FAKE_TREEHOUSE_INITIAL_PROJECT:?}" worktree add --quiet --detach \
                 "$FM_FAKE_TREEHOUSE_INITIAL_PATH" || exit 1
@@ -342,7 +344,8 @@ test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree() {
     FM_FAKE_EXIT_FLAG="$case_dir/exited" run_spawn "$foreign" "$id")
   status=$?
   expect_code 0 "$status" "spawn should launch in this home's own worktree"$'\n'"$out"
-  assert_exact_line "treehouse get" "$pane_log" "spawn did not ask the shared pool first"
+  assert_exact_line "HOME='$CASE_USER_HOME' treehouse get" "$pane_log" \
+    "spawn did not ask the shared pool under the operator HOME"
   assert_exact_line "exit" "$pane_log" \
     "spawn did not leave the other clone's copy, so treehouse never took it back"
   assert_no_grep "args=return --force $foreign" "$tree_log" \
@@ -597,7 +600,8 @@ test_spawn_keeps_the_shared_copy_of_its_own_clone() {
   out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" run_spawn "$own" "$id")
   status=$?
   expect_code 0 "$status" "a copy of this clone should launch from the shared pool"$'\n'"$out"
-  assert_exact_line "treehouse get" "$pane_log" "the launch did not send treehouse get"
+  assert_exact_line "HOME='$CASE_USER_HOME' treehouse get" "$pane_log" \
+    "the launch did not send treehouse get under the operator HOME"
   assert_no_exact_line "exit" "$pane_log" "the launch left a copy of its own clone"
   [ ! -s "$tree_log" ] || fail "a copy of this clone still called treehouse itself: $(cat "$tree_log")"
   assert_grep "worktree=$own" "$CASE_HOME/state/$id.meta" "spawn did not record the shared copy"
@@ -716,7 +720,7 @@ test_shasum_only_path_names_the_pool_from_the_home() {
 }
 
 test_initial_get_checks_returned_worktree() {
-  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return complete_on_sleep out status
+  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return complete_on_sleep override_root out status
   for variant in inside outside unconfirmed pending; do
     id="pool-placement-initial-$variant"
     case_dir=$TMP_ROOT/$id
@@ -741,10 +745,12 @@ test_initial_get_checks_returned_worktree() {
     [ "$variant" != pending ] || hold_return=1
     complete_on_sleep=
     case "$variant" in inside) complete_on_sleep=1 ;; esac
+    override_root=
+    [ "$variant" != outside ] || override_root=$CASE_HOME/ignored-treehouse-root
     : > "$pane_log"
     : > "$tree_log"
     status=0
-    out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    out=$(TREEHOUSE_ROOT="${override_root:-}" FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
       FM_FAKE_TREEHOUSE_INITIAL_PATH="$allocated" \
       FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
       FM_FAKE_TREEHOUSE_INITIAL_LEASE="$lease" FM_FAKE_CWD_FAIL_AFTER_EXIT="$fail_cwd" \
@@ -752,7 +758,8 @@ test_initial_get_checks_returned_worktree() {
       FM_FAKE_TREEHOUSE_COMPLETE_ON_SLEEP="$complete_on_sleep" \
       FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" FM_FAKE_EXIT_FLAG="$case_dir/exited" \
       run_spawn "$reported" "$id") || status=$?
-    assert_exact_line 'treehouse get' "$pane_log" "$variant: initial get was not sent"
+    assert_exact_line "HOME='$CASE_USER_HOME' treehouse get" "$pane_log" \
+      "$variant: initial get did not use the operator HOME"
     [ -d "$allocated" ] || fail "$variant: fake Treehouse did not allocate a worktree"
     if [ "$variant" = inside ]; then
       [ "$status" -ne 0 ] || fail "inside: spawn accepted the allocated worktree"$'\n'"$out"
@@ -832,7 +839,7 @@ test_pool_preflight_refuses_initial_get() {
     [ "$status" -ne 0 ] || fail "$variant: unsafe pool was accepted"$'\n'"$out"
     assert_contains "$out" 'treehouse pool ' "$variant: refusal did not name the pool"
     assert_contains "$out" 'is inside Firstmate home' "$variant: refusal did not name the boundary"
-    assert_no_exact_line 'treehouse get' "$pane_log" "$variant: initial get was called"
+    assert_no_grep 'treehouse get' "$pane_log" "$variant: initial get was called"
     [ ! -s "$tree_log" ] || fail "$variant: Treehouse was called before pool refusal"
     [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "$variant: refusal published a task"
   done
@@ -860,12 +867,50 @@ test_pool_preflight_refuses_fallback_get() {
   [ "$status" -ne 0 ] || fail "unsafe fallback pool was accepted"$'\n'"$out"
   assert_contains "$out" 'treehouse pool ' "fallback refusal did not name the pool"
   assert_contains "$out" 'is inside Firstmate home' "fallback refusal did not name the boundary"
-  assert_exact_line 'treehouse get' "$pane_log" "initial get was skipped"
+  assert_exact_line "HOME='$CASE_USER_HOME' treehouse get" "$pane_log" "initial get was skipped"
   assert_exact_line 'exit' "$pane_log" "foreign copy was not exited"
   assert_no_exact_line "args=get --lease --lease-holder $id" "$tree_log" \
     "fallback get was called for an unsafe pool"
   [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "fallback refusal published a task"
   pass "fallback pool preflight refuses before leasing"
+}
+
+test_pool_preflight_uses_operator_git_for_fallback_hash() {
+  local id=pool-preflight-fallback-hash case_dir=$TMP_ROOT/pool-preflight-fallback-hash
+  local project foreign pane_log tree_log linked_pool operator_origin synthetic_origin out status=0
+  CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+  prepare_spawn_home "$case_dir" "$id"
+  project=$CASE_HOME/projects/widget
+  git -C "$project" remote set-url origin fm-operator-only:widget
+  git config --file "$CASE_USER_HOME/.gitconfig" "url.$CASE_URL.insteadOf" fm-operator-only:widget
+  operator_origin=$(env -u GIT_CONFIG_GLOBAL HOME="$CASE_USER_HOME" git -C "$project" remote get-url origin)
+  synthetic_origin=$(env -u GIT_CONFIG_GLOBAL HOME="$CASE_POOL" git -C "$project" remote get-url origin)
+  assert_equals "$CASE_URL" "$operator_origin" "operator Git did not rewrite the origin"
+  assert_equals 'fm-operator-only:widget' "$synthetic_origin" \
+    "synthetic Git unexpectedly read the operator rewrite"
+  linked_pool=$CASE_POOL/.treehouse/widget-$(pool_hash6 "$operator_origin")
+  mkdir -p "$CASE_POOL/.treehouse" "$CASE_HOME/unsafe-pool"
+  ln -s "$CASE_HOME/unsafe-pool" "$linked_pool"
+  foreign=$case_dir/shared-pool/1/widget
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  : > "$pane_log"
+  : > "$tree_log"
+  out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    FM_FAKE_TREEHOUSE_INITIAL_PATH="$foreign" \
+    FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$case_dir/other/projects/widget" \
+    FM_FAKE_TREEHOUSE_INITIAL_LEASE="$case_dir/initial-lease" \
+    FM_FAKE_PANE_AFTER_EXIT="$project" FM_FAKE_EXIT_FLAG="$case_dir/exited" \
+    run_spawn "$foreign" "$id") || status=$?
+  [ "$status" -ne 0 ] || fail "rewritten fallback pool was accepted"$'\n'"$out"
+  assert_contains "$out" "treehouse pool $CASE_HOME/unsafe-pool" \
+    "fallback preflight hashed the origin with synthetic Git HOME"
+  assert_exact_line "HOME='$CASE_USER_HOME' treehouse get" "$pane_log" \
+    "initial get did not use the operator HOME"
+  assert_no_exact_line "args=get --lease --lease-holder $id" "$tree_log" \
+    "fallback get was called before the rewritten pool was refused"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "fallback refusal published a task"
+  pass "fallback preflight hashes the origin with the operator Git HOME"
 }
 
 test_fake_treehouse_return_requires_submission_and_completion() {
@@ -967,6 +1012,7 @@ test_fallback_lease_checks_returned_worktree() {
 test_initial_get_checks_returned_worktree
 test_pool_preflight_refuses_initial_get
 test_pool_preflight_refuses_fallback_get
+test_pool_preflight_uses_operator_git_for_fallback_hash
 test_fake_treehouse_return_requires_submission_and_completion
 test_fallback_lease_checks_returned_worktree
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
