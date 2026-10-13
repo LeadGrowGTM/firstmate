@@ -811,10 +811,10 @@ When the harness token is absent or `default`, secondmate launch falls back thro
 Any other line may give one second mate its own model and effort as `<id>: <model|-> [<effort|->]`, for example `alexander-media: opus low`.
 That line refines the pin above for that mate only: `-` or an omitted effort keeps the pin's own token for that axis, the first line for an id wins, and the harness itself never changes.
 Like the pin's own tokens, an override applies only when the pin names a concrete harness.
-Every launch of that mate resolves the same values - first spawn, recovery, the watcher's and session start's automatic relaunch, a control-plane relaunch, and a restart - so the choice survives every respawn.
+Each default-profile launch of that mate re-resolves the file - first spawn, recovery, the watcher's and session start's automatic relaunch, a control-plane relaunch, and a restart - so the choice survives every respawn.
 
 `fm-harness.sh secondmate-model [<id>]` and `fm-harness.sh secondmate-effort [<id>]` expose only the optional tokens from `config/secondmate-harness`, with that mate's override applied when an id is given; `config/crew-harness` remains a bare adapter-name file.
-Changing this pin affects the next secondmate spawn or control-plane relaunch; the relaunch profile rules are owned by [`docs/agent-control.md`](agent-control.md#transactional-relaunch).
+Changing this file affects the next secondmate spawn or control-plane relaunch; the relaunch profile rules are owned by [`docs/agent-control.md`](agent-control.md#transactional-relaunch).
 
 ### Per-launch overrides and inherited defaults
 
@@ -1229,7 +1229,7 @@ Firstmate resolves the rule's profile object or array under `AGENTS.md` section 
 
 - When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness`, a positional adapter, or a raw launch command).
 - Batch spawns satisfy the same requirement with a shared `--harness`.
-- Secondmate spawns are exempt and still resolve through `config/secondmate-harness` and its optional model and effort tokens.
+- Secondmate spawns are exempt and resolve through the [secondmate harness configuration](#choose-the-secondmate-harness).
 
 **Contract owners**
 

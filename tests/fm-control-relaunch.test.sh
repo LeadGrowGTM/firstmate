@@ -43,9 +43,9 @@ TASK_TMPS=()
 relaunch_cleanup() {
   local d
   for d in "${TASK_TMPS[@]:-}"; do
-    [ -n "$d" ] && rm -rf "$d"
+    [ -n "$d" ] && fm_test_remove_tree "$d"
   done
-  rm -rf "$TMP_ROOT"
+  fm_test_remove_tree "$TMP_ROOT"
 }
 trap relaunch_cleanup EXIT
 
@@ -981,7 +981,7 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
   dir=$(new_case smpin sm3)
   home="$dir/home"
   mkdir -p "$home/config"
-  printf 'codex some-model high\n' > "$home/config/secondmate-harness"
+  printf 'claude opus medium\nsm3: opus low\n' > "$home/config/secondmate-harness"
   mkdir -p "$home/data/sm3"
   printf '# secondmate brief\n' > "$home/data/sm3/brief.md"
   fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
@@ -1003,17 +1003,17 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
   } > "$home/state/sm3.meta"
   printf '%s\n' "fm-sm3" > "$dir/fake/windows"
   printf '%s' "$dir/smhome" > "$dir/fake/cwd"
-  printf 'codex' > "$dir/fake/becomes"
+  printf 'claude' > "$dir/fake/becomes"
   out=$(run_control "$dir" sm3 relaunch); rc=$?
   expect_code 0 "$rc" "a configured secondmate harness should relaunch"$'\n'"$out"
-  [ "$(journal_field "$dir" sm3 to_harness)" = codex ] \
+  [ "$(journal_field "$dir" sm3 to_harness)" = claude ] \
     || fail "a secondmate relaunch should pick up the configured harness pin, got '$(journal_field "$dir" sm3 to_harness)'"
-  [ "$(journal_field "$dir" sm3 to_model)" = some-model ] \
-    || fail "the configured model token should come with the pin"
-  [ "$(journal_field "$dir" sm3 to_effort)" = high ] \
-    || fail "the configured effort token should come with the pin"
-  assert_not_contains "$out" "not a verified harness" "codex is a verified harness"
-  pass "fm-control relaunch: a secondmate relaunch re-resolves its durable configured harness pin"
+  [ "$(journal_field "$dir" sm3 to_model)" = opus ] \
+    || fail "the mate's configured model should be selected on relaunch"
+  [ "$(journal_field "$dir" sm3 to_effort)" = low ] \
+    || fail "the mate's configured effort should be selected on relaunch"
+  assert_not_contains "$out" "not a verified harness" "claude is a verified harness"
+  pass "fm-control relaunch: a secondmate re-resolves its durable opus low override"
 }
 
 # The watcher's secondmate auto-relaunch and a control-plane relaunch must not
@@ -1103,6 +1103,8 @@ test_secondmate_relaunch_arms_the_semantic_busy_record() {
   dir=$(new_case smbusy sm7)
   home="$dir/home"
   sm="$dir/smhome"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
   mkdir -p "$home/data/sm7"
   printf '# secondmate brief\n' > "$home/data/sm7/brief.md"
   fm_git_worktree "$dir/proj" "$sm" sm-busy-branch
@@ -1166,6 +1168,8 @@ test_secondmate_relaunch_never_removes_operator_settings() {
   dir=$(new_case smoperator sm8)
   home="$dir/home"
   sm="$dir/smhome"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
   mkdir -p "$home/data/sm8"
   printf '# secondmate brief\n' > "$home/data/sm8/brief.md"
   fm_git_worktree "$dir/proj" "$sm" sm-operator-branch
@@ -2399,6 +2403,8 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session() {
       return 0
     }
     dir=$HERDR_CASE_DIR
+    printf '#!/usr/bin/env bash\nprintf "Options: --session --tui-mode\\n"\n' > "$dir/fakebin/pi"
+    chmod +x "$dir/fakebin/pi"
     rm -f "$dir/fake/herdr-stopped"
     sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/resume-$registered.meta"
     # Keep the pane's status authority registered to an existing Pi session,

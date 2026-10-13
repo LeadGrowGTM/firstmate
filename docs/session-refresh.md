@@ -10,7 +10,7 @@ The script header is the authoritative owner of its arguments, output lines, env
 The command reads only the active `FM_HOME`'s own `state/<id>.meta` records, or the task ids named on its command line.
 For each one, in task-id order:
 
-- A `kind=secondmate` direct report whose semantic busy-state verdict is exactly `idle`, read twice a settle window apart, is relaunched with `bin/fm-control.sh <id> relaunch --only-if-idle`, on the harness, model, and effort its record names.
+- A `kind=secondmate` direct report whose semantic busy-state verdict is exactly `idle`, read twice a settle window apart, is relaunched with `bin/fm-control.sh <id> relaunch --only-if-idle`, which re-resolves its configured harness, model, and effort under the [control-plane profile rules](agent-control.md#transactional-relaunch).
 - One whose turn starts after those reads but before its agent is stopped is left running: `--only-if-idle` refuses instead of interrupting it, and it is reported as `skipped (became busy, next night)`.
 - A busy one waits for the next run.
 - One whose verdict is `unknown` also waits for the next run, because unknown is never idle under the [busy-state contract](../bin/fm-busy-lib.sh).

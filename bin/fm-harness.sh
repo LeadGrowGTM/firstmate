@@ -43,16 +43,8 @@
 #                                        so a caller that knows the terminal's foreground
 #                                        process group can keep a backgrounded process out
 #                                        of the selection.
-# config/secondmate-harness format: a single line "<harness> [<model>] [<effort>]",
-# whitespace-separated. A bare "<harness>" (today's format) behaves exactly as before:
-# harness only, no model/effort. Only the first non-empty, non-comment line that is
-# not a per-secondmate override line is parsed as that pin.
-# Per-secondmate override lines, anywhere in the file, have the form
-# "<id>: <model|-> [<effort|->]" (a first token holding a colon after a task id).
-# They refine the model and effort of the pin above for that one mate only, "-"
-# keeps the pin's own token for that axis, and the first line for an id wins. Like
-# the pin's own tokens they apply only when the pin names a concrete harness, and
-# they never change the harness itself.
+# config/secondmate-harness uses a pin line and optional per-mate override lines;
+# docs/configuration.md owns the format. A bare harness remains harness-only.
 # Model/effort come ONLY from this file - config/crew-harness stays a bare adapter
 # name and is never parsed for a model.
 # Detection evidence and precedence:

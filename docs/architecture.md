@@ -315,7 +315,7 @@ The dispatch file is intentionally judgment-based: firstmate reads the natural-l
 The shell scripts validate the JSON shape and verified harness/effort combinations, but they do not parse task intent, match natural-language rules, or own array selection.
 The session-start bootstrap step keeps valid dispatch configuration silent unless verbose facts are enabled and surfaces a concise invalid-config line when validation fails.
 When the file exists, `fm-spawn.sh` refuses crewmate and scout launches without an explicit harness, so `config/crew-harness` is only automatic when no dispatch profile file is active.
-Secondmate launches are exempt because they resolve the secondmate harness and any optional secondmate model or effort tokens instead.
+Secondmate launches are exempt because they use the [secondmate harness configuration](configuration.md#choose-the-secondmate-harness) instead.
 Unsupported effort values are still recorded in task meta when passed to `fm-spawn.sh`, but the launch template omits any effort flag that the selected harness does not accept.
 That keeps spawn launch compatible across claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, gemini, muse, rovo, omp, agy, and devin while preserving the requested profile for later audit.
 
@@ -349,7 +349,7 @@ Secondmate homes converge conservatively to the primary's version and declared i
 The [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md) owns the full guarded sync, propagation, nudge, and mid-session local-material push contract.
 
 Secondmate agents can run on a different verified harness than crewmates.
-`config/secondmate-harness` controls the primary's secondmate launch harness and may also carry optional model and effort tokens as `<harness> [<model>] [<effort>]` on its pin line, plus per-secondmate model and effort override lines whose schema [`docs/configuration.md`](configuration.md#choose-the-secondmate-harness) owns.
+`config/secondmate-harness` controls the primary's secondmate launch harness and can select model and effort for each mate; [`docs/configuration.md`](configuration.md#choose-the-secondmate-harness) owns its format.
 A bare harness line remains harness-only, so existing `config/secondmate-harness` files keep their previous behavior.
 When the harness token is unset or `default`, launch falls back to `config/crew-harness`, then to the primary's own harness, and the model and effort tokens are ignored.
 Those optional tokens are re-read on every secondmate spawn or respawn and are overridden by explicit per-spawn `--model` or `--effort` flags.
