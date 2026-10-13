@@ -1,0 +1,92 @@
+BASELINE
+{
+  "complete": true,
+  "coverage": [
+    {
+      "baseline": true,
+      "complete": true,
+      "id": "skills",
+      "kind": "skills",
+      "root": "/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPJ3FVNWKXVTQJV6CQPWR/.domain-freshness-live.AqOD9C/home/skills",
+      "session_visibility": "unmeasured",
+      "surfaces": [
+        "instruction"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "after": {
+        "bytes": 26,
+        "content": "# Original skill guidance\n",
+        "content_truncated": false,
+        "digest": "5c92e668f3d98c8b7aace412a080d72bb7194f6fb0d6e3ff11bb0c7175cc883a",
+        "kind": "instruction"
+      },
+      "before": null,
+      "kind": "inventory-baseline",
+      "path": "/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPJ3FVNWKXVTQJV6CQPWR/.domain-freshness-live.AqOD9C/home/skills/SKILL.md",
+      "source": "skills"
+    }
+  ]
+}
+CHANGE
+{
+  "complete": true,
+  "coverage": [
+    {
+      "baseline": false,
+      "complete": true,
+      "id": "skills",
+      "kind": "skills",
+      "root": "/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPJ3FVNWKXVTQJV6CQPWR/.domain-freshness-live.AqOD9C/home/skills",
+      "session_visibility": "unmeasured",
+      "surfaces": [
+        "instruction"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "after": {
+        "bytes": 25,
+        "content": "# Updated skill guidance\n",
+        "content_truncated": false,
+        "digest": "ea88de623e89e2af65b3d62a7056106bcecb7a02c7f2ef228c7d6b4f212e1bc7",
+        "kind": "instruction"
+      },
+      "before": {
+        "bytes": 26,
+        "content": "# Original skill guidance\n",
+        "content_truncated": false,
+        "digest": "5c92e668f3d98c8b7aace412a080d72bb7194f6fb0d6e3ff11bb0c7175cc883a",
+        "kind": "instruction"
+      },
+      "kind": "inventory-change",
+      "path": "/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPJ3FVNWKXVTQJV6CQPWR/.domain-freshness-live.AqOD9C/home/skills/SKILL.md",
+      "source": "skills"
+    }
+  ]
+}
+UNCHANGED
+stdout_length=0
+{
+  "checkpoint": "2026-10-15T12:00:00Z"
+}
+UNSAFE SYMLINK
+exit=2
+{
+  "complete": false,
+  "coverage": [
+    {
+      "complete": false,
+      "id": "skills",
+      "kind": "skills",
+      "reason": "inventory symlink escapes declared safe roots"
+    }
+  ],
+  "evidence": []
+}
+{
+  "checkpoint": "2026-10-15T12:00:00Z"
+}

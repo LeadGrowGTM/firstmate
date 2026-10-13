@@ -1,0 +1,1 @@
+{"collected_at": "2026-10-16T12:00:00Z", "complete": false, "coverage": [{"complete": false, "id": "skills", "kind": "skills", "reason": "inventory symlink escapes declared safe roots"}], "domains": [], "evidence": [], "registry_coverage": "absent", "schema": "fm-domain-evidence.v1"}
