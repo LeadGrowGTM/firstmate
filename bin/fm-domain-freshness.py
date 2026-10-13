@@ -516,9 +516,9 @@ def validate_config(config):
                     if not isinstance(item, dict):
                         raise ValueError('inventory files must be objects')
                     path = item.get('path', '')
-                    if not isinstance(path, str) or not path or Path(path).is_absolute() or '..' in Path(path).parts or path in names:
+                    if not isinstance(path, str) or not path or Path(path).is_absolute() or '..' in Path(path).parts or Path(path) in names:
                         raise ValueError('invalid or duplicate inventory filename')
-                    names.add(path)
+                    names.add(Path(path))
                     if item.get('kind') not in ('instruction', 'asset', 'plugin-manifest', 'plugin-enablement', 'plugin-version'):
                         raise ValueError('invalid inventory file kind')
         elif kind == 'unavailable':

@@ -238,6 +238,17 @@ jq -e '.evidence | length == 2 and (any(.[]; .after.manifest.plugins.demo[0].ver
 pass 'plugin projections omit irrelevant fields and detect effective changes'
 
 new_home
+mkdir -p "$HOME_DIR/plugins"
+printf '%s\n' '{"plugins":{"demo":[{"version":"1.0","scope":"user"}]}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{"demo":true}}' > "$HOME_DIR/plugins/enabled.json"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"./manifest.json",kind:"plugin-enablement"}]}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 1 "$STATUS" 'normalized plugin file collision'
+assert_grep 'invalid or duplicate inventory filename' "$TMP_ROOT/stderr" 'colliding plugin file paths passed config validation'
+assert_absent "$HOME_DIR/data/domain-freshness" 'colliding plugin file paths wrote collector state'
+pass 'local configuration rejects paths that normalize to one inventory record'
+
+new_home
 mkdir -p "$HOME_DIR/skills/one" "$HOME_DIR/plugins"
 printf 'first script' > "$HOME_DIR/skills/one/run.py"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
@@ -780,6 +791,20 @@ bundle
 jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("remote inventory transport")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'remote root-target inventory claimed complete coverage'
 jq -e '.sources.remote.checkpoint == "2026-10-18T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'remote root-target inventory advanced checkpoint'
 pass 'remote inventory rejects a root target before returning a snapshot'
+
+mkdir -p "$REMOTE_HOME/skills-new/sub"
+printf '%s\n' '{"plugins":{}}' > "$REMOTE_HOME/skills-new/sub/manifest.json"
+jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"sub/manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"sub//manifest.json",kind:"plugin-enablement"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+FM_HOME="$REMOTE_HOME" bash "$COLLECTOR" inventory remote-skills > "$TMP_ROOT/remote-collision-stdout" 2> "$TMP_ROOT/remote-collision-stderr"
+expect_code 1 "$?" 'remote inventory normalized path collision'
+assert_grep 'invalid or duplicate inventory filename' "$TMP_ROOT/remote-collision-stderr" 'remote inventory accepted redundant separator collision'
+assert_equals '' "$(cat "$TMP_ROOT/remote-collision-stdout")" 'remote inventory emitted a colliding snapshot'
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-20T12:00:00Z
+expect_code 2 "$STATUS" 'parent collection of colliding remote inventory'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'colliding remote inventory claimed complete coverage'
+jq -e '.sources.remote.checkpoint == "2026-10-18T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'colliding remote inventory advanced checkpoint'
+pass 'remote inventory CLI rejects redundant separator aliases before transport checkpoint'
 
 new_home
 config "$repo_sources"
