@@ -1,0 +1,47 @@
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/clean-fab3ff/1/clean. Run 'treehouse return ~/.treehouse/clean-fab3ff/1/clean' to release it.
+SCENARIO clean stopped worker
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+swept: 1 workers, 1 copies, 0 stale registrations
+STATE clean: record absent; copy absent
+A new version of treehouse is available: v2.1.1 → v3.1.3
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/ignored-423f47/1/ignored. Run 'treehouse return ~/.treehouse/ignored-423f47/1/ignored' to release it.
+SCENARIO ignored operator work
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+swept: 0 workers, 0 copies, 0 stale registrations; kept ignored: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/ignored-423f47/1/ignored has uncommitted changes.
+STATE ignored: record present; copy and ignored file present
+A new version of treehouse is available: v2.1.1 → v3.1.3
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/submodule-f9b96f/1/submodule. Run 'treehouse return ~/.treehouse/submodule-f9b96f/1/submodule' to release it.
+SCENARIO occupied uninitialized submodule
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+swept: 0 workers, 0 copies, 0 stale registrations; kept ignored: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/ignored-423f47/1/ignored has uncommitted changes.; kept submodule: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/submodule-f9b96f/1/submodule has an occupied submodule path; needs a human look.
+STATE submodule: record present; copy and submodule file present
+SCENARIO daily check and one-time report
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh swept: 0 workers, 0 copies, 0 stale registrations; kept ignored: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/ignored-423f47/1/ignored has uncommitted changes.; kept submodule: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/submodule-f9b96f/1/submodule has an occupied submodule path; needs a human look.
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+STATE daily: launched=yes; pending-result=no
+SCENARIO absent stale worktree registration
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+swept: 0 workers, 0 copies, 1 stale registrations; kept ignored: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/ignored-423f47/1/ignored has uncommitted changes.; kept submodule: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/submodule-f9b96f/1/submodule has an occupied submodule path; needs a human look.
+STATE stale: registration absent
+A new version of treehouse is available: v2.1.1 → v3.1.3
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/pool-2b15c4/1/pool. Run 'treehouse return ~/.treehouse/pool-2b15c4/1/pool' to release it.
+A new version of treehouse is available: v2.1.1 → v3.1.3
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+SCENARIO safe pool prune
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.nyRNsh
+swept: 0 workers, 1 copies, 0 stale registrations; kept ignored: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/ignored-423f47/1/ignored has uncommitted changes.; kept submodule: REFUSED: worktree /tmp/fm-lab.nyRNsh/user/.treehouse/submodule-f9b96f/1/submodule has an occupied submodule path; needs a human look.
+STATE pool: returned clean copy absent
