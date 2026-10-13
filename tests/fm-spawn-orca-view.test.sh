@@ -35,6 +35,8 @@ case "${1:-}" in
   -S) shift 2; exec "$0" "$@" ;;
 esac
 case "$*" in
+  *'#{session_name}'*)
+    [ "${FM_FAKE_VIEW_LOOKUP_FAIL:-}" != 1 ] || exit 1 ;;
   *'#{window_index}'*)
     n=0
     while IFS= read -r w; do
@@ -50,6 +52,7 @@ case "$*" in
   *'#{socket_path}'*) printf '/tmp/fm-fake-socket\n'; exit 0 ;;
 esac
 case "${1:-}" in
+  new-window) printf '%s\n' "$*" >> "$D/new-windows"; exec "$here/tmux.base" "$@" ;;
   has-session)
     for a in "$@"; do
       case "$a" in =orca-*) [ -e "$D/session-${a#=}" ]; exit $? ;; esac
@@ -179,6 +182,18 @@ test_switch_absent_changes_nothing() {
   assert_equals "" "$(meta sm-off orca_view_handle)" "no tab is recorded without the switch"
   assert_no_grep 'ORCA_' "$PANE_LOG" "the pane receives no Orca export or unset without the switch"
   pass "switch absent: a secondmate spawn makes no Orca call and changes nothing in its pane"
+}
+
+test_failed_container_lookup_stops_spawn() {
+  local pane
+  for pane in %missing ''; do
+    FM_FAKE_VIEW_LOOKUP_FAIL=1 TMUX_PANE="$pane" spawn_secondmate "lookup-${pane:-none}" sm-lookup absent
+    [ "$STATUS" -ne 0 ] || fail "a failed tmux container lookup accepted the spawn"
+    assert_contains "$OUT" "could not resolve the tmux container session" \
+      "the spawn reports the failed container lookup"
+    assert_absent "$VIEW_DIR/new-windows" "no window is created after the lookup fails"
+  done
+  pass "a failed pane or client session lookup stops spawn before window creation"
 }
 
 test_switch_on_opens_and_forwards_identity() {
@@ -423,6 +438,7 @@ test_respawn_replaces_the_previous_tab() {
 }
 
 test_switch_absent_changes_nothing
+test_failed_container_lookup_stops_spawn
 test_switch_on_opens_and_forwards_identity
 test_unavailable_orca_steps_aside
 test_missing_identity_keeps_fresh_spawn_unbadged

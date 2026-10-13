@@ -3978,7 +3978,10 @@ EOF
 else
   case "$BACKEND" in
   tmux)
-    SES=$(fm_backend_tmux_container_ensure)
+    SES=$(fm_backend_tmux_container_ensure) || {
+      echo "error: could not resolve the tmux container session" >&2
+      exit 1
+    }
     T="$SES:$W"
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's

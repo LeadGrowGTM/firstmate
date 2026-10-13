@@ -1766,7 +1766,7 @@ SH
 }
 
 test_secondmate_force_teardown_sweeps_nested_homes() {
-  local home subhome childhome subhome_abs childhome_abs fakebin log sweep_log
+  local home subhome childhome subhome_abs childhome_abs fakebin log sweep_log orca_log
   home="$TMP_ROOT/procevent-force-home"
   subhome="$TMP_ROOT/procevent-force-subhome"
   childhome="$TMP_ROOT/procevent-force-childhome"
@@ -1784,18 +1784,30 @@ test_secondmate_force_teardown_sweeps_nested_homes() {
   childhome_abs=$(cd "$childhome" && pwd -P)
   fm_write_secondmate_meta "$home/state/domain.meta" "$subhome"
   fm_write_secondmate_meta "$subhome/state/nested.meta" "$childhome"
+  printf 'orca_view_handle=term-nested\norca_view_session=orca-nested\norca_view_owned=1\n' \
+    >> "$subhome/state/nested.meta"
   cat > "$home/data/secondmates.md" <<EOF
 - domain - design domain (home: $subhome; scope: design domain; projects: alpha; added 2026-06-22)
 - nested - nested domain (home: $childhome; scope: nested domain; projects: beta; added 2026-06-22)
 EOF
   fakebin=$(make_fake_tmux "$TMP_ROOT/procevent-force-fake")
   log="$TMP_ROOT/procevent-force-fake/tmux.log"
+  orca_log="$TMP_ROOT/procevent-force-fake/orca.log"
+  cat > "$fakebin/orca-ide" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_FAKE_ORCA_VIEW_LOG"
+printf '{"ok":true}\n'
+SH
+  chmod +x "$fakebin/orca-ide"
 
   PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" \
     FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/procevent-force-fake/pane.txt" \
-    FM_FAKE_PROCEVENT_SWEEP_LOG="$sweep_log" \
+    FM_FAKE_PROCEVENT_SWEEP_LOG="$sweep_log" FM_FAKE_ORCA_VIEW_LOG="$orca_log" \
+    FM_ORCA_CLI="$fakebin/orca-ide" FM_WSL_INTEROP_DIR="$TMP_ROOT/no-wsl" \
     "$ROOT/bin/fm-teardown.sh" domain --force >/dev/null 2>/dev/null \
     || fail "force teardown failed after recursively sweeping process events"
+  grep -Fx 'terminal close --terminal term-nested --tab --json' "$orca_log" >/dev/null \
+    || fail "force teardown removed a nested secondmate record without closing its Orca tab"
   grep -Fx "$subhome_abs" "$sweep_log" >/dev/null || fail "force teardown did not sweep the parent secondmate home"
   grep -Fx "$childhome_abs" "$sweep_log" >/dev/null || fail "force teardown did not sweep the nested secondmate home"
   [ ! -d "$subhome" ] || fail "force teardown retained the swept parent home"
