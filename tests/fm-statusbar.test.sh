@@ -88,6 +88,10 @@ render() {  # <session> <width> <expected>
 # --- label + apply: grouped view sessions share window options ---
 bash "$SB" label firstmate:fm-demo-task fm-demo-task claude 'claude-opus-5-5[1m]' high \
   /home/u/.treehouse/firstmate-840e8b/17/firstmate
+[ "$(tmux show-options -wqv -t firstmate:fm-demo-task @fm_wt)" = firstmate/17 ] || fail "Treehouse direct label lost its slot"
+tmux new-window -d -t firstmate: -n numeric-home 'sleep 600'
+bash "$SB" label firstmate:numeric-home numeric-home claude opus high /home/u/homes/2026/firstmate
+[ "$(tmux show-options -wqv -t firstmate:numeric-home @fm_wt)" = firstmate ] || fail "ordinary numeric-parent home gained a slot"
 tmux set-option -t firstmate 'status-format[0]' 'CUSTOM #{window_name}'
 bash "$SB" apply firstmate
 if out=$(bash "$SB" apply 2>&1); then fail "apply accepted an implicit session"; fi
@@ -397,6 +401,17 @@ bash "$SB" sync
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_task)" = sync-task ] || fail "sync did not label the recorded window"
 [ "$(tmux show-options -wqv -t firstmate:bare @fm_wt)" = proj/4 ] || fail "sync worktree label" "$(tmux show-options -wqv -t firstmate:bare @fm_wt)"
 pass "sync labels recorded windows from state metadata"
+
+cat >"$WORK/state/sync-home.meta" <<META
+window=firstmate:numeric-home
+harness=claude
+model=opus
+effort=high
+worktree=/home/u/homes/2026/firstmate
+META
+bash "$SB" sync
+[ "$(tmux show-options -wqv -t firstmate:numeric-home @fm_task)" = sync-home ] || fail "sync missed the ordinary numeric-parent home"
+[ "$(tmux show-options -wqv -t firstmate:numeric-home @fm_wt)" = firstmate ] || fail "sync gave an ordinary numeric-parent home a slot"
 
 cat >"$WORK/state/sync-task.meta" <<META
 window=firstmate:bare

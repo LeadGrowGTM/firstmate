@@ -72,14 +72,20 @@ fm_sb_clean() {  # <value> [max]
 # <project>/<slot> for a leased pool path ending <project>-<hash>/<slot>/<name>;
 # otherwise the final path component, which names a secondmate home.
 fm_sb_wt_label() {  # <path>
-  local p=${1%/} base parent slot
+  local p=${1%/} base parent slot pool
   [ -n "$p" ] || return 0
   base=${p##*/}
   parent=${p%/*}
   slot=${parent##*/}
   case "$slot" in
   '' | *[!0-9]*) printf '%s' "$base" ;;
-  *) printf '%s/%s' "$base" "$slot" ;;
+  *)
+    pool=${parent%/*}
+    case "${pool%/*}" in
+      */.treehouse) printf '%s/%s' "$base" "$slot" ;;
+      *) printf '%s' "$base" ;;
+    esac
+    ;;
   esac
 }
 
