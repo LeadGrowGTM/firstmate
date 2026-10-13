@@ -1,0 +1,3 @@
+live_socket=/run/WSL/1_interop
+new_pane=@1
+pane_interop=/run/WSL/1_interop

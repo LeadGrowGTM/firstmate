@@ -1,0 +1,5 @@
+SCENARIO: real Orca terminal create on disposable tmux server
+open_exit=3
+note: Orca is unreachable or refused the view tab: {   "id": "ba8bb831-692a-4028-be76-58572d1dc017",   "ok": false,   "error": {     "code": "selector_not_found",     "message": "selector_not_found",     "data": {       "selector": "path:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TNNV8SYKX90RR1VTX9RCZH",       "validSelectorForms": [       
+view_after_failed_open=absent
+base_session=alive

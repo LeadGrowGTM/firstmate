@@ -1,0 +1,19 @@
+SCENARIO: home-local switch, real helper
+off
+on
+warning: config/orca-view-tabs holds 'invalid'; accepted values are on and off, so Orca view tabs stay off
+off
+SCENARIO: command and window target, real isolated tmux server
+agent_window=@1
+tmux -S '/tmp/tmux-1000/fm-lab-orca-test-3607767' attach-session -t '=orca-agent'; tmux -S '/tmp/tmux-1000/fm-lab-orca-test-3607767' has-session -t '=orca-agent' 2>/dev/null || printf '%s\n' 'The agent window this tab showed is gone, so its view ended; this tab can be closed.'
+SCENARIO: absent Orca does not create a view or disturb agent
+note: no Orca command line was found (set FM_ORCA_CLI, or install Orca's CLI)
+open_exit=3
+can't find session: orca-agent
+view_absent=yes
+base_alive=yes
+SCENARIO: followed view stays on target, then ends when target closes
+selected_after_follow=@1
+can't find session: orca-agent
+view_ended=yes
+base_survives=yes
