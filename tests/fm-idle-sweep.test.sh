@@ -347,6 +347,68 @@ sweep
 [ "$(sed -n '2p' "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = extra3 ] || fail 'target recheck after long launch did not dispatch'
 unset TEST_CLOCK_FILE
 pass 'launch time does not consume the shared target collection budget'
+# Section moves preserve row text but must reset its observed age.
+cp "$home/data/backlog.md" "$TMP_ROOT/backlog-before-state-age"
+state_age_backlog() {
+  printf '# Backlog\n\n## %s\n\n- [ ] state-age - State fixture (repo: example)\n  Same body.\n\n## Done\n' "$1" > "$home/data/backlog.md"
+}
+state_age_backlog Queued
+printf 'kind=crewmate\nwindow=fm-state-age\n' > "$home/state/state-age.meta"
+printf '1800000000\n' > "$TMP_ROOT/clock"
+export TEST_CLOCK_FILE="$TMP_ROOT/clock"
+TEST_ENDPOINT=alive sweep
+printf '1801296000\n' > "$TEST_CLOCK_FILE"
+result=$(bash "$home/bin/fm-targets.sh" --json)
+printf '%s' "$result" | jq -e '.stale_ids == ["state-age"]' >/dev/null || fail 'unchanged queued row did not age'
+for section in 'In flight' Queued; do
+  state_age_backlog "$section"
+  result=$(bash "$home/bin/fm-targets.sh" --json)
+  printf '%s' "$result" | jq -e '.targets[] | select(.id=="stale_backlog") | .current==null and .gap==null' >/dev/null || fail "$section transition retained old age"
+  TEST_ENDPOINT=alive sweep
+  result=$(bash "$home/bin/fm-targets.sh" --json)
+  printf '%s' "$result" | jq -e '.targets[] | select(.id=="stale_backlog") | .current==0 and .gap==0' >/dev/null || fail "$section observation did not reset age"
+  tick=$(cat "$TEST_CLOCK_FILE")
+  printf '%s\n' "$((tick + 15 * 86400))" > "$TEST_CLOCK_FILE"
+done
+pass 'starting and requeuing unchanged rows invalidate and reset stale age'
+jq 'with_entries(.value.content |= (fromjson | .[1:] | tojson))' "$home/state/idle-sweep-backlog.json" > "$TMP_ROOT/legacy-ledger"
+mv "$TMP_ROOT/legacy-ledger" "$home/state/idle-sweep-backlog.json"
+result=$(bash "$home/bin/fm-targets.sh" --json)
+printf '%s' "$result" | jq -e '.targets[] | select(.id=="stale_backlog") | .current==null' >/dev/null || fail 'legacy ledger retained a trusted age'
+TEST_ENDPOINT=alive sweep
+result=$(bash "$home/bin/fm-targets.sh" --json)
+printf '%s' "$result" | jq -e '.targets[] | select(.id=="stale_backlog") | .current==0' >/dev/null || fail 'legacy ledger did not establish a new baseline'
+pass 'legacy row-content ledger becomes unknown until observed again'
+unset TEST_CLOCK_FILE
+rm "$home/state/state-age.meta"
+cp "$TMP_ROOT/backlog-before-state-age" "$home/data/backlog.md"
+# Prepared branch contracts are passed to the normal spawn entrypoint.
+printf '# Backlog\n\n## Queued\n\n## Done\n' > "$home/data/backlog.md"
+for id in bad-base bad-ship base-ship custom-ship base-scout; do add_task "$id"; done
+printf 'Ship branch: fix/another-task\n' >> "$home/data/bad-ship/brief.md"
+for id in bad-base base-ship base-scout; do
+  cat >> "$home/data/$id/brief.md" <<'BASE'
+# Setup
+You are in a disposable git worktree of example, at a detached HEAD on a clean copy of its base branch.
+Base branch: release
+BASE
+done
+cat >> "$home/data/bad-base/brief.md" <<'BASE'
+You are in a disposable git worktree of example, at a detached HEAD on a clean copy of its base branch.
+Base branch: other-release
+BASE
+printf 'Ship branch: fm/base-ship\n' >> "$home/data/base-ship/brief.md"
+printf 'Ship branch: fix/custom-ship\n' >> "$home/data/custom-ship/brief.md"
+perl -pi -e 's/Delivery contract: mode=no-mistakes/Delivery contract: mode=scout/' "$home/data/base-scout/brief.md"
+perl -pi -e 's/(base-scout - .*?)(\s*)$/$1 (kind: scout)$2/' "$home/data/backlog.md"
+: > "$TEST_SPAWN_LOG"
+sweep
+[ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 3 ] || fail 'prepared branch fixture did not start three valid tasks'
+grep -Eq '^base-ship .*--base-branch release( |$)' "$TEST_SPAWN_LOG" || fail 'prepared ship base was not forwarded'
+grep -Eq '^custom-ship .*--branch-prefix fix/( |$)' "$TEST_SPAWN_LOG" || fail 'prepared ship prefix was not preserved'
+grep -Eq '^base-scout .*--scout .*--base-branch release( |$)' "$TEST_SPAWN_LOG" || fail 'prepared scout base was not forwarded'
+if grep -Eq '^bad-(base|ship) ' "$TEST_SPAWN_LOG"; then fail 'inconsistent prepared branch reached spawn'; fi
+pass 'prepared ship and scout bases and ship prefixes survive dispatch; inconsistent contracts are skipped'
 # Exercise the actual watcher heartbeat hook and its normal wake path without
 # launching a worker or touching a real terminal backend.
 # shellcheck source=tests/wake-helpers.sh

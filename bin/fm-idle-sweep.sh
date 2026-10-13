@@ -59,8 +59,8 @@ config=$(idle_config) || { echo 'fm-idle-sweep: invalid configuration' >&2; exit
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/fm-classify-lib.sh"
-# shellcheck source=bin/fm-brief-heading-lib.sh
-. "$SCRIPT_DIR/fm-brief-heading-lib.sh"
+# shellcheck source=bin/fm-dod-lib.sh
+. "$SCRIPT_DIR/fm-dod-lib.sh"
 mkdir -p "$STATE"
 lock="$STATE/.idle-sweep.lock"
 fm_lock_try_acquire "$lock" || exit 0
@@ -180,8 +180,27 @@ while IFS= read -r candidate; do
   if [ "$mode" = scout ]; then
     flags=(--scout)
   else
-    prefix=$(bash "$SCRIPT_DIR/fm-project-mode.sh" --branch-prefix "$project")
+    ship_branches=$(sed -n 's/^Ship branch: //p' "$brief")
+    if [ -n "$ship_branches" ]; then
+      ship_branch=$(printf '%s\n' "$ship_branches" | head -n 1)
+      if printf '%s\n' "$ship_branches" | grep -vxF -- "$ship_branch" >/dev/null; then continue; fi
+      git check-ref-format --branch "$ship_branch" >/dev/null 2>&1 || continue
+      case "$ship_branch" in
+        *"$id") prefix=${ship_branch%"$id"} ;;
+        *) continue ;;
+      esac
+    else
+      prefix=$(bash "$SCRIPT_DIR/fm-project-mode.sh" --branch-prefix "$project")
+    fi
     flags+=(--branch-prefix "$prefix")
+  fi
+  if base_branches=$(fm_brief_base_branches "$brief"); then
+    base_branch=$(printf '%s\n' "$base_branches" | head -n 1)
+    [ -n "$base_branch" ] || continue
+    if printf '%s\n' "$base_branches" | grep -vxF -- "$base_branch" >/dev/null; then continue; fi
+    forge=$(bash "$SCRIPT_DIR/fm-project-mode.sh" --forge "$project")
+    fm_base_branch_valid "$base_branch" "$mode" "$forge" fm-idle-sweep.sh || continue
+    flags+=(--base-branch "$base_branch")
   fi
   [ ! -e "$STATE/$id.meta" ] && [ ! -L "$STATE/$id.meta" ] || continue
   [ -z "$(status_open_decisions "$STATE/$id.status")" ] || continue

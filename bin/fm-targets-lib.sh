@@ -47,7 +47,7 @@ fm_targets_observe() {  # <canonical backlog JSON>
   tmp=$(mktemp "$STATE/.idle-sweep-backlog.XXXXXX") || return 1
   if ! jq -n --argjson snapshot "$1" --argjson old "$ledger" --argjson now "$(date +%s)" '
     reduce ($snapshot.backlog.records[] | select(.structured)) as $r ({};
-      ($r | [.raw,.body_lines] | tojson) as $content |
+      ($r | [.state,.raw,.body_lines] | tojson) as $content |
       .[$r.id] = {content:$content,changed:
         (if $old[$r.id].content == $content then $old[$r.id].changed else $now end)})
   ' > "$tmp"; then
@@ -125,7 +125,7 @@ fm_targets_collect() {  # <canonical backlog JSON>
       if any($repos[]; .[$name] == null) then null
       else ([$repos | unique_by(.repo)[] | .[$name]] | add // 0) end;
     [$snapshot.backlog.records[] | select(.structured and .state != "done") |
-      . as $r | ($r | [.raw,.body_lines] | tojson) as $content |
+      . as $r | ($r | [.state,.raw,.body_lines] | tojson) as $content |
       {id:.id, stale:(if $ledger[.id].content == $content and ($ledger[.id].changed | type) == "number"
         then ($now - $ledger[.id].changed >= $limits.stale_days * 86400) else null end)}] as $ages |
     {schema:"fm-targets.v1", repos:$repos, stale_ids:[$ages[] | select(.stale == true) | .id],

@@ -189,7 +189,7 @@ Non-GitHub clones and symlinked project entries are outside these GitHub metrics
 Default-branch failures include failed commit statuses and completed unsuccessful check runs on the current head; pending checks alone are not red.
 The local backlog metric counts unfinished structured rows unchanged for at least `stale_days`, including held rows for visibility, without authorizing work on them.
 The initial implementation supports the local markdown backlog; another tasks-axi backend is refused explicitly.
-The heartbeat records row content and its last observed change in `state/idle-sweep-backlog.json`.
+The heartbeat records each row's section state, content, and last observed change in `state/idle-sweep-backlog.json`.
 The first observation establishes the age baseline; row creation dates are not used as evidence of last change.
 The evaluator reports unknown before a row is observed or after its content changes between observations.
 
@@ -228,7 +228,7 @@ An open-PR step should prepare a review or fix, since meeting that target may st
 The sweep starts a batch only when no ordinary worker is live and all effective Codex account windows report known, fresh remaining quota strictly above 15 percent.
 It rechecks home idleness, quota, complete backlog row, brief boundary, and open decisions before each start, selects at most three steps, and orders red-branch work before other target work, then ready backlog work in backlog order.
 Unmeasured red-branch evidence holds the batch rather than allowing backlog work to outrank an unknown failure.
-Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the prepared delivery mode, and yolo off; backend refusals stop the batch without a fallback.
+Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the prepared delivery mode and branch contract, and yolo off; backend refusals stop the batch without a fallback.
 The sweep reads briefs without editing them and refuses work whose prepared brief lacks the reversible-work boundary above.
 Successful starts produce one named status line in `state/idle-sweep.status`; concurrent heartbeat invocations share a local lock, and existing task metadata prevents redispatch.
 Target collection has a shared 120 second budget across the batch; a started `bin/fm-spawn.sh` launch runs to completion under its own lifecycle guards.
