@@ -1148,6 +1148,8 @@ No check shim or separate scheduler needs arming.
 The sweep runs while the normal supervision cycle is active, starts at most once per day, and reports its result on the next slow-check poll.
 [`bin/fm-deadweight-sweep.sh`](../bin/fm-deadweight-sweep.sh) owns the schedule, state records, output, and safety gates.
 It uses teardown's landed-work and completion checks, preserves captain holds and secondmates, and delegates pool removal to treehouse's safe prune.
+It keeps uncertain work, including ignored or operator-edited files, unmerged recorded PRs, and remote branches whose status cannot be verified; only exact Firstmate-generated wiring is exempt from the file check.
+When a worker copy is missing, its record remains unless the recorded remote branch is confirmed merged or absent.
 Automatic teardown requires a proven dead or missing endpoint.
 Alive idle workers and backends without reliable death proof remain in place and appear as `idle-left` in the one-line report when the semantic busy classifier confirms idle.
 
@@ -1165,7 +1167,7 @@ A prune that fails, times out, or declines to run prints one warning and never f
 A pool that another launch or cleanup is using at that moment is skipped silently and reclaimed by the next cleanup or daily sweep.
 Because a returned copy whose work has landed is exactly what treehouse prunes, the next launch on that project usually creates a fresh copy instead of reusing a returned one.
 
-### Daily sweep
+### Optional daily treehouse pool sweep
 
 A home arms the daily check with `bin/fm-treehouse-guard.sh arm`.
 It writes `state/treehouse-guard.check.sh` and binds it through the same authenticated watcher-check mechanism as the [daily startup growth check](#daily-startup-growth-check), so no extra daemon or scheduler is installed and an armed home keeps needing a watcher after its last task is cleaned up.
