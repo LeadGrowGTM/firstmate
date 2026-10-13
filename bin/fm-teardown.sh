@@ -1954,7 +1954,7 @@ teardown_treehouse_return() {
 report_worktree_dirt() {
   # Use the same porcelain snapshot and exemptions as the refusal predicate.
   printf '%s\n' "$1" | awk '
-    /^\?\? / { if (++untracked <= 10) paths = paths "  " substr($0, 4) "\n"; next }
+    /^(\?\?|!!)/ { if (++untracked <= 10) paths = paths "  " substr($0, 4) "\n"; next }
     NF { tracked = 1 }
     END {
       if (tracked) print "uncommitted changes present (includes tracked edits)"
@@ -1969,7 +1969,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -1979,7 +1979,12 @@ validate_worktree_teardown_safety() {
 
   untracked=normal
   [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
-  if ! dirty_raw=$(git -C "$WT" status --porcelain "--untracked-files=$untracked" 2>/dev/null); then
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored 2>/dev/null); then
+      echo "REFUSED: cannot inspect worktree $WT for uncommitted changes." >&2
+      return 1
+    fi
+  elif ! dirty_raw=$(git -C "$WT" status --porcelain "--untracked-files=$untracked" 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
     fi
@@ -1988,17 +1993,24 @@ validate_worktree_teardown_safety() {
     return 1
   fi
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
-    dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? \.fm-(grok|kimi)-turnend$' || true)
-    if [ -f "$WT/.claude/settings.local.json" ] \
-      && [ ! -L "$WT/.claude/settings.local.json" ] \
-      && [ -r "$WT/.claude/settings.local.json" ] \
-      && ! fm_control_claude_settings_operator_owned "$WT"; then
-      dirty=$(printf '%s\n' "$dirty" | grep -vFx '?? .claude/settings.local.json' || true)
-    fi
-    if [ -L "$WT/.claude/settings.local.json" ] \
-      || fm_control_claude_settings_operator_owned "$WT"; then
-      dirty="${dirty:+$dirty$'\n'}?? .claude/settings.local.json"
-    fi
+    dirty=
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      case "$line" in
+        '?? .fm-grok-turnend'|'!! .fm-grok-turnend') suffix=grok ; pointer=.fm-grok-turnend ;;
+        '?? .fm-kimi-turnend'|'!! .fm-kimi-turnend') suffix=kimi ; pointer=.fm-kimi-turnend ;;
+        *) dirty="${dirty:+$dirty$'\n'}$line"; continue ;;
+      esac
+      token=$(cat "$STATE/$ID.$suffix-turnend-token" 2>/dev/null || true)
+      if [ -f "$STATE/$ID.$suffix-turnend-token" ] \
+        && [ ! -L "$STATE/$ID.$suffix-turnend-token" ] \
+        && [ -f "$WT/$pointer" ] && [ ! -L "$WT/$pointer" ] \
+        && [[ "$token" = fm.???????????? ]] \
+        && cmp -s "$WT/$pointer" <(printf 'token=%s\n' "$token"); then
+        continue
+      fi
+      dirty="${dirty:+$dirty$'\n'}$line"
+    done <<< "$dirty_raw"
   else
     dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' || true)
   fi
@@ -2066,6 +2078,34 @@ validate_worktree_teardown_safety() {
       echo "REFUSED: worktree $WT has commits beyond its base not landed on $DEFAULT." >&2
       return 1
     fi
+  fi
+}
+
+validate_missing_worktree_branch_for_sweep() {
+  local branch default remote_state=0
+  [ "$ONLY_IF_STOPPED" = 1 ] && [ ! -d "$WT" ] || return 0
+  branch=$(fm_meta_get "$META" branch)
+  if [ -z "$branch" ] || ! git check-ref-format --branch "$branch" >/dev/null 2>&1 \
+    || ! git -C "$PROJ" remote get-url origin >/dev/null 2>&1; then
+    echo "REFUSED: missing worktree for $ID has no verifiable recorded remote branch." >&2
+    return 1
+  fi
+  git -C "$PROJ" ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1 || remote_state=$?
+  case "$remote_state" in
+    2) return 0 ;;
+    0) ;;
+    *) echo "REFUSED: cannot verify remote branch $branch for missing worktree $WT." >&2; return 1 ;;
+  esac
+  default=$(default_branch) || {
+    echo "REFUSED: cannot determine default branch for missing worktree $WT." >&2; return 1
+  }
+  if ! git -C "$PROJ" fetch --quiet origin \
+    "+refs/heads/$branch:refs/remotes/origin/$branch" \
+    "+refs/heads/$default:refs/remotes/origin/$default" >/dev/null 2>&1 \
+    || ! git -C "$PROJ" merge-base --is-ancestor \
+      "refs/remotes/origin/$branch" "refs/remotes/origin/$default" 2>/dev/null; then
+    echo "REFUSED: remote branch $branch for missing worktree $WT is not confirmed merged." >&2
+    return 1
   fi
 }
 
@@ -3547,6 +3587,7 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
   ORCA_PATH_MATCH_VERIFIED=1
 fi
 
+validate_missing_worktree_branch_for_sweep || exit 1
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   if validate_worktree_teardown_safety; then
     :

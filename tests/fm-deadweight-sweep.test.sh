@@ -84,7 +84,7 @@ add_worker() {
   fm_write_meta "$home/state/task.meta" \
     window=firstmate:fm-task endpoint_task_id=task \
     "worktree=$home/worker" "project=$home/projects/project" \
-    "kind=$kind" mode=no-mistakes spawn_gen=sweep-test
+    "kind=$kind" branch=fm/task mode=no-mistakes spawn_gen=sweep-test
   echo 'done: complete' > "$home/state/task.status"
 }
 
@@ -148,6 +148,47 @@ test_changes_kept() {
   assert_present "$home/state/task.meta" 'operator Claude settings record kept'
   assert_present "$home/worker/.claude/settings.local.json" 'operator Claude settings kept'
   pass 'sweep keeps dirty, unpushed, pushed, and untracked Claude work'
+}
+
+test_ignored_work_kept() {
+  local home out
+  home=$(make_home ignored); add_worker "$home"
+  printf '.env\n.claude/\n' >> "$home/projects/project/.git/info/exclude"
+  printf 'operator secret\n' > "$home/worker/.env"
+  mkdir -p "$home/worker/.claude/commands"
+  printf 'operator command\n' > "$home/worker/.claude/commands/custom.md"
+  out=$(sweep "$home")
+  assert_contains "$out" 'uncommitted changes' 'ignored paths refuse automatic teardown'
+  assert_present "$home/state/task.meta" 'ignored work record kept'
+  assert_grep 'operator secret' "$home/worker/.env" 'ignored env kept'
+  assert_grep 'operator command' "$home/worker/.claude/commands/custom.md" 'ignored command kept'
+  home=$(make_home edited-settings); add_worker "$home"
+  mkdir -p "$home/worker/.claude"
+  printf '{"hook":"fm-busy-event.sh","operator":true}\n' > "$home/worker/.claude/settings.local.json"
+  out=$(sweep "$home")
+  assert_contains "$out" 'uncommitted changes' 'edited generated settings refuse teardown'
+  assert_present "$home/state/task.meta" 'edited settings record kept'
+  assert_present "$home/worker/.claude/settings.local.json" 'edited settings file kept'
+  pass 'sweep preserves ignored operator files'
+}
+
+test_missing_copy_remote_branch_kept_until_merged() {
+  local home out
+  home=$(make_home missing-branch); add_worker "$home"
+  printf 'unlanded\n' >> "$home/worker/file"
+  git -C "$home/worker" add file
+  git -C "$home/worker" commit -qm unlanded
+  git -C "$home/worker" push -qu origin fm/task
+  git -C "$home/projects/project" worktree remove "$home/worker"
+  out=$(sweep "$home")
+  assert_contains "$out" 'not confirmed merged' 'missing copy with remote work refused'
+  assert_present "$home/state/task.meta" 'missing copy record kept while branch unmerged'
+  git -C "$home/seed" fetch -q origin fm/task
+  git -C "$home/seed" merge -q --ff-only FETCH_HEAD
+  git -C "$home/seed" push -q origin main
+  out=$(sweep "$home")
+  assert_absent "$home/state/task.meta" 'record removed after remote branch merged'
+  pass 'sweep retains missing copies with pushed unmerged work'
 }
 
 test_decisions_secondmates_and_unknown_kept() {
@@ -368,6 +409,29 @@ test_default_daily_check_and_watcher() {
   pass 'automatic default-on daily gate runs detached and watcher reports once'
 }
 
+test_due_check_runs_before_sweep_report() {
+  local home out rc=0
+  home=$(make_home due-check)
+  printf 'swept: 1 workers, 1 copies, 0 stale registrations\n' > "$home/state/.deadweight-sweep-result"
+  date +%s > "$home/state/.deadweight-sweep-launched"
+  cat > "$home/state/due.check.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'ran\n' > "$FIXTURE/due-check-ran"
+printf 'due check ran\n'
+SH
+  chmod 0700 "$home/state/due.check.sh"
+  FM_HOME="$home" "$ROOT/bin/fm-check-register.sh" due >/dev/null
+  env PATH="$home/fakebin:$PATH" FM_HOME="$home" FIXTURE="$home" \
+    FM_TEARDOWN_GUARD_DONE=1 FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=1 \
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 10 > "$home/watcher-out" 2> "$home/watcher-err" || rc=$?
+  out=$(cat "$home/watcher-out")
+  assert_equals 0 "$rc" 'watcher handled due task check'
+  assert_present "$home/due-check-ran" 'due task check ran before sweep wake'
+  assert_contains "$out" 'due check ran' 'due task check surfaced first'
+  assert_grep deadweight-sweep "$home/state/.wake-queue" 'sweep report remains queued'
+  pass 'due task checks run before a completed sweep report surfaces'
+}
+
 test_unsafe_records() {
   local home out rc=0
   home=$(make_home unsafe); add_worker "$home"
@@ -396,6 +460,8 @@ test_detached_sweep_survives_watcher_timeout() {
 
 test_clean_stopped_and_idempotence
 test_changes_kept
+test_ignored_work_kept
+test_missing_copy_remote_branch_kept_until_merged
 test_decisions_secondmates_and_unknown_kept
 test_recorded_pr_kept_until_merged
 test_scout_gates_and_work_kept
@@ -405,5 +471,6 @@ test_guard_cannot_force
 test_pipeline_and_captain_hold_kept
 
 test_default_daily_check_and_watcher
+test_due_check_runs_before_sweep_report
 test_unsafe_records
 test_detached_sweep_survives_watcher_timeout

@@ -2797,11 +2797,7 @@ while :; do
     # gate detaches the sweep so this check's timeout cannot stop a prune.
     FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
       run_check_capture "$SCRIPT_DIR/fm-deadweight-sweep.sh" check || exit 1
-    if [ -n "$FM_CHECK_RESULT" ]; then
-      reason="check: deadweight-sweep: $FM_CHECK_RESULT"
-      touch "$STATE/.last-check"
-      wake "$reason"
-    fi
+    sweep_report=$FM_CHECK_RESULT
     rejected_checks=
     contribution_check_output=
     for c in "$STATE"/*.check.sh; do
@@ -2926,6 +2922,9 @@ EOF
     touch "$STATE/.last-check"
     if [ -n "$contribution_check_output" ]; then
       wake "$contribution_check_output"
+    fi
+    if [ -n "$sweep_report" ]; then
+      wake "check: deadweight-sweep: $sweep_report"
     fi
   fi
 
