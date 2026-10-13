@@ -29,14 +29,16 @@
 #
 # One exit per run keeps the run inside the watcher's per-check bound; the
 # next poll takes the next candidate. A handled task is recorded in
-# state/.idle-exit/<id> against its activity stamp, so it is not probed again
-# until it shows new activity; a record whose task record is gone is pruned.
+# state/.idle-exit/<id> against its activity stamp. Successful exits are not
+# probed again until new activity; failed exits are retried on later polls but
+# reported only once per activity stamp. A record whose task is gone is pruned.
 # Eligibility and activity are read again just before the exit call. An answer
 # can still arrive after that read; it remains in the inbox and the worker can
 # be relaunched with all work and records intact.
 #
 # Output follows the watcher's custom state-check contract: one line when an
-# agent was stopped or an exit failed, nothing otherwise. `arm` writes
+# agent was stopped or an exit first failed for an activity stamp, nothing
+# otherwise. `arm` writes
 # state/idle-exit.check.sh and binds its bytes with fm-check-register.sh, so
 # the watcher runs it on its FM_CHECK_INTERVAL cadence; `disarm` removes the
 # shim, its trust binding, and the records. docs/configuration.md "Idle
@@ -126,9 +128,11 @@ activity_epoch() {  # <id>
   printf '%s\n' "$newest"
 }
 
-record_matches() {  # <id> <activity>
-  [ -f "$RECORD_DIR/$1" ] && [ ! -L "$RECORD_DIR/$1" ] \
-    && [ "$(sed -n 1p "$RECORD_DIR/$1" 2>/dev/null)" = "$2" ]
+record_outcome() {  # <id> <activity>
+  local file="$RECORD_DIR/$1"
+  [ -f "$file" ] && [ ! -L "$file" ] || return 0
+  [ "$(sed -n 1p "$file" 2>/dev/null)" = "$2" ] || return 0
+  sed -n 2p "$file" 2>/dev/null
 }
 
 record_write() {  # <id> <activity> <outcome>
@@ -179,7 +183,7 @@ parked_on_decision() {  # <state-line> <status-file>
 }
 
 run_check() {
-  local meta id kind activity fresh_activity now started age state state_line fresh_state_line limit out rc left line=
+  local meta id kind activity fresh_activity now started age state state_line fresh_state_line limit out rc left previous line=
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || return 0
   prune_records
   now=$(now_epoch)
@@ -197,7 +201,8 @@ run_check() {
     [ "$activity" -gt 0 ] || continue
     age=$((now - activity))
     [ "$age" -ge "$DONE_SECS" ] || continue
-    record_matches "$id" "$activity" && continue
+    previous=$(record_outcome "$id" "$activity")
+    case "$previous" in stopped|already-stopped) continue ;; esac
     state_line=$(crew_state "$id") || continue
     state=${state_line#state: }
     state=${state%% *}
@@ -229,11 +234,13 @@ run_check() {
         ;;
       3) continue ;;
       *)
-        record_write "$id" "$activity" failed || { line="could not record failed exit of $id"; break; }
-        if fm_timed_out "$rc"; then
-          line="exit of $id ($state, idle $((age / 60))m) timed out after ${left}s"
-        else
-          line="exit of $id ($state, idle $((age / 60))m) failed: ${out%%$'\n'*}"
+        if [ "$previous" != failed ]; then
+          record_write "$id" "$activity" failed || { line="could not record failed exit of $id"; break; }
+          if fm_timed_out "$rc"; then
+            line="exit of $id ($state, idle $((age / 60))m) timed out after ${left}s"
+          else
+            line="exit of $id ($state, idle $((age / 60))m) failed: ${out%%$'\n'*}"
+          fi
         fi
         ;;
     esac

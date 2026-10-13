@@ -181,12 +181,17 @@ measure_copies() {  # <due> <now>
         mb=${mb%%[!0-9]*}
         if [ "$rc" -eq 0 ] && [ -n "$mb" ]; then
           at=$now
-        elif [ "$left" -ge "$MEASURE_BUDGET_SECS" ]; then
-          mb=timeout
-          at=$now
+        elif fm_timed_out "$rc"; then
+          if [ "$left" -ge "$MEASURE_BUDGET_SECS" ]; then
+            mb=timeout
+            at=$now
+          else
+            pending=1
+            continue
+          fi
         else
-          pending=1
-          continue
+          mb=error
+          at=$now
         fi
       else
         pending=1
@@ -218,6 +223,7 @@ worktree_findings() {
   awk -F '\t' -v total_max="$WORKTREES_MB" -v copy_max="$COPY_MB" -v budget="$MEASURE_BUDGET_SECS" '
     function gb(mb) { return sprintf("%.1f GB", mb / 1024) }
     $2 == "timeout" { slow = slow (slow == "" ? "" : ", ") $1; next }
+    $2 == "error" { bad = bad (bad == "" ? "" : ", ") $1; next }
     $2 ~ /^[0-9]+$/ {
       total += $2
       if ($2 > copy_max) big = big (big == "" ? "" : ", ") $1 " " gb($2)
@@ -226,6 +232,7 @@ worktree_findings() {
       if (total > total_max) print "no-mistakes worktrees total " gb(total) ", over " gb(total_max)
       if (big != "") print "no-mistakes copies over " gb(copy_max) ": " big
       if (slow != "") print "read failed: could not size " slow " within " budget "s"
+      if (bad != "") print "read failed: could not size " bad
     }' "$SIZES"
 }
 

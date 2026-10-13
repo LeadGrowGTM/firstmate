@@ -205,7 +205,14 @@ test_busy_turn_is_left_and_failure_reported_once() {
   assert_contains "$out" 'idle-exit: exit of bz (done, idle 120m) failed: error: exit of bz could not be proven' "failure line"
   out=$(run_check "$home")
   [ -z "$out" ] || fail "a failure is reported once per activity: $out"
-  pass "fm-idle-exit: a busy turn is left running and a failed exit is reported once"
+  assert_equals 3 "$(log "$home" control | wc -l | tr -d ' ')" "a failed exit is retried"
+  printf '0\n' > "$home/fixtures/bz.rc"
+  out=$(run_check "$home")
+  assert_contains "$out" 'idle-exit: exited bz' "a later successful exit is reported"
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "a successful exit should not be retried: $out"
+  assert_equals 4 "$(log "$home" control | wc -l | tr -d ' ')" "successful exit stops retries"
+  pass "fm-idle-exit: a busy turn is left running and failed exits retry without repeat reports"
 }
 
 test_record_failure_is_reported() {

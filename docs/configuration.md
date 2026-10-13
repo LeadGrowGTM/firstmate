@@ -1756,7 +1756,7 @@ It is off until armed.
 - The exit is `bin/fm-control.sh <id> exit --only-if-idle`, so a turn that is not idle at the exit point is refused with exit 3 and left running, and the endpoint, worktree, and every uncommitted change are kept.
 - It never tears down, discards, relaunches, or removes a worktree.
 - At most one agent is exited per run, which keeps the run inside `FM_CHECK_TIMEOUT`; the next poll takes the next candidate.
-- A handled task is recorded in `state/.idle-exit/<id>` against its activity stamp and is not probed again until it shows new activity; a record whose task record is gone is pruned.
+- An exit outcome is recorded in `state/.idle-exit/<id>` against its activity stamp; successful exits are not probed again until new activity, failed exits are retried on later polls but reported only once per activity stamp, and a record whose task is gone is pruned.
 
 An exited worker stays supervised.
 A steer sent to it with `bin/fm-send.sh` is recorded durably, and the usual [relaunch](agent-control.md) resumes it when an answer arrives.

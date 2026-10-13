@@ -39,6 +39,7 @@ name=${*: -1}
 name=${name##*/}
 printf '%s\n' "$name" >> "$FIXTURES/du.log"
 [ ! -f "$FIXTURES/slow-$name" ] || sleep 5
+[ ! -f "$FIXTURES/fail-$name" ] || exit 1
 printf '%s\t%s\n' "$(cat "$FIXTURES/size-$name")" "${*: -1}"
 FAKE
 chmod +x "$FAKE_BIN"/*
@@ -122,6 +123,20 @@ test_copy_depth_and_read_failures() {
   pass "fm-clutter-check: each run is sized and measurement failures are visible"
 }
 
+test_du_error_is_not_reported_as_timeout() {
+  local home out
+  home=$(make_home du-error)
+  add_copy "$home" repo broken 4000
+  : > "$home/fixtures/fail-broken"
+  out=$(run_check "$home")
+  assert_contains "$out" 'read failed: could not size repo/broken' "du error must be reported"
+  assert_not_contains "$out" 'within 14s' "an immediate du error is not a timeout"
+  rm -f "$home/fixtures/fail-broken"
+  out=$(CHECK_NOW=$((NOW + 86400)) run_check "$home")
+  assert_contains "$out" 'no-mistakes copies over 3.0 GB: repo/broken 3.9 GB' "the next daily check measures the copy again"
+  pass "fm-clutter-check: du errors are distinguished from timeouts"
+}
+
 test_daily_gate() {
   local home out
   home=$(make_home daily)
@@ -182,6 +197,7 @@ test_arm_refuses_secondmate_home_and_runs_the_shim() {
 test_clean_is_silent
 test_space_conditions_join_into_one_line
 test_copy_depth_and_read_failures
+test_du_error_is_not_reported_as_timeout
 test_daily_gate
 test_budget_and_unmeasurable_copy
 test_arm_refuses_secondmate_home_and_runs_the_shim
