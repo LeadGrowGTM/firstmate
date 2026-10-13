@@ -7,8 +7,8 @@
 # The primary handles it at a normal checkpoint and uses its existing cascade.
 # --eligible rechecks the bound live session and read-only delivery guards.
 #
-# Skip (exit 0, with a reason) unless fm-inbox ready proves a live primary and,
-# when queueing, a healthy wake consumer in present posture. Away/quiet records
+# Queue for a recorded lock PID even when the host cannot classify its holder.
+# A verified local holder also needs a healthy wake consumer. Away/quiet records
 # and a secondmate home also skip. A primary pass recorded by fm-stow-cascade --record-pass in
 # state/.last-stow-primary-pass within 20 hours skips, including a future stamp.
 # An unreadable or malformed stamp fails closed. Missing stamps allow a pass.
@@ -69,11 +69,15 @@ ready = json.loads(sys.argv[1])
 stamp = pathlib.Path(sys.argv[2])
 if ready['posture']['state'] != 'present':
     print('away/quiet posture or posture unknown')
-elif (ready['lock']['state'] != 'held' or ready['lock']['live_harness'] is not True) and sys.argv[6] != '1':
+elif ready['lock']['state'] in ('free', 'stale'):
+    print('no proven live main session')
+elif sys.argv[4] == 'queue' and (ready['lock']['state'] not in ('held', 'unknown') or ready['lock']['pid'] is None):
+    print('no usable main lock holder')
+elif sys.argv[4] == 'eligible' and (ready['lock']['state'] != 'held' or ready['lock']['live_harness'] is not True) and sys.argv[6] != '1':
     print('no proven live main session')
 elif sys.argv[4] == 'eligible' and ready['lock']['pid'] != int(sys.argv[5]):
     print('different main session holds the lock')
-elif sys.argv[4] == 'queue' and ready['can_receive'] is not True:
+elif sys.argv[4] == 'queue' and ready['lock']['state'] == 'held' and ready['can_receive'] is not True:
     print('main wake consumer is not proven healthy')
 elif stamp.exists() or stamp.is_symlink():
     try:

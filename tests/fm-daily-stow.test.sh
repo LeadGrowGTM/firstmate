@@ -35,10 +35,7 @@ assert_equals 0 "$(count_wakes)" 'absent session gets no wake'
 printf '999999999\n' > "$home/state/.lock"
 out=$(run_daily)
 assert_contains "$out" 'no proven live main session' 'stale session skips'
-printf '%s\n' "$$" > "$home/state/.lock"
-out=$(run_daily)
-assert_contains "$out" 'no proven live main session' 'non-harness lock cannot imply liveness'
-pass 'missing, stale, and unrelated lock holders receive no instruction'
+pass 'missing and stale lock holders receive no instruction'
 
 # Exercise the existing structural live-lock API with a real process, as in
 # fm-inbox.test.sh; no vendor-dependent busy classifier is added here.
@@ -158,36 +155,32 @@ expect_code 3 "$rc" 'disappearing session id cannot use the old note'
 assert_contains "$out" 'different main session holds the lock' 'sidecar disappearance drops the old note'
 pass 'session binding follows recorded id changes and presence'
 
-# The host cannot classify a PID recorded in a different namespace. A
-# recorded Codex id and fresh watcher beacon do not prove the main still runs.
+# Model the host view of a namespaced Codex lock: a recorded PID that the host
+# cannot classify, with a recorded Codex id for the recipient's later recheck.
 home="$TMP_ROOT/codex-host-home"
 mkdir -p "$home/state" "$home/data" "$home/config"
 printf '%s\n' "$$" > "$home/state/.lock"
 printf 'codex:old-thread\n' > "$home/state/.lock-session"
 touch "$home/state/.last-watcher-beat"
-ready=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" bash "$ROOT/bin/fm-inbox.sh" ready)
+ready=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_SUPERVISION_MODEL=autoarm \
+  bash "$ROOT/bin/fm-inbox.sh" ready)
 assert_equals unknown "$(printf '%s' "$ready" | python3 -c 'import json,sys; print(json.load(sys.stdin)["lock"]["state"])')" \
   'the host cannot classify the namespaced lock pid'
+assert_equals healthy "$(printf '%s' "$ready" | python3 -c 'import json,sys; print(json.load(sys.stdin)["wake_consumer"]["state"])')" \
+  'the watcher is healthy despite the unknown lock'
+out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+  FM_CONFIG_OVERRIDE="$home/config" FM_SUPERVISION_MODEL=autoarm bash "$DAILY")
+assert_contains "$out" 'queued' 'host queues for an unknown lock with a healthy watcher'
+assert_equals 1 "$(count_wakes)" 'unknown lock receives one scheduled wake'
 python3 - "$home/state/.last-watcher-beat" <<'PY'
 import os, sys, time
 age = time.time() - 600
 os.utime(sys.argv[1], (age, age))
 PY
 out=$(run_daily)
-assert_contains "$out" 'no proven live main session' 'old beacon cannot queue for an unknown lock'
-touch "$home/state/.last-watcher-beat"
-out=$(run_daily)
-assert_contains "$out" 'no proven live main session' \
-  'a fresh leftover beacon cannot prove a namespaced Codex primary is still live'
-assert_equals 0 "$(count_wakes)" 'an exited primary receives no scheduled wake'
-out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
-  FM_CONFIG_OVERRIDE="$home/config" FM_SUPERVISION_MODEL=persistent bash "$DAILY")
-assert_contains "$out" 'no proven live main session' 'known supervision without a watcher cannot queue for an unknown lock'
-out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
-  FM_CONFIG_OVERRIDE="$home/config" FM_SUPERVISION_MODEL=autoarm bash "$DAILY")
-assert_contains "$out" 'no proven live main session' 'a healthy watcher verdict cannot prove the primary lives'
-assert_equals 0 "$(count_wakes)" 'no unknown lock queues a wake'
-pass 'unknown lock skips despite a recorded Codex id and fresh beacon'
+assert_contains "$out" 'replay' 'unknown lock retry reuses the note despite a stale beacon'
+assert_equals 1 "$(count_wakes)" 'same-day retry does not add a second wake'
+pass 'unknown lock queues once despite host PID visibility and watcher state'
 
 # A Codex tool can lose host PID visibility while its daemon still holds the
 # lock. A new conversation can also reuse that daemon PID after the TUI exits.
