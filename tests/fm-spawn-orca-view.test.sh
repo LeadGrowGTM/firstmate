@@ -170,7 +170,8 @@ make_secondmate_home() {  # <dir> <id>
 # HOME_DIR, FAKEBIN, VIEW_DIR, PANE_LOG, LAUNCH_LOG, OUT, STATUS. A file at
 # $TMP_ROOT/<case>.prior-meta becomes the existing record a respawn replaces.
 spawn_secondmate() {
-  local name=$1 id=$2 switch=$3 allowlist=${4:-} identity_mode=${5:-} base_session=${6:-}
+  local name=$1 id=$2 switch=$3 allowlist=${4:-} identity_mode=${5:-} base_session=${6:-} harness=${7:-}
+  local -a harness_args=()
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
   VIEW_DIR="$CASE_DIR/view"
@@ -178,6 +179,11 @@ spawn_secondmate() {
   LAUNCH_LOG="$CASE_DIR/launch.log"
   FAKEBIN=$(fm_test_make_spawn_fakebin "$CASE_DIR/fake")
   install_view_fakes "$FAKEBIN" "$VIEW_DIR"
+  if [ -n "$harness" ]; then
+    printf '#!/bin/sh\nexit 0\n' > "$FAKEBIN/$harness"
+    chmod +x "$FAKEBIN/$harness"
+    harness_args=(--harness "$harness")
+  fi
   [ -z "$identity_mode" ] || : > "$VIEW_DIR/identity-$identity_mode"
   printf 'fm-%s\n' "$id" > "$VIEW_DIR/windows"
   fm_test_spawn_home "$HOME_DIR" codex
@@ -191,7 +197,7 @@ spawn_secondmate() {
   OUT=$(FM_FAKE_LAUNCH_LOG="$LAUNCH_LOG" FM_FAKE_PANE_LOG="$PANE_LOG" FM_FAKE_VIEW_DIR="$VIEW_DIR" \
     FM_FAKE_BASE_SESSION="$base_session" \
     FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
-    fm_test_run_spawn "$HOME_DIR" "$CASE_DIR/sm" "$FAKEBIN" "$id" "$CASE_DIR/sm" --secondmate)
+    fm_test_run_spawn "$HOME_DIR" "$CASE_DIR/sm" "$FAKEBIN" "$id" "$CASE_DIR/sm" --secondmate "${harness_args[@]}")
   STATUS=$?
 }
 
@@ -327,7 +333,8 @@ SH
 # `untracked` the record names no tab, as for a secondmate launched before the
 # switch, whose hand-opened tab made the view session.
 relaunch_secondmate() {
-  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} sm
+  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} harness=${6:-} sm
+  local -a harness_args=()
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
   VIEW_DIR="$CASE_DIR/fake"
@@ -339,6 +346,11 @@ relaunch_secondmate() {
   [ "$switch" = absent ] || printf '%s\n' "$switch" > "$HOME_DIR/config/orca-view-tabs"
   make_relaunch_stub "$FAKEBIN"
   install_view_fakes "$FAKEBIN" "$VIEW_DIR"
+  if [ -n "$harness" ]; then
+    printf '#!/bin/sh\nexit 0\n' > "$FAKEBIN/$harness"
+    chmod +x "$FAKEBIN/$harness"
+    harness_args=(--harness "$harness")
+  fi
   if [ "${FM_FAKE_STAGE_FAIL:-}" = 1 ]; then
     cat > "$FAKEBIN/mkdir" <<'SH'
 #!/usr/bin/env bash
@@ -383,7 +395,7 @@ SH
     FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
     HOME="$CASE_DIR/user-home" CLAUDE_CONFIG_DIR='' FM_SPAWN_NO_GUARD=1 \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
-    "$CONTROL" "$id" relaunch 2>&1)
+    "$CONTROL" "$id" relaunch "${harness_args[@]}" 2>&1)
   STATUS=$?
 }
 
@@ -428,6 +440,37 @@ test_aborted_relaunch_keeps_prior_tab_record() {
   assert_equals "pane=tab-0:leaf tab=tab-0 worktree=wt-1 endpoint=/hooks/endpoint.env env=production version=1" "$seen" \
     "the surviving pane keeps all six fields of the prior tab identity"
   pass "aborted relaunch closes its new tab and restores the surviving tab record"
+}
+
+test_post_export_abort_keeps_replacement_tab() {
+  FM_KIMI_READY_POLLS=1 FM_KIMI_POLL_INTERVAL=0 \
+    relaunch_secondmate relaunch-post-export sm-post on '' '' kimi
+  [ "$STATUS" -ne 0 ] || fail "Kimi readiness failure must abort the relaunch"
+  assert_contains "$OUT" "kimi did not show a verified ready signal" \
+    "the relaunch reached readiness after sending the new identity"
+  assert_equals term-1 "$(meta sm-post orca_view_handle)" "the exported tab remains recorded"
+  assert_equals orca-sm-post "$(meta sm-post orca_view_session)" "the exported view remains recorded"
+  assert_equals 1 "$(meta sm-post orca_view_owned)" "the exported view retains ownership"
+  assert_grep 'tab-1:leaf' "$VIEW_DIR/keys" "the new identity was sent to the pane"
+  assert_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
+    "abort closes the superseded tab"
+  assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" \
+    "abort keeps the tab bound to the surviving pane"
+  pass "post-export relaunch abort retains the new tab and closes the prior tab"
+}
+
+test_post_export_fresh_abort_keeps_only_tab() {
+  FM_KIMI_READY_POLLS=1 FM_KIMI_POLL_INTERVAL=0 \
+    spawn_secondmate fresh-post-export sm-fresh-post on '' '' '' kimi
+  [ "$STATUS" -ne 0 ] || fail "Kimi readiness failure must abort the fresh spawn"
+  assert_contains "$OUT" "kimi did not show a verified ready signal" \
+    "the fresh spawn reached readiness after sending the new identity"
+  assert_equals term-1 "$(meta sm-fresh-post orca_view_handle)" "the only tab remains recorded"
+  assert_equals orca-sm-fresh-post "$(meta sm-fresh-post orca_view_session)" "the only view remains recorded"
+  assert_grep 'tab-1:leaf' "$PANE_LOG" "the new identity was sent to the pane"
+  assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" \
+    "abort keeps the only tab bound to the surviving pane"
+  pass "post-export fresh abort retains its only tab and task record"
 }
 
 test_cross_home_view_name_collision() {
@@ -567,6 +610,8 @@ test_missing_identity_keeps_fresh_spawn_unbadged
 test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
 test_aborted_relaunch_keeps_prior_tab_record
+test_post_export_abort_keeps_replacement_tab
+test_post_export_fresh_abort_keeps_only_tab
 test_cross_home_view_name_collision
 test_derived_view_name_collision
 test_incomplete_identity_keeps_prior_tab

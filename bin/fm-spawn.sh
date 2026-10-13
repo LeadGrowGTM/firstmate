@@ -1316,6 +1316,7 @@ spawn_remote_secondmate() {
 BACKEND=
 ORCA_ABORT_CLEANUP=0
 ORCA_VIEW_ABORT_CLOSE=0
+ORCA_VIEW_IDENTITY_SENT=0
 ORCA_VIEW_HANDLE=
 ORCA_VIEW_SESSION=
 ORCA_VIEW_OWNED=
@@ -1469,7 +1470,13 @@ spawn_abort_cleanup() {
     fi
   fi
   if [ "$ORCA_VIEW_ABORT_CLOSE" = 1 ]; then
-    if [ "$RELAUNCH" -eq 1 ] &&
+    if [ "$ORCA_VIEW_IDENTITY_SENT" = 1 ]; then
+      ORCA_VIEW_ABORT_CLOSE=0
+      if [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
+        [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ]; then
+        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" || true
+      fi
+    elif [ "$RELAUNCH" -eq 1 ] &&
       [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
       orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
       if ! { awk -F= '$1 !~ /^orca_view_(handle|session|owned)$/' "$STATE/$ID.meta" >"$orca_restore" &&
@@ -1497,7 +1504,7 @@ spawn_abort_cleanup() {
     SPAWN_TASK_LOCK_HELD=0
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
-  if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
+  if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ] && [ "$ORCA_VIEW_IDENTITY_SENT" != 1 ]; then
     if ! spawn_fresh_commit_rollback; then
       status=1
     fi
@@ -6024,6 +6031,7 @@ fi
 if [ -n "$ORCA_VIEW_EXPORT" ]; then
   spawn_send_text_line "$T" "unset ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"
   spawn_send_text_line "$T" "$ORCA_VIEW_EXPORT"
+  ORCA_VIEW_IDENTITY_SENT=1
 fi
 sleep 0.3
 SPAWN_LAUNCH_ATTEMPTED=1
@@ -6140,7 +6148,9 @@ else
 fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
-    if spawn_fresh_commit_rollback; then
+    if [ "$ORCA_VIEW_IDENTITY_SENT" = 1 ]; then
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its launched agent and Orca tab remain recorded at $STATE/$ID.meta for reconciliation" >&2
+    elif spawn_fresh_commit_rollback; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
