@@ -1474,7 +1474,12 @@ spawn_abort_cleanup() {
       ORCA_VIEW_ABORT_CLOSE=0
       if [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
         [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ]; then
-        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" || true
+        orca_prior_close_args=()
+        if [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] && [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
+          [ "$ORCA_VIEW_PRIOR_SESSION" != "$ORCA_VIEW_SESSION" ]; then
+          orca_prior_close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION")
+        fi
+        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" "${orca_prior_close_args[@]}" || true
       fi
     elif [ "$RELAUNCH" -eq 1 ] &&
       [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
@@ -6187,11 +6192,14 @@ fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
 ORCA_VIEW_ABORT_CLOSE=0
-# Committed: a fresh view tab replaced the previous one, so close the previous
-# tab. Its view session is kept, because the fresh tab attached it.
 if [ -n "$ORCA_VIEW_HANDLE" ] && [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
   [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ]; then
-  "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" || true
+  orca_prior_close_args=()
+  if [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] && [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
+    [ "$ORCA_VIEW_PRIOR_SESSION" != "$ORCA_VIEW_SESSION" ]; then
+    orca_prior_close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION")
+  fi
+  "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" "${orca_prior_close_args[@]}" || true
 fi
 
 SPAWN_DELIVERY=
