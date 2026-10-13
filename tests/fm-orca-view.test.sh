@@ -16,6 +16,7 @@ command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 
 VIEW="$ROOT/bin/fm-orca-view.sh"
+DEFAULT_ORCA_PROJECT='33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate'
 REAL_TMUX=$(command -v tmux)
 TMP_ROOT=$(fm_test_tmproot fm-orca-view)
 mkdir -p "$TMP_ROOT"
@@ -59,6 +60,7 @@ case "$1 $2" in
       case "$1" in
         --command) cmd=$2; shift 2 ;;
         --title) title=$2; shift 2 ;;
+        --worktree) printf '%s\n' "$2" > "$FM_FAKE_ORCA_LOG.project"; shift 2 ;;
         *) shift ;;
       esac
     done
@@ -87,6 +89,7 @@ names_claude() { printf '%s\n' "$1" | grep -Eiq "$ORCA_CLAUDE_RE"; }
 run_view() {  # <args...>: off WSL unless the caller sets FM_WSL_INTEROP_DIR
   PATH="$SHIM:$PATH" FM_ORCA_CLI="$SHIM/orca-ide" FM_FAKE_ORCA_LOG="$ORCA_LOG" \
     FM_FAKE_ORCA_TAB_HOST=tabs FM_ROOT_OVERRIDE="$TMP_ROOT/code-root" \
+    FM_HOME="$TMP_ROOT/home" FM_CONFIG_OVERRIDE="${FM_CONFIG_OVERRIDE:-$TMP_ROOT/config}" \
     FM_WSL_INTEROP_DIR="${FM_WSL_INTEROP_DIR:-$TMP_ROOT/no-wsl}" \
     "$VIEW" "$@"
 }
@@ -165,8 +168,8 @@ test_open_views_the_window_and_writes_identity() {
     || fail "open failed: $out"
   assert_contains "$out" "handle=term-1" "open prints the Orca terminal handle"
   assert_contains "$out" "view_session=orca-dev" "open prints the view session"
-  assert_grep "terminal create --worktree path:$TMP_ROOT/code-root --title dev" "$ORCA_LOG" \
-    "the tab is created on the code root's Orca worktree with its title"
+  assert_contains "$(cat "$ORCA_LOG")" "terminal create --worktree $DEFAULT_ORCA_PROJECT --title dev" \
+    "the tab defaults to the explicit firstmate Orca project with its title"
   assert_no_grep '--shell' "$ORCA_LOG" "off WSL the tab keeps Orca's default shell"
   wait_for_session orca-dev || fail "open did not create its grouped view session"
   assert_equals "$DEV_ID" "$("$SHIM/tmux" show-options -v -t '=orca-dev:' @fm_view_window)" \
@@ -191,6 +194,26 @@ test_open_views_the_window_and_writes_identity() {
   assert_equals 1 "$("$SHIM/tmux" list-sessions -F '#{session_name}' | grep -c '^orca-dev$')" \
     "no duplicate view session"
   pass "open: one tab per call on a grouped view of exactly that window, reused when it exists, identity without secrets"
+}
+
+test_home_local_orca_project() {
+  local config="$TMP_ROOT/project-config" out
+  mkdir -p "$config"
+  printf '%s\n' 'repo-other::C:\Users\other\Project With Spaces' > "$config/orca-view-project"
+  : > "$ORCA_LOG"
+  out=$(FM_CONFIG_OVERRIDE="$config" run_view open --target "firstmate:$DEV_ID" --view-session orca-project-override) || fail "the configured project did not open: $out"
+  assert_contains "$(cat "$ORCA_LOG")" 'terminal create --worktree repo-other::C:\Users\other\Project With Spaces --title orca-project-override' "open forwards the home-local selector as one argument"
+  assert_equals 'repo-other::C:\Users\other\Project With Spaces' "$(cat "$ORCA_LOG.project")" "Windows paths with spaces reach Orca in one argument"
+  : > "$config/orca-view-project"
+  : > "$ORCA_LOG"
+  out=$(FM_CONFIG_OVERRIDE="$config" run_view window "$DEV_ID" 2>&1)
+  expect_code 3 "$?" "an empty project selection steps aside"
+  assert_contains "$out" 'orca-view-project' "the note names the invalid config file"
+  assert_no_grep 'terminal create' "$ORCA_LOG" "invalid project configuration creates no tab"
+  printf 'first\nsecond\n' > "$config/orca-view-project"
+  out=$(FM_CONFIG_OVERRIDE="$config" run_view window "$DEV_ID" 2>&1)
+  expect_code 3 "$?" "a multiline project selection steps aside"
+  pass "project: home-local override preserves Windows paths and spaces; invalid selections step aside"
 }
 
 test_open_refuses_a_foreign_view_session() {
@@ -302,7 +325,7 @@ test_window_helper() {
   out=$(run_view window "$DEV_ID") || fail "window failed: $out"
   assert_contains "$out" "view_session=orca-w$n" "the view session is named after the window id"
   assert_contains "$out" "handle=term-" "the helper prints the tab's handle"
-  assert_grep "terminal create --worktree path:$TMP_ROOT/code-root --title firstmate:fm-dev" "$ORCA_LOG" \
+  assert_contains "$(cat "$ORCA_LOG")" "terminal create --worktree $DEFAULT_ORCA_PROJECT --title firstmate:fm-dev" \
     "the tab is titled after the owning session and window"
   wait_for_window "orca-w$n" "$DEV_ID" || fail "the helper's view must show exactly that window"
   assert_equals "$DEV_ID" "$("$SHIM/tmux" show-options -v -t "=orca-w$n:" @fm_view_window)" \
@@ -551,6 +574,7 @@ SH
 test_switch_values
 test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
+test_home_local_orca_project
 test_open_refuses_the_base_as_a_view
 test_open_preserves_borrowed_hooks
 test_open_preserves_inherited_hooks

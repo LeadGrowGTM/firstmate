@@ -255,8 +255,8 @@ test_switch_on_opens_and_forwards_identity() {
   expect_code 0 "$STATUS" "a secondmate spawn with the switch on should succeed: $OUT"
   assert_equals term-1 "$(meta sm-on orca_view_handle)" "the tab's handle is recorded"
   assert_equals orca-sm-on "$(meta sm-on orca_view_session)" "the view session is recorded"
-  assert_grep "terminal create --worktree path:$ROOT --title sm-on" "$VIEW_DIR/orca.log" \
-    "the tab is titled for the secondmate on the code root's Orca worktree"
+  assert_contains "$(cat "$VIEW_DIR/orca.log")" 'terminal create --worktree 33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate --title sm-on' \
+    "the tab is titled for the secondmate on the configured default firstmate project"
   assert_present "$VIEW_DIR/session-orca-sm-on" "the spawn created the tab's view session"
   assert_absent "$HOME_DIR/state/sm-on.orca-view-identity" "the identity hand-off file is consumed"
   install_env_probe "$FAKEBIN"

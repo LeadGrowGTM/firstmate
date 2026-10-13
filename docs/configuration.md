@@ -835,7 +835,12 @@ Turning it off does not close a tab already recorded for a secondmate; cleanup s
 Any other content is treated as `off` with a one-line warning, so the file never stops a spawn.
 The home that spawns the secondmate reads the switch, and secondmate homes do not inherit it.
 
-With the switch on, every secondmate spawn or relaunch opens one Orca terminal, titled with the secondmate id, on the Orca project registered for this Firstmate code root.
+The optional home-local `config/orca-view-project` file selects the Orca project for both automatic tabs and the public `open` and `window` helpers.
+It contains one nonempty Orca worktree selector, passed as a single `--worktree` argument, preserving Windows paths and spaces.
+An absent file defaults to the `firstmate` project's worktree `33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate`.
+An unreadable, empty, or multiline file reports a note and skips opening a tab.
+This selection is independent of the Firstmate code root, so a WSL checkout path does not select the unrelated `mitch/project` entry.
+With the switch on, every secondmate spawn or relaunch opens one Orca terminal, titled with the secondmate id, on that selected Orca project.
 The tab attaches a grouped tmux view session that shows exactly that secondmate's window, so each tab follows its own window without moving any other viewer.
 It prefers `orca-<id>` and chooses a distinct name when an occupied candidate belongs to another base session or identifies another task's window.
 An eligible existing session, such as one a hand-opened tab created, is reused rather than duplicated.

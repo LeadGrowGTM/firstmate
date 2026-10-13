@@ -35,7 +35,8 @@
 #           which stalls Orca's Claude account machinery.
 # open      creates or reuses the view session, points it at the target window
 #           as described above, then creates the Orca terminal on the
-#           registered Orca worktree for this Firstmate code root
+#           home-local Orca project (config/orca-view-project; schema in
+#           docs/configuration.md "Orca view tabs")
 #           and prints handle=<terminal-handle>
 #           with its view_session=<name>. Failed opens leave the view session
 #           in place. With --identity-file the tab first writes its own Orca
@@ -81,6 +82,8 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-wsl-interop-lib.sh
@@ -119,6 +122,20 @@ cmd_enabled() {
     printf 'off\n'
     ;;
   esac
+}
+
+orca_project() {
+  local file="$CONFIG/orca-view-project" value
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    printf '%s\n' '33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate'
+    return 0
+  fi
+  value=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$file" 2>/dev/null) ||
+    note "cannot read config/orca-view-project, so no Orca tab was opened"
+  case "$value" in
+  '' | *$'\n'*) note "config/orca-view-project must contain one nonempty Orca worktree selector" ;;
+  esac
+  printf '%s\n' "$value"
 }
 
 # resolve_target <session:window>: sets BASE_SESSION (the group base's name),
@@ -310,11 +327,12 @@ cmd_command() {
 }
 
 cmd_open() {
-  local cmd out handle grouped group
+  local cmd out handle grouped group project
   parse_view_args "$@"
   resolve_target "$TARGET"
   [ "$VIEW_SESSION" != "$BASE_SESSION" ] || note "the base session cannot be used as its own view"
   command -v jq >/dev/null 2>&1 || note "jq is not installed, so Orca's reply cannot be read"
+  project=$(orca_project) || return 3
   cmd=$(view_command "$IDFILE")
   orca_env
   if ! tmux has-session -t "=$VIEW_SESSION" 2>/dev/null; then
@@ -329,7 +347,7 @@ EOF
   fi
   track_view || note "view session $VIEW_SESSION cannot show window $WINDOW_ID of $BASE_SESSION"
   [ -z "$IDFILE" ] || rm -f "$IDFILE" "$IDFILE.tmp"
-  set -- terminal create --worktree "path:$FM_ROOT" --title "$TITLE" --command "$cmd" --json
+  set -- terminal create --worktree "$project" --title "$TITLE" --command "$cmd" --json
   ! on_wsl || set -- "$@" --shell wsl.exe
   out=$(orca_call "$@") || note "Orca is unreachable or refused the view tab: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
   handle=$(printf '%s' "$out" | jq -r 'select(.ok == true) | .result.terminal.handle // empty' 2>/dev/null)
