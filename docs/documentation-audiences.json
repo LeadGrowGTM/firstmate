@@ -365,6 +365,14 @@
       "audience": "operator-example"
     },
     {
+      "path": "docs/examples/session-refresh/fm-daily-stow.service",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/session-refresh/fm-daily-stow.timer",
+      "audience": "operator-example"
+    },
+    {
       "path": "docs/examples/session-refresh/fm-session-refresh.service",
       "audience": "operator-example"
     },

@@ -1,0 +1,10 @@
+# Opt-in daily memory pass before the Toronto session refresh.
+[Unit]
+Description=Firstmate daily stow before session refresh
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 America/Toronto
+Persistent=true
+
+[Install]
+WantedBy=timers.target
