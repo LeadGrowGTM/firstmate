@@ -4793,7 +4793,7 @@ fi
     else
       sl_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
     fi
-    sl_cmd="$SCRIPT_DIR/fm-statusbar.sh claude-line --task $ID --kind $KIND"
+    sl_cmd="$SCRIPT_DIR/fm-statusbar.sh claude-line --task $ID"
     case "$sl_cmd" in
     *[\'\"\\\$\`]* | *[[:cntrl:]]*) ;;
     *)
@@ -5289,7 +5289,7 @@ fi
 # sure the window's session group shows the detail line. Best effort only.
 if [ "$BACKEND" = tmux ]; then
   "$SCRIPT_DIR/fm-statusbar.sh" label "${WT_TARGET:-$T}" "$ID" "$HARNESS" "$MODEL" "$EFFORT" "$WT" \
-    "$WORKER_ACCOUNT_DECLARED" "$WORKER_ACCOUNT_PROVIDER" >/dev/null 2>&1 || true
+    "$WORKER_ACCOUNT_PROVIDER" >/dev/null 2>&1 || true
   "$SCRIPT_DIR/fm-statusbar.sh" apply "$SES" >/dev/null 2>&1 || true
 fi
 

@@ -4,7 +4,7 @@
 # per-window data instead of per-refresh probes.
 #
 # Usage:
-#   fm-statusbar.sh label <target> <id> <harness> <model> <effort> <worktree> [account] [account-provider]
+#   fm-statusbar.sh label <target> <id> <harness> <model> <effort> <worktree> [account-provider]
 #       Record the task's facts as window user options (@fm_task,
 #       @fm_model, @fm_effort, @fm_wt) on one tmux window. fm-spawn
 #       calls it for every tmux spawn and relaunch. Never fails the caller.
@@ -18,13 +18,13 @@
 #       Print the cached plan-usage segment for one window,
 #       and refresh it from `quota-axi` in the background at most once a minute.
 #       The cache holds account keys and percentages, never credentials.
-#   fm-statusbar.sh claude-line [--task <id>] [--kind <kind>]
+#   fm-statusbar.sh claude-line [--task <id>]
 #       The Claude Code statusLine command: reads Claude's statusLine JSON on
 #       stdin and prints one short line (model and effort, context, rate-limit
 #       windows, task). Only whitelisted fields are ever printed.
 #
 # Environment: FM_STATE_OVERRIDE selects the state directory (default
-# $FM_HOME/state); FM_STATUSBAR_USAGE_TTL overrides the 60 second refresh floor.
+# $FM_HOME/state).
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,8 +34,9 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 USAGE_CACHE="$STATE/statusbar-usage.txt"
 USAGE_ATTEMPT="$STATE/.statusbar-usage-attempt"
 USAGE_LOCK="$STATE/.statusbar-usage.lock"
-USAGE_TTL="${FM_STATUSBAR_USAGE_TTL:-60}"
+USAGE_TTL=60
 SELF="$SCRIPT_DIR/fm-statusbar.sh"
+. "$SCRIPT_DIR/fm-quota-axi-lib.sh"
 
 # One value, one line, no tmux style or format metacharacters, bounded length.
 fm_sb_clean() {  # <value> [max]
@@ -68,7 +69,7 @@ fm_sb_model_label() {  # <model-id>
 
 cmd_label() {
   local target=${1:-} id=${2:-} harness=${3:-} model=${4:-} effort=${5:-} wt=${6:-}
-  local account=${7:-} account_provider=${8:-} provider=
+  local account_provider=${7:-} provider= account
   [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 0
   case "$harness" in
     claude|codex|grok|kimi|cursor|agy) provider=$harness ;;
@@ -81,15 +82,8 @@ cmd_label() {
       esac
       ;;
   esac
-  case "$harness" in
-    codex) account=codex-home ;;
-    pi|pi-signed)
-      if [ "${model%%/*}" = codex-native ]; then account=codex-home
-      elif [ -n "$account_provider" ]; then account=$account_provider
-      fi
-      ;;
-  esac
-  [ "$account" != ordinary ] || account=default
+  account=$(jq -nr --arg harness "$harness" --arg model "$model" \
+    "$FM_QUOTA_ROW_JQ quota_lane(\$harness; \$model)") || account=
   [ -n "$account" ] || account=default
   [ "$effort" != default ] || effort=
   tmux set-window-option -t "$target" @fm_task "$(fm_sb_clean "$id" 40)" 2>/dev/null || return 0
@@ -116,7 +110,7 @@ fm_sb_format() {
 }
 
 cmd_sync() {
-  local meta id win harness model effort wt backend home account account_provider
+  local meta id win harness model effort wt backend home account_provider
   for meta in "$STATE"/*.meta; do
     [ -f "$meta" ] || continue
     id=${meta##*/}
@@ -128,11 +122,10 @@ cmd_sync() {
     harness=$(sed -n 's/^harness=//p' "$meta" | head -1)
     model=$(sed -n 's/^model=//p' "$meta" | head -1)
     effort=$(sed -n 's/^effort=//p' "$meta" | head -1)
-    account=$(sed -n 's/^account=//p' "$meta" | head -1)
     account_provider=$(sed -n 's/^account_provider=//p' "$meta" | head -1)
     wt=$(sed -n 's/^worktree=//p' "$meta" | head -1)
     home=$(sed -n 's/^home=//p' "$meta" | head -1)
-    cmd_label "$win" "$id" "$harness" "$model" "$effort" "${home:-$wt}" "$account" "$account_provider"
+    cmd_label "$win" "$id" "$harness" "$model" "$effort" "${home:-$wt}" "$account_provider"
   done
   return 0
 }
@@ -182,11 +175,10 @@ fm_sb_usage_display() {  # <window>
   [ -n "$provider" ] && [ -f "$USAGE_CACHE" ] || { printf 'u ?\n'; return 0; }
   awk -F '\t' -v provider="$provider" -v account="$account" '
     $1 == provider {
-      if (!seen[$2]++) count++
       if ($2 == account || $2 == "*") {
         if (!matched || $3 + 0 > used) { used = $3 + 0; key = $2 }
         matched = 1
-      } else if (account == "codex-home" && $2 == "default") {
+      } else if ($2 == "default") {
         if (!fallback || $3 + 0 > fallback_used) fallback_used = $3 + 0
         fallback = 1
       }
@@ -195,23 +187,28 @@ fm_sb_usage_display() {  # <window>
       if (!matched && fallback) { used = fallback_used; key = "default"; matched = 1 }
       if (!matched) { print "u ?"; exit }
       code = provider == "claude" ? "cl" : provider == "codex" ? "cx" : provider == "grok" ? "gk" : substr(provider, 1, 2)
-      label = ""
-      if (count > 1) { label = key; sub(/^.*-/, "", label); label = ":" substr(label, 1, 4) }
+      if (key == "*") label = "all"
+      else {
+        label = key
+        sub(/^.*-/, "", label)
+        label = key == label ? substr(key, 1, 4) : substr(key, 1, 2) substr(label, 1, 2)
+      }
       value = sprintf("%.1f", used); sub(/\.0$/, "", value)
-      printf "u %s%s%s%%\n", code, label, value
+      printf "u %s:%s%s%%\n", code, label, value
     }
   ' "$USAGE_CACHE"
 }
 
 cmd_usage() {
-  local age now target=${1:-${TMUX_PANE:-}}
+  local age now target=${1:-}
+  [ -n "$target" ] || return 2
   now=$(date +%s)
   if [ -f "$USAGE_CACHE" ]; then
     age=$((now - $(fm_sb_mtime "$USAGE_CACHE")))
   else
     age=$((USAGE_TTL + 1))
   fi
-  [ -z "$target" ] || fm_sb_usage_display "$target"
+  fm_sb_usage_display "$target"
   [ "$age" -ge "$USAGE_TTL" ] || return 0
   if [ -f "$USAGE_ATTEMPT" ] && [ $((now - $(fm_sb_mtime "$USAGE_ATTEMPT"))) -lt "$USAGE_TTL" ]; then
     return 0
@@ -232,15 +229,14 @@ cmd_usage() {
 }
 
 cmd_claude_line() {
-  local task='' kind='' json parts model effort ctx limits wt out
+  local task='' json parts model effort ctx limits wt out
   while [ $# -gt 0 ]; do
     case "$1" in
     --task) task=${2:-}; shift ;;
-    --kind) kind=${2:-}; shift ;;
     esac
     shift
   done
-  command -v jq >/dev/null 2>&1 || { printf '%s\n' "$(fm_sb_clean "$task")"; return 0; }
+  command -v jq >/dev/null 2>&1 || { printf '? ?%s\n' "${task:+ | $(fm_sb_clean "$task" 32)}"; return 0; }
   json=$(cat)
   # Whitelist: model, effort, context fill, rate-limit windows, workspace name.
   parts=$(printf '%s' "$json" | jq -r '
@@ -260,9 +256,8 @@ cmd_claude_line() {
   ctx=$(fm_sb_clean "$ctx" 12)
   limits=$(fm_sb_clean "$limits" 20)
   wt=$(fm_sb_clean "$wt" 24)
-  out=$model
-  [ -z "$effort" ] || out="$out $effort"
-  [ -z "$task" ] || out="$out | $(fm_sb_clean "$task" 32)${kind:+ ($(fm_sb_clean "$kind" 12))}"
+  out="${model:-?} ${effort:-?}"
+  [ -z "$task" ] || out="$out | $(fm_sb_clean "$task" 32)"
   [ -z "$wt" ] || out="$out | $wt"
   [ -z "$ctx" ] || out="$out | $ctx"
   [ -z "$limits" ] || out="$out | $limits"
