@@ -176,6 +176,36 @@ test_tracked_wiring_kept() {
   pass 'sweep preserves tracked operator wiring at every removal path'
 }
 
+test_symlinked_wiring_directory_kept() {
+  local home out component target name
+  for component in .claude .opencode .opencode/plugins; do
+    name=${component//\//-}
+    home=$(make_home "symlinked-$name")
+    case "$component" in
+      .claude) target=settings.local.json ;;
+      .opencode) target=plugins/fm-busy-state.js ;;
+      .opencode/plugins) target=fm-busy-state.js ;;
+    esac
+    mkdir -p "$home/shared/$(dirname "$target")" "$home/seed/$(dirname "$component")"
+    printf 'original\n' > "$home/shared/$target"
+    ln -s "$home/shared" "$home/seed/$component"
+    git -C "$home/seed" add -f "$component"
+    git -C "$home/seed" commit -qm operator-symlink
+    git -C "$home/seed" push -q origin main
+    git -C "$home/projects/project" pull -q
+    add_worker "$home"
+    printf 'operator edit\n' > "$home/shared/$target"
+    assert_equals '' "$(git -C "$home/worker" status --porcelain --untracked-files=all --ignored)" "$component edit hidden from Git status"
+    out=$(sweep "$home")
+    assert_contains "$out" 'symlinked wiring directory' "$component refusal reported"
+    assert_present "$home/state/task.meta" "$component record kept"
+    assert_present "$home/worker" "$component copy kept"
+    assert_present "$home/shared/$target" "$component operator file kept"
+    assert_equals 'operator edit' "$(cat "$home/shared/$target")" "$component operator edit kept"
+  done
+  pass 'sweep preserves operator files behind symlinked wiring directories'
+}
+
 test_ignored_work_kept() {
   local home out
   home=$(make_home ignored); add_worker "$home"
@@ -763,6 +793,7 @@ test_detached_sweep_survives_watcher_timeout() {
 test_clean_stopped_and_idempotence
 test_changes_kept
 test_tracked_wiring_kept
+test_symlinked_wiring_directory_kept
 test_ignored_work_kept
 test_flagged_tracked_edits_kept
 test_flagged_guard_under_pipefail

@@ -1988,6 +1988,12 @@ validate_worktree_teardown_safety() {
   untracked=normal
   [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    for path in .claude .opencode .opencode/plugins; do
+      if [ -L "$WT/$path" ]; then
+        echo "REFUSED: worktree $WT has symlinked wiring directory $path; needs a human look." >&2
+        return 1
+      fi
+    done
     if ! tracked_wiring=$(git -C "$WT" ls-files --cached -- \
       .claude/settings.local.json .opencode/plugins/fm-turn-end.js \
       .opencode/plugins/fm-busy-state.js .fm-grok-turnend .fm-kimi-turnend 2>/dev/null); then
