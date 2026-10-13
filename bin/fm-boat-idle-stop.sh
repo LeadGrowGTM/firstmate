@@ -45,8 +45,6 @@ case "${1:-}" in
     [ "$#" -eq 1 ] || die 'one operation required'
     fm_lock_try_acquire "$LOCK" || exit 0
     trap 'fm_lock_release "$LOCK" || true' EXIT
-    [ -f "$STATE/.boat-no-env" ] && [ ! -L "$STATE/.boat-no-env" ] &&
-      [ "$(cat "$STATE/.boat-no-env")" = "$BOX" ] || exit 0
     info=$(fm_run_timed 5 "$BOAT_BIN" --no-update info "$BOX" --json) || die 'Boat info unavailable'
     state=$(printf '%s\n' "$info" | jq -er --arg box "$BOX" 'select(.sandbox.id == $box) | .sandbox.state') || die 'Boat info is invalid'
     case "$state" in
@@ -54,6 +52,11 @@ case "${1:-}" in
       ready|idle|running) ;;
       *) die 'Boat state is unknown' ;;
     esac
+    [ -f "$STATE/.boat-no-env" ] && [ ! -L "$STATE/.boat-no-env" ] &&
+      [ "$(cat "$STATE/.boat-no-env")" = "$BOX" ] || {
+      printf 'blocked: Boat idle stop missing --no-env receipt for %s\n' "$BOX"
+      exit 0
+    }
     activity=$(fm_run_timed 10 "$SCRIPT_DIR/fm-on.sh" boat-eng fm-boat-worker.sh idle) || die 'Boat worker state unavailable'
     case "$activity" in
       active) rm -f -- "$STAMP"; exit 0 ;;

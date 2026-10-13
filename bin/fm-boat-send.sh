@@ -27,7 +27,7 @@
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
 # Status, steering, and reports use existing fm-on.sh commands against boat-eng;
 # no PC worker endpoint or worktree is allocated. The registered idle check
-# stops the box after 20 minutes without a live worker or Boat dispatch.
+# stops the box after at least 20 idle minutes on the next watcher sweep.
 # Auto-stop is the hard upper bound if controller supervision disappears.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,10 +59,12 @@ LOCK_PATH="$FM_HOME/state/.boat-send.lock"
 fm_lock_acquire_wait "$LOCK_PATH" || die 'Boat send lock unavailable'
 SEND_LOCK="$LOCK_PATH"
 REG="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
-[ "$(secondmate_registry_field "$REG" "$ROUTE" host)" = boat-prove ] || die 'boat-eng must use boat-prove'
-REMOTE_HOME=$(secondmate_registry_field "$REG" "$ROUTE" home) || die 'missing boat-eng home'
-case "$REMOTE_HOME" in /home/user/*) ;; *) die 'boat-eng must have a dedicated sandbox home' ;; esac
-[ "$REMOTE_HOME" != /home/user/fm-home ] || die 'the earlier proof mate home is not an overflow home'
+if [ "$PREPARE" -eq 0 ]; then
+  [ "$(secondmate_registry_field "$REG" "$ROUTE" host)" = boat-prove ] || die 'boat-eng must use boat-prove'
+  REMOTE_HOME=$(secondmate_registry_field "$REG" "$ROUTE" home) || die 'missing boat-eng home'
+  case "$REMOTE_HOME" in /home/user/*) ;; *) die 'boat-eng must have a dedicated sandbox home' ;; esac
+  [ "$REMOTE_HOME" != /home/user/fm-home ] || die 'the earlier proof mate home is not an overflow home'
+fi
 "$SCRIPT_DIR/fm-boat-idle-stop.sh" arm || die 'Boat idle stop check could not be armed'
 STOP_ON_REFUSAL=0
 stop_refuse() {

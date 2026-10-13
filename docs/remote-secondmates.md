@@ -587,7 +587,7 @@ bin/fm-on.sh boat-eng fm-send.sh <task-id> '<steer>'
 bin/fm-on.sh boat-eng fm-remote-file.sh get data/<task-id>/report.md
 ```
 
-The sender arms the controller's registered idle check, which stops the approved box after twenty minutes with no live worker or queued Boat dispatch; auto-stop remains a hard bound if controller supervision disappears.
+The sender arms the controller's registered idle check, which stops the approved box after at least twenty idle minutes on the next watcher sweep (normally within about twenty-five minutes), with no live worker or queued Boat task; auto-stop remains a hard bound if controller supervision disappears.
 The sender refuses on unreadable spend state or a cap violation, stops a box it resumed when a later step fails, and preserves an uncertain remote launch for same-task reconciliation.
 It adds no worker retry, merge path, or supervision loop.
 

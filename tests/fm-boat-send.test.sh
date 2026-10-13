@@ -82,8 +82,16 @@ SH
 cat > "$BIN/fm-spawn.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'spawn %s\n' "$*" >> "$FIXTURES/calls"
-[ ! -e "$FIXTURES/spawn.fail" ] || exit 1
+if [ -e "$FIXTURES/spawn.fail" ]; then
+  printf 'prelaunch\n' > "$FM_BOAT_PRELAUNCH_PROOF"
+  exit 1
+fi
+if [ -e "$FIXTURES/spawn.postlaunch.fail" ]; then
+  : > "$FIXTURES/endpoint-launched"
+  exit 1
+fi
 printf '%s\n' "$@" > "$FIXTURES/spawn.argv"
+printf 'kind=ship\n' > "$FM_HOME/state/$1.meta"
 SH
 # These guards make accidental fixture escape a failure instead of contacting
 # an ambient terminal server or endpoint.
@@ -106,6 +114,7 @@ new_case() {
   printf '%s\n' '- boat-eng - Code overflow (host: boat-prove; root: /home/user/firstmate; home: /home/user/boat-eng; scope: Code only; projects: firstmate, dev-loop; added 2026-10-13)' \
     > "$LOCAL_HOME/data/secondmates.md"
   printf 'boat-eng\n' > "$REMOTE_HOME/.fm-secondmate-home"
+  printf '## In flight\n\n## Queued\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
   printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium"}' \
     > "$FIXTURES/request.json"
   printf 'empty\n' > "$FIXTURES/activity"
@@ -345,6 +354,21 @@ test_running_quota_and_route() {
   pass 'running work survives start quota and cap refusals; route validation follows transport registry'
 }
 
+test_prepare_before_route() {
+  new_case prepare-before-route
+  rm "$LOCAL_HOME/data/secondmates.md"
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --prepare --code-only
+  expect_code 0 "$CODE" "prepare before route registration: $OUT"
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --no-env' "$FIXTURES/calls" 'prepare did not safely resume'
+  assert_grep 'alias bx_ahnbu3qr boat-prove' "$FIXTURES/calls" 'prepare did not refresh alias'
+  assert_no_grep '^on ' "$FIXTURES/calls" 'prepare dispatched without route'
+  : > "$FIXTURES/calls"
+  send_task
+  expect_code 1 "$CODE" 'dispatch without registered route'
+  [ ! -s "$FIXTURES/calls" ] || fail 'dispatch without route contacted Boat'
+  pass 'prepare establishes access before route registration while dispatch still requires the route'
+}
+
 test_idle_stop() {
   new_case idle-stop
   : > "$FIXTURES/resumed"
@@ -373,6 +397,12 @@ test_idle_stop() {
   printf '4200\n' > "$FIXTURES/time"
   run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'live worker stopped at old idle deadline'
+  new_case missing-idle-receipt
+  : > "$FIXTURES/resumed"
+  run_entry "$LOCAL_HOME" fm-boat-idle-stop.sh check
+  expect_code 0 "$CODE" 'missing idle receipt check'
+  assert_contains "$OUT" 'blocked: Boat idle stop missing --no-env receipt' 'missing receipt was silent'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'missing receipt stopped box'
   new_case remote-idle
   seed_worker worker-a ship firstmate 'state: working active'
   run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
@@ -382,6 +412,15 @@ test_idle_stop() {
   run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
   expect_code 0 "$CODE" 'completed remote worker state'
   assert_equals empty "$OUT" 'completed worker must release idle clock'
+  printf '## In flight\n\n## Queued\n- [ ] queued Boat task\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
+  assert_equals active "$OUT" 'queued Boat task must keep box on'
+  printf '## In flight\n- [ ] in-flight Boat task\n\n## Queued\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
+  assert_equals active "$OUT" 'in-flight Boat task must keep box on'
+  rm "$REMOTE_HOME/data/backlog.md"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh idle
+  assert_equals active "$OUT" 'missing backlog must not claim idle'
   pass 'registered idle check stops only after 20 empty minutes and remote state clears timer'
 }
 
@@ -439,6 +478,18 @@ test_remote_cap_and_merge_authority() {
   rm "$FIXTURES/spawn.fail"
   spawn_task
   expect_code 0 "$CODE" 'same task id retry after prelaunch failure'
+  new_case postlaunch-failure
+  seed_project firstmate
+  : > "$FIXTURES/spawn.postlaunch.fail"
+  spawn_task
+  expect_code 1 "$CODE" 'postlaunch failure'
+  [ -f "$FIXTURES/endpoint-launched" ] || fail 'postlaunch fixture did not launch'
+  [ -f "$REMOTE_HOME/data/task-one/brief.md" ] || fail 'postlaunch failure deleted a live brief'
+  : > "$FIXTURES/calls"
+  rm "$FIXTURES/spawn.postlaunch.fail"
+  spawn_task
+  expect_code 1 "$CODE" 'postlaunch uncertainty refuses retry'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'postlaunch uncertainty relaunched task'
   new_case no-mistakes-unproven
   set_json request '.mode = "no-mistakes"'
   seed_project firstmate
@@ -454,6 +505,7 @@ test_whole_timer_reservation
 test_unreadable_caps
 test_sender_success_and_timer
 test_running_quota_and_route
+test_prepare_before_route
 test_idle_stop
 test_remote_cap_and_merge_authority
 pass 'fm-boat-send'

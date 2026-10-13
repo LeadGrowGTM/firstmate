@@ -144,7 +144,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-tool-update-check.sh` | Report watched tooling with an update available, and updates installed but left inert by PATH order |
 | `fm-startup-growth-check.sh` | Daily metadata-only growth check for startup memory and tracked startup/instruction surfaces |
 | `fm-boat-spend-check.sh` | Optional: daily read-only Boat spend check that reports only when spend, running sandboxes, or billing settings are outside `config/boat-spend.json` ([configuration.md](configuration.md#boat-spend-check-configboat-spendjson)) |
-| `fm-boat-idle-stop.sh` | Registered controller check for the approved box's twenty-minute empty-worker stop |
+| `fm-boat-idle-stop.sh` | Registered controller check for the approved box's twenty-minute empty-worker and backlog threshold, on the next watcher sweep |
 | `fm-idle-exit.sh` | Exit the agent session of a done or parked worker through `fm-control.sh exit --only-if-idle`, keeping its endpoint, worktree, and work ([configuration.md](configuration.md#idle-session-exit)) |
 | `fm-clutter-check.sh` | Daily read-only machine clutter check: worktree pools, no-mistakes pipeline copies, archived logs, root use, and Windows free space ([configuration.md](configuration.md#clutter-check)) |
 | `fm-treehouse-guard.sh` | Trigger safe prune and report pool size ([configuration.md](configuration.md#worktree-pool-guard)) |

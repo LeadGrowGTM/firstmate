@@ -14,8 +14,8 @@
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project
 # clones. It generates a normal remote brief and uses fm-spawn.sh, forcing yolo
-# off and a three-worker box-wide cap under one lock. Existing task ids refuse;
-# unknown transport completion must be reconciled rather than relaunched.
+# off and a three-worker box-wide cap under one lock. A proven prelaunch failure
+# may reuse its id; unknown transport completion must be reconciled.
 # no-mistakes requires the operator's config/boat-no-mistakes-proven receipt:
 # one successful proof PR URL after a real box pipeline, plus an installed CLI.
 # Neither validation nor dispatch manufactures that proof or downgrades a mode.
@@ -49,19 +49,42 @@ if [ "$1" = idle ]; then
     status=$(FM_CREW_STATE_NO_FORGE=1 "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null) || { printf 'active\n'; exit 0; }
     case "$status" in 'state: done '*|'state: failed '*) ;; *) printf 'active\n'; exit 0 ;; esac
   done
-  printf 'empty\n'
+  backlog="$FM_HOME/data/backlog.md"
+  [ -f "$backlog" ] && [ ! -L "$backlog" ] || { printf 'active\n'; exit 0; }
+  backlog_state=$(awk '
+    /^##[[:space:]]+/ {
+      section = $0
+      sub(/^##[[:space:]]+/, "", section)
+      sub(/[[:space:]]+$/, "", section)
+      if (section == "Queued") queued = 1
+      if (section == "In flight") in_flight = 1
+      next
+    }
+    (section == "Queued" || section == "In flight") && /^[-*][[:space:]]+/ { found = 1 }
+    END {
+      if (!queued || !in_flight) exit 1
+      if (found) print "active"
+      else print "empty"
+    }
+  ' "$backlog") || { printf 'active\n'; exit 0; }
+  printf '%s\n' "$backlog_state"
   exit 0
 fi
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-boat-worker.XXXXXX")
 LOCK=
 CREATED_BRIEF=0
+SPAWN_STARTED=0
 cleanup() {
   local status=$?
   rm -rf -- "$TMP"
   if [ "$status" -ne 0 ] && [ "$CREATED_BRIEF" -eq 1 ] &&
     [ -d "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ] &&
-    [ ! -e "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ]; then
+    [ ! -e "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] &&
+    { [ "$SPAWN_STARTED" -eq 0 ] ||
+      { [ -f "$FM_HOME/state/$ID.boat-prelaunch" ] && [ ! -L "$FM_HOME/state/$ID.boat-prelaunch" ] &&
+        [ "$(cat "$FM_HOME/state/$ID.boat-prelaunch")" = prelaunch ]; }; }; then
     rm -rf -- "$FM_HOME/data/$ID"
+    rm -f -- "$FM_HOME/state/$ID.boat-prelaunch"
   fi
   [ -z "$LOCK" ] || fm_lock_release "$LOCK" || true
 }
@@ -93,8 +116,14 @@ LOCK="$FM_HOME/state/.boat-worker.lock"
 ID=$(jq -r .id "$TMP/request")
 PROJECT=$(jq -r .project "$TMP/request")
 MODE=$(jq -r .mode "$TMP/request")
-[ ! -e "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ] &&
-  [ ! -e "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task id already exists; reconcile before retry'
+[ ! -e "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task id already exists; reconcile before retry'
+if [ -e "$FM_HOME/data/$ID" ] || [ -L "$FM_HOME/data/$ID" ]; then
+  [ -d "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ] &&
+    [ -f "$FM_HOME/state/$ID.boat-prelaunch" ] && [ ! -L "$FM_HOME/state/$ID.boat-prelaunch" ] &&
+    [ "$(cat "$FM_HOME/state/$ID.boat-prelaunch")" = prelaunch ] || die 'task id already exists; reconcile before retry'
+  rm -rf -- "$FM_HOME/data/$ID"
+fi
+rm -f -- "$FM_HOME/state/$ID.boat-prelaunch"
 if [ "$MODE" = no-mistakes ]; then
   PROOF="$FM_HOME/config/boat-no-mistakes-proven"
   if [ -f "$PROOF" ] && [ ! -L "$PROOF" ] &&
@@ -149,5 +178,7 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
 cat "$TMP/brief" > "$BRIEF"
 if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
 ARGS+=(--harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
-"$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
+SPAWN_STARTED=1
+FM_BOAT_PRELAUNCH_PROOF="$FM_HOME/state/$ID.boat-prelaunch" \
+  "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"
