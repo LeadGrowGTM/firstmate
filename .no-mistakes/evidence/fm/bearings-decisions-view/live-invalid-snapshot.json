@@ -1,0 +1,134 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": ".test-tmp/fm-live-snapshot.UvsRYe",
+  "generated": "2026-10-13T12:00:00Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "complete": false,
+    "proven_clear": false,
+    "unmeasured_homes": 1,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [],
+  "secondmates": [
+    {
+      "id": "mate",
+      "state": "unknown",
+      "doing": "structured home ledger is missing, unreadable, or invalid",
+      "provenance": "unknown",
+      "freshness": "unknown",
+      "age_seconds": null,
+      "contradiction": false,
+      "reason": "structured home ledger is missing, unreadable, or invalid"
+    }
+  ],
+  "secondmate_reconcile": [],
+  "decisions_open": [
+    {
+      "id": "major",
+      "key": "major",
+      "verb": "captain-hold",
+      "summary": "Same subject: Keep compatibility or retire the old format; keeping it costs maintenance an…",
+      "owner": "(main)"
+    }
+  ],
+  "landed": [],
+  "gates": [
+    {
+      "id": "minor",
+      "title": "Set launch date",
+      "blocked_by": "-",
+      "reason": "until 2026-11-01: Launch soon for speed …",
+      "owner": "(main)",
+      "filed": null
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "decision_layout": [
+    {
+      "id": "major",
+      "title": "Same subject",
+      "repo": "sample",
+      "reason": "Keep compatibility or retire the old format; keeping it costs maintenance and retiring it requires consumer upgrades",
+      "priority": "high",
+      "origin": null,
+      "hold_set": "2026-10-13T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "major"
+    },
+    {
+      "id": "minor",
+      "title": "Set launch date",
+      "repo": "sample",
+      "reason": "Launch soon for speed or later for more review",
+      "priority": "low",
+      "origin": null,
+      "hold_set": "2026-10-13T10:00:00Z",
+      "bucket": "dated",
+      "until": "2026-11-01",
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "minor"
+    }
+  ],
+  "decision_layout_unavailable": [
+    {
+      "owner": "mate",
+      "reason": "Detailed decision inventory unavailable; inspect owner home"
+    }
+  ],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "secondmate home(s) with unreadable structured state: 1",
+      "reveal": "inspect the listed secondmate home ledgers"
+    },
+    {
+      "surface": "captain holds bucketed blocked, dated, or aged: 1",
+      "reveal": "--all-decisions"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}

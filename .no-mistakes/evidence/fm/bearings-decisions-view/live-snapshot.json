@@ -1,0 +1,155 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": ".test-tmp/fm-live-snapshot.UvsRYe",
+  "generated": "2026-10-13T12:00:00Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "complete": true,
+    "proven_clear": true,
+    "unmeasured_homes": 0,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [],
+  "secondmates": [
+    {
+      "id": "mate",
+      "state": "captain_decision",
+      "doing": "Same subject",
+      "provenance": "structured-home",
+      "freshness": "fresh",
+      "age_seconds": 0,
+      "contradiction": false,
+      "reason": "-"
+    }
+  ],
+  "secondmate_reconcile": [
+    {
+      "id": "mate",
+      "spawn_gen": null,
+      "host": null,
+      "kind": null,
+      "ids": []
+    }
+  ],
+  "decisions_open": [
+    {
+      "id": "major",
+      "key": "major",
+      "verb": "captain-hold",
+      "summary": "Same subject: Keep compatibility or retire the old format; keeping it costs maintenance an…",
+      "owner": "(main)"
+    },
+    {
+      "id": "mate/remote",
+      "key": "remote",
+      "verb": "captain-hold",
+      "summary": "Same subject: Decide the secondmate migration route; safe is slower and fast risks compati…",
+      "owner": "mate"
+    }
+  ],
+  "landed": [],
+  "gates": [
+    {
+      "id": "minor",
+      "title": "Set launch date",
+      "blocked_by": "-",
+      "reason": "until 2026-11-01: Launch soon for speed …",
+      "owner": "(main)",
+      "filed": null
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "decision_layout": [
+    {
+      "id": "major",
+      "title": "Same subject",
+      "repo": "sample",
+      "reason": "Keep compatibility or retire the old format; keeping it costs maintenance and retiring it requires consumer upgrades",
+      "priority": "high",
+      "origin": null,
+      "hold_set": "2026-10-13T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "major"
+    },
+    {
+      "id": "minor",
+      "title": "Set launch date",
+      "repo": "sample",
+      "reason": "Launch soon for speed or later for more review",
+      "priority": "low",
+      "origin": null,
+      "hold_set": "2026-10-13T10:00:00Z",
+      "bucket": "dated",
+      "until": "2026-11-01",
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "minor"
+    },
+    {
+      "id": "mate/remote",
+      "title": "Same subject",
+      "repo": "sample",
+      "reason": "Decide the secondmate migration route; safe is slower and fast risks compatibility",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-13T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "mate",
+      "key": "remote"
+    }
+  ],
+  "decision_layout_unavailable": [],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "captain holds bucketed blocked, dated, or aged: 1",
+      "reveal": "--all-decisions"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}

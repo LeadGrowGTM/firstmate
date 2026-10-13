@@ -1,0 +1,40 @@
+{
+  "decision_layout": [
+    {
+      "id": "major",
+      "title": "Same subject",
+      "repo": "sample",
+      "reason": "Keep compatibility or retire the old format; keeping it costs maintenance and retiring it requires consumer upgrades",
+      "priority": "high",
+      "origin": null,
+      "hold_set": "2026-10-13T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "major"
+    },
+    {
+      "id": "minor",
+      "title": "Set launch date",
+      "repo": "sample",
+      "reason": "Launch soon for speed or later for more review",
+      "priority": "low",
+      "origin": null,
+      "hold_set": "2026-10-13T10:00:00Z",
+      "bucket": "dated",
+      "until": "2026-11-01",
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "minor"
+    }
+  ],
+  "decision_layout_unavailable": [
+    {
+      "owner": "mate",
+      "reason": "Detailed decision inventory unavailable; inspect owner home"
+    }
+  ]
+}
