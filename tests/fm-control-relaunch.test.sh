@@ -2733,7 +2733,7 @@ test_scheduled_control_receipts() {
   expect_code 0 "$rc" "guarded continuation should confirm a live receipt: $out"
   jq -e --arg gen "$(meta_field "$dir" rl-receipt-live spawn_gen)" \
     '.outcome == "live-worker" and .exit_code == 0 and .spawn_gen == $gen and
-     .task == "rl-receipt-live" and .backend == "tmux" and .harness == "claude"' "$receipt" >/dev/null \
+     .task == "rl-receipt-live" and .backend == "tmux" and .harness == "claude" and .launch_sent == true' "$receipt" >/dev/null \
     || fail "live receipt must bind the confirmed replacement generation"
 
   dir=$(new_case receipt-late rl-receipt-late)
@@ -2745,6 +2745,14 @@ test_scheduled_control_receipts() {
   jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == true' "$receipt" >/dev/null \
     || fail "a started replacement cannot grant prepublication retry authority"
   [ "$(cat "$dir/fake/command")" = claude ] || fail "late-failure fixture must have started the replacement"
+  dir=$(new_case receipt-stop rl-receipt-stop)
+  add_ship_task "$dir" rl-receipt-stop claude
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP=1 \
+    run_control "$dir" rl-receipt-stop relaunch --note "checkpoint after partial stop"); rc=$?
+  expect_code 1 "$rc" "partial stop should fail closed: $out"
+  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "a failed stop must remain uncertain without claiming a replacement launch"
   pass "control receipts bind live confirmation and preserve late-launch uncertainty"
 }
 
@@ -2762,6 +2770,23 @@ test_scheduled_control_preflight_keeps_worker_live() {
   [ "$(cat "$dir/fake/command")" = claude ] || fail "the prior worker stopped for a missing replacement"
   [ ! -s "$dir/fake/literal" ] || fail "a missing replacement sent lifecycle input"
   cmp -s "$dir/meta-before" "$dir/home/state/$id.meta" || fail "a missing replacement changed the task record"
+
+  dir=$(new_case preflight-cursor rl-preflight-cursor)
+  add_ship_task "$dir" rl-preflight-cursor claude
+  cat > "$dir/fakebin/agent" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then /bin/sleep 2; fi
+exit 0
+SH
+  chmod +x "$dir/fakebin/agent"
+  receipt="$dir/outcome.json"
+  out=$(PATH=/usr/bin:/bin FM_CURSOR_PROBE_TIMEOUT=1 FM_SPAWN_OUTCOME_FILE="$receipt" \
+    run_control "$dir" rl-preflight-cursor relaunch --harness cursor --note "continue on Cursor"); rc=$?
+  expect_code 1 "$rc" "a timed-out Cursor identity probe must refuse: $out"
+  jq -e '.outcome == "uncertain" and .reason == "selected-executable-identity-inconclusive-before-stop" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "a timed-out Cursor identity probe must not grant fallback"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "Cursor identity timeout stopped the prior worker"
+  [ ! -s "$dir/fake/literal" ] || fail "Cursor identity timeout sent lifecycle input"
 
   dir=$(new_case preflight-unknown rl-preflight-unknown)
   add_ship_task "$dir" rl-preflight-unknown claude

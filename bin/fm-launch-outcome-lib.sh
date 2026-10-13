@@ -32,7 +32,7 @@ fm_launch_outcome_init() {
 fm_launch_outcome_write() { # <exit-code>
   [ -n "${FM_LAUNCH_OUTCOME_FILE:-}" ] || return 0
   local code=$1 outcome=$FM_LAUNCH_OUTCOME tmp
-  if { [ "${SPAWN_LAUNCH_SENT:-0}" = 1 ] || [ "${SPAWN_PROVISIONING_STARTED:-0}" = 1 ]; } && [ "$code" -ne 0 ]; then
+  if { [ "${SPAWN_LAUNCH_SENT:-0}" = 1 ] || [ "${SPAWN_PROVISIONING_STARTED:-0}" = 1 ] || [ "${RELAUNCH_STOP_STARTED:-0}" = 1 ]; } && [ "$code" -ne 0 ]; then
     outcome=uncertain
     FM_LAUNCH_OUTCOME_REASON=provisioning-or-delivery-started
   fi

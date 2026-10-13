@@ -1022,8 +1022,13 @@ resolve_relaunch_profile() {
     *) executable=$(command -v "$TARGET_HARNESS" 2>/dev/null || true) ;;
     esac
     if [ ! -x "$executable" ]; then
-      FM_LAUNCH_OUTCOME=worker-unavailable
-      FM_LAUNCH_OUTCOME_REASON=selected-executable-missing-before-stop
+      if [ "$TARGET_HARNESS" = cursor ] && fm_cursor_executable_candidate_exists; then
+        FM_LAUNCH_OUTCOME=uncertain
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-identity-inconclusive-before-stop
+      else
+        FM_LAUNCH_OUTCOME=worker-unavailable
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-missing-before-stop
+      fi
       FM_OUTCOME_HARNESS=$TARGET_HARNESS
       MODEL=$TARGET_MODEL
       EFFORT=$TARGET_EFFORT
@@ -1222,7 +1227,7 @@ do_relaunch() {
 
   # Once stopping starts any failure requires reconciliation, even if a
   # rollback restores the prior metadata.
-  SPAWN_LAUNCH_SENT=1
+  RELAUNCH_STOP_STARTED=1
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
@@ -1234,8 +1239,20 @@ do_relaunch() {
   spawn_args=("$ID" --relaunch --harness "$TARGET_HARNESS")
   [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
   [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
-  if FM_SPAWN_OUTCOME_FILE='' FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
-      "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
+  local child_outcome=
+  if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+    child_outcome="$STATE/.${ID}.${RELAUNCH_TX}.outcome.json"
+  fi
+  local spawn_status=0
+  FM_SPAWN_OUTCOME_FILE="$child_outcome" FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
+    "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null || spawn_status=$?
+  if [ -n "$child_outcome" ]; then
+    if jq -e '.launch_sent == true' "$child_outcome" >/dev/null 2>&1; then
+      SPAWN_LAUNCH_SENT=1
+    fi
+    rm -f "$child_outcome"
+  fi
+  if [ "$spawn_status" -eq 0 ]; then
     RELAUNCH_META_PUBLISHED=1
     # $T was resolved from the record before the launch. When the recorded
     # endpoint was gone, the launch owner created a fresh one and republished
@@ -1267,7 +1284,6 @@ do_relaunch() {
 
   journal_write complete "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
   RELAUNCH_ACTIVE=0
-  SPAWN_LAUNCH_SENT=0
   SPAWN_GEN=$(fm_meta_get "$META" spawn_gen)
   FM_LAUNCH_OUTCOME=live-worker
   FM_LAUNCH_OUTCOME_REASON=replacement-agent-confirmed-alive

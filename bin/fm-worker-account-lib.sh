@@ -203,6 +203,10 @@ fm_worker_account_check() {
     else
       check_status=$?
     fi
+    if [ "$check_status" -ne 0 ] && [ "$check_status" -ne 1 ]; then
+      echo "error: config/pi-account sign-in check was inconclusive for provider '$provider' (auth check exited $check_status)" >&2
+      return 2
+    fi
     verdict=$(printf '%s\n' "$out" | jq -r '
       if type != "object" or (has("status") | not) then "list"
       elif .status == "ready" then "ready"

@@ -2293,6 +2293,19 @@ test_opt_in_production_launch_receipts() {
     [ ! -s "$LAUNCH_LOG" ] || fail "$harness absence sent a fake tmux launch"
     assert_absent "$HOME_DIR/state/$id.meta" "$harness absence published metadata"
   done
+  id='receipt-missing-cursor'
+  rec=$(make_spawn_case "$id" cursor "$id")
+  read_case_record "$rec"
+  rm "$FAKEBIN_DIR/cursor-agent"
+  receipt="$CASE_DIR/outcome.json"
+  out=$(PATH=/usr/bin:/bin FM_SPAWN_OUTCOME_FILE="$receipt" \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 1 "$status" "Cursor executable absence should refuse: $out"
+  jq -e '.outcome == "worker-unavailable" and .reason == "selected-executable-missing" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "missing Cursor CLI must permit another selected candidate"
+  [ ! -s "$LAUNCH_LOG" ] || fail "Cursor absence sent a fake tmux launch"
+  assert_absent "$HOME_DIR/state/$id.meta" "Cursor absence published metadata"
   pass "production receipts bind publication and prelaunch refusal without a live runtime"
 }
 

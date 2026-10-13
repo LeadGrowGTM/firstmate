@@ -2523,7 +2523,18 @@ cursor)
   # verified owner rather than a bare command lookup. Refusing here keeps a
   # missing install a loud spawn refusal instead of a pane that dies with a
   # command-not-found the supervisor would read as a wedged worker.
-  CURSOR_BIN=$(fm_cursor_resolve_binary) || exit 1
+  CURSOR_BIN=$(fm_cursor_resolve_binary) || {
+    if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+      if fm_cursor_executable_candidate_exists; then
+        FM_LAUNCH_OUTCOME=uncertain
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-identity-inconclusive
+      else
+        FM_LAUNCH_OUTCOME=worker-unavailable
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+      fi
+    fi
+    exit 1
+  }
   if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
     if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
       if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
