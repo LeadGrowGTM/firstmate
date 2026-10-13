@@ -42,6 +42,10 @@ method=$2 path=$3
 if [ -e "$FIXTURES/unavailable" ]; then exit 1; fi
 case "$method:$path" in
   GET:/repos/o/r/pulls/*)
+    if [ -e "$FIXTURES/queue-race" ]; then
+      count=$(cat "$FIXTURES/queue-race")
+      printf '%s\n' "$((count + 1))" > "$FIXTURES/queue-race"
+    fi
     if [ -e "$FIXTURES/race" ]; then
       count=$(cat "$FIXTURES/race")
       printf '%s\n' "$((count + 1))" > "$FIXTURES/race"
@@ -63,7 +67,11 @@ case "$method:$path" in
     fi ;;
   GET:/repos/o/r/commits/*/check-runs*) payload=$(cat "$FIXTURES/checks.json") ;;
   POST:/graphql)
-    payload=$(jq --slurpfile core "$FIXTURES/core.json" '.data.repository.pullRequest.headRefOid=$core[0].head.sha' "$FIXTURES/queue.json") ;;
+    queue="$FIXTURES/queue.json"
+    if [ -e "$FIXTURES/queue-race" ] && [ "$(cat "$FIXTURES/queue-race")" -ge 2 ]; then
+      queue="$FIXTURES/queue-transition"
+    fi
+    payload=$(jq --slurpfile core "$FIXTURES/core.json" '.data.repository.pullRequest.headRefOid=$core[0].head.sha' "$queue") ;;
   PUT:/repos/o/r/pulls/*/update-branch)
     # The expected head must be present and the pre-publication receipt durable.
     input=''
@@ -195,6 +203,25 @@ assert_equals incomplete "$(result "$home")" 'later local head read leaves incom
 assert_equals 'local head unavailable' "$(jq -r --arg url "$URL" '.receipts[$url].reason' "$home/state/pr-autoupdate.json")" 'local read failure has explicit reason'
 assert_equals 0 "$(put_count "$home")" 'local read failure prevents publication'
 
+home=$(world confirmed_receipt_preparation_timeout)
+run "$home" >/dev/null
+set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+run "$home" >/dev/null
+assert_equals updated "$(result "$home")" 'initial update is confirmed before the later preparation failure'
+set_fixture "$home" core '.base.sha="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"'
+set_fixture "$home" compare '.behind_by=1 | .status="diverged"'
+printf '0\n' > "$home/fixtures/local-head-read-count"
+run "$home" check 17200 >/dev/null
+assert_equals incomplete "$(result "$home")" 'later preparation timeout is visible'
+assert_equals "$HEAD_B" "$(jq -r --arg url "$URL" '.receipts[$url].result_head' "$home/state/pr-autoupdate.json")" 'preparation timeout preserves the confirmed head'
+assert_equals "$HEAD_A" "$(jq -r --arg url "$URL" '.receipts[$url].local_heads.task' "$home/state/pr-autoupdate.json")" 'preparation timeout preserves the unchanged local head'
+assert_equals 1 "$(put_count "$home")" 'preparation timeout sends no new update'
+rm "$home/fixtures/local-head-read-count"
+run "$home" check 17200 >/dev/null
+assert_equals 2 "$(put_count "$home")" 'the next poll retries after the transient preparation failure'
+assert_equals "$HEAD_B" "$(jq -r --arg url "$URL" '.receipts[$url].old_head' "$home/state/pr-autoupdate.json")" 'successful preparation captures the current head'
+
 for phase in prewrite postchecks; do
   for state in queued draft closed; do
     home=$(world "${phase}_${state}")
@@ -222,6 +249,27 @@ for phase in prewrite postchecks; do
       assert_equals false "$(jq '.coverage_complete' "$home/state/pr-autoupdate.json")" "$phase $state leaves coverage unfinished"
     fi
   done
+done
+
+for phase in prewrite postchecks; do
+  home=$(world "${phase}_graphql_queue_race")
+  if [ "$phase" = postchecks ]; then
+    run "$home" >/dev/null
+    set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+    set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+  fi
+  jq '.data.repository.pullRequest.mergeQueueEntry={id:"queue"}' "$home/fixtures/queue.json" > "$home/fixtures/queue-transition"
+  printf '0\n' > "$home/fixtures/queue-race"
+  run "$home" >/dev/null
+  assert_equals deferred "$(result "$home")" "$phase observes final GraphQL queue membership"
+  assert_equals behind "$(jq -r '.mergeable_state' "$home/fixtures/core.json")" 'REST state stays unchanged while queue membership changes'
+  if [ "$phase" = prewrite ]; then
+    assert_equals 0 "$(put_count "$home")" 'final GraphQL queue evidence prevents publication'
+  else
+    assert_equals 1 "$(put_count "$home")" 'final GraphQL queue evidence prevents repeated publication'
+    assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_A" 'final GraphQL queue evidence preserves ready metadata'
+    assert_equals true "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'final GraphQL queue evidence leaves confirmation pending'
+  fi
 done
 
 home=$(world base_advanced)

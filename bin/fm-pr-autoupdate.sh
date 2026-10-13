@@ -30,8 +30,9 @@
 # Persist the old head, captured base and pending receipt BEFORE the expected-head
 # guarded gh-axi API PUT. A timeout or error may have published: never repeat that
 # PUT blindly. A later GET plus compare must prove a changed head contains the
-# captured base. Confirmation stores checks bound to the new head, rereads the
-# head after checks, then updates pr_head under the metadata locks. This
+# captured base. Final publication and confirmation recheck head-bound queue
+# membership. Confirmation stores checks bound to the new head, rereads the head
+# after checks, then updates pr_head under the metadata locks. This
 # command never grants readiness, review, or merge authority.
 # Ambiguous requests remain pending for inspection even across disarm/re-arm.
 # It never changes local Git refs, rebases, force-pushes, launches repair workers,
@@ -261,8 +262,17 @@ compare() { # captured base head
   jq -e '(.behind_by | type == "number" and . >= 0 and . == floor)
     and (.status | IN("ahead","behind","identical","diverged"))' "$TMP/compare" >/dev/null || { REASON='incomplete comparison'; return 1; }
 }
+queue_read() {
+  local owner repo query
+  owner=${PROJECT%%/*}; repo=${PROJECT#*/}
+  query=$(printf 'query { repository(owner:"%s",name:"%s") { pullRequest(number:%s) { headRefOid mergeQueueEntry { id } } } }' "$owner" "$repo" "$NUMBER")
+  api POST /graphql --field "query=$query" > "$TMP/queue" || { REASON='merge queue state unavailable'; return 1; }
+  jq -e --arg head "$HEAD" '.errors == null and .data.repository.pullRequest.headRefOid == $head
+    and (.data.repository.pullRequest | has("mergeQueueEntry"))' "$TMP/queue" >/dev/null || { REASON='merge queue evidence incomplete or raced'; return 1; }
+  [ "$(jq -r '.data.repository.pullRequest.mergeQueueEntry == null' "$TMP/queue")" = true ] || { RESULT=deferred; REASON='merge queued'; return 1; }
+}
 process_pr() {
-  local id old captured expected previous meta lock_path query owner repo local_head
+  local id old captured expected previous meta lock_path local_head proposed_receipt
   fm_pr_url_parse "$URL" || { REASON='invalid owned PR identity'; return 0; }
   [ "$FM_PR_PROVIDER" = github ] || { RESULT=deferred; REASON='unsupported forge'; return 0; }
   PROJECT=$FM_PR_PATH; NUMBER=$FM_PR_NUMBER
@@ -304,12 +314,7 @@ process_pr() {
       [ "$(meta_value "$STATE/$id.meta" pr_head)" = "$HEAD" ] || { REASON='current head has no matching ready record'; return 0; }
     done
   fi
-  owner=${PROJECT%%/*}; repo=${PROJECT#*/}
-  query=$(printf 'query { repository(owner:"%s",name:"%s") { pullRequest(number:%s) { headRefOid mergeQueueEntry { id } } } }' "$owner" "$repo" "$NUMBER")
-  api POST /graphql --field "query=$query" > "$TMP/queue" || { REASON='merge queue state unavailable'; return 0; }
-  jq -e --arg head "$HEAD" '.errors == null and .data.repository.pullRequest.headRefOid == $head
-    and (.data.repository.pullRequest | has("mergeQueueEntry"))' "$TMP/queue" >/dev/null || { REASON='merge queue evidence incomplete or raced'; return 0; }
-  [ "$(jq -r '.data.repository.pullRequest.mergeQueueEntry == null' "$TMP/queue")" = true ] || { RESULT=deferred; REASON='merge queued'; return 0; }
+  queue_read || return 0
   if [ "$(printf '%s' "$RECEIPT" | jq -r '.pending // false')" = true ]; then
     old=$(printf '%s' "$RECEIPT" | jq -r '.old_head'); captured=$(printf '%s' "$RECEIPT" | jq -r '.base_sha')
     PENDING=true
@@ -331,6 +336,7 @@ process_pr() {
     compare "$BASE" "$HEAD" || return 0
     local closing_behind
     closing_behind=$(jq '.behind_by' "$TMP/compare")
+    queue_read || return 0
     for id in $OWNERS; do
       meta="$STATE/$id.meta"
       awk '!/^pr_head=/' "$meta" > "$TMP/meta"
@@ -359,12 +365,14 @@ process_pr() {
     def guarded: {state,merged,draft,head:{sha:.head.sha,ref:.head.ref,repo:.head.repo.full_name},
       base:{sha:.base.sha,ref:.base.ref,repo:.base.repo.full_name},auto_merge,mergeable,mergeable_state}; guarded == ($first[0] | guarded)' "$TMP/core" >/dev/null; then REASON='PR changed before update'; return 0; fi
   [ $((DEADLINE - $(date +%s))) -ge 4 ] || { REASON='segment budget exhausted before publication'; return 0; }
-  RECEIPT=$(jq -cn --arg head "$expected" --arg base "$previous" --slurpfile core "$TMP/core" \
+  proposed_receipt=$(jq -cn --arg head "$expected" --arg base "$previous" --slurpfile core "$TMP/core" \
     '{old_head:$head,base_sha:$base,base_ref:$core[0].base.ref,head_ref:$core[0].head.ref,head_repo:$core[0].head.repo.full_name,pending:true}')
   for id in $OWNERS; do
     local_head=$(bounded git -C "$(meta_value "$STATE/$id.meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
-    RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --arg id "$id" --arg head "$local_head" '.local_heads[$id]=$head')
+    proposed_receipt=$(printf '%s' "$proposed_receipt" | jq -c --arg id "$id" --arg head "$local_head" '.local_heads[$id]=$head')
   done
+  queue_read || return 0
+  RECEIPT=$proposed_receipt
   PENDING=true; RESULT=pending; REASON='request prepared; awaiting confirmed head'
   record_result # Durable before the outward-facing side effect.
   jq -n --arg head "$expected" '{expected_head_sha:$head}' > "$TMP/request"
