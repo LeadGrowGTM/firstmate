@@ -1432,6 +1432,59 @@ See [`docs/examples/crew-dispatch.json`](examples/crew-dispatch.json) for a star
 
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
 
+## Domain evidence collection (config/domain-freshness.json)
+
+The optional home-local `config/domain-freshness.json` declares the permitted inputs for manual domain evidence collection.
+Absent configuration or `enabled: false` produces no collection; nothing installs or enables this configuration automatically.
+Machine-specific inventory paths are local choices and must not be inherited across hosts.
+[`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
+Daily intake and domain proposal delivery are separate integrations; this collector neither schedules work nor changes installations or operational instructions.
+
+This section owns the version 1 configuration schema:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | Exactly `1`. |
+| `enabled` | Required boolean, default posture is off. |
+| `max_pages` | Optional per-feed pagination bound, integer 1 through 100, default 20; reaching it without proving completion fails that source's coverage. |
+| `sources` | Up to 100 source objects, each with a unique safe `id` and one `kind` below. |
+
+| Source kind | Required fields and coverage |
+| --- | --- |
+| `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head and changed-file metadata. |
+| `skills` | Absolute `root`; discover Markdown instruction fingerprints beneath it, including `SKILL.md`, supporting instruction resources, additions, and removals. |
+| `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest, enablement settings, version manifests, and relevant instruction files. |
+| `unavailable` | Nonempty `reason`; disclose an unavailable home/host or input instead of treating it as current. |
+
+Inventory sources optionally declare absolute `symlink_roots` for permitted external symlink targets.
+Declare only specific safe roots and instruction files; credentials, environment files, client data, browser profiles, generated logs, and runtime state are excluded.
+A resolved target outside the declared roots fails coverage, and the collector never discovers or reads another home's endpoints.
+Missing remote inventory remains `unavailable` until that owning home supplies its bounded observation through the existing parent transport.
+
+The `plugin-files` file kinds are `plugin-manifest` (installed `plugins` records with version/scope/path metadata), `plugin-enablement` (the effective `enabledPlugins` boolean map), `plugin-version` (name/version), and `instruction` (content digest and bounded text).
+Only those manifest fields are retained; unrelated settings fields are excluded from fingerprints and evidence.
+Inventory coverage names the observed surfaces and explicitly leaves session visibility unmeasured; a cache version alone does not establish effective installation or enablement.
+Instruction excerpts disclose truncation while their digest covers the full file.
+First inventory observations are explicit baselines rather than historical change claims.
+
+The current secondmate registry supplies domain id/home/scope context for every bundle.
+All collected sources remain available to scope judgment, including effects that cross department boundaries; collection does not assign repositories exclusively to one mate.
+The collector makes no model calls, parent requests, or review cards on complete unchanged observations.
+
+An off example, to adapt only after the separate activation approval:
+
+```json
+{
+  "version": 1,
+  "enabled": false,
+  "sources": [
+    { "id": "firstmate", "kind": "repository", "repo": "owner/firstmate" },
+    { "id": "local-skills", "kind": "skills", "root": "/absolute/safe/skills" },
+    { "id": "remote-inventory", "kind": "unavailable", "reason": "Owning host has not supplied its inventory" }
+  ]
+}
+```
+
 ## Task types (config/task-types.json)
 
 The optional local, gitignored `config/task-types.json` lists the recurring specialist types for this home.

@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""Deterministic collector implementation; fm-domain-freshness.sh owns the CLI."""
+import base64
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+
+class CoverageError(Exception):
+    pass
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def instant(value):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', value):
+        raise ValueError('expected an ISO UTC timestamp')
+    return dt.datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=dt.timezone.utc)
+
+
+def iso(value):
+    return value.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def safe_path(path):
+    """Reject symlinks in collector-owned storage, including ancestors."""
+    path = Path(path)
+    if not path.is_absolute() or any(p.is_symlink() for p in (path, *path.parents)):
+        raise ValueError('unsafe collector path')
+    return path
+
+
+def load(path):
+    safe_path(path)
+    if path.stat().st_size > 8 * 1024 * 1024:
+        raise ValueError('JSON input exceeds 8 MiB')
+    with path.open() as handle:
+        return json.load(handle)
+
+
+def publish(path, value):
+    safe_path(path)
+    fd, temporary = tempfile.mkstemp(prefix='.publish-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as handle:
+            json.dump(value, handle, sort_keys=True, ensure_ascii=True)
+            handle.write('\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def api(path):
+    # The shared timeout owner bounds the complete gh-axi process group.
+    owner = str(Path(__file__).with_name('fm-timeout-lib.sh'))
+    # gh-axi emits TOON even for caller-shaped JSON. Base64 makes the raw
+    # response a single bounded-alphabet field in its documented raw envelope.
+    command = ['bash', '-c', '. "$1"; fm_run_timed 10 gh-axi api GET "$2" --jq @base64 --full', '_', owner, path]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode:
+        raise CoverageError('forge read failed (exit %s): %s' % (result.returncode, path))
+    try:
+        match = re.fullmatch(r'api_response:\s*\n  body: ([A-Za-z0-9+/=]+)\n  truncated: false\s*', result.stdout)
+        if not match:
+            raise ValueError('expected a complete raw API envelope')
+        return json.loads(base64.b64decode(match[1], validate=True))
+    except (ValueError, TypeError) as error:
+        raise CoverageError('malformed forge response: ' + path) from error
+
+
+def pages(path, max_pages):
+    for page in range(1, max_pages + 1):
+        rows = api(path + ('&' if '?' in path else '?') + 'per_page=100&page=' + str(page))
+        if not isinstance(rows, list) or len(rows) > 100 or any(not isinstance(row, dict) for row in rows):
+            raise CoverageError('malformed forge page: ' + path)
+        yield rows
+        if len(rows) < 100:
+            return
+    raise CoverageError('pagination limit reached: ' + path)
+
+
+def forge(source, previous, now, max_pages):
+    start = instant(previous['checkpoint']) if previous else now - dt.timedelta(days=1)
+    lower = start - dt.timedelta(seconds=300) if previous else start
+    seen = dict(previous.get('seen', {})) if previous else {}
+    events = []
+    repo = source['repo']
+    prefix = '/repos/' + repo
+    for kind, endpoint, timestamp in [('merged-pr', '/pulls?state=closed&sort=updated&direction=desc', 'merged_at'),
+                                       ('new-issue', '/issues?state=all&sort=created&direction=desc&since=' + iso(lower), 'created_at')]:
+        for rows in pages(prefix + endpoint, max_pages):
+            stop = False
+            for row in rows:
+                ordering = 'updated_at' if kind == 'merged-pr' else 'created_at'
+                if instant(row.get(ordering)) < lower:
+                    stop = True
+                if kind == 'new-issue' and 'pull_request' in row:
+                    continue
+                when = row.get(timestamp)
+                if when is None and kind == 'merged-pr':
+                    continue
+                occurred = instant(when)
+                if not lower <= occurred <= now:
+                    continue
+                number = row.get('number')
+                if type(number) is not int or number < 1:
+                    raise CoverageError('invalid forge object number')
+                url = 'https://github.com/%s/%s/%s' % (repo, 'pull' if kind == 'merged-pr' else 'issues', number)
+                if row.get('html_url') != url:
+                    raise CoverageError('noncanonical forge identity')
+                key = kind + ':' + url
+                if key in seen:
+                    continue
+                event = {'kind': kind, 'url': url, 'repository': repo, timestamp: when,
+                         'title': row.get('title'), 'labels': row.get('labels', [])}
+                if kind == 'merged-pr':
+                    detail = api(prefix + '/pulls/' + str(number))
+                    if not isinstance(detail, dict) or detail.get('merged_at') != when or detail.get('html_url') != url:
+                        raise CoverageError('inconsistent merged PR detail')
+                    base, head = detail.get('base', {}), detail.get('head', {})
+                    if not base.get('ref') or not head.get('sha') or (base.get('repo') or {}).get('full_name') != repo:
+                        raise CoverageError('missing PR base/head metadata')
+                    files = []
+                    for file_rows in pages(prefix + '/pulls/' + str(number) + '/files', max_pages):
+                        for item in file_rows:
+                            if not isinstance(item.get('filename'), str) or not isinstance(item.get('status'), str):
+                                raise CoverageError('malformed PR file metadata')
+                            files.append({key: item.get(key) for key in ['filename', 'previous_filename', 'status', 'sha', 'additions', 'deletions', 'changes', 'blob_url', 'raw_url']})
+                    if type(detail.get('changed_files')) is not int or len(files) != detail['changed_files']:
+                        raise CoverageError('truncated PR changed-file set')
+                    event.update(base={'repository': repo, 'ref': base['ref'], 'sha': base.get('sha')},
+                                 head={'repository': (head.get('repo') or {}).get('full_name'), 'ref': head.get('ref'), 'sha': head['sha']},
+                                 files=files)
+                events.append(event)
+                seen[key] = when
+            if stop:
+                break
+    # Only identities in the overlap need retention after a complete read.
+    seen = {key: value for key, value in seen.items() if instant(value) >= now - dt.timedelta(seconds=300)}
+    return {'checkpoint': iso(now), 'seen': seen}, events, {'window_start': iso(lower), 'window_end': iso(now)}
+
+
+FORBIDDEN = {'.ssh', '.git', 'credentials', 'credentials.json', '.credentials.json', 'auth.json',
+             'secrets', 'clients', 'browser', 'profiles', 'logs', 'state'}
+
+
+def inventory_path(path, roots):
+    absolute = Path(path).absolute()
+    resolved = absolute.resolve(strict=True)
+    if any(part.lower() in FORBIDDEN or part.lower().startswith('.env') for part in (*absolute.parts, *resolved.parts)):
+        raise CoverageError('excluded inventory path')
+    if not any(resolved == root or root in resolved.parents for root in roots):
+        raise CoverageError('inventory symlink escapes declared safe roots')
+    return resolved
+
+
+def projection(value, kind):
+    if not isinstance(value, dict):
+        raise CoverageError('manifest must be an object')
+    if kind == 'plugin-enablement':
+        enabled = value.get('enabledPlugins')
+        if not isinstance(enabled, dict) or any(type(v) is not bool for v in enabled.values()):
+            raise CoverageError('missing effective enabledPlugins map')
+        return {'enabledPlugins': enabled}
+    if kind == 'plugin-version':
+        if not isinstance(value.get('version'), str) or not isinstance(value.get('name'), str):
+            raise CoverageError('missing plugin name/version')
+        return {'name': value['name'], 'version': value['version']}
+    plugins = value.get('plugins')
+    if not isinstance(plugins, dict):
+        raise CoverageError('missing installed plugins map')
+    result = {}
+    for name, entries in plugins.items():
+        if not isinstance(entries, list):
+            raise CoverageError('malformed installed plugin entries')
+        result[name] = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get('version'), str):
+                raise CoverageError('missing installed plugin version')
+            result[name].append({key: entry.get(key) for key in ['version', 'scope', 'projectPath', 'installPath']})
+        result[name].sort(key=lambda item: json.dumps(item, sort_keys=True))
+    return {'plugins': result}
+
+
+def inventory(source, previous, now):
+    root = Path(source['root'])
+    roots = [Path(item).resolve(strict=True) for item in [source['root'], *source.get('symlink_roots', [])]]
+    inventory_path(root, roots)
+    paths = []
+    if source['kind'] == 'skills':
+        visited = set()
+
+        def walk(directory):
+            actual = inventory_path(directory, roots)
+            if actual in visited:
+                raise CoverageError('duplicate or cyclic skill symlink')
+            visited.add(actual)
+            for item in sorted(directory.iterdir()):
+                if item.name.lower() in FORBIDDEN or item.name.lower().startswith('.env'):
+                    continue
+                resolved = inventory_path(item, roots)
+                if resolved.is_dir():
+                    walk(item)
+                elif item.suffix.lower() == '.md':
+                    paths.append((item, 'instruction'))
+                if len(visited) + len(paths) > 2000:
+                    raise CoverageError('skill inventory limit reached')
+        walk(root)
+    else:
+        paths = [(root / item['path'], item['kind']) for item in source['files']]
+    records = {}
+    for path, kind in paths:
+        resolved = inventory_path(path, roots)
+        if not resolved.is_file() or resolved.stat().st_size > 1048576:
+            raise CoverageError('inventory file unavailable or exceeds 1 MiB')
+        content = resolved.read_bytes()
+        if kind == 'instruction':
+            text = content.decode('utf-8')
+            metadata = {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content),
+                        'content': text[:4096], 'content_truncated': len(text) > 4096}
+        else:
+            value = projection(json.loads(content), kind)
+            metadata = {'digest': digest(value), 'manifest': value}
+        records[str(path.relative_to(root))] = {'kind': kind, **metadata}
+    old = previous.get('inventory', {}) if previous else {}
+    changes = []
+    for path in sorted(set(records) | set(old)):
+        if records.get(path) != old.get(path):
+            changes.append({'kind': 'inventory-baseline' if previous is None else 'inventory-change',
+                            'path': str(root / path), 'before': None if previous is None else old.get(path), 'after': records.get(path)})
+    # An empty first baseline is still explicit evidence.
+    if previous is None and not changes:
+        changes.append({'kind': 'inventory-baseline', 'root': str(root), 'entries': 0})
+    return {'checkpoint': iso(now), 'inventory': records}, changes, {'baseline': previous is None, 'root': str(root),
+            'surfaces': sorted({kind for _, kind in paths}), 'session_visibility': 'unmeasured'}
+
+
+def validate_config(config):
+    if not isinstance(config, dict) or config.get('version') != 1 or type(config.get('enabled')) is not bool:
+        raise ValueError('config requires version:1 and boolean enabled')
+    sources = config.get('sources')
+    if not isinstance(sources, list) or len(sources) > 100:
+        raise ValueError('sources must be an array of at most 100 entries')
+    ids = set()
+    for source in sources:
+        if not isinstance(source, dict) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', source.get('id', '')) or source['id'] in ids:
+            raise ValueError('source ids must be unique safe identifiers')
+        ids.add(source['id'])
+        kind = source.get('kind')
+        if kind == 'repository':
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', source.get('repo', '')):
+                raise ValueError('invalid repository')
+        elif kind in ('skills', 'plugin-files'):
+            for path in [source.get('root', ''), *source.get('symlink_roots', [])]:
+                if not isinstance(path, str) or not Path(path).is_absolute() or path == '/':
+                    raise ValueError('inventory roots must be specific absolute paths')
+            if kind == 'plugin-files':
+                files = source.get('files')
+                if not isinstance(files, list) or not files or len(files) > 2000:
+                    raise ValueError('plugin-files requires a bounded files list')
+                names = set()
+                for item in files:
+                    if not isinstance(item, dict):
+                        raise ValueError('inventory files must be objects')
+                    path = item.get('path', '')
+                    if not isinstance(path, str) or not path or Path(path).is_absolute() or '..' in Path(path).parts or path in names:
+                        raise ValueError('invalid or duplicate inventory filename')
+                    names.add(path)
+                    if item.get('kind') not in ('instruction', 'plugin-manifest', 'plugin-enablement', 'plugin-version'):
+                        raise ValueError('invalid inventory file kind')
+        elif kind == 'unavailable':
+            if not isinstance(source.get('reason'), str) or not source['reason'].strip():
+                raise ValueError('unavailable source requires a reason')
+        else:
+            raise ValueError('unsupported source kind')
+    limit = config.get('max_pages', 20)
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError('max_pages must be 1..100')
+
+
+def main():
+    home, config_path, domains_path, clock = sys.argv[1:]
+    config = load(Path(config_path))
+    validate_config(config)
+    if not config['enabled']:
+        return 0
+    now = instant(clock)
+    directory = safe_path(Path(home) / 'data' / 'domain-freshness')
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    bundles = safe_path(directory / 'bundles')
+    bundles.mkdir(mode=0o700, exist_ok=True)
+    lock = directory / '.collect.lock'
+    # Advisory locks release on process death. Keep the inode permanently so a
+    # concurrent opener cannot accidentally lock a different replacement file.
+    fd = os.open(safe_path(lock), os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        cursor_path = directory / 'cursors.json'
+        cursor = load(cursor_path) if cursor_path.exists() else {'version': 1, 'sources': {}}
+        if cursor.get('version') != 1 or not isinstance(cursor.get('sources'), dict):
+            raise ValueError('invalid collector cursor')
+        for saved in cursor['sources'].values():
+            if not isinstance(saved, dict) or not isinstance(saved.get('binding'), str):
+                raise ValueError('invalid source cursor')
+            instant(saved.get('checkpoint'))
+            if not isinstance(saved.get('seen', {}), dict) or not isinstance(saved.get('inventory', {}), dict):
+                raise ValueError('invalid source cursor data')
+        domains = load(Path(domains_path))
+        coverage = []
+        evidence = []
+        if domains['coverage'] not in ('complete', 'absent'):
+            coverage.append({'id': 'registry', 'complete': False, 'reason': domains['coverage']})
+        elif len({row['id'] for row in domains['domains']}) != len(domains['domains']):
+            coverage.append({'id': 'registry', 'complete': False, 'reason': 'duplicate domain id'})
+        for source in config['sources']:
+            key = source['id']
+            binding = digest(source)
+            previous = cursor['sources'].get(key)
+            if previous and previous.get('binding') != binding:
+                previous = None
+            try:
+                if previous and instant(previous['checkpoint']) > now:
+                    raise CoverageError('clock precedes successful checkpoint')
+                if source['kind'] == 'repository':
+                    saved, events, detail = forge(source, previous, now, config.get('max_pages', 20))
+                elif source['kind'] == 'unavailable':
+                    raise CoverageError(source['reason'])
+                else:
+                    saved, events, detail = inventory(source, previous, now)
+                cursor['sources'][key] = {**saved, 'binding': binding}
+                coverage.append({'id': key, 'kind': source['kind'], 'complete': True, **detail})
+                evidence.extend({'source': key, **event} for event in events)
+            except (CoverageError, OSError, ValueError, KeyError, TypeError) as error:
+                coverage.append({'id': key, 'kind': source['kind'], 'complete': False, 'reason': str(error)})
+        complete = all(row['complete'] for row in coverage)
+        bundle = {'schema': 'fm-domain-evidence.v1', 'collected_at': iso(now), 'complete': complete,
+                  'registry_coverage': domains['coverage'], 'domains': domains['domains'], 'coverage': coverage, 'evidence': evidence}
+        identity = digest(bundle)
+        output = bundles / (identity + '.json')
+        if output.exists():
+            if load(output) != bundle:
+                raise ValueError('bundle identity collision')
+        else:
+            publish(output, bundle)
+        publish(cursor_path, cursor)
+        if evidence or not complete:
+            print(output)
+        return 0 if complete else 2
+    finally:
+        os.close(fd)
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print('fm-domain-freshness: ' + str(exc), file=sys.stderr)
+        sys.exit(1)
