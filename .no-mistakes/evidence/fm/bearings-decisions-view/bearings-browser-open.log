@@ -1,0 +1,3 @@
+error: Bridge is running but the attached CDP target appears to have gone away
+code: BRIDGE_NOT_READY
+help[3]: The Chrome/Electron instance the bridge was attached to may have exited.,"Verify the target is still listening on its remote-debugging port, then re-run the command.","If the target was restarted, the bridge has already been recycled — this run will succeed once the target is reachable."

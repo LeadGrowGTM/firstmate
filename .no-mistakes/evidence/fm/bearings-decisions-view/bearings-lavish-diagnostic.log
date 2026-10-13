@@ -1,0 +1,3 @@
+error: Port 4387 is served by another Lavish installation at 127.0.0.1 (state directory /home/mitch/.lavish-axi)
+code: SERVER_ERROR
+help[1]: "Set LAVISH_AXI_PORT to another port, or set LAVISH_AXI_STATE_DIR to /home/mitch/.lavish-axi to use that installation"

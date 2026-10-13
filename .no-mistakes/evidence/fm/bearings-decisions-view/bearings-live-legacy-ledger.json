@@ -1,0 +1,136 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "01M4TVMS3K7ZC4F8H92ZD43X9F/.fm-bearings-live.WhdETZ",
+  "generated": "2026-10-13T16:40:48Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "complete": true,
+    "proven_clear": true,
+    "unmeasured_homes": 0,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [],
+  "secondmates": [
+    {
+      "id": "mate",
+      "state": "captain_decision",
+      "doing": "Remote choice",
+      "provenance": "structured-home-cache",
+      "freshness": "cached",
+      "age_seconds": 1,
+      "contradiction": false,
+      "reason": "-"
+    }
+  ],
+  "secondmate_reconcile": [
+    {
+      "id": "mate",
+      "spawn_gen": null,
+      "host": "127.0.0.1",
+      "kind": null,
+      "ids": []
+    }
+  ],
+  "decisions_open": [
+    {
+      "id": "main",
+      "key": "main",
+      "verb": "captain-hold",
+      "summary": "Main choice: Choose main route",
+      "owner": "(main)"
+    },
+    {
+      "id": "mate/remote",
+      "key": "remote",
+      "verb": "captain-hold",
+      "summary": "Remote choice: Choose remote route",
+      "owner": "mate"
+    }
+  ],
+  "landed": [],
+  "gates": [],
+  "reports": [],
+  "recorded_prs": [],
+  "decision_layout": [
+    {
+      "id": "main",
+      "title": "Main choice",
+      "repo": "sample",
+      "reason": "Choose main route",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "main"
+    },
+    {
+      "id": "mate/remote",
+      "title": "Remote choice",
+      "repo": "sample",
+      "reason": "Choose remote route",
+      "priority": null,
+      "origin": null,
+      "hold_set": null,
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "mate",
+      "key": "remote"
+    }
+  ],
+  "decision_layout_unavailable": [
+    {
+      "owner": "mate",
+      "reason": "Detailed decision inventory unavailable; inspect owner home"
+    }
+  ],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "secondmate mate served from cached home ledger",
+      "reveal": "inspect the home ledger publication and remote route"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}

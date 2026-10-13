@@ -1,0 +1,583 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "01M4TVMS3K7ZC4F8H92ZD43X9F/.fm-bearings-live.IbFas5",
+  "generated": "2026-10-13T12:00:00Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "complete": true,
+    "proven_clear": true,
+    "unmeasured_homes": 0,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [
+    {
+      "id": "call-01",
+      "key": "call-01",
+      "verb": "captain-hold",
+      "summary": "Choice 01: Decide route 01",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-02",
+      "key": "call-02",
+      "verb": "captain-hold",
+      "summary": "Choice 02: Decide route 02",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-03",
+      "key": "call-03",
+      "verb": "captain-hold",
+      "summary": "Choice 03: Decide route 03",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-04",
+      "key": "call-04",
+      "verb": "captain-hold",
+      "summary": "Choice 04: Decide route 04",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-05",
+      "key": "call-05",
+      "verb": "captain-hold",
+      "summary": "Choice 05: Decide route 05",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-06",
+      "key": "call-06",
+      "verb": "captain-hold",
+      "summary": "Choice 06: Decide route 06",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-07",
+      "key": "call-07",
+      "verb": "captain-hold",
+      "summary": "Choice 07: Decide route 07",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-08",
+      "key": "call-08",
+      "verb": "captain-hold",
+      "summary": "Choice 08: Decide route 08",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-09",
+      "key": "call-09",
+      "verb": "captain-hold",
+      "summary": "Choice 09: Decide route 09",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-10",
+      "key": "call-10",
+      "verb": "captain-hold",
+      "summary": "Choice 10: Decide route 10",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-11",
+      "key": "call-11",
+      "verb": "captain-hold",
+      "summary": "Choice 11: Decide route 11",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-12",
+      "key": "call-12",
+      "verb": "captain-hold",
+      "summary": "Choice 12: Decide route 12",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-13",
+      "key": "call-13",
+      "verb": "captain-hold",
+      "summary": "Choice 13: Decide route 13",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-14",
+      "key": "call-14",
+      "verb": "captain-hold",
+      "summary": "Choice 14: Decide route 14",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-15",
+      "key": "call-15",
+      "verb": "captain-hold",
+      "summary": "Choice 15: Decide route 15",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-16",
+      "key": "call-16",
+      "verb": "captain-hold",
+      "summary": "Choice 16: Decide route 16",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-17",
+      "key": "call-17",
+      "verb": "captain-hold",
+      "summary": "Choice 17: Decide route 17",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-18",
+      "key": "call-18",
+      "verb": "captain-hold",
+      "summary": "Choice 18: Decide route 18",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-19",
+      "key": "call-19",
+      "verb": "captain-hold",
+      "summary": "Choice 19: Decide route 19",
+      "owner": "(main)"
+    },
+    {
+      "id": "call-20",
+      "key": "call-20",
+      "verb": "captain-hold",
+      "summary": "Choice 20: Decide route 20",
+      "owner": "(main)"
+    }
+  ],
+  "landed": [],
+  "gates": [],
+  "reports": [],
+  "recorded_prs": [],
+  "decision_layout": [
+    {
+      "id": "call-01",
+      "title": "Choice 01",
+      "repo": "sample",
+      "reason": "Decide route 01",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-01"
+    },
+    {
+      "id": "call-02",
+      "title": "Choice 02",
+      "repo": "sample",
+      "reason": "Decide route 02",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-02"
+    },
+    {
+      "id": "call-03",
+      "title": "Choice 03",
+      "repo": "sample",
+      "reason": "Decide route 03",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-03"
+    },
+    {
+      "id": "call-04",
+      "title": "Choice 04",
+      "repo": "sample",
+      "reason": "Decide route 04",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-04"
+    },
+    {
+      "id": "call-05",
+      "title": "Choice 05",
+      "repo": "sample",
+      "reason": "Decide route 05",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-05"
+    },
+    {
+      "id": "call-06",
+      "title": "Choice 06",
+      "repo": "sample",
+      "reason": "Decide route 06",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-06"
+    },
+    {
+      "id": "call-07",
+      "title": "Choice 07",
+      "repo": "sample",
+      "reason": "Decide route 07",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-07"
+    },
+    {
+      "id": "call-08",
+      "title": "Choice 08",
+      "repo": "sample",
+      "reason": "Decide route 08",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-08"
+    },
+    {
+      "id": "call-09",
+      "title": "Choice 09",
+      "repo": "sample",
+      "reason": "Decide route 09",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-09"
+    },
+    {
+      "id": "call-10",
+      "title": "Choice 10",
+      "repo": "sample",
+      "reason": "Decide route 10",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-10"
+    },
+    {
+      "id": "call-11",
+      "title": "Choice 11",
+      "repo": "sample",
+      "reason": "Decide route 11",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-11"
+    },
+    {
+      "id": "call-12",
+      "title": "Choice 12",
+      "repo": "sample",
+      "reason": "Decide route 12",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-12"
+    },
+    {
+      "id": "call-13",
+      "title": "Choice 13",
+      "repo": "sample",
+      "reason": "Decide route 13",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-13"
+    },
+    {
+      "id": "call-14",
+      "title": "Choice 14",
+      "repo": "sample",
+      "reason": "Decide route 14",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-14"
+    },
+    {
+      "id": "call-15",
+      "title": "Choice 15",
+      "repo": "sample",
+      "reason": "Decide route 15",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-15"
+    },
+    {
+      "id": "call-16",
+      "title": "Choice 16",
+      "repo": "sample",
+      "reason": "Decide route 16",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-16"
+    },
+    {
+      "id": "call-17",
+      "title": "Choice 17",
+      "repo": "sample",
+      "reason": "Decide route 17",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-17"
+    },
+    {
+      "id": "call-18",
+      "title": "Choice 18",
+      "repo": "sample",
+      "reason": "Decide route 18",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-18"
+    },
+    {
+      "id": "call-19",
+      "title": "Choice 19",
+      "repo": "sample",
+      "reason": "Decide route 19",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-19"
+    },
+    {
+      "id": "call-20",
+      "title": "Choice 20",
+      "repo": "sample",
+      "reason": "Decide route 20",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-20"
+    },
+    {
+      "id": "call-21",
+      "title": "Choice 21",
+      "repo": "sample",
+      "reason": "Decide route 21",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-21"
+    },
+    {
+      "id": "call-22",
+      "title": "Choice 22",
+      "repo": "sample",
+      "reason": "Decide route 22",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-22"
+    },
+    {
+      "id": "call-23",
+      "title": "Choice 23",
+      "repo": "sample",
+      "reason": "Decide route 23",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-23"
+    },
+    {
+      "id": "call-24",
+      "title": "Choice 24",
+      "repo": "sample",
+      "reason": "Decide route 24",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-24"
+    },
+    {
+      "id": "call-25",
+      "title": "Choice 25",
+      "repo": "sample",
+      "reason": "Decide route 25",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "call-25"
+    }
+  ],
+  "decision_layout_unavailable": [],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "decisions_open showing 20 of 25",
+      "reveal": "--all-decisions"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}

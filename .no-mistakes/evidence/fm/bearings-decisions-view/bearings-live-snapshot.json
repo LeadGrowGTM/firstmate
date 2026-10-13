@@ -1,0 +1,114 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "01M4TVMS3K7ZC4F8H92ZD43X9F/.fm-bearings-live.wh5W8s",
+  "generated": "2026-10-13T12:00:00Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "complete": true,
+    "proven_clear": true,
+    "unmeasured_homes": 0,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [],
+  "secondmates": [],
+  "secondmate_reconcile": [],
+  "decisions_open": [
+    {
+      "id": "main-high",
+      "key": "main-high",
+      "verb": "captain-hold",
+      "summary": "Preserve compatibility: Choose compatibility or migration before rollout",
+      "owner": "(main)"
+    }
+  ],
+  "landed": [],
+  "gates": [
+    {
+      "id": "main-deferred",
+      "title": "Schedule the switch",
+      "blocked_by": "-",
+      "reason": "until 2026-11-01: Choose the cutover dat…",
+      "owner": "(main)",
+      "filed": null
+    }
+  ],
+  "reports": [],
+  "recorded_prs": [],
+  "decision_layout": [
+    {
+      "id": "main-high",
+      "title": "Preserve compatibility",
+      "repo": "sample",
+      "reason": "Choose compatibility or migration before rollout",
+      "priority": "high",
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "main-high"
+    },
+    {
+      "id": "main-deferred",
+      "title": "Schedule the switch",
+      "repo": "sample",
+      "reason": "Choose the cutover date",
+      "priority": "low",
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "dated",
+      "until": "2026-11-01",
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "main-deferred"
+    }
+  ],
+  "decision_layout_unavailable": [],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "captain holds bucketed blocked, dated, or aged: 1",
+      "reveal": "--all-decisions"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}

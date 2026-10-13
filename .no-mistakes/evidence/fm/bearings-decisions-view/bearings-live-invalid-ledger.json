@@ -1,0 +1,106 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "01M4TVMS3K7ZC4F8H92ZD43X9F/.fm-bearings-live.WhdETZ",
+  "generated": "2026-10-13T16:40:48Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "complete": false,
+    "proven_clear": false,
+    "unmeasured_homes": 1,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [],
+  "secondmates": [
+    {
+      "id": "mate",
+      "state": "unknown",
+      "doing": "structured home ledger is missing, unreadable, or invalid and no valid cached copy is available",
+      "provenance": "unknown",
+      "freshness": "unknown",
+      "age_seconds": null,
+      "contradiction": false,
+      "reason": "structured home ledger is missing, unreadable, or invalid and no valid cached copy is available"
+    }
+  ],
+  "secondmate_reconcile": [],
+  "decisions_open": [
+    {
+      "id": "main",
+      "key": "main",
+      "verb": "captain-hold",
+      "summary": "Main choice: Choose main route",
+      "owner": "(main)"
+    }
+  ],
+  "landed": [],
+  "gates": [],
+  "reports": [],
+  "recorded_prs": [],
+  "decision_layout": [
+    {
+      "id": "main",
+      "title": "Main choice",
+      "repo": "sample",
+      "reason": "Choose main route",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-12T10:00:00Z",
+      "bucket": "live",
+      "until": null,
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "main"
+    }
+  ],
+  "decision_layout_unavailable": [
+    {
+      "owner": "mate",
+      "reason": "Detailed decision inventory unavailable; inspect owner home"
+    }
+  ],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "secondmate home(s) with unreadable structured state: 1",
+      "reveal": "inspect the listed secondmate home ledgers"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}
