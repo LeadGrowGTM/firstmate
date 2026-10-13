@@ -86,36 +86,44 @@ case "${1:-}" in
       shift
       skip_next=
       literal=
+      pending=$FM_FAKE_PANE_LOG.pending
       for a in "$@"; do
         if [ -n "$skip_next" ]; then skip_next=; continue; fi
         case "$a" in
           -t) skip_next=1; continue ;;
           -l) literal=1; continue ;;
-          Enter|C-m) continue ;;
-          *)
-            [ -n "$literal" ] || printf '%s\n' "$a" >> "$FM_FAKE_PANE_LOG"
-            if [ "$a" = 'treehouse get' ] && [ -n "${FM_FAKE_TREEHOUSE_INITIAL_PATH:-}" ]; then
+          Enter|C-m)
+            [ -f "$pending" ] || continue
+            command=$(cat "$pending")
+            rm -f "$pending"
+            printf '%s\n' "$command" >> "$FM_FAKE_PANE_LOG"
+            if [ "$command" = 'treehouse get' ] && [ -n "${FM_FAKE_TREEHOUSE_INITIAL_PATH:-}" ]; then
               mkdir -p "$(dirname "$FM_FAKE_TREEHOUSE_INITIAL_PATH")"
               git -C "${FM_FAKE_TREEHOUSE_INITIAL_PROJECT:?}" worktree add --quiet --detach \
                 "$FM_FAKE_TREEHOUSE_INITIAL_PATH" || exit 1
               : > "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:?}"
             fi
-            if [ -n "$literal" ] && [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
-              printf '%s\n' "$a" >> "$FM_FAKE_LAUNCH_LOG"
+            if [ -f "$pending.literal" ] && [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
+              printf '%s\n' "$command" >> "$FM_FAKE_LAUNCH_LOG"
             fi
-            if [ -n "$literal" ] && [ -n "${FM_FAKE_WORKER_EDIT_PATH:-}" ]; then
-              case "$a" in
+            if [ -f "$pending.literal" ] && [ -n "${FM_FAKE_WORKER_EDIT_PATH:-}" ]; then
+              case "$command" in
                 *launch.*) printf 'worker work that must survive\n' >> "$FM_FAKE_WORKER_EDIT_PATH/README.md" ;;
               esac
             fi
-            if [ "$a" = exit ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ]; then
+            rm -f "$pending.literal"
+            if [ "$command" = exit ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ]; then
               : > "$FM_FAKE_EXIT_FLAG"
               if [ -n "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}" ] \
                 && [ -z "${FM_FAKE_CWD_FAIL_AFTER_EXIT:-}" ] \
                 && [ -z "${FM_FAKE_TREEHOUSE_DELAY_RETURN:-}" ]; then
-                rm -f "$FM_FAKE_TREEHOUSE_INITIAL_LEASE"
+                treehouse fake-complete-return || exit 1
               fi
             fi
+            ;;
+          *)
+            printf '%s' "$a" >> "$pending"
+            [ -z "$literal" ] || : > "$pending.literal"
             ;;
         esac
       done
@@ -146,15 +154,6 @@ case "$*" in
     state=available
     if [ -f "$lease" ]; then
       state=in-use
-      if [ -n "${FM_FAKE_TREEHOUSE_DELAY_RETURN:-}" ] \
-        && [ -n "${FM_FAKE_EXIT_FLAG:-}" ] && [ -f "$FM_FAKE_EXIT_FLAG" ]; then
-        if [ -f "$lease.status-seen" ] && [ -z "${FM_FAKE_TREEHOUSE_HOLD_RETURN:-}" ]; then
-          rm -f "$lease"
-          state=available
-        else
-          : > "$lease.status-seen"
-        fi
-      fi
     fi
     shown=$path
     case "$path" in
@@ -165,6 +164,12 @@ case "$*" in
     if [ -n "${FM_FAKE_TREEHOUSE_HOLD_RETURN:-}" ]; then
       printf '%-4s  %-11s  %s\n' 2 available "$shown-other"
     fi
+    ;;
+  fake-complete-return)
+    [ -n "${FM_FAKE_EXIT_FLAG:-}" ] && [ -f "$FM_FAKE_EXIT_FLAG" ] || exit 1
+    [ -n "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}" ] \
+      && [ -f "$FM_FAKE_TREEHOUSE_INITIAL_LEASE" ] || exit 1
+    rm -f "$FM_FAKE_TREEHOUSE_INITIAL_LEASE"
     ;;
   'get --lease --lease-holder '*)
     printf 'gitmarker=%s\n' "$(git config --global --get fm.marker 2>/dev/null)" >> "$log"
@@ -187,7 +192,20 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux" "$fakebin/treehouse"
-  fm_test_fake_sleep_noop "$fakebin"
+  cat > "$fakebin/sleep" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ -n "${FM_FAKE_TREEHOUSE_COMPLETE_ON_SLEEP:-}" ] \
+  && [ -n "${FM_FAKE_EXIT_FLAG:-}" ] && [ -f "$FM_FAKE_EXIT_FLAG" ] \
+  && [ -n "${FM_FAKE_TREEHOUSE_LOG:-}" ] \
+  && grep -Fqx 'args=status' "$FM_FAKE_TREEHOUSE_LOG" \
+  && [ -n "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}" ] \
+  && [ -f "$FM_FAKE_TREEHOUSE_INITIAL_LEASE" ]; then
+  treehouse fake-complete-return
+fi
+exit 0
+SH
+  chmod +x "$fakebin/sleep"
   printf '%s\n' "$fakebin"
 }
 
@@ -697,7 +715,7 @@ test_shasum_only_path_names_the_pool_from_the_home() {
 }
 
 test_initial_get_checks_returned_worktree() {
-  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return out status
+  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return complete_on_sleep out status
   for variant in inside inside-tilde outside unconfirmed pending; do
     id="pool-placement-initial-$variant"
     case_dir=$TMP_ROOT/$id
@@ -722,6 +740,8 @@ test_initial_get_checks_returned_worktree() {
     [ "$variant" != unconfirmed ] || fail_cwd=1
     hold_return=
     [ "$variant" != pending ] || hold_return=1
+    complete_on_sleep=
+    case "$variant" in inside|inside-tilde) complete_on_sleep=1 ;; esac
     : > "$pane_log"
     : > "$tree_log"
     status=0
@@ -730,6 +750,7 @@ test_initial_get_checks_returned_worktree() {
       FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
       FM_FAKE_TREEHOUSE_INITIAL_LEASE="$lease" FM_FAKE_CWD_FAIL_AFTER_EXIT="$fail_cwd" \
       FM_FAKE_TREEHOUSE_DELAY_RETURN=1 FM_FAKE_TREEHOUSE_HOLD_RETURN="$hold_return" \
+      FM_FAKE_TREEHOUSE_COMPLETE_ON_SLEEP="$complete_on_sleep" \
       FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" FM_FAKE_EXIT_FLAG="$case_dir/exited" \
       run_spawn "$reported" "$id") || status=$?
     assert_exact_line 'treehouse get' "$pane_log" "$variant: initial get was not sent"
@@ -741,6 +762,8 @@ test_initial_get_checks_returned_worktree() {
       assert_exact_line 'exit' "$pane_log" "inside: allocated copy was not returned"
       [ "$(grep -Fxc 'args=status' "$tree_log")" -ge 2 ] \
         || fail "inside: return was accepted before Treehouse finished releasing the copy"
+      assert_exact_line 'args=fake-complete-return' "$tree_log" \
+        "$variant: no separate return completion was submitted"
       [ ! -e "$lease" ] || fail "inside: fake Treehouse lease remained active"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "inside: refusal published a task"
     elif [ "$variant" = unconfirmed ]; then
@@ -759,6 +782,8 @@ test_initial_get_checks_returned_worktree() {
       assert_exact_line 'exit' "$pane_log" "pending: return was not attempted"
       assert_exact_line 'args=status' "$tree_log" \
         "pending: Treehouse status was not checked"
+      assert_no_exact_line 'args=fake-complete-return' "$tree_log" \
+        "pending: a return completion was submitted"
       [ -f "$lease" ] || fail "pending: fake Treehouse lease was unexpectedly released"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "pending: refusal published a task"
     else
@@ -770,6 +795,48 @@ test_initial_get_checks_returned_worktree() {
     fi
   done
   pass "initial get releases refused copies and reports unconfirmed returns"
+}
+
+test_fake_treehouse_return_requires_submission_and_completion() {
+  local id=pool-fake-return-state case_dir=$TMP_ROOT/fake-return-state
+  local allocated lease pane_log tree_log exit_flag output
+  local -a fake
+  CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+  prepare_spawn_home "$case_dir" "$id"
+  allocated=$CASE_HOME/worktrees/1/widget
+  lease=$case_dir/initial-lease
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  exit_flag=$case_dir/exited
+  : > "$pane_log"
+  : > "$tree_log"
+  fake=(env HOME="$CASE_HOME/user-home" PATH="$CASE_FAKEBIN:$PATH" \
+    FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    FM_FAKE_TREEHOUSE_INITIAL_PATH="$allocated" \
+    FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
+    FM_FAKE_TREEHOUSE_INITIAL_LEASE="$lease" FM_FAKE_EXIT_FLAG="$exit_flag" \
+    FM_FAKE_TREEHOUSE_DELAY_RETURN=1)
+  "${fake[@]}" tmux send-keys -t fake 'treehouse get'
+  [ ! -e "$lease" ] || fail "typing get without Enter allocated a copy"
+  "${fake[@]}" tmux send-keys -t fake Enter
+  [ -f "$lease" ] || fail "submitted get did not allocate a copy"
+  "${fake[@]}" tmux send-keys -t fake exit
+  [ ! -e "$exit_flag" ] || fail "typing exit without Enter left the copy"
+  if "${fake[@]}" treehouse fake-complete-return >/dev/null 2>&1; then
+    fail "return completion succeeded before exit was submitted"
+  fi
+  [ -f "$lease" ] || fail "unsubmitted exit released the copy"
+  "${fake[@]}" tmux send-keys -t fake Enter
+  [ -f "$exit_flag" ] && [ -f "$lease" ] \
+    || fail "submitted exit did not leave the lease pending confirmation"
+  output=$("${fake[@]}" treehouse status)
+  assert_contains "$output" 'in-use' "plain status did not report the pending lease"
+  [ -f "$lease" ] || fail "reading status released the copy"
+  "${fake[@]}" treehouse fake-complete-return
+  [ ! -e "$lease" ] || fail "explicit return completion did not release the copy"
+  output=$("${fake[@]}" treehouse status)
+  assert_contains "$output" 'available' "plain status did not report the released copy"
+  pass "the fake requires submitted commands and a separate return completion"
 }
 
 test_fallback_lease_checks_returned_worktree() {
@@ -827,6 +894,7 @@ test_fallback_lease_checks_returned_worktree() {
 }
 
 test_initial_get_checks_returned_worktree
+test_fake_treehouse_return_requires_submission_and_completion
 test_fallback_lease_checks_returned_worktree
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
 test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
