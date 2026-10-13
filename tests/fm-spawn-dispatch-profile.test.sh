@@ -37,6 +37,7 @@ SH
 make_spawn_fakebin() {
   local dir=$1 fakebin
   fakebin=$(fm_test_make_spawn_fakebin "$dir")
+  fm_fake_exit0 "$fakebin" claude
   cat > "$fakebin/timeout" <<'SH'
 #!/usr/bin/env bash
 shift
@@ -2267,6 +2268,94 @@ test_non_claude_harness_ignores_claude_permission_mode() {
   pass "config/claude-permission-mode changes claude launches only"
 }
 
+test_opt_in_production_launch_receipts() {
+  local rec id out status receipt harness
+  id='receipt-published-z24'
+  rec=$(make_spawn_case receipt-published claude "$id")
+  read_case_record "$rec"
+  receipt="$CASE_DIR/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "production spawn with receipt should publish: $out"
+  jq -e --arg id "$id" --arg gen "$(sed -n 's/^spawn_gen=//p' "$HOME_DIR/state/$id.meta")" \
+    '.version == 1 and .task == $id and .exit_code == 0 and .outcome == "worker-published" and
+     .launch_sent == true and .spawn_gen == $gen and .backend == "tmux" and
+     .harness == "claude" and .mode == "no-mistakes" and .yolo == "off"' "$receipt" >/dev/null \
+    || fail "published receipt does not bind the committed task generation and launch: $(cat "$receipt")"
+  [ -s "$LAUNCH_LOG" ] || fail "published receipt had no fake tmux launch"
+
+  id='receipt-refused-z25'
+  rec=$(make_spawn_case receipt-refused claude "$id")
+  read_case_record "$rec"
+  receipt="$CASE_DIR/outcome.json"
+  printf 'invalid\n' > "$HOME_DIR/config/claude-permission-mode"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 1 "$status" "guard refusal should return a typed receipt: $out"
+  jq -e --arg id "$id" '.version == 1 and .task == $id and .exit_code == 1 and
+    .outcome == "unsafe-refusal" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "guard refusal receipt is not typed: $(cat "$receipt")"
+  [ ! -s "$LAUNCH_LOG" ] || fail "guard refusal sent a fake tmux launch"
+  assert_absent "$HOME_DIR/state/$id.meta" "guard refusal published metadata"
+  for harness in kimi muse rovo; do
+    id="receipt-missing-$harness"
+    rec=$(make_spawn_case "$id" "$harness" "$id")
+    read_case_record "$rec"
+    receipt="$CASE_DIR/outcome.json"
+    out=$(PATH=/usr/bin:/bin FM_SPAWN_OUTCOME_FILE="$receipt" \
+      run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+    status=$?
+    expect_code 1 "$status" "$harness executable absence should refuse: $out"
+    jq -e --arg harness "$harness" '.outcome == "worker-unavailable" and
+      .reason == "selected-executable-missing" and .harness == $harness and
+      .exit_code == 1 and .launch_sent == false' "$receipt" >/dev/null \
+      || fail "$harness missing-executable evidence was lost by its resolver"
+    [ ! -s "$LAUNCH_LOG" ] || fail "$harness absence sent a fake tmux launch"
+    assert_absent "$HOME_DIR/state/$id.meta" "$harness absence published metadata"
+  done
+  id='receipt-missing-cursor'
+  rec=$(make_spawn_case "$id" cursor "$id")
+  read_case_record "$rec"
+  rm "$FAKEBIN_DIR/cursor-agent"
+  receipt="$CASE_DIR/outcome.json"
+  out=$(PATH=/usr/bin:/bin FM_SPAWN_OUTCOME_FILE="$receipt" \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 1 "$status" "Cursor executable absence should refuse: $out"
+  jq -e '.outcome == "worker-unavailable" and .reason == "selected-executable-missing" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "missing Cursor CLI must permit another selected candidate"
+  [ ! -s "$LAUNCH_LOG" ] || fail "Cursor absence sent a fake tmux launch"
+  assert_absent "$HOME_DIR/state/$id.meta" "Cursor absence published metadata"
+  pass "production receipts bind publication and prelaunch refusal without a live runtime"
+}
+
+
+test_production_late_launch_receipt() {
+  local rec id out status receipt
+  id='receipt-late-z26'
+  rec=$(make_spawn_case receipt-late claude "$id")
+  read_case_record "$rec"
+  receipt="$CASE_DIR/outcome.json"
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux-base"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+"${0%/*}/tmux-base" "$@"
+for argument in "$@"; do
+  case "$argument" in
+    ". '"*"/launch."*".sh'") exit 1 ;;
+  esac
+done
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 1 "$status" "late launch failure must return nonzero: $out"
+  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "late launch receipt granted unsafe retry authority"
+  [ -s "$LAUNCH_LOG" ] || fail "late failure must follow actual fake transport delivery"
+  pass "production spawn receipt preserves uncertain delivery even when metadata rolls back"
+}
+
 test_worker_launch_delivers_role_scope
 test_no_profile_keeps_claude_profile_defaults
 test_claude_launch_brief_publishes_record_doorbell
@@ -2341,5 +2430,7 @@ test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks
 test_keep_ai_trailers_reaches_secondmate_crew_launches
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
+test_opt_in_production_launch_receipts
+test_production_late_launch_receipt
 
 echo "# all fm-spawn-dispatch-profile tests passed"

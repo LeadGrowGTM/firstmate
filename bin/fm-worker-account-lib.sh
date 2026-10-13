@@ -41,12 +41,15 @@
 #   Claude: `claude auth status`, which exits 0 only when signed in.
 #   Pi:     `pi auth check --provider <p> --json --no-refresh`; status "ready"
 #           passes. `pi auth check` loads no extensions, so it answers
-#           not_ready/provider_not_found for an extension-registered provider,
-#           and a Pi without the command (before 0.84.1) prints no JSON. Both
-#           fall through to `pi --list-models <p>`, which lists only the models
+#           not_ready/provider_not_found for an extension-registered provider.
+#           An older Pi that lacks the command must report the exact known
+#           unsupported-command response; only those two proven cases use
+#           `pi --list-models <p>`, which lists only the models
 #           a root can authenticate; a row whose provider column is exactly
 #           <p> passes. --no-refresh keeps the check from rewriting a root's
 #           tokens while other workers use them.
+#           A timeout, empty response, or malformed JSON is inconclusive and
+#           cannot be turned into readiness by a model listing.
 # A pinned Claude launch also unsets the environment credentials Claude ranks
 # above the root's stored login, so an ambient API key or token cannot outrank
 # the pin. Pi ranks a root's stored credentials above environment variables,
@@ -170,7 +173,7 @@ fm_worker_account_pi_provider() {
 # Returns 0 only when the runner's own check says the selected root is signed
 # in for this launch; otherwise prints one error and returns 1.
 fm_worker_account_check() {
-  local harness=$1 declared=$2 root=$3 executable=$4 provider=${5:-} out verdict name
+  local harness=$1 declared=$2 root=$3 executable=$4 provider=${5:-} out verdict name check_status list_status
   local -a clean=(env -i "HOME=${HOME:-}" "PATH=${PATH:-}")
   for name in TMPDIR USER LOGNAME; do
     [ -z "${!name:-}" ] || clean+=("$name=${!name}")
@@ -181,6 +184,12 @@ fm_worker_account_check() {
     if fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
       "$executable" auth status >/dev/null 2>&1 </dev/null; then
       return 0
+    else
+      check_status=$?
+    fi
+    if [ "$check_status" -ne 1 ]; then
+      echo "error: config/claude-account sign-in check was inconclusive (claude auth status exited $check_status)" >&2
+      return 2
     fi
     if [ -n "$root" ]; then
       echo "error: config/claude-account pins Claude workers to $root, which is not signed in (claude auth status); sign in with CLAUDE_CONFIG_DIR=$root claude, then /login, or change the pin" >&2
@@ -191,23 +200,54 @@ fm_worker_account_check() {
     ;;
   pi | pi-signed)
     clean+=("PI_CODING_AGENT_DIR=$root")
-    out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
-      "$executable" auth check --provider "$provider" --json --no-refresh 2>/dev/null </dev/null)
+    if out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
+      "$executable" auth check --provider "$provider" --json --no-refresh 2>&1 </dev/null); then
+      check_status=0
+    else
+      check_status=$?
+    fi
+    if [ "$check_status" -ne 0 ] && [ "$check_status" -ne 1 ]; then
+      echo "error: config/pi-account sign-in check was inconclusive for provider '$provider' (auth check exited $check_status)" >&2
+      return 2
+    fi
     verdict=$(printf '%s\n' "$out" | jq -r '
-      if type != "object" or (has("status") | not) then "list"
+      if type != "object" or (has("status") | not) then "inconclusive"
       elif .status == "ready" then "ready"
       elif .status == "not_ready" and .reason == "provider_not_found" then "list"
       else "\(.status) \(.reason // "")"
-      end' 2>/dev/null)
-    case "${verdict:-list}" in
-    ready) return 0 ;;
+      end' 2>/dev/null) || verdict=inconclusive
+    if [ "$check_status" -eq 1 ] && [ "$out" = 'Unknown command: auth' ]; then
+      verdict=list
+    fi
+    case "$verdict" in
+    ready)
+      if [ "$check_status" -eq 0 ]; then
+        return 0
+      fi
+      echo "error: config/pi-account sign-in check was inconclusive for provider '$provider' (auth check exited $check_status)" >&2
+      return 2
+      ;;
+    'not_ready credentials_not_configured') ;;
     list)
       if out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
-        "$executable" --list-models "$provider" 2>/dev/null </dev/null) &&
-        printf '%s\n' "$out" | awk -v p="$provider" 'NR > 1 && $1 == p { found = 1; exit } END { exit !found }'; then
+        "$executable" --list-models "$provider" 2>/dev/null </dev/null); then
+        list_status=0
+      else
+        list_status=$?
+      fi
+      if [ "$list_status" -ne 0 ] || [ -z "$out" ] ||
+         ! printf '%s\n' "$out" | awk 'NR == 1 { exit $1 != "provider" }'; then
+        echo "error: config/pi-account sign-in check was inconclusive for provider '$provider' (model listing exited $list_status)" >&2
+        return 2
+      fi
+      if printf '%s\n' "$out" | awk -v p="$provider" 'NR > 1 && $1 == p { found = 1; exit } END { exit !found }'; then
         return 0
       fi
       verdict="no model listed for provider $provider"
+      ;;
+    *)
+      echo "error: config/pi-account sign-in check was inconclusive for provider '$provider' ($verdict)" >&2
+      return 2
       ;;
     esac
     echo "error: config/pi-account pins Pi workers to $declared, which is not signed in for provider '$provider' ($verdict); sign in with PI_CODING_AGENT_DIR=$root $harness, then /login, or change the pin" >&2
@@ -264,7 +304,14 @@ fm_worker_account_select() {
       ;;
     esac
   fi
-  fm_worker_account_check "$harness" "$declared" "$root" "$executable" "$provider" || return 1
+  local check_status
+  if fm_worker_account_check "$harness" "$declared" "$root" "$executable" "$provider"; then
+    :
+  else
+    check_status=$?
+    [ "${FM_WORKER_ACCOUNT_TYPED:-0}" != 1 ] || return "$((check_status + 9))"
+    return 1
+  fi
   printf '%s\t%s\t%s\n' "$declared" "$root" "$provider"
 }
 

@@ -194,6 +194,15 @@ Backend capability comes from each adapter's real surface, not from a policy cho
 Per-harness interrupt keys, repeat counts, composer clears, exit commands, and supported task kinds live in `bin/fm-control-lib.sh` and are exercised for every verified harness by `tests/fm-control.test.sh`, with adapters outside its lane pinning their control mechanics in their own harness suites.
 The empirical basis for each adapter's value is the `harness-adapters` skill's verification record for that adapter.
 
+## Scheduled worker continuation
+
+Scheduled fallback is opt-in and task-local; it never enables a schedule or changes a supervisor harness.
+[`bin/fm-scheduled-worker.sh`](../bin/fm-scheduled-worker.sh) validates explicit authorization and a recent supervisor-supplied selection, and owns the bounded candidate ledger, occurrence replay barrier, and exhaustion-proof/checkpoint contract.
+It delegates launch to spawn and continuation to this control plane in the existing worktree, preserving runtime backend, account pins, and delivery rigor.
+[`bin/fm-launch-outcome-lib.sh`](../bin/fm-launch-outcome-lib.sh) owns the attempt receipt schema; publication and live process confirmation are distinct outcomes.
+Current routing remains the selection authority, and uncertain launch results require reconciliation before another attempt.
+The portable regression [`tests/fm-scheduled-worker.test.sh`](../tests/fm-scheduled-worker.test.sh) uses only isolated test doubles; it does not establish live subscription exhaustion or runtime availability.
+
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for its verified-harness lane (adapters outside the lane pin their control mechanics in their own harness suites), the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
