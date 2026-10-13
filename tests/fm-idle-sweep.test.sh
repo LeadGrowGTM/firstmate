@@ -19,6 +19,10 @@ printf '%s\n' '- example [no-mistakes +yolo] - fixture' > "$home/data/projects.m
 cat > "$TMP_ROOT/fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 string() { printf 'api_response:\n  body: %s\n  truncated: false\n' "$1"; }
+if [ -n "${TEST_FORGE_HOOK:-}" ] && [ "$2" = user ] && [ ! -e "$TEST_FORGE_HOOK_MARKER" ]; then
+  : > "$TEST_FORGE_HOOK_MARKER"
+  bash "$TEST_FORGE_HOOK"
+fi
   case "$2" in
   user) string fixture-user ;;
   search/issues*) if [ -n "${TEST_PR_COUNT_FILE:-}" ]; then cat "$TEST_PR_COUNT_FILE"; else echo 7; fi ;;
@@ -56,12 +60,19 @@ cat > "$home/bin/fm-backend.sh" <<'SH'
 fm_meta_get() { sed -n "s/^$2=//p" "$1" | head -1; }
 fm_backend_of_meta() { echo tmux; }
 fm_backend_target_of_meta() { fm_meta_get "$1" window; }
-fm_backend_agent_state() { echo "$TEST_ENDPOINT"; }
+fm_backend_agent_state() {
+  if [ "$2" = fm-concurrent ] || [ "${TEST_STARTED_ENDPOINT:-}" = alive ]; then
+    echo alive
+  else
+    echo "$TEST_ENDPOINT"
+  fi
+}
 SH
 cat > "$home/bin/fm-spawn.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TEST_SPAWN_LOG"
 [ "${TEST_SPAWN_FAIL:-0}" = 0 ] || exit 1
+[ "${TEST_SPAWN_START_ROWS:-0}" != 1 ] || bash "$FM_HOME/bin/fm-tasks-axi.sh" start "$1" >/dev/null
 printf 'kind=crewmate\nwindow=fm-%s\n' "$1" > "$FM_HOME/state/$1.meta"
 SH
 chmod +x "$TMP_ROOT/fakebin/gh-axi" "$TMP_ROOT/fakebin/quota-axi"
@@ -102,6 +113,23 @@ no_starts 'no fire while a worker process is live'
 TEST_ENDPOINT=unverified sweep
 no_starts 'unknown endpoint classification holds the batch'
 rm "$home/state/live.meta"
+cat > "$TMP_ROOT/start-concurrent-worker" <<'SH'
+#!/usr/bin/env bash
+printf 'kind=crewmate\nwindow=fm-concurrent\n' > "$FM_HOME/state/concurrent.meta"
+SH
+export TEST_FORGE_HOOK="$TMP_ROOT/start-concurrent-worker" TEST_FORGE_HOOK_MARKER="$TMP_ROOT/forge-hook-ran"
+sweep
+no_starts 'worker started during target collection holds the batch'
+rm "$home/state/concurrent.meta" "$TEST_FORGE_HOOK_MARKER"
+cat > "$TMP_ROOT/start-concurrent-row" <<'SH'
+#!/usr/bin/env bash
+bash "$FM_HOME/bin/fm-tasks-axi.sh" start extra3 >/dev/null
+SH
+TEST_FORGE_HOOK="$TMP_ROOT/start-concurrent-row"
+sweep
+no_starts 'in-flight row started during target collection holds the batch'
+bash "$home/bin/fm-tasks-axi.sh" reopen extra3 >/dev/null
+unset TEST_FORGE_HOOK TEST_FORGE_HOOK_MARKER
 jq '.steps |= map(select(.id=="ordinary"))' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
 cp "$home/data/ordinary/brief.md" "$TMP_ROOT/ordinary-brief"
 printf "# Task\n## Captain's intent\nFix the fixture.\n## Firstmate spec\nNo boundary supplied.\n" > "$home/data/ordinary/brief.md"
@@ -133,6 +161,11 @@ printf '%s' "$result" | jq -e '.targets == [
   {id:"open_prs",current:7,limit:4,gap:3},
   {id:"stale_backlog",current:8,limit:0,gap:8}]' >/dev/null || fail 'fixture target values and gaps'
 pass 'read-only target evaluator reports fixture values and gaps'
+git -C "$home/projects/example" remote set-url origin ssh://git@github.com/example/repo.git
+ssh_result=$(bash "$home/bin/fm-targets.sh" --json)
+printf '%s' "$ssh_result" | jq -e 'any(.repos[]; .repo == "example/repo" and .open_prs == 7 and .red_default_branches == 1)' >/dev/null || fail 'SSH GitHub URL target metrics'
+git -C "$home/projects/example" remote set-url origin https://github.com/example/repo.git
+pass 'SSH GitHub URL resolves target metrics'
 before=$(cat "$home/state/idle-sweep-backlog.json")
 text_output=$(bash "$home/bin/fm-targets.sh")
 assert_contains "$text_output" 'open_prs: current=7 limit=4 gap=3' 'text target projection'
@@ -154,16 +187,19 @@ cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 printf 'needs-decision [at=1791902116] [key=fixture]: approval needed\n' > "$home/state/extra.status"
 captain_brief=$(cat "$home/data/captain/brief.md")
 ordinary_brief=$(cat "$home/data/ordinary/brief.md")
+export TEST_SPAWN_START_ROWS=1 TEST_STARTED_ENDPOINT=alive
 sweep
 [ "$(cat "$home/data/captain/brief.md")" = "$captain_brief" ] || fail 'captain-held brief was changed'
 [ "$(cat "$home/data/ordinary/brief.md")" = "$ordinary_brief" ] || fail 'enrolled brief was changed'
-[ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 3 ] || fail 'batch cap'
+[ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 3 ] || fail "batch cap: $(cat "$TEST_SPAWN_LOG")"
 [ "$(head -1 "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = red ] || fail 'red outranks backlog'
 if grep -Eq '^(held|captain|extra|flight) ' "$TEST_SPAWN_LOG"; then fail 'held, decision, or in-flight work selected'; fi
 grep -q -- '--yolo off' "$TEST_SPAWN_LOG" || fail 'merge authority was not forced off'
 grep -q -- '--harness codex --model gpt-6.1-sol' "$TEST_SPAWN_LOG" || fail 'explicit Codex profile'
 [ "$(wc -l < "$home/state/idle-sweep.status" | tr -d ' ')" = 1 ] || fail 'one status line per batch'
 pass 'at most three starts, red first, holds and decisions excluded, explicit Codex and yolo off'
+unset TEST_SPAWN_START_ROWS TEST_STARTED_ENDPOINT
+while IFS= read -r id; do bash "$home/bin/fm-tasks-axi.sh" reopen "$id" >/dev/null; done < <(awk '{print $1}' "$TEST_SPAWN_LOG")
 sweep
 [ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 4 ] || fail 'existing metadata must prevent duplicate starts'
 pass 'a later batch never restarts an existing task'

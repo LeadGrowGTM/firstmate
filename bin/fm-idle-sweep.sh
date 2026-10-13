@@ -52,23 +52,31 @@ trap 'fm_lock_release "$lock" || true' EXIT
 snapshot=$(fm_targets_backlog)
 fm_targets_observe "$snapshot"
 
-# Idle means no local ordinary worker process, not merely an idle terminal.
-# Every unknown backend state, orphan in-flight row, or unreadable record holds.
-for meta in "$STATE"/*.meta; do
-  [ -e "$meta" ] || [ -L "$meta" ] || continue
-  [ -f "$meta" ] && [ ! -L "$meta" ] || exit 0
-  [ "$(fm_meta_get "$meta" kind)" != secondmate ] || continue
-  backend=$(fm_backend_of_meta "$meta")
-  target=$(fm_backend_target_of_meta "$meta")
-  [ -n "$target" ] || exit 0
-  # Arguments expand in the bounded child, not in this shell.
-  # shellcheck disable=SC2016
-  case "$(fm_run_timed 15 bash -c '. "$1/fm-backend.sh"; fm_backend_agent_state "$2" "$3"' _ "$SCRIPT_DIR" "$backend" "$target")" in
-    dead|missing) ;;
-    *) exit 0 ;;
-  esac
-done
-printf '%s' "$snapshot" | jq -e 'any(.backlog.records[]; .state == "in_flight" and .current_role == "worker") | not' >/dev/null || exit 0
+home_idle() {
+  local current_snapshot=$1 meta id backend target started_id
+  shift
+  for meta in "$STATE"/*.meta; do
+    [ -e "$meta" ] || [ -L "$meta" ] || continue
+    id=${meta##*/}
+    id=${id%.meta}
+    for started_id; do [ "$id" != "$started_id" ] || continue 2; done
+    [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+    [ "$(fm_meta_get "$meta" kind)" != secondmate ] || continue
+    backend=$(fm_backend_of_meta "$meta")
+    target=$(fm_backend_target_of_meta "$meta")
+    [ -n "$target" ] || return 1
+    # shellcheck disable=SC2016
+    case "$(fm_run_timed 15 bash -c '. "$1/fm-backend.sh"; fm_backend_agent_state "$2" "$3"' _ "$SCRIPT_DIR" "$backend" "$target")" in
+      dead|missing) ;;
+      *) return 1 ;;
+    esac
+  done
+  printf '%s' "$current_snapshot" | jq -e '
+    any(.backlog.records[]; .state == "in_flight" and .current_role == "worker" and
+      (.id as $id | ($ARGS.positional | index($id)) == null)) | not
+  ' --args "$@" >/dev/null
+}
+home_idle "$snapshot" || exit 0
 
 quota_clear() {
   local quota
@@ -132,9 +140,6 @@ while IFS= read -r candidate; do
   current_config=$(idle_config) || { failed=1; break; }
   [ "$current_config" = "$config" ] || break
   fm_targets_init || { failed=1; break; }
-  current=$(fm_targets_backlog) || { failed=1; break; }
-  printf '%s' "$current" | jq -e --argjson candidate "$candidate" \
-    'any(.backlog.records[]; .structured and .id == $candidate.id and . == $candidate.row)' >/dev/null || continue
   if [ "$target_kind" != backlog ]; then
     printf '%s' "$latest_targets" | jq -e --argjson candidate "$candidate" --argjson limits "$TARGET_LIMITS" '
       any(.targets[]; .id == $candidate.target and .limit == $limits[$candidate.target] and .gap != null and .gap > 0) and
@@ -163,6 +168,10 @@ while IFS= read -r candidate; do
   fi
   [ ! -e "$STATE/$id.meta" ] && [ ! -L "$STATE/$id.meta" ] || continue
   [ -z "$(status_open_decisions "$STATE/$id.status")" ] || continue
+  current=$(fm_targets_backlog) || { failed=1; break; }
+  printf '%s' "$current" | jq -e --argjson candidate "$candidate" \
+    'any(.backlog.records[]; .structured and .id == $candidate.id and del(.order) == ($candidate.row | del(.order)))' >/dev/null || continue
+  home_idle "$current" "${started[@]}" || break
   if bash "$SCRIPT_DIR/fm-spawn.sh" "$id" "$PROJECTS/$project" "${flags[@]}" --harness codex --model gpt-6.1-sol; then
     started+=("$id")
   else

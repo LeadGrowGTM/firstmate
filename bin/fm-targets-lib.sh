@@ -88,7 +88,7 @@ fm_targets_collect() {  # <canonical backlog JSON>
   for dir in "$PROJECTS"/*; do
     [ -d "$dir" ] || continue
     remote=$(git -C "$dir" config --get remote.origin.url 2>/dev/null) || remote=''
-    repo=$(printf '%s\n' "$remote" | sed -nE 's#^(https://github.com/|git@github.com:)([^/]+/[^/]+)$#\2#p')
+    repo=$(printf '%s\n' "$remote" | sed -nE 's#^(https://github.com/|git@github.com:|ssh://git@github.com/)([^/]+/[^/]+)$#\2#p')
     repo=${repo%.git}
     count=null; red=null
     if [ -n "$repo" ] && [ -n "$identity" ]; then
