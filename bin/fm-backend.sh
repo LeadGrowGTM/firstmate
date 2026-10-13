@@ -633,6 +633,10 @@ fm_backend_source_readable() {  # <path>
   [ -f "$1" ] && [ -r "$1" ]
 }
 
+fm_backend_tmux_lab_check() {
+  [ ! -f "$FM_HOME/.fm-lab-home" ] || "$FM_BACKEND_LIB_DIR/fm-lab-home.sh" tmux-check "$FM_HOME"
+}
+
 fm_backend_source() {  # <name>
   local name=$1 adapter rel sibling
   fm_backend_validate "$name" || return 1
@@ -643,9 +647,7 @@ fm_backend_source() {  # <name>
     tmux)
       # A marked home is permission to use a lab, never the operator socket.
       # Check before even sourcing the adapter, independently of gate markers.
-      if [ -f "$FM_HOME/.fm-lab-home" ]; then
-        "$FM_BACKEND_LIB_DIR/fm-lab-home.sh" tmux-check "$FM_HOME" || return 1
-      fi
+      fm_backend_tmux_lab_check || return 1
       set -- fm-tmux-lib.sh fm-composer-lib.sh fm-cursor-lib.sh fm-session-lock-lib.sh fm-agent-process-lib.sh fm-gemini-lib.sh
       ;;
     herdr)
@@ -973,6 +975,7 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
   local backend=$1 target=$2 expected_label=${3:-} session pane
   case "$backend" in
     tmux)
+      fm_backend_tmux_lab_check || return 1
       tmux display-message -p -t "$target" '#{pane_id}' >/dev/null 2>&1
       ;;
     herdr)
