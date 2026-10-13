@@ -173,6 +173,41 @@ ROWS
   pass "C1 fm-harness.sh secondmate-model/secondmate-effort resolve the optional tokens; bare harness stays empty (backward-compat)"
 }
 
+# Per-secondmate override lines ("<id>: <model|-> [<effort|->]") refine the pin
+# for one mate only. Each row asks for mate "sm" and then for an unrelated mate.
+#   <label>^<file-line>^<sm-model>^<sm-effort>^<other-model>^<other-effort>
+test_secondmate_per_mate_override_tokens() {
+  local label line exp_m exp_e exp_om exp_oe case_dir cfg got n
+  n=0
+  while IFS='^' read -r label line exp_m exp_e exp_om exp_oe; do
+    [ -n "$label" ] || continue
+    n=$((n + 1))
+    case_dir="$TMP_ROOT/per-mate-$n"
+    cfg="$case_dir/config"
+    mkdir -p "$cfg"
+    printf '%b\n' "$line" > "$cfg/secondmate-harness"
+    got=$(PATH="$BLIND_BIN:$BASE_PATH" CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate)
+    [ "$got" = claude ] || fail "$label: an override line changed the harness to '$got'"
+    got=$(PATH="$BLIND_BIN:$BASE_PATH" CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate-model sm)
+    [ "$got" = "$exp_m" ] || fail "$label: sm model resolved '$got', expected '$exp_m'"
+    got=$(PATH="$BLIND_BIN:$BASE_PATH" CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate-effort sm)
+    [ "$got" = "$exp_e" ] || fail "$label: sm effort resolved '$got', expected '$exp_e'"
+    got=$(PATH="$BLIND_BIN:$BASE_PATH" CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate-model other)
+    [ "$got" = "$exp_om" ] || fail "$label: other model resolved '$got', expected '$exp_om'"
+    got=$(PATH="$BLIND_BIN:$BASE_PATH" CLAUDECODE=1 FM_CONFIG_OVERRIDE="$cfg" "$ROOT/bin/fm-harness.sh" secondmate-effort other)
+    [ "$got" = "$exp_oe" ] || fail "$label: other effort resolved '$got', expected '$exp_oe'"
+  done <<'ROWS'
+override after the pin wins for its mate only^claude opus medium\nsm: opus low^opus^low^opus^medium
+override before the pin does not become the pin^sm: opus low\nclaude opus medium^opus^low^opus^medium
+dash keeps the pin's model and overrides only effort^claude opus medium\nsm: - low^opus^low^opus^medium
+effort-less override keeps the pin's effort^claude opus medium\nsm: sonnet^sonnet^medium^opus^medium
+override adds effort to a model-only pin^claude opus\nsm:opus low^opus^low^opus^
+first override line for an id wins^claude opus medium\nsm: opus low\nsm: opus high^opus^low^opus^medium
+default pin ignores every override, like its own tokens^default\nsm: opus low^^^^
+ROWS
+  pass "C1b fm-harness.sh secondmate-model/secondmate-effort <id> apply that mate's override line and leave other mates on the pin"
+}
+
 # ===========================================================================
 # A/C) pi-signed process identity and shared Pi marker behavior
 # ===========================================================================
@@ -893,6 +928,31 @@ test_spawn_secondmate_harness_model_and_effort_tokens() {
   assert_contains "$launch" "claude --dangerously-skip-permissions $(sm_claude_remote_control sm)$(sm_claude_add_dir "$w" sm)--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false}}' --model 'opus' --effort 'high'" \
     "model-effort-tokens: launch did not carry both --model opus and --effort high"
   pass "C4 spawn: config/secondmate-harness's model+effort tokens thread into the launch and meta"
+}
+
+# A per-secondmate override line moves only that mate's spawn onto its own
+# model and effort; the global pin still applies to every other mate.
+test_spawn_secondmate_per_mate_override() {
+  local w sm meta launchlog launch
+  w="$TMP_ROOT/spawn-per-mate-override"
+  sm="$w/sm"
+  launchlog="$w/launch.log"
+  mkdir -p "$w/home/config"
+  printf 'claude opus medium\nsm: - low\nother: sonnet high\n' > "$w/home/config/secondmate-harness"
+  make_seeded_home "$sm" sm
+
+  spawn_secondmate_capture "$w" sm "$sm" "$launchlog" >/dev/null 2>&1
+
+  meta="$w/home/state/sm.meta"
+  [ "$(meta_field "$meta" harness)" = claude ] || fail "per-mate-override: meta harness not claude"
+  [ "$(meta_field "$meta" model)" = opus ] || fail "per-mate-override: meta model not opus (got '$(meta_field "$meta" model)')"
+  [ "$(meta_field "$meta" effort)" = low ] || fail "per-mate-override: meta effort not low (got '$(meta_field "$meta" effort)')"
+  launch=$(cat "$launchlog")
+  assert_contains "$launch" "--model 'opus' --effort 'low'" \
+    "per-mate-override: launch did not carry the mate's own --effort low"
+  assert_not_contains "$launch" "--effort 'medium'" "per-mate-override: launch leaked the pin's effort"
+  assert_not_contains "$launch" "sonnet" "per-mate-override: launch leaked another mate's override"
+  pass "C4b spawn: a per-secondmate override line sets that mate's model and effort at launch"
 }
 
 # Precedence: an explicit per-spawn --model overrides the file's model token.
@@ -2886,6 +2946,7 @@ SH
 test_harness_resolution
 test_cursor_marker_detection
 test_secondmate_model_effort_tokens
+test_secondmate_per_mate_override_tokens
 test_pi_signed_detection_and_session_lock_identity
 test_dash_leading_process_names_are_basename_operands
 test_propagate_lib
@@ -2900,6 +2961,7 @@ test_spawn_explicit_backend_precedence_over_env_and_inherited_config
 test_spawn_bare_harness_no_model_effort_flag
 test_spawn_secondmate_harness_model_token
 test_spawn_secondmate_harness_model_and_effort_tokens
+test_spawn_secondmate_per_mate_override
 test_spawn_explicit_model_overrides_secondmate_harness_token
 test_spawn_explicit_effort_overrides_secondmate_harness_token
 test_spawn_explicit_harness_does_not_inherit_secondmate_harness_tokens

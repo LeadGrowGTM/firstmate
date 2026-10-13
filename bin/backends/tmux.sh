@@ -71,9 +71,30 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
 # firstmate itself runs inside tmux, else ensure a dedicated detached
 # "firstmate" session exists. Mirrors fm-spawn.sh's container-ensure block;
 # prints the resolved session name.
+#
+# Inside tmux the session is read from this process's own pane ($TMUX_PANE),
+# and a grouped session resolves to its group's base session. Without that,
+# tmux answers with the session of the most recently active client, so a viewer
+# attached through a grouped session (`tmux new-session -t <base> -s <view>`,
+# the shape an Orca view tab opens) would become the recorded container of
+# every later task. A group whose base session is gone keeps the pane's own.
 fm_backend_tmux_container_ensure() {
+  local fmt info ses grouped group
+  fmt=$'#{session_name}\t#{session_grouped}\t#{session_group}'
   if [ -n "${TMUX:-}" ]; then
-    tmux display-message -p '#S'
+    if [ -n "${TMUX_PANE:-}" ]; then
+      info=$(tmux display-message -p -t "$TMUX_PANE" "$fmt")
+    else
+      info=$(tmux display-message -p "$fmt")
+    fi
+    IFS=$'\t' read -r ses grouped group <<EOF
+$info
+EOF
+    if [ "$grouped" = 1 ] && [ -n "$group" ] && [ "$group" != "$ses" ] \
+      && tmux has-session -t "=$group" 2>/dev/null; then
+      ses=$group
+    fi
+    printf '%s\n' "$ses"
   else
     tmux has-session -t firstmate 2>/dev/null || tmux new-session -d -s firstmate
     printf 'firstmate'

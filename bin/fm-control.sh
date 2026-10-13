@@ -67,9 +67,13 @@
 #              An explicit `default` model or effort clears that
 #              axis for the replacement. With no explicit axis, a secondmate
 #              re-resolves its durable config/secondmate-harness pin (harness
-#              plus its optional model and effort tokens) exactly as any other
-#              respawn does, while a ship or scout keeps the exact adapter
-#              already recorded for it.
+#              plus its optional model and effort tokens, and that mate's own
+#              override line) exactly as any other respawn does, while a ship
+#              or scout keeps the exact adapter already recorded for it.
+#              A secondmate relaunch holds that mate's liveness lock
+#              (bin/fm-secondmate-liveness-lib.sh) for the whole transaction,
+#              so the automatic relaunch stands down instead of racing it, and
+#              refuses before anything changes while a liveness check holds it.
 #              A prefixed raw-command basename cannot reconstruct its launch
 #              command, so relaunch requires an explicit --harness for it.
 #              A replacement Claude or Pi profile must also pass this home's
@@ -201,6 +205,7 @@ die() {  # <message>
 
 CONTROL_LOCK=
 CONTROL_LOCK_HELD=0
+SM_LIVENESS_LOCK=
 RELAUNCH_ACTIVE=0
 RELAUNCH_PHASE=start
 
@@ -214,6 +219,10 @@ control_cleanup() {
   # the next lifecycle command for this task writes the same path.
   if [ -n "${FM_COMPOSER_DIALOG_SINK:-}" ]; then
     rm -f "$FM_COMPOSER_DIALOG_SINK"
+  fi
+  if [ -n "$SM_LIVENESS_LOCK" ]; then
+    fm_lock_release "$SM_LIVENESS_LOCK" || true
+    SM_LIVENESS_LOCK=
   fi
   if [ "$CONTROL_LOCK_HELD" = 1 ]; then
     CONTROL_LOCK_HELD=0
@@ -916,8 +925,8 @@ resolve_relaunch_profile() {
     # from firstmate's own dispatch-profile judgment at intake, and silently
     # re-resolving it would bypass that consultation.
     CONFIG_HARNESS=$("$SCRIPT_DIR/fm-harness.sh" secondmate 2>/dev/null || true)
-    CONFIG_MODEL=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model 2>/dev/null || true)
-    CONFIG_EFFORT=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort 2>/dev/null || true)
+    CONFIG_MODEL=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model "$ID" 2>/dev/null || true)
+    CONFIG_EFFORT=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort "$ID" 2>/dev/null || true)
     case "$CONFIG_EFFORT" in
       ''|low|medium|high|xhigh|max|ultra) ;;
       *)
@@ -1116,6 +1125,16 @@ do_relaunch() {
     note_line="note_file=$NOTE_FILE"
   else
     note_line="note=none"
+  fi
+  # A secondmate's endpoint-liveness episodes (bin/fm-secondmate-liveness-lib.sh)
+  # serialize on this lock. Holding it for the whole transaction makes the
+  # watcher's and the session-start sweep's auto-relaunch stand down while this
+  # relaunch stops the old agent, instead of reading the gap as a dead mate and
+  # racing this launch with a second one.
+  if [ "$KIND" = secondmate ]; then
+    fm_lock_try_acquire "$STATE/.secondmate-liveness-$ID.lock" \
+      || die "a secondmate liveness check or recovery is in progress for $ID; nothing was changed - retry the relaunch"
+    SM_LIVENESS_LOCK="$STATE/.secondmate-liveness-$ID.lock"
   fi
   safe_checkpoint
   cp -p "$META" "$META_PRIOR" || die "could not preserve task $ID's durable record before relaunching"

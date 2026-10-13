@@ -169,5 +169,36 @@ state=$(fm_backend_agent_state tmux "$TARGET")
 fm_backend_tmux_kill "$TARGET" || fail "fm_backend_tmux_kill on an already-dead target must stay best-effort (never fail)"
 pass "real tmux: kill removes the window and the readable session inventory authoritatively classifies it missing"
 
+# --- container_ensure with a grouped viewer attached ---------------------------
+# A viewer such as an Orca view tab attaches through a grouped session
+# (`tmux new-session -t <base> -s <view>`). That client is then the most recently
+# active one, and tmux answers an untargeted query from it, so a spawn from the
+# base session's pane must still record the base session, never the view.
+tmux new-session -d -s base -n spawner || fail "real tmux: could not create the base session"
+tmux new-session -d -t base -s orca-view || fail "real tmux: could not create the grouped view session"
+SPAWNER_PANE=$(tmux display-message -p -t '=base:spawner' '#{pane_id}')
+OUTER_SOCKET="$SOCKET-outer"
+"$REAL_TMUX" -L "$OUTER_SOCKET" new-session -d -x 80 -y 24 \
+  "env -u TMUX -u TMUX_PANE $REAL_TMUX -L $SOCKET attach -t orca-view" \
+  || fail "real tmux: could not start the viewer client"
+attached=
+for _ in $(seq 1 100); do
+  attached=$(tmux list-clients -F '#{client_session}' 2>/dev/null)
+  [ "$attached" = orca-view ] && break
+  sleep 0.05
+done
+[ "$attached" = orca-view ] || fail "real tmux: the viewer client never attached to the view session"
+# Non-vacuous: tmux itself answers the untargeted question with the view.
+[ "$(TMUX=x tmux display-message -p '#S')" = orca-view ] \
+  || fail "real tmux: an untargeted query should answer from the attached viewer"
+got=$(TMUX=x TMUX_PANE="$SPAWNER_PANE" fm_backend_tmux_container_ensure) \
+  || fail "fm_backend_tmux_container_ensure failed with a viewer attached"
+[ "$got" = base ] || fail "a spawn from the base pane recorded '$got' instead of the base session"
+got=$(TMUX=x TMUX_PANE='' fm_backend_tmux_container_ensure) \
+  || fail "fm_backend_tmux_container_ensure failed without a pane"
+[ "$got" = base ] || fail "a grouped session without a pane must resolve to its base, got '$got'"
+"$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
+pass "real tmux: container_ensure records the base session while a grouped viewer is attached"
+
 cleanup_all
 trap - EXIT

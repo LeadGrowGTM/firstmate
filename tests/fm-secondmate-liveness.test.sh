@@ -359,11 +359,14 @@ run_bootstrap() {  # <fakebin> <home> <pane-cmd> <call-log> [extra env...] -> st
 test_sweep_respawns_confirmed_dead_secondmate() {
   local w fb tmuxfb log out
   w=$(new_world sweep-dead)
+  printf 'claude opus medium\nsm1: opus low\n' > "$w/home/config/secondmate-harness"
   add_sm_home "$w" sm1 firstmate:fm-sm1
   fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
   log="$w/calls.log"; : > "$log"
+  mkdir -p "$w/user-home"
 
-  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log")
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log" \
+    HOME="$w/user-home" CLAUDE_CONFIG_DIR="$w/user-home")
 
   assert_not_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: respawned" \
     "a successfully respawned secondmate should be handled silently"
@@ -373,7 +376,11 @@ test_sweep_respawns_confirmed_dead_secondmate() {
     "a confirmed-dead secondmate should actually be relaunched"
   assert_grep 'relaunched' "$w/home/state/.secondmate-relaunch-sm1" \
     "the shared library did not leave the durable per-mate relaunch record"
-  pass "sweep: a confirmed-dead secondmate endpoint is killed and respawned"
+  grep -qxF 'model=opus' "$w/home/state/sm1.meta" \
+    || fail "the recovered secondmate lost its configured model"
+  grep -qxF 'effort=low' "$w/home/state/sm1.meta" \
+    || fail "the recovered secondmate lost its configured effort"
+  pass "sweep: a confirmed-dead secondmate is respawned with its opus low override"
 }
 
 test_sweep_skips_mate_whose_liveness_lock_is_held() {

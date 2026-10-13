@@ -1076,7 +1076,10 @@ secondmate_liveness_tick() {
     id=${meta##*/}
     id=${id%.meta}
     case "$id" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
-    fm_secondmate_liveness_lock "$id" || continue
+    if ! fm_secondmate_liveness_lock "$id"; then
+      triage_log "secondmate $id liveness: skipped while another liveness check or a control-plane relaunch holds its lock"
+      continue
+    fi
     fm_secondmate_liveness_probe "$meta" "$id" poll
     bound_marker="$STATE/.secondmate-relaunch-bound-$id"
     reason='' notify_key='' err=''

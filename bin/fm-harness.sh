@@ -9,10 +9,14 @@
 #                                        defers to the crew resolution, so an unset
 #                                        secondmate-harness behaves exactly as the crew
 #                                        harness did before this knob existed.
-#        fm-harness.sh secondmate-model    print the optional MODEL token from
+#        fm-harness.sh secondmate-model [<id>]
+#                                        print the optional MODEL token from
 #                                        config/secondmate-harness, or empty when absent.
-#        fm-harness.sh secondmate-effort   print the optional EFFORT token from
+#                                        With <id>, that mate's override line wins.
+#        fm-harness.sh secondmate-effort [<id>]
+#                                        print the optional EFFORT token from
 #                                        config/secondmate-harness, or empty when absent.
+#                                        With <id>, that mate's override line wins.
 #        fm-harness.sh validate-native-effort <harness> <model> <effort>
 #                                        Refuse ultra unless the harness is pi or
 #                                        pi-signed and the model explicitly names
@@ -39,9 +43,8 @@
 #                                        so a caller that knows the terminal's foreground
 #                                        process group can keep a backgrounded process out
 #                                        of the selection.
-# config/secondmate-harness format: a single line "<harness> [<model>] [<effort>]",
-# whitespace-separated. A bare "<harness>" (today's format) behaves exactly as before:
-# harness only, no model/effort. Only the first non-empty, non-comment line is parsed.
+# config/secondmate-harness uses a pin line and optional per-mate override lines;
+# docs/configuration.md owns the format. A bare harness remains harness-only.
 # Model/effort come ONLY from this file - config/crew-harness stays a bare adapter
 # name and is never parsed for a model.
 # Detection evidence and precedence:
@@ -451,10 +454,9 @@ resolve_crew() {
   if [ -z "$crew" ] || [ "$crew" = "default" ]; then detect_own; else echo "$crew"; fi
 }
 
-# Print the first non-empty, non-comment line of config/secondmate-harness
-# (leading/trailing whitespace trimmed), or nothing when the file is absent or
-# holds only blank/comment lines.
-secondmate_line() {
+# Print each non-empty, non-comment line of config/secondmate-harness (leading
+# and trailing whitespace trimmed), or nothing when the file is absent.
+secondmate_lines() {
   local line
   [ -f "$CONFIG/secondmate-harness" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
@@ -465,8 +467,26 @@ secondmate_line() {
       '#'*) continue ;;
     esac
     printf '%s\n' "$line"
-    return 0
   done < "$CONFIG/secondmate-harness"
+}
+
+# Print the id a per-secondmate override line names, or fail for any other line.
+secondmate_override_id() {  # <line>
+  local first=${1%%[[:space:]]*} id
+  case "$first" in *:*) ;; *) return 1 ;; esac
+  id=${first%%:*}
+  case "$id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  printf '%s\n' "$id"
+}
+
+# Print the pin line: the first line that is not a per-secondmate override.
+secondmate_line() {
+  local line
+  while IFS= read -r line; do
+    secondmate_override_id "$line" >/dev/null && continue
+    printf '%s\n' "$line"
+    return 0
+  done < <(secondmate_lines)
 }
 
 # Print the 1-based whitespace-separated token (1=harness, 2=model, 3=effort) of
@@ -497,23 +517,47 @@ resolve_secondmate() {
   echo "$sm"
 }
 
-# Print the optional model token (2nd field) from config/secondmate-harness, or
-# empty when the harness token is absent/"default" (harness-only file, same as
-# today) or when no model token is present.
-resolve_secondmate_model() {
-  local sm
-  sm=$(secondmate_field 1)
-  [ -n "$sm" ] && [ "$sm" != "default" ] || return 0
-  secondmate_field 2
+# Print the 1-based token (1=model, 2=effort) of the first override line for
+# <id>, or nothing when no such line or token exists.
+secondmate_override_field() {  # <id> <idx>
+  local id=$1 idx=$2 line rest
+  [ -n "$id" ] || return 0
+  while IFS= read -r line; do
+    [ "$(secondmate_override_id "$line")" = "$id" ] || continue
+    rest=${line#*:}
+    # shellcheck disable=SC2086  # deliberate word-splitting: tokenizing the line into fields
+    set -- $rest
+    case "$idx" in
+      1) printf '%s\n' "${1:-}" ;;
+      2) printf '%s\n' "${2:-}" ;;
+    esac
+    return 0
+  done < <(secondmate_lines)
 }
 
-# Print the optional effort token (3rd field) from config/secondmate-harness,
-# the same way.
-resolve_secondmate_effort() {
-  local sm
+# Print the optional model (pin field 2, override field 1) or effort (pin field
+# 3, override field 2) for secondmate <id>, or for every secondmate when <id> is
+# empty. Empty when the harness token is absent/"default" (harness-only file,
+# same as today) or when no token is present; an override token other than "-"
+# wins over the pin's own.
+resolve_secondmate_axis() {  # <pin-idx> <override-idx> [<id>]
+  local sm value
   sm=$(secondmate_field 1)
   [ -n "$sm" ] && [ "$sm" != "default" ] || return 0
-  secondmate_field 3
+  value=$(secondmate_override_field "${3:-}" "$2")
+  if [ -n "$value" ] && [ "$value" != - ]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  secondmate_field "$1"
+}
+
+resolve_secondmate_model() {  # [<id>]
+  resolve_secondmate_axis 2 1 "${1:-}"
+}
+
+resolve_secondmate_effort() {  # [<id>]
+  resolve_secondmate_axis 3 2 "${1:-}"
 }
 
 validate_native_effort() {
@@ -549,7 +593,7 @@ case "${1:-}" in
     ;;
   crew) resolve_crew ;;
   secondmate) resolve_secondmate ;;
-  secondmate-model) resolve_secondmate_model ;;
-  secondmate-effort) resolve_secondmate_effort ;;
+  secondmate-model) resolve_secondmate_model "${2:-}" ;;
+  secondmate-effort) resolve_secondmate_effort "${2:-}" ;;
   *) detect_own ;;
 esac
