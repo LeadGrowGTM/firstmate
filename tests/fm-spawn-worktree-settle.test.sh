@@ -56,7 +56,12 @@ case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows) exit 0 ;;
   has-session|new-session|new-window|kill-window) exit 0 ;;
-  send-keys) exit 0 ;;
+  send-keys)
+    if [ -n "${FM_FAKE_PANE_LOG:-}" ] && [ "${5:-}" = Enter ]; then
+      printf '%s\n' "${4:-}" >> "$FM_FAKE_PANE_LOG"
+    fi
+    exit 0
+    ;;
 esac
 exit 0
 SH
@@ -221,9 +226,28 @@ test_primary_checkout_that_never_settles_fails_at_the_deadline() {
   pass "a pane stuck on the primary checkout fails loudly at the deadline"
 }
 
+test_treehouse_root_reaches_the_pane_before_acquire() {
+  local rec id out status pane_log root command
+  id=settle-treehouse-root-z5
+  rec=$(make_settle_case settle-treehouse-root "$id" 0)
+  read_settle_record "$rec"
+  pane_log="$HOME_DIR/pane-lines"
+  root="$HOME_DIR/pool with 'quote'"
+
+  out=$(TREEHOUSE_ROOT="$root" FM_FAKE_PANE_LOG="$pane_log" run_settle_spawn "$id")
+  status=$?
+  expect_code 0 "$status" "spawn with a custom Treehouse pool should succeed"$'\n'"$out"
+  command=$(awk '/^treehouse get$/ {print previous; exit} {previous=$0}' "$pane_log")
+  [ -n "$command" ] || fail "spawn did not configure the pane before Treehouse acquisition"
+  [ "$(env -u TREEHOUSE_ROOT bash -c "$command; printf '%s' \"\$TREEHOUSE_ROOT\"")" = "$root" ] \
+    || fail "Treehouse acquisition did not receive the caller's pool root"
+  pass "Treehouse acquisition receives the caller's pool root"
+}
+
 test_single_stale_first_read_is_not_accepted
 test_already_settled_pane_costs_one_confirm_read
 test_transient_primary_checkout_is_not_accepted
 test_primary_checkout_that_never_settles_fails_at_the_deadline
+test_treehouse_root_reaches_the_pane_before_acquire
 
 echo "# all fm-spawn-worktree-settle tests passed"
