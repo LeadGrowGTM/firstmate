@@ -158,9 +158,8 @@ expect_code 3 "$rc" 'disappearing session id cannot use the old note'
 assert_contains "$out" 'different main session holds the lock' 'sidecar disappearance drops the old note'
 pass 'session binding follows recorded id changes and presence'
 
-# The timer sees a Codex PID from outside its namespace, so the host cannot
-# classify the lock holder even though the session has a recorded id and a
-# fresh watcher beacon.
+# The host cannot classify a PID recorded in a different namespace. A
+# recorded Codex id and fresh watcher beacon do not prove the main still runs.
 home="$TMP_ROOT/codex-host-home"
 mkdir -p "$home/state" "$home/data" "$home/config"
 printf '%s\n' "$$" > "$home/state/.lock"
@@ -177,17 +176,18 @@ PY
 out=$(run_daily)
 assert_contains "$out" 'no proven live main session' 'old beacon cannot queue for an unknown lock'
 touch "$home/state/.last-watcher-beat"
+out=$(run_daily)
+assert_contains "$out" 'no proven live main session' \
+  'a fresh leftover beacon cannot prove a namespaced Codex primary is still live'
+assert_equals 0 "$(count_wakes)" 'an exited primary receives no scheduled wake'
 out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
   FM_CONFIG_OVERRIDE="$home/config" FM_SUPERVISION_MODEL=persistent bash "$DAILY")
 assert_contains "$out" 'no proven live main session' 'known supervision without a watcher cannot queue for an unknown lock'
-out=$(run_daily)
-assert_contains "$out" 'queued' 'timer queues for a namespaced Codex session with a fresh beacon'
-assert_equals 1 "$(count_wakes)" 'timer appends one wake for the namespaced session'
 out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
   FM_CONFIG_OVERRIDE="$home/config" FM_SUPERVISION_MODEL=autoarm bash "$DAILY")
-assert_contains "$out" 'replay' 'a healthy watcher verdict permits the same bound request'
-assert_equals 1 "$(count_wakes)" 'explicit supervision does not duplicate the wake'
-pass 'timer queues for a namespaced Codex session with a fresh beacon'
+assert_contains "$out" 'no proven live main session' 'a healthy watcher verdict cannot prove the primary lives'
+assert_equals 0 "$(count_wakes)" 'no unknown lock queues a wake'
+pass 'unknown lock skips despite a recorded Codex id and fresh beacon'
 
 # A Codex tool can lose host PID visibility while its daemon still holds the
 # lock. A new conversation can also reuse that daemon PID after the TUI exits.

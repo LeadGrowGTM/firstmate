@@ -59,37 +59,21 @@ READY=$("$SCRIPT_DIR/fm-inbox.sh" ready)
 # shellcheck source=bin/fm-session-lock-lib.sh
 . "$SCRIPT_DIR/fm-session-lock-lib.sh"
 RECIPIENT_SESSION_MATCH=0
-RECORDED_CODEX=0
-if [ "$MODE" = queue ]; then
-  recorded=$(fm_session_lock_recorded_session_id "$STATE" 2>/dev/null || true)
-  case "$recorded" in codex:*) RECORDED_CODEX=1 ;; esac
-fi
 if [ "$MODE" = eligible ] && trusted=$(fm_session_lock_trusted_codex_thread_id); then
   recorded=$(fm_session_lock_recorded_session_id "$STATE" 2>/dev/null || true)
   [ "$recorded" != "codex:$trusted" ] || RECIPIENT_SESSION_MATCH=1
 fi
-REASON=$(python3 - "$READY" "$STATE/.last-stow-primary-pass" "$(date +%s)" "$MODE" "${BOUND_PID:-}" "$RECIPIENT_SESSION_MATCH" "$RECORDED_CODEX" "${FM_GUARD_GRACE:-300}" <<'PY'
+REASON=$(python3 - "$READY" "$STATE/.last-stow-primary-pass" "$(date +%s)" "$MODE" "${BOUND_PID:-}" "$RECIPIENT_SESSION_MATCH" <<'PY'
 import json, pathlib, sys
 ready = json.loads(sys.argv[1])
 stamp = pathlib.Path(sys.argv[2])
-age = ready['wake_consumer']['beacon_age_seconds']
-# A host cannot classify a Codex PID recorded inside its namespace. A fresh
-# watcher beacon and lock-bound conversation id allow a tentative queue; the
-# recipient must still prove that exact conversation before running /stow.
-namespaced_codex = (sys.argv[4] == 'queue' and sys.argv[7] == '1'
-                    and ready['lock']['state'] == 'unknown'
-                    and isinstance(ready['lock']['pid'], int)
-                    and ready['lock']['pid'] > 0
-                    and (ready['wake_consumer']['state'] == 'healthy'
-                         or ready['wake_consumer']['reason'] == 'supervision-model-unknown-for-home')
-                    and age is not None and age < int(sys.argv[8]))
 if ready['posture']['state'] != 'present':
     print('away/quiet posture or posture unknown')
-elif (ready['lock']['state'] != 'held' or ready['lock']['live_harness'] is not True) and sys.argv[6] != '1' and not namespaced_codex:
+elif (ready['lock']['state'] != 'held' or ready['lock']['live_harness'] is not True) and sys.argv[6] != '1':
     print('no proven live main session')
 elif sys.argv[4] == 'eligible' and ready['lock']['pid'] != int(sys.argv[5]):
     print('different main session holds the lock')
-elif sys.argv[4] == 'queue' and ready['can_receive'] is not True and not namespaced_codex:
+elif sys.argv[4] == 'queue' and ready['can_receive'] is not True:
     print('main wake consumer is not proven healthy')
 elif stamp.exists() or stamp.is_symlink():
     try:
