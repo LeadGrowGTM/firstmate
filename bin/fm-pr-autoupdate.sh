@@ -348,6 +348,9 @@ process_pr() {
     local closing_behind
     closing_behind=$(jq '.behind_by' "$TMP/compare")
     queue_read || return 0
+    read_owners || return 0
+    [ "$(jq -r --arg url "$URL" '.[] | select(.url == $url) | .owners[]' "$TMP/owners")" = "$OWNERS" ] \
+      || { REASON='canonical owners changed before confirmation'; return 0; }
     for id in $OWNERS; do
       meta="$STATE/$id.meta"
       awk '!/^pr_head=/' "$meta" > "$TMP/meta"

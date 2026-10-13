@@ -181,6 +181,20 @@ regression_refusal() {
 }
 regression_confirmation() {
   local home
+  home=$(world confirmation_owner_race)
+  run "$home" >/dev/null
+  set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+  set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+  cp "$home/state/task.meta" "$home/state/other.meta"
+  jq '.rows += [{task:"other",url:"https://github.com/o/r/pull/1",kind:"pr"}]' "$home/fixtures/owned.json" > "$home/fixtures/owned-transition"
+  run "$home" >/dev/null
+  assert_equals incomplete "$(result "$home")" 'new canonical owner prevents confirmation'
+  assert_equals 'canonical owners changed before confirmation' "$(jq -r --arg url "$URL" '.receipts[$url].reason' "$home/state/pr-autoupdate.json")" 'ownership race remains visible'
+  assert_equals true "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'ownership race preserves pending receipt'
+  assert_equals false "$(jq '.coverage_complete' "$home/state/pr-autoupdate.json")" 'ownership race cannot complete coverage'
+  assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_A" 'old owner metadata stays unchanged'
+  assert_contains "$(cat "$home/state/other.meta")" "pr_head=$HEAD_A" 'new owner metadata stays unchanged'
+  assert_equals 1 "$(put_count "$home")" 'ownership race sends no repeated update'
   home=$(world interrupted_confirmation)
   cp "$home/state/task.meta" "$home/state/other.meta"
   set_fixture "$home" owned '.rows[0].tasks=["task","other"]'
