@@ -250,6 +250,11 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
   [ "$rc" -ne 0 ] || fail "an unknown captains_call type was accepted"
 
   write_valid_payload "$data"
+  jq '.captains_call[0].pr_state = "OPEN"' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
+  [ "$rc" -ne 0 ] || fail "an OPEN PR state with no distinct behavior was accepted"
+
+  write_valid_payload "$data"
   jq 'del(.captains_call[0].options[0].value)' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
   set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
   [ "$rc" -ne 0 ] || fail "a captains_call option without an answer value was accepted"
@@ -284,10 +289,9 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
   [ "$rc" -ne 0 ] || fail "a non-boolean renderer field was accepted"
 
   write_valid_payload "$data"
-  jq '.captains_call[0].options = [] | .captains_call[0].allow_freeform = false' "$data" > "$data.tmp" \
-    && mv "$data.tmp" "$data"
+  jq '.captains_call[0].pr_state = "CLOSED"' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
   set +e; out=$(run_board "$home" build "$data" 2>&1); rc=$?; set -e
-  [ "$rc" -ne 0 ] || fail "an unanswerable captains_call item was accepted"
+  [ "$rc" -ne 0 ] || fail "a closed PR state without a linked PR was accepted"
 
   write_valid_payload "$data"
   jq '.captains_call[1].pr_url = "javascript:alert(1)"' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
@@ -299,6 +303,7 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
     "id": "sample-landed",
     "repo": "sample",
     "what": "Landed work",
+    "home": "(main)",
     "owner": "firstmate",
     "pr_url": "data:text/html,unsafe"
   }]' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
@@ -307,6 +312,23 @@ test_build_refuses_malformed_payloads_before_touching_the_board() {
 
   assert_absent "$board" "a refused payload still produced a board"
   pass "build refuses malformed payloads before touching the board"
+}
+
+test_build_accepts_an_incomplete_freeform_card() {
+  local home data board out
+  home=$(make_home incomplete-freeform-card)
+  data="$home/payload.json"
+  board="$home/.lavish/bearings-board.html"
+  write_valid_payload "$data"
+  jq '.captains_call[0].options = [] | .captains_call[0].allow_freeform = false' "$data" > "$data.tmp" \
+    && mv "$data.tmp" "$data"
+  out=$(run_board "$home" build "$data" 2>&1) || fail "an incomplete freeform card was rejected: $out"
+  extract_payload "$board" | jq -e '
+    .captains_call[0].key == "sample-instruction-layer-refinement-review-decision-perishable-first-admission-choice"
+    and ([.captains_call[0].options[].value] == ["reconcile"])
+  ' >/dev/null \
+    || fail "an incomplete card was not retained for answering"
+  pass "build retains an incomplete card for a freeform answer"
 }
 
 test_build_injects_binds_then_arms() {
@@ -626,10 +648,18 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
   board="$home/.lavish/bearings-board.html"
   write_valid_payload "$data"
   jq '.captains_call = [
-        {"key":"landed-by-task","type":"decision","repo":"sample","title":"Already shipped",
+        {"key":"landed-by-task","owner":"(main)","type":"decision","repo":"sample","title":"Already shipped",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"landed-by-task","owner":"mate","type":"decision","repo":"sample","title":"Foreign call with the same key",
          "options":[{"value":"yes","label":"Yes"}]},
         {"key":"timeout-reattach","type":"decision","repo":"sample","title":"Already merged",
          "pr_url":"https://github.com/sample/sample/pull/7",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"closed-linked-pr","type":"decision","repo":"sample","title":"Closed PR",
+         "pr_url":"https://github.com/sample/sample/pull/8","pr_state":"CLOSED",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"verified-duplicate","type":"decision","repo":"sample","title":"Verified duplicate",
+         "stale_reason":"Verified duplicate of another open call",
          "options":[{"value":"yes","label":"Yes"}]},
         {"key":"quota-version","type":"decision","repo":"sample","title":"Old quota release",
          "subject":{"artifact":"quota-axi","version":"0.1.37"},
@@ -639,12 +669,12 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
          "options":[{"value":"yes","label":"Yes"}]}
       ]
       | .landed = [
-        {"id":"landed-by-task","repo":"sample","what":"shipped it","owner":"crew"},
-        {"id":"some-other-task","repo":"sample","what":"merged timeout reattach","owner":"crew",
+        {"id":"landed-by-task","repo":"sample","what":"shipped it","home":"(main)","owner":"crew"},
+        {"id":"some-other-task","repo":"sample","what":"merged timeout reattach","home":"(main)","owner":"crew",
          "pr_url":"https://github.com/sample/sample/pull/7"},
-        {"id":"quota-release","repo":"sample","what":"published quota-axi","owner":"crew",
+        {"id":"quota-release","repo":"sample","what":"published quota-axi","home":"(main)","owner":"crew",
          "subject":{"artifact":"quota-axi","version":"0.1.38"}},
-        {"id":"unrelated\nstill-open","repo":"sample","what":"unrelated multiline identity","owner":"crew"}
+        {"id":"unrelated\nstill-open","repo":"sample","what":"unrelated multiline identity","home":"(main)","owner":"crew"}
       ]' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
 
   out=$(run_board "$home" build "$data" 2>&1) || fail "the hygiene build failed: $out"
@@ -654,9 +684,45 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
     "the build did not report dropping the merged timeout/reattach card: $out"
   assert_contains "$out" "dropped-landed-card: quota-version" \
     "the build did not report dropping the superseded quota-axi version card: $out"
-  extract_payload "$board" | jq -e '[.captains_call[].key] == ["still-open"]' >/dev/null \
+  extract_payload "$board" | jq -e '
+    [.captains_call[] | [.owner // "(main)", .key]]
+      == [["mate","landed-by-task"],["(main)","still-open"]]
+    and (.stale_candidates | any(.owner == "(main)" and .key == "landed-by-task"))
+    and (.stale_candidates | any(.key == "closed-linked-pr" and .stale_reason == "Linked PR closed"))
+    and (.stale_candidates | any(.key == "verified-duplicate" and .stale_reason == "Verified duplicate of another open call"))
+  ' >/dev/null \
     || fail "the board dropped an open card or kept one whose subject already landed"
   pass "build drops decision cards whose subject already landed and keeps open ones"
+}
+
+test_landed_task_matches_home_not_contributor() {
+  local home data board out
+  home=$(make_home landed-home-identity)
+  data="$home/payload.json"
+  board="$home/.lavish/bearings-board.html"
+  write_valid_payload "$data"
+  jq '.captains_call = [
+        {"key":"choice","owner":"(main)","type":"decision","repo":"sample","title":"Main choice",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"choice","owner":"mate","type":"decision","repo":"sample","title":"Mate choice",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"contributor-collision","owner":"(main)","type":"decision","repo":"sample","title":"Main landed choice",
+         "options":[{"value":"yes","label":"Yes"}]},
+        {"key":"contributor-collision","owner":"mate","type":"decision","repo":"sample","title":"Mate open choice",
+         "options":[{"value":"yes","label":"Yes"}]}
+      ]
+      | .landed = [
+        {"id":"choice","repo":"sample","what":"Mate shipped","home":"mate","owner":"crew"},
+        {"id":"contributor-collision","repo":"sample","what":"Main shipped","home":"(main)","owner":"mate"}
+      ]' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  out=$(run_board "$home" build "$data" 2>&1) || fail "the home-identity build failed: $out"
+  extract_payload "$board" | jq -e '
+    ([.captains_call[] | [.owner // "(main)", .key]] | sort)
+      == [["(main)","choice"],["mate","contributor-collision"]]
+    and ([.stale_candidates[] | [.owner // "(main)", .key]] | sort)
+      == [["(main)","contributor-collision"],["mate","choice"]]
+  ' >/dev/null || fail "landed task identity was inferred from the contributor label: $out"
+  pass "landed task ids match their home even when contributor labels collide"
 }
 
 test_build_keeps_a_decision_absent_from_the_main_backlog() {
@@ -771,6 +837,7 @@ test_build_refuses_a_nondecision_reconcile_value() {
 
 test_path_is_stable_and_home_scoped
 test_build_refuses_malformed_payloads_before_touching_the_board
+test_build_accepts_an_incomplete_freeform_card
 test_charted_kind_is_optional_and_accepts_both_values
 test_build_injects_binds_then_arms
 test_registration_cannot_consume_before_any_origin_binding
@@ -782,6 +849,7 @@ test_build_reopens_when_an_opened_session_ends_before_listing
 test_build_refuses_to_arm_when_the_session_stays_ended
 test_build_starts_a_listener_for_an_already_armed_board
 test_build_drops_decision_cards_whose_subject_already_landed
+test_landed_task_matches_home_not_contributor
 test_build_keeps_a_decision_absent_from_the_main_backlog
 test_build_fails_when_reconcile_cannot_establish_a_listener
 test_every_decision_card_carries_the_reconcile_choice

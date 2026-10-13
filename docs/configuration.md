@@ -12,9 +12,11 @@ Start with the directory layout, then use the setting reference for the behavior
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
+| Automatic reversible work and numeric goals | [Idle sweep and standing targets](#idle-sweep-and-standing-targets) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and [Claude Remote Control](#claude-remote-control-configclaude-remote-control) |
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity) and [worktree pool guard](#worktree-pool-guard) |
 | Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
+| Opt-in recurring task intake | [Recurring intake](#recurring-intake-configschedulesjson) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
 ## FM_HOME
@@ -160,6 +162,79 @@ The Pi extension reloads this preference on every Pi `session_start`, including 
 The Claude Code mod reloads it on every `session.start`, including same-process session replacement.
 It also loads the preference lazily before any row that can draw ahead of that event, including during `claude --continue` restoration.
 This preference is local to each Firstmate home and is not part of secondmate inherited configuration.
+
+## Idle sweep and standing targets
+
+The idle sweep runs inside the existing watcher's supervision heartbeat, across all primary harnesses, without another daemon.
+It runs by default and reads only this home's backlog, prepared briefs, recorded worker endpoints, and project clones.
+A marked live-lab home requires its recorded private tmux socket; a caller inside tmux must also be in that lab's pane.
+Secondmate endpoints are supervisors and do not count as local workers; no child home is inspected.
+Runtime backends without the canonical recovery-grade agent classifier conservatively hold the sweep when they have a recorded worker.
+
+This section owns the `config/targets.json` schema for numeric limits per home.
+An absent file uses these defaults; a partial object overrides only the supplied fields:
+
+```json
+{
+  "open_prs": 4,
+  "red_default_branches": 0,
+  "stale_backlog": 0,
+  "stale_days": 14
+}
+```
+
+All limits are nonnegative integers; `stale_days` must be positive, and unknown fields are refused.
+`open_prs` is an inclusive maximum, so the default implements fewer than five open PRs.
+The forge metrics cover the authenticated GitHub user's open PRs and default-branch failures in the immediate local clones under this home's projects directory.
+Non-GitHub clones and symlinked project entries are outside these GitHub metrics; unavailable evidence for a GitHub clone makes them unknown.
+Default-branch failures include failed commit statuses and completed unsuccessful check runs on the current head; pending checks alone are not red.
+The local backlog metric counts unfinished structured rows unchanged for at least `stale_days`, including held rows for visibility, without authorizing work on them.
+The initial implementation supports the local markdown backlog; another tasks-axi backend is refused explicitly.
+The heartbeat records each row's section state, content, and last observed change in `state/idle-sweep-backlog.json`.
+The first observation establishes the age baseline; row creation dates are not used as evidence of last change.
+The evaluator reports unknown before a row is observed or after its content changes between observations.
+
+`bin/fm-targets.sh` prints each target's current value, limit, and nonnegative gap without writing state or contacting other homes.
+Its `--json` output also lists per-project forge values and known stale row IDs.
+Missing forge or observation evidence remains unknown.
+Portable behavior fixtures live in `tests/fm-idle-sweep.test.sh`.
+
+An absent `config/idle-sweep.json` enables the sweep with the limits from `config/targets.json`, or the defaults when that file is absent, and considers prepared queued tasks with a reversible brief and delivery contract.
+An indented `Idle target: red_default_branches`, `Idle target: open_prs`, or `Idle target: stale_backlog` line in a backlog row associates that task with one standing target; an untagged row remains ordinary backlog work.
+The file can switch the sweep off:
+
+```json
+{
+  "enabled": false
+}
+```
+
+Prepare queued tasks and their normal briefs with the right authority and permissions.
+Free-form backlog titles alone never confer reversible-work authority.
+Each prepared brief must contain these exact lines in its Firstmate specification:
+
+```text
+Never merge, deploy, spend money, contact a client, answer a captain decision, or alter a captain-held item.
+If the task needs one of those actions, report needs-decision to firstmate and stop.
+```
+
+Set `enabled: false` to stop future automatic batches; existing workers continue normally.
+The sweep derives scout delivery from a scout row and ship delivery from the brief's `Delivery contract: mode=` line.
+Unknown fields are refused.
+Each backlog row supplies the local project clone and must be unheld, unblocked, queued ordinary work with no metadata record or open task decision.
+Targeted work runs only while its gap is positive; red-branch work must name a red project and stale-backlog work must name a stale row.
+Before targeted dispatch, the sweep rechecks the target's current gap and project or row match.
+An open-PR step should prepare a review or fix, since meeting that target may still require a captain-approved merge.
+
+The sweep starts a batch only when no ordinary worker is live and all effective Codex account windows report known, fresh remaining quota strictly above 15 percent.
+It rechecks home idleness, quota, complete backlog row, brief boundary, and open decisions before each start, selects at most three steps, and orders red-branch work before other target work, then ready backlog work in backlog order.
+Unmeasured red-branch evidence holds the batch rather than allowing backlog work to outrank an unknown failure.
+Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the prepared delivery mode and branch contract, and yolo off; backend refusals stop the batch without a fallback.
+The sweep reads briefs without editing them and refuses work whose prepared brief lacks the reversible-work boundary above.
+Successful starts produce one named status line in `state/idle-sweep.status`; concurrent heartbeat invocations share a local lock, and existing task metadata prevents redispatch.
+Target collection has a shared 120 second budget across the batch; a started `bin/fm-spawn.sh` launch runs to completion under its own lifecycle guards.
+A configuration or dispatch failure returns a normal `check: idle-sweep` wake to supervision.
+Script headers and help own the executable mechanics.
 
 ## Pi supervision branch
 
@@ -845,23 +920,24 @@ For omp secondmate launches, `fm-spawn.sh` names only the per-task busy-state ex
 
 ## Claude permission mode (config/claude-permission-mode)
 
-The optional local, gitignored `config/claude-permission-mode` selects the permission flag for every Claude worker launch: crewmates, scouts, Claude secondmates, and control-plane relaunches.
+The optional local, gitignored `config/claude-permission-mode` selects the permission flags for every Claude worker launch: crewmates, scouts, Claude secondmates, and control-plane relaunches.
 
 ### Accepted values and refusals
 
-The token is the file's whitespace-trimmed content.
+The token is the file's content with all whitespace removed.
 
-| Token | Launch permission flag |
+| Token | Launch permission flags |
 | --- | --- |
-| `bypass` | `claude --dangerously-skip-permissions` |
+| `bypass` | `--dangerously-skip-permissions` |
 | `auto` | `--permission-mode auto` |
 
-An absent file defaults to bypass, so an unconfigured home launches with the bypass permission flag.
-Auto is Claude Code's classifier-reviewed permission mode, for a captain who refuses to run workers in bypass mode.
-Only the permission flag changes between the two modes.
-The environment prefix, inline settings, model, effort flags, and the task-channel `--add-dir` grant below stay the same in both.
+An absent file launches every Claude worker with `--allow-dangerously-skip-permissions --permission-mode auto`, so bypass is available but not active.
+Auto is Claude Code's classifier-reviewed permission mode; with the file absent, bypass stays reachable through the session's shift+tab mode cycle, while explicit `auto` removes it from that cycle for a captain who refuses bypass mode entirely.
+`bypass` starts the worker with every permission check skipped.
+Only the permission flags change between the modes.
+The environment prefix, inline settings, model, effort flags, and the task-channel `--add-dir` grant below stay the same in every mode.
 
-Every Claude launch, in both modes, also passes `--add-dir` for exactly this task's Firstmate channel directories, resolved to real paths: a secondmate gets the parent home's `state/<id>.inbox` it reads its steers from; a ship or scout worker gets this home's `state/operational-inbox` (its launch record), `state/<id>.inbox` (its steers), `data/<id>` (its brief and report), and the code root's `.agents/skills`.
+Every Claude launch, in every mode, also passes `--add-dir` for exactly this task's Firstmate channel directories, resolved to real paths: a secondmate gets the parent home's `state/<id>.inbox` it reads its steers from; a ship or scout worker gets this home's `state/operational-inbox` (its launch record), `state/<id>.inbox` (its steers), `data/<id>` (its brief and report), and the code root's `.agents/skills`.
 The grant exists because Claude Code path-checks the Read/Glob/Grep file tools against cwd plus `--add-dir`, and since 2.1.257 the first outside read in `auto` mode parks the pane on a one-time interactive question, while a "Block" answer there writes `permissions.blockReadsOutsideWorkingDirectories` into user settings and then refuses the same reads under bypass too.
 It never covers the whole `state/` or anything wider.
 
@@ -995,7 +1071,9 @@ A raw Claude launch command refuses if its leading assignments set `CLAUDE_CONFI
 The assignment would override the pin.
 The refusal names the variable; remove that assignment from the raw command, or change or remove `config/claude-account`.
 
-Before any worker endpoint, local copy, or task record exists, and before a relaunch stops the running worker, Firstmate asks the runner itself whether the pinned account is signed in: `claude auth status` for Claude, and `pi auth check --provider <provider> --json --no-refresh` for Pi, falling back to `pi --list-models <provider>` for a provider an extension registers.
+Before any worker endpoint, local copy, or task record exists, and before a relaunch stops the running worker, Firstmate asks the runner itself whether the pinned account is signed in: `claude auth status` for Claude, and `pi auth check --provider <provider> --json --no-refresh` for Pi.
+Pi uses `pi --list-models <provider>` only when the auth check positively identifies an extension-registered provider or reports the exact unsupported-command response from an older Pi; a timeout, empty response, or malformed response leaves sign-in inconclusive even if a model listing is available.
+For explicit scheduled fallback, only a proven signed-out account permits selection of another already-authorized profile; an inconclusive check requires reconciliation and never changes the pin.
 The check runs with only `HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`, and the pinned root in its environment, so a credential variable in firstmate's own environment cannot answer for an empty root.
 
 A pinned Claude launch also unsets the environment credentials Claude ranks above a stored login, such as `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, and the Bedrock and Vertex switches ([authentication precedence](https://code.claude.com/docs/en/authentication#authentication-precedence)).
@@ -1162,9 +1240,9 @@ Its header owns the exact treehouse flags, exit codes, record files, and time bo
 
 ### Prune after cleanup
 
-After a cleanup returns a copy to a pool, Firstmate runs treehouse's safe prune for that task's project pool only.
-A prune that fails, times out, or declines to run prints one warning and never fails the cleanup, which has already finished.
-A pool that another launch or cleanup is using at that moment is skipped silently and reclaimed by the next cleanup or daily sweep.
+After a cleanup returns a copy to a pool, Firstmate asks Treehouse to safe prune the project's configured pool and, when a per-home slot is detected, attempts a second prune.
+A failed or timed-out prune prints one warning and never fails the cleanup, which has already finished.
+A pool that another launch or cleanup is using at that moment is skipped silently and can be reclaimed by a later cleanup or daily sweep while it remains in the guard's selected location.
 Because a returned copy whose work has landed is exactly what treehouse prunes, the next launch on that project usually creates a fresh copy instead of reusing a returned one.
 
 ### Optional daily treehouse pool sweep
@@ -1176,7 +1254,7 @@ Use `bin/fm-treehouse-guard.sh disarm` to remove the check and its records.
 At most once a day the check starts a sweep in the background, and a later poll reports its result as one line.
 The sweep runs the same safe prune for each project clone under this home's `projects/`, then reports when:
 
-- the worktree copies under `~/.treehouse` use more than 5 GB;
+- the worktree copies under `~/.treehouse`, or under the per-home pool path computed in the sweep's environment, use more than 5 GB;
 - that size could not be measured;
 - a prune did not run, with the reason.
 
@@ -1186,12 +1264,37 @@ A reported finding is a recommendation, not cleanup authority.
 ### What the guard never does
 
 - It never asks treehouse to remove a copy that is unlanded, in use, or leased, and it never prunes by age.
-- It never prunes a pool that belongs to another home, because it prunes only from this home's own project clones.
-- It never makes a machine-wide treehouse call: the only treehouse command it runs is `treehouse prune --yes` from one project clone.
-  The size total is a machine-wide read-only measurement taken with `du`.
+- It does not scan another home's project clones or per-home pool directories.
+  It invokes prune from this home's project clones, with a second call when a per-home slot is detected; a clone-local root can redirect both invocations.
+- It never makes a machine-wide treehouse call: each treehouse command is `treehouse prune --yes` run from a project clone.
+  The size checks are read-only measurements taken with `du`.
 
-Two clones of the same origin under the same directory name share one treehouse pool, even across homes.
-Treehouse leaves a copy that another home's clone created in place, because git refuses to remove a worktree from a clone that does not own it.
+Treehouse still keys its default pool by directory name plus origin, so two clones with the same name and origin are offered one pool.
+A fresh launch asks Treehouse for a copy first and keeps it only when it is a worktree of the spawning clone.
+When treehouse hands it another clone's idle copy, the launch leaves that copy at once and attempts to lease a worktree of its own clone using this home's per-home pool folder.
+The per-home pool folder is named under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/`; a clone-local `treehouse.toml` root can select a different Treehouse location.
+`<home>` is the home's folder name and `<hash>` is the first six hex digits of the sha256 of the home's physical path, so two homes with one folder name stay apart.
+On the ordinary fallback path, treehouse resets the idle copy it offered to the default branch before handing it over, and takes it back unleased when the launch leaves it; no copy is added there.
+Treehouse reads its default pool location from `HOME`, so that lease and its prune run treehouse with `HOME` set to the pool folder, while every git process it starts keeps the operator's `HOME`, git configuration, and credential helpers.
+The user-level treehouse configuration therefore does not apply to this pool; a `treehouse.toml` in the clone still does.
+The lease is bounded to 600 seconds, and a fetch that would prompt for credentials fails instead of waiting.
+A launch that still cannot get a worktree of its own clone stops before the worker starts.
+Relaunch resumes in the recorded worktree; a Claude relaunch refuses an old record whose worktree belongs to another clone and names both the worktree and recorded project.
+Non-Claude relaunches continue to use their recorded worktree.
+If a clone-local `treehouse.toml` root redirects the fallback lease to another clone's copy, the launch refuses it and does not force-return that foreign copy.
+An abort before worker launch returns its own clone's lease from the recorded project clone only after proving it has no uncommitted work or commits absent from its remotes.
+Leases containing work, leases whose safety checks fail, and leases used by a launched worker stay in place for teardown, even if the worker endpoint closes.
+The attempted `get --lease` may already have marked that foreign copy leased, so the refusal leaves its Treehouse state for the pool owner to inspect.
+Git still refuses to remove a worktree from a clone that does not own it, so a shared pool is not cleared by the other home.
+The daily sweep's extra per-home prune and size checks use the pool path computed in its own environment.
+
+### Pool-selection limits
+
+The guard does not retain the pool root selected by an earlier launch.
+Firstmate does not validate the resolved pool location before launch, so a clone-local root or a linked `.treehouse` folder can put a pool inside a Firstmate home or the project clone.
+If a clone-local `treehouse.toml` root is added after a per-home pool already exists, the guard's extra per-home prune follows the new root and can prune that configured pool twice while leaving the earlier pool unpruned.
+The per-home size check still measures the computed folder and can miss an external configured root.
+If a launch sets `XDG_STATE_HOME` only for that command and the armed watcher runs without it, the watcher computes a different per-home folder and misses the launch's pool during prune and size checks.
 
 ### Copies outside the guard
 
@@ -1204,8 +1307,8 @@ Run `treehouse prune --yes` from the root of the clone that owns that pool, whic
 ### Per-repository caps (max_trees)
 
 Treehouse reads `max_trees` from the `treehouse.toml` at the root of the clone it runs in.
-When that clone has no `treehouse.toml`, the whole configuration, `max_trees` included, comes from the user-level `~/.config/treehouse/config.toml` if that file exists.
-The built-in limit of 16 copies applies only when neither file exists.
+For the default pool, when that clone has no `treehouse.toml`, the whole configuration, `max_trees` included, comes from the user-level `~/.config/treehouse/config.toml` if that file exists.
+The built-in limit of 16 copies applies to the default pool when neither file exists, and to this home's own pool when the clone has no `treehouse.toml`.
 
 ```toml
 max_trees = 2
@@ -1213,19 +1316,19 @@ max_trees = 2
 
 | Repository | `max_trees` | Where it is set |
 | --- | --- | --- |
-| Firstmate | 10 | The [`treehouse.toml`](../treehouse.toml) committed at the root of this repository |
+| Firstmate | 16 | The [`treehouse.toml`](../treehouse.toml) committed at the root of this repository |
 | `gtm-orchestrator` | 2 | Recommended; set in that repository |
 | Client repositories | 1 | Recommended; set in each client repository |
 
 `treehouse.toml` is a file in each project repository, so setting a cap is that project's own change, delivered the way that project delivers any other change.
 Firstmate writes it into no other repository.
 
-This repository's `treehouse.toml` holds only `max_trees = 10`, and changing the cap is a one-line change to that file.
+This repository's `treehouse.toml` holds only the cap, and changing it is a one-line change to that file.
 The Firstmate pool also holds the leased copies behind local secondmate homes, and each of them counts against the cap.
-The cap is 10 because the peak number of simultaneous Firstmate copies on the owner's machine was 8.
+The configured cap matches how the pool actually runs.
 Once a repository has its own `treehouse.toml`, treehouse takes `max_trees` and `root` for that repository from it and no longer from `~/.config/treehouse/config.toml`.
 A user who set a user-level `root` must therefore expect this repository's pool to use the default root.
-User-level hooks still apply.
+User-level hooks still apply to the default pool.
 
 A launch into a pool that is already at its cap is refused at once rather than waiting for a copy: `treehouse get` and `treehouse get --lease` both exit 1 with a message naming `max_trees`.
 [Project capacity](#project-capacity-configproject-capacity) does not prevent that on its own, because a place frees when a PR is ready while the copy stays held until cleanup.
@@ -1404,6 +1507,64 @@ The format and behavior are the same there, and a home without the file lists no
 `FM_CONFIG_OVERRIDE` selects the config directory, as it does for the other files `bin/fm-brief.sh` reads.
 
 Regression coverage is in [`tests/fm-brief.test.sh`](../tests/fm-brief.test.sh).
+
+## Recurring intake (config/schedules.json)
+
+The optional home-local, gitignored `config/schedules.json` declares enqueue-only recurring intent.
+It is not inherited, and an absent file or disabled entries cause no new detections.
+Nothing in a checkout automatically writes this file, arms a check, or enables a host timer.
+[`bin/fm-schedule-check.sh`](../bin/fm-schedule-check.sh) owns due calculation, occurrence identity, journal receipts, bounded execution, replay, and explicit arm/disarm commands.
+The existing authenticated watcher check cadence supplies the poll; no vendor scheduler or new daemon is needed.
+Python 3.9 or newer with IANA timezone data must be available in the watcher's environment.
+
+```json
+{
+  "version": 1,
+  "schedules": [
+    {
+      "id": "domain-freshness",
+      "enabled": false,
+      "home": "/absolute/owning/firstmate-home",
+      "project": "firstmate",
+      "delivery": "scout",
+      "intent": "Collect permitted domain freshness evidence for review",
+      "brief": "/absolute/owning/firstmate-home/data/domain-freshness-brief.md",
+      "cadence": {
+        "kind": "daily-local",
+        "at": "07:00",
+        "timezone": "America/Toronto"
+      }
+    }
+  ]
+}
+```
+
+This section owns the configuration format.
+The root requires exactly integer `version: 1` and `schedules`, an array of at most 100 entries.
+Each entry requires the fields shown, selecting exactly one absolute `brief` pointer or lowercase `task_type` slug.
+The check freezes a home-data brief's bytes or the existing task-type owner's rendered brief section as request input, and never executes input commands.
+An absolute `brief` must remain inside the effective home's data directory and name a regular single-link file of at most 64 KiB.
+Worker profiles are omitted from task-type snapshots so current routing still governs intake.
+`id` is a unique lowercase identifier of at most 63 characters using letters, digits and plain dashes, beginning with a letter or digit.
+`enabled` is an explicit boolean, `home` must exactly match the absolute effective `FM_HOME`, and `project` names the project to resolve through normal intake.
+`delivery` is the intended `no-mistakes`, `direct-PR`, `local-only`, or knowledge-only `scout` path, subject to the existing task lifecycle's authority.
+`intent` is the authorized recurring task description, not authority for additional external actions.
+The string fields are nonempty single lines of at most 4096 characters.
+Daily-local cadence requires exactly `kind`, valid 24-hour `at` (`HH:MM`), and an IANA `timezone`.
+An interval cadence instead requires exactly `kind` and integer `seconds` from 60 through 31536000 (for example, `{"kind":"interval","seconds":7200}`); interval slots use UTC epoch arithmetic.
+Unknown fields, duplicate ids, invalid timezone data, unsafe files, or malformed entries refuse the entire check before new publication.
+The configuration is bounded to 1 MiB and the journal to 16 MiB, including frozen brief snapshots; both must be regular single-link files.
+Commands, credentials, accounts, harnesses, worker models and vendor trigger ids are not accepted fields.
+The owning supervisor uses current routing and quota evidence at intake rather than freezing a worker subscription in the schedule.
+
+Due occurrences are filed or reused through [`bin/fm-tasks-axi.sh`](../bin/fm-tasks-axi.sh) as ordinary Queued items containing the frozen brief pointer and occurrence digest.
+The existing task lifecycle owns supervisor judgement, dispatch, capacity and completion; no new skill or always-loaded rule is needed.
+Disabling a schedule or removing the configuration stops new detections, but subsequent checks still observe dispatch and completion of occurrences in the journal.
+Disarming removes the automatic watcher check without deleting the journal or already filed tasks.
+An attempted task that disappears from the active backlog is retained pending for ordinary custody reconciliation, including a task completed and archived between polls, rather than recreated.
+Activation requires a separate approved home-local configuration and explicit check arming; this feature supplies no branch-write or operational-update authority.
+Enqueue-only intake does not implement worker failover, PR updates, or domain collection.
+Regression coverage is in [`tests/fm-schedule-check.test.sh`](../tests/fm-schedule-check.test.sh).
 
 ## Typed dispatch resolution (.env TYPESAFE_API_KEY)
 
@@ -1699,6 +1860,47 @@ Arm the check once per home with `bin/fm-tool-update-check.sh arm`.
 - The sweep must finish inside `FM_CHECK_TIMEOUT` (default 30), because a run the watcher kills prints nothing and records nothing and would then repeat that silence on every poll.
 - So a budget larger than that timeout allows is cut down to what fits instead of being refused, and the cut is reported in the report line.
 - A budget that is not a whole number from 1 to 120 is still refused outright.
+
+## Direct-PR freshness (config/pr-autoupdate.json)
+
+The optional home-local `config/pr-autoupdate.json` enables [`bin/fm-pr-autoupdate.sh`](../bin/fm-pr-autoupdate.sh).
+An absent file or `enabled: false` keeps the updater off, and no startup path arms it automatically.
+This file is not inherited to child homes.
+Each home owns only its explicitly linked task PRs; the script header and help own cadence, receipts, continuation, locks, and failure handling.
+
+```json
+{
+  "enabled": false,
+  "write_scope": []
+}
+```
+
+The object accepts exactly `enabled` (boolean) and `write_scope` (array).
+Each grant has exactly `pr` (a canonical GitHub PR URL), `head_repo` (`owner/repository`), and `head_ref` (the exact task branch).
+A grant permits base-into-head updates of that PR only while its observed head repository and branch still match.
+Fork heads require their own exact grant; repository-wide and implicit default-branch grants are unsupported.
+For example, an approved grant can be `{"pr":"https://github.com/example/repo/pull/123","head_repo":"example/repo","head_ref":"fm/example-task"}`.
+Unknown keys and malformed grants refuse rather than broadening scope.
+
+Activation is a separate approval for the exact home and branch-write scope.
+Updates write remote commits and may trigger CI, notifications, compute spend, deployment, or publication workflows.
+Exclude any branch whose workflow has an unapproved outward effect until that effect has explicit approval.
+After approval, set `enabled: true` with the exact grants and invoke `bin/fm-pr-autoupdate.sh arm` with explicit `FM_HOME`.
+The authenticated shim runs through the existing watcher; no cron, host timer, pinned model, or worker subscription is needed.
+`disarm` removes that shim and trust binding while preserving pending receipts.
+`status` prints the coverage journal without contacting the forge.
+
+Direct-PR ships need their canonical task metadata, recorded ready head, clean task copy, confirmed done worker, and positive absence of pipeline custody.
+The updater uses `gh-axi`, `jq`, Git, and the installed no-mistakes read surface to establish those preconditions.
+Pipeline-owned tasks are deferred pending a pipeline-native freshness feature; an unknown owner, unavailable read, or unsupported forge remains visibly incomplete.
+An accepted request records the PR, expected old head, and request time, then leaves the resulting head and its checks to the task delivery path and normal contribution observer.
+The updater never publishes `pr_head`, confirms a resulting SHA, or grants review or merge authority.
+After an accepted request, shared contribution readiness remains invalid until the delivery owner records the changed head and a later normal observation validates it.
+An uncertain request stays pending and keeps readiness invalid without a repeated write; the delivery owner must resolve that evidence.
+
+Fixture regression: `bash bin/fm-test-run.sh tests/fm-pr-autoupdate.test.sh`.
+This regression exercises local doubles and does not prove live GitHub asynchronous update behavior.
+Live write verification requires a separately authorized disposable PR before enabling real fleet writes.
 
 ## Boat spend check (config/boat-spend.json)
 

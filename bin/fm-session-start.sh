@@ -704,6 +704,47 @@ REBUILDING_SESSION_PID=$(fm_harness_ancestry_pid 2>/dev/null || true)
 print_agents_refresh_if_required "$REBUILDING_SESSION_PID"
 
 if [ "$READ_ONLY" -eq 0 ]; then
+  PRIMARY_FLEET_SESSION=
+  if [ -n "${TMUX_PANE:-}" ]; then
+    PRIMARY_LABEL=${FM_HOME%/}
+    PRIMARY_LABEL=${PRIMARY_LABEL##*/}
+    PRIMARY_DISPLAY_MODEL=${FM_PRIMARY_MODEL:-}
+    PRIMARY_DISPLAY_EFFORT=${FM_PRIMARY_EFFORT:-}
+    if [ "$PRIMARY_HARNESS" = claude ]; then
+      PRIMARY_DISPLAY_MODEL=${PRIMARY_DISPLAY_MODEL:-${CLAUDE_MODEL:-}}
+      PRIMARY_DISPLAY_EFFORT=${PRIMARY_DISPLAY_EFFORT:-${CLAUDE_CODE_EFFORT_LEVEL:-}}
+    fi
+    PRIMARY_EXISTING_TASK=$(tmux show-options -wqv -t "$TMUX_PANE" @fm_task 2>/dev/null) || PRIMARY_EXISTING_TASK=
+    PRIMARY_EXISTING_STATE=$(tmux show-options -wqv -t "$TMUX_PANE" @fm_state 2>/dev/null) || PRIMARY_EXISTING_STATE=
+    PRIMARY_SPAWN_WINDOW=
+    if [ -n "$PRIMARY_EXISTING_STATE" ]; then
+      case "$PRIMARY_EXISTING_TASK" in
+        ''|.|..|*[!A-Za-z0-9._-]*) ;;
+        *)
+          PRIMARY_TASK_RECORD="$PRIMARY_EXISTING_STATE/$PRIMARY_EXISTING_TASK.meta"
+          if [ -f "$PRIMARY_TASK_RECORD" ]; then
+            PRIMARY_TASK_BACKEND=$(sed -n 's/^backend=//p' "$PRIMARY_TASK_RECORD" | head -1)
+            PRIMARY_TASK_WINDOW=$(sed -n 's/^window=//p' "$PRIMARY_TASK_RECORD" | head -1)
+            if [ "${PRIMARY_TASK_BACKEND:-tmux}" = tmux ] && [ -n "$PRIMARY_TASK_WINDOW" ]; then
+              PRIMARY_SPAWN_WINDOW=$(tmux display-message -p -t "$PRIMARY_TASK_WINDOW" '#{window_id}' 2>/dev/null) || PRIMARY_SPAWN_WINDOW=
+            fi
+          fi
+          ;;
+      esac
+    fi
+    PRIMARY_PANE_WINDOW=$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null) || PRIMARY_PANE_WINDOW=
+    if [ -z "$PRIMARY_SPAWN_WINDOW" ] || [ "$PRIMARY_SPAWN_WINDOW" != "$PRIMARY_PANE_WINDOW" ]; then
+      "$SCRIPT_DIR/fm-statusbar.sh" label "$TMUX_PANE" "$PRIMARY_LABEL" "$PRIMARY_HARNESS" \
+        "$PRIMARY_DISPLAY_MODEL" "$PRIMARY_DISPLAY_EFFORT" "$FM_HOME" >/dev/null 2>&1 || true
+    fi
+    PRIMARY_FLEET_SESSION=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || PRIMARY_FLEET_SESSION=
+  else
+    if tmux has-session -t '=firstmate' 2>/dev/null; then
+      PRIMARY_FLEET_SESSION=firstmate
+    fi
+  fi
+  "$SCRIPT_DIR/fm-statusbar.sh" sync >/dev/null 2>&1 || true
+  [ -z "$PRIMARY_FLEET_SESSION" ] || "$SCRIPT_DIR/fm-statusbar.sh" apply "$PRIMARY_FLEET_SESSION" >/dev/null 2>&1 || true
   if [ "$REEMIT" -eq 0 ]; then
     rm -f "$COMPLETION_FILE" 2>/dev/null || true
   fi

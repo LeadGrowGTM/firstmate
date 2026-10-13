@@ -275,7 +275,15 @@
 #   itself a linked worktree of the project repository still launches. A pane
 #   that never reaches an isolated worktree refuses at the end of that wait,
 #   naming the last path seen and why it was rejected.
-#   That placement is proven only at launch. Every ship or scout pane therefore
+#   A worktree registered to another clone is not this project's copy, even when
+#   treehouse offers it from a pool keyed only by directory name and origin.
+#   When `treehouse get` hands the pane another clone's copy, the launch leaves
+#   that subshell, which returns the copy, and attempts a lease using this
+#   home's pool folder (bin/fm-wake-lib.sh's fm_treehouse_home_pool, under the user
+#   state directory). A lease that is still another clone is not returned and
+#   the launch stops. Relaunch resumes in the recorded worktree; Claude refuses
+#   a recorded copy from another clone. Orca and secondmate launches do not use this pool.
+#   That worktree isolation is proven only at launch. Every ship or scout pane therefore
 #   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
 #   the same channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
 #   behavior suite from the repository primary checkout while that marker is
@@ -346,12 +354,15 @@
 #   shell, credential files, same-user processes, or later shell initialization.
 #   See docs/configuration.md for provider/Git setup and supported limits.
 # Claude permission mode (config/claude-permission-mode):
-#   One token selecting the permission flag every claude launch (ship, scout,
-#   secondmate, and relaunch) carries. Absent or `bypass` keeps today's
-#   `--dangerously-skip-permissions`; `auto` launches with `--permission-mode
-#   auto` instead, Claude Code's classifier-reviewed mode, for a captain who
-#   refuses to run workers in bypass mode. Every other part of the claude launch
-#   is unchanged. The token is the file's whitespace-trimmed content; any other
+#   One token selecting the permission flags every claude launch (ship, scout,
+#   secondmate, and relaunch) carries. An absent file launches
+#   with `--allow-dangerously-skip-permissions --permission-mode auto`: the
+#   worker runs in Claude Code's classifier-reviewed auto mode while bypass
+#   stays one shift+tab away. `bypass` keeps `--dangerously-skip-permissions`
+#   active from the start; `auto` launches with `--permission-mode auto` alone,
+#   leaving bypass unreachable, for a captain who refuses bypass mode entirely.
+#   Every other part of the claude launch is unchanged. The token is the
+#   file's content with all whitespace removed; any other
 #   value, or an unreadable file, refuses the spawn before any endpoint,
 #   worktree, or record exists and names the accepted values. The file is read
 #   on every spawn and relaunch, so a change reaches the next launch without a
@@ -388,7 +399,7 @@
 #   bin/fm-worker-account-lib.sh owns parsing, the check, and the shed list.
 #   Launch templates live in launch_template() below; placeholders replaced before launch:
 #     __BRIEF__    absolute path to data/<task-id>/brief.md
-#     __CLAUDEPERMFLAG__ the claude permission flag selected by config/claude-permission-mode
+#     __CLAUDEPERMFLAG__ the claude permission flags selected by config/claude-permission-mode
 #     __CLAUDEREMOTECONTROL__ on a claude secondmate template only: the quoted
 #                  `--remote-control 'fm-<id>' ` flag, or empty when
 #                  config/claude-remote-control is `off` (supplies its own
@@ -511,6 +522,9 @@
 # keeps no data/backlog.md. A configured non-markdown adapter remains
 # active without a markdown file; any active automatic backend without
 # compatible tasks-axi refuses before creating lifecycle state.
+# Opt-in FM_SPAWN_OUTCOME_FILE writes an attempt-specific structured receipt;
+# bin/fm-launch-outcome-lib.sh owns its schema and publication safety contract.
+# No receipt means no new failover authority; legacy exit/output are unchanged.
 # On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> [mode=<mode> yolo=<on|off>] window=<backend-target> worktree=<path>
 # A ship task records the explicit mode/yolo it was passed; a secondmate spawn records
 # mode=secondmate, yolo=off, home=, and projects=; a scout records neither, and both the
@@ -585,6 +599,11 @@ fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+# Opt-in attempt receipt; ordinary spawns retain their output and exit codes.
+# shellcheck source=bin/fm-launch-outcome-lib.sh
+. "$SCRIPT_DIR/fm-launch-outcome-lib.sh"
+fm_launch_outcome_init "${1:-}" || { echo "error: unsafe or existing spawn outcome path" >&2; exit 1; }
+trap 'fm_launch_outcome_write "$?"' EXIT
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # shellcheck source=bin/fm-config-inherit-lib.sh
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
@@ -614,7 +633,7 @@ fi
 if ! CLAUDE_PERM_PRESENT=$(fm_config_source_present "$CONFIG/claude-permission-mode"); then
   exit 1
 fi
-CLAUDE_PERMISSION_MODE=bypass
+CLAUDE_PERM_FLAG='--allow-dangerously-skip-permissions --permission-mode auto'
 if [ "$CLAUDE_PERM_PRESENT" = 1 ]; then
   if [ ! -f "$CONFIG/claude-permission-mode" ] || [ ! -r "$CONFIG/claude-permission-mode" ]; then
     echo "error: config/claude-permission-mode must be a readable regular file holding one of: bypass, auto" >&2
@@ -622,17 +641,14 @@ if [ "$CLAUDE_PERM_PRESENT" = 1 ]; then
   fi
   CLAUDE_PERMISSION_MODE=$(tr -d '[:space:]' <"$CONFIG/claude-permission-mode" || true)
   case "$CLAUDE_PERMISSION_MODE" in
-  bypass | auto) ;;
+  bypass) CLAUDE_PERM_FLAG='--dangerously-skip-permissions' ;;
+  auto) CLAUDE_PERM_FLAG='--permission-mode auto' ;;
   *)
-    echo "error: config/claude-permission-mode holds '$CLAUDE_PERMISSION_MODE'; accepted values are: bypass (--dangerously-skip-permissions, the default when the file is absent), auto (--permission-mode auto)" >&2
+    echo "error: config/claude-permission-mode holds '$CLAUDE_PERMISSION_MODE'; accepted values are: bypass (--dangerously-skip-permissions), auto (--permission-mode auto); an absent file defaults to --allow-dangerously-skip-permissions --permission-mode auto" >&2
     exit 1
     ;;
   esac
 fi
-case "$CLAUDE_PERMISSION_MODE" in
-auto) CLAUDE_PERM_FLAG='--permission-mode auto' ;;
-*) CLAUDE_PERM_FLAG='--dangerously-skip-permissions' ;;
-esac
 # config/claude-remote-control (header above): resolved once per spawn or
 # relaunch, before any mutation, so a malformed file refuses instead of
 # launching a secondmate with a phone-reachability posture nobody chose.
@@ -1317,6 +1333,7 @@ SPAWN_TASK_SET_LOCK_HELD=0
 SPAWN_TREEHOUSE_PROJECT_LOCK=
 SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
 SPAWN_SLOT_CLAIMED=0
+SPAWN_PRIVATE_LEASE_PATH=
 RELAUNCH_REPLACEMENT_PENDING=0
 RELAUNCH_REPLACEMENT_BUSY_GEN=
 RELAUNCH_REPLACEMENT_HARNESS=
@@ -1326,6 +1343,7 @@ CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 GIT_HOOKS_DIR=
 SPAWN_LAUNCH_SENT=0
+SPAWN_LAUNCH_ATTEMPTED=0
 SPAWN_ENDPOINT_CLOSED=0
 
 spawn_fresh_commit_rollback() {
@@ -1357,6 +1375,7 @@ parse_orca_worktree_result() {
 
 spawn_abort_cleanup() {
   local status=$?
+  local lease_dirty lease_unlanded
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
     [ -n "$SPAWN_META_TMP" ] &&
@@ -1469,6 +1488,23 @@ spawn_abort_cleanup() {
       echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it" >&2
     fi
   fi
+  if [ -n "$SPAWN_PRIVATE_LEASE_PATH" ] &&
+    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
+    if fm_treehouse_same_clone "$PROJ_ABS" "$SPAWN_PRIVATE_LEASE_PATH" &&
+      [ "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" != "$PROJ_ABS_REAL" ]; then
+      if [ "$SPAWN_LAUNCH_SENT" != 0 ]; then
+        echo "warning: leaving per-home treehouse lease at '$SPAWN_PRIVATE_LEASE_PATH' in place: a worker was launched; preserve its work for teardown" >&2
+      elif ! lease_dirty=$(git -C "$SPAWN_PRIVATE_LEASE_PATH" status --porcelain 2>/dev/null) ||
+        ! lease_unlanded=$(git -C "$SPAWN_PRIVATE_LEASE_PATH" log --oneline HEAD --not --remotes -- 2>/dev/null); then
+        echo "warning: leaving per-home treehouse lease at '$SPAWN_PRIVATE_LEASE_PATH' in place: cannot prove that it has no uncommitted or unlanded work" >&2
+      elif [ -n "$lease_dirty" ] || [ -n "$lease_unlanded" ]; then
+        echo "warning: leaving per-home treehouse lease at '$SPAWN_PRIVATE_LEASE_PATH' in place: it has uncommitted or unlanded work" >&2
+      elif ! (cd "$PROJ_ABS" && treehouse return --force "$SPAWN_PRIVATE_LEASE_PATH") >/dev/null 2>&1; then
+        echo "warning: could not return the per-home treehouse lease at $SPAWN_PRIVATE_LEASE_PATH" >&2
+      fi
+    fi
+    SPAWN_PRIVATE_LEASE_PATH=
+  fi
   if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
     SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
     fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK" || true
@@ -1490,7 +1526,7 @@ spawn_abort_cleanup() {
   # reinstalls this strip dir, is never undone. A launched agent whose endpoint
   # was not closed may still be committing, so it keeps its strip.
   if [ "$status" -ne 0 ] && [ -n "$GIT_HOOKS_DIR" ] &&
-    { [ "$SPAWN_LAUNCH_SENT" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; } &&
+    { [ "$SPAWN_LAUNCH_ATTEMPTED" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; } &&
     fm_lock_try_acquire "$SPAWN_TASK_LOCK"; then
     if [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
       chmod u+w "$GIT_HOOKS_DIR" 2>/dev/null || true
@@ -1498,6 +1534,7 @@ spawn_abort_cleanup() {
     fi
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
+  fm_launch_outcome_write "$status" || status=1
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
@@ -1587,6 +1624,10 @@ if [ "$RELAUNCH" -eq 1 ] && [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart"
   exit 1
 fi
 if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in */*) false ;; *) true ;; esac then
+  if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+    echo "error: an attempt receipt is single-task only; batch dispatch cannot share one receipt" >&2
+    exit 1
+  fi
   if [ "$KIND" != secondmate ] && [ -z "$HARNESS_ARG" ] && [ -f "$CONFIG/crew-dispatch.json" ]; then
     echo "error: config/crew-dispatch.json is active - pass an explicit harness resolved from the dispatch rules (the consultation backstop, so the rules are never silently skipped)." >&2
     exit 1
@@ -1634,6 +1675,10 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   exit "$rc"
 fi
 ID=${POS[0]}
+if [ "$KIND" = secondmate ] && [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+  echo "error: scheduled worker receipts do not authorize replacing a supervisor" >&2
+  exit 1
+fi
 fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
   exit 2
@@ -2136,9 +2181,9 @@ launch_template() {
   # sources are not guaranteed to load that scope, so a worker would
   # otherwise run with attribution back on; carrying it per launch keeps the
   # policy in force regardless of which settings scopes end up loaded.
-  # __CLAUDEPERMFLAG__ is the permission flag config/claude-permission-mode
-  # selects (header above): --dangerously-skip-permissions by default, or
-  # --permission-mode auto for a captain who refuses bypass mode.
+  # __CLAUDEPERMFLAG__ is the permission flags config/claude-permission-mode
+  # selects (header above): auto mode with bypass available by default,
+  # bypass active, or auto alone.
   # __CLAUDEADDDIRS__ is the task-channel directory grant
   # claude_add_dirs_flag below builds: Claude path-checks Read/Glob/Grep (and
   # an Edit's mandatory prior Read) against cwd plus --add-dir, and since
@@ -2148,7 +2193,7 @@ launch_template() {
   # into user settings and refuses those reads under bypass too.
   # __CLAUDEREMOTECONTROL__ is emitted for a secondmate only, so a ship or
   # scout launch can never carry Remote Control. It sits directly after the
-  # permission flag and always names the session: `--remote-control` takes an
+  # permission flags and always names the session: `--remote-control` takes an
   # OPTIONAL name, so a bare flag standing last before the positional doorbell
   # would swallow the doorbell as the session name and launch with no prompt.
   # A Claude task worker receives the brief and later steering as file-shaped
@@ -2468,12 +2513,16 @@ fi
 case "$HARNESS" in
 devin)
   DEVIN_BIN=$(command -v devin) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: devin executable not found on PATH" >&2
     exit 1
   }
   ;;
 pi | pi-signed)
   PI_BIN=$(resolve_pi_executable "$HARNESS") || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
     exit 1
   }
@@ -2502,7 +2551,18 @@ cursor)
   # verified owner rather than a bare command lookup. Refusing here keeps a
   # missing install a loud spawn refusal instead of a pane that dies with a
   # command-not-found the supervisor would read as a wedged worker.
-  CURSOR_BIN=$(fm_cursor_resolve_binary) || exit 1
+  CURSOR_BIN=$(fm_cursor_resolve_binary) || {
+    if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
+      if fm_cursor_executable_candidate_exists; then
+        FM_LAUNCH_OUTCOME=uncertain
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-identity-inconclusive
+      else
+        FM_LAUNCH_OUTCOME=worker-unavailable
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+      fi
+    fi
+    exit 1
+  }
   if [ -n "$MODEL" ] && [ "$MODEL" != default ]; then
     if CURSOR_MODELS=$(fm_cursor_list_models "$CURSOR_BIN"); then
       if ! printf '%s\n' "$CURSOR_MODELS" | fm_cursor_catalog_has_model "$MODEL"; then
@@ -2514,6 +2574,8 @@ cursor)
   ;;
 omp)
   OMP_BIN=$(resolve_pi_executable omp) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: omp executable not found on PATH; install Oh My Pi or select a different verified harness" >&2
     exit 1
   }
@@ -2525,6 +2587,8 @@ omp)
   ;;
 agy)
   AGY_BIN=$(resolve_pi_executable agy) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
     echo "error: agy executable not found on PATH; install Antigravity CLI or select a different verified harness" >&2
     exit 1
   }
@@ -2567,13 +2631,41 @@ fi
 if [ "$HARNESS" = agy ]; then
   agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
 fi
+# Scheduled intake additionally proves canonical executables exist before
+# provisioning. A raw command is never an authorized fallback candidate.
+if [ -n "$FM_LAUNCH_OUTCOME_FILE" ] && [ "$RAW_LAUNCH" = 0 ]; then
+  case "$HARNESS" in
+    claude|codex|opencode|grok|gemini)
+      if ! command -v "$HARNESS" >/dev/null 2>&1; then
+        FM_LAUNCH_OUTCOME=worker-unavailable
+        FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+        echo "error: selected $HARNESS executable is unavailable before provisioning" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
 # Worker account pin (header above): resolved before any endpoint, worktree, or
 # record exists. An absent pin selects nothing and leaves every later launch
 # step exactly as it was. A pinned Claude root is exported here as well, so the
 # trust registration below writes the store the worker will actually read.
 RAW_COMMAND=
 [ "$RAW_LAUNCH" = 0 ] || RAW_COMMAND=$ARG3
-WORKER_ACCOUNT=$(fm_worker_account_select "$HARNESS" "$CONFIG" "$MODEL" "${PI_BIN:-$HARNESS}" "$RAW_COMMAND") || exit 1
+if WORKER_ACCOUNT=$(FM_WORKER_ACCOUNT_TYPED=1 fm_worker_account_select "$HARNESS" "$CONFIG" "$MODEL" "${PI_BIN:-$HARNESS}" "$RAW_COMMAND"); then
+  :
+else
+  ACCOUNT_CHECK_STATUS=$?
+  if [ "$ACCOUNT_CHECK_STATUS" = 10 ]; then
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-account-check-refused
+  elif [ "$ACCOUNT_CHECK_STATUS" = 11 ]; then
+    FM_LAUNCH_OUTCOME=uncertain
+    FM_LAUNCH_OUTCOME_REASON=selected-account-check-inconclusive
+  fi
+  exit 1
+fi
+FM_LAUNCH_OUTCOME=unsafe-refusal
+FM_LAUNCH_OUTCOME_REASON=guard-refusal
 WORKER_ACCOUNT_DECLARED=${WORKER_ACCOUNT%%$'\t'*}
 WORKER_ACCOUNT_ROOT=${WORKER_ACCOUNT#*$'\t'}
 WORKER_ACCOUNT_PROVIDER=${WORKER_ACCOUNT_ROOT#*$'\t'}
@@ -2868,7 +2960,11 @@ effort_flag_for_harness() {
 
 case "$LAUNCH" in
 *__MUSEBIN__*)
-  MUSE_BIN=$(resolve_muse_binary) || exit 1
+  MUSE_BIN=$(resolve_muse_binary) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+    exit 1
+  }
   MUSE_CONFIG_HOME=$(resolve_directory_input XDG_CONFIG_HOME "${XDG_CONFIG_HOME:-${HOME:-}/.config}") || exit 1
   MUSE_DATA_HOME=$(resolve_directory_input XDG_DATA_HOME "${XDG_DATA_HOME:-${HOME:-}/.local/share}") || exit 1
   MUSE_AUTH_FILE="$MUSE_CONFIG_HOME/muse/auth.json"
@@ -2888,7 +2984,11 @@ esac
 
 case "$LAUNCH" in
 *__KIMIBIN__*)
-  KIMI_BIN=$(resolve_kimi_binary) || exit 1
+  KIMI_BIN=$(resolve_kimi_binary) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+    exit 1
+  }
   LAUNCH=${LAUNCH//__KIMIBIN__/$(shell_quote "$KIMI_BIN")}
   fm_backend_visible_capture_supported "$BACKEND" || {
     echo "error: refusing Kimi spawn because backend '$BACKEND' has no verified viewport-bounded capture; Kimi 2.0.0 gates a fresh worktree on a trust dialog that can only be answered and confirmed cleared from a scrollback-free read of the live pane" >&2
@@ -2905,7 +3005,11 @@ esac
 
 case "$LAUNCH" in
 *__ROVOBIN__*)
-  ROVO_BIN=$(resolve_rovo_binary) || exit 1
+  ROVO_BIN=$(resolve_rovo_binary) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON=selected-executable-missing
+    exit 1
+  }
   LAUNCH=${LAUNCH//__ROVOBIN__/$(shell_quote "$ROVO_BIN")}
   ;;
 esac
@@ -2953,14 +3057,14 @@ rovo_config_override_flag() {
 # auto parks the pane on a one-time interactive question instead of reading,
 # and any "Block" answer on the machine lands
 # permissions.blockReadsOutsideWorkingDirectories in user settings, which
-# then refuses the same reads under --dangerously-skip-permissions too. A
+# then refuses the same reads in bypass mode too. A
 # Firstmate worker always reads outside its cwd - a secondmate's steers live
 # in the PARENT home's state/<id>.inbox, and a ship or scout worker's launch
 # record, steers, and brief live in this home's state/operational-inbox,
 # state/<id>.inbox, and data/<id>, plus the code root's .agents/skills so the
 # worker can read the skill file the launch role names as the fallback for a
 # session where the skill name does not resolve - so every Claude launch,
-# fresh spawn and relaunch, in both permission modes, grants exactly those
+# fresh spawn and relaunch, in every permission mode, grants exactly those
 # task-channel directories. The skills grant is that directory, not the
 # checkout root, so the grant does not open the whole checkout. Paths resolve
 # the way rovo_config_override_flag resolves them
@@ -3190,6 +3294,16 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
+if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" != secondmate ]; then
+  case "$HARNESS" in
+    claude*)
+      if ! fm_treehouse_same_clone "$PROJ_ABS" "$RELAUNCH_WT"; then
+        echo "error: Claude relaunch refused: recorded worktree '$RELAUNCH_WT' is not a worktree of recorded project '$PROJ_ABS'" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
 # Project capacity admission (bin/fm-project-capacity-lib.sh owns the
 # declaration, what holds a place, and why this is race-safe). A fresh worker
 # for a project whose declared capacity is already held is deferred here, before
@@ -3233,6 +3347,8 @@ if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
   fi
   if [ "$FM_PROJECT_CAPACITY_OCCUPANTS" -ge "$SPAWN_PROJECT_CAPACITY" ]; then
     echo "deferred: project $(basename "$PROJ_ABS") admits $SPAWN_PROJECT_CAPACITY worker(s) at once on this machine ($FM_PROJECT_CAPACITY_FILE) and $FM_PROJECT_CAPACITY_OCCUPANTS already hold a place ($FM_PROJECT_CAPACITY_OCCUPANT_IDS); task $ID was not launched and its backlog item stays queued - dispatch it again once one of them records its ready PR or is cleaned up" >&2
+    FM_LAUNCH_OUTCOME=capacity
+    FM_LAUNCH_OUTCOME_REASON=project-capacity
     exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
   fi
 fi
@@ -3750,6 +3866,7 @@ if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
   exit 1
 fi
 
+SPAWN_PROVISIONING_STARTED=1
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
   # A secondmate's home already resolved WT above through the same validation a
@@ -4455,6 +4572,90 @@ agy_spawn_fail() {  # <detail>
   rovo_endpoint_cleanup
 }
 
+# Wait until the pane's cwd is an isolated worktree on two consecutive reads.
+# Target the stable window id, not the name: if the name is ever lost,
+# display-message -t <bad-name> falls back to the active client's window, which
+# would misread firstmate's own pane path as the worktree. The project
+# comparison is physical: spawn_worktree_isolated screens each read against
+# PROJ_ABS_REAL, because a symlinked project prefix would otherwise differ from
+# PROJ_ABS before the pane has moved.
+#
+# One isolated read is not proof. A new window can report an unrelated real
+# checkout before `treehouse get` finishes its cd, and that path passes
+# spawn_worktree_isolated. Two consecutive reads must agree. A mismatch becomes
+# the new candidate, so a pane that is already settled costs one confirming
+# sleep. A read of the project or of the repository primary is the transient
+# it is, and the wait continues. On failure SPAWN_WT_LAST_SEEN and
+# SPAWN_WT_LAST_REASON name the last path and why it was rejected.
+spawn_wait_isolated_worktree() {
+  local candidate="" p p_real _
+  WT=
+  SPAWN_WT_LAST_SEEN=
+  SPAWN_WT_LAST_REASON="the pane reported no path"
+  for _ in $(seq 1 60); do
+    p=$(spawn_current_path "$WT_TARGET" || true)
+    [ -z "$p" ] || SPAWN_WT_LAST_SEEN=$p
+    if [ -n "$p" ] && spawn_worktree_isolated "$p"; then
+      p_real=$(real_path_or_raw "$p")
+      SPAWN_WT_LAST_REASON="it is an isolated worktree, but no second read agreed with it"
+      if [ -n "$candidate" ] && [ "$p_real" = "$candidate" ]; then
+        WT=$p
+        return 0
+      fi
+      candidate=$p_real
+    else
+      candidate=
+      [ -z "$p" ] || SPAWN_WT_LAST_REASON=$SPAWN_WT_REASON
+    fi
+    sleep 1
+  done
+  WT=
+  return 1
+}
+
+spawn_wait_left_path() {  # <path>
+  local path=$1 real seen _
+  real=$(real_path_or_raw "$path")
+  for _ in $(seq 1 60); do
+    seen=$(spawn_current_path "$WT_TARGET" || true)
+    if [ -z "$seen" ] || [ "$(real_path_or_raw "$seen")" != "$real" ]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+spawn_lease_clone_worktree() {
+  local errfile leased rc=0
+  errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
+  leased=$(
+    {
+      cd "$PROJ_ABS" &&
+        fm_treehouse_home_pool_run "$FM_HOME" 600 get --lease --lease-holder "$ID"
+    } 2>"$errfile"
+  ) || rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$leased" ]; then
+    if fm_timed_out "$rc"; then
+      echo "error: leasing a worktree of '$PROJ_ABS' from this home's own pool did not finish in 600s" >&2
+    else
+      echo "error: could not lease a worktree of '$PROJ_ABS' from this home's own pool (treehouse exit $rc)" >&2
+    fi
+    if [ -s "$errfile" ]; then
+      sed 's/^/treehouse: /' "$errfile" >&2
+    fi
+    rm -f -- "$errfile"
+    return 1
+  fi
+  rm -f -- "$errfile"
+  leased=$(printf '%s\n' "$leased" | awk 'NF { last = $0 } END { print last }')
+  if [ -z "$leased" ] || [ ! -d "$leased" ]; then
+    echo "error: the per-home treehouse lease for '$PROJ_ABS' did not report a worktree directory" >&2
+    return 1
+  fi
+  SPAWN_PRIVATE_LEASE_PATH=$leased
+}
+
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$RELAUNCH" -eq 1 ]; then
@@ -4492,78 +4693,56 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
-
-  # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
-  # Target the stable window id, not the name: if the name is ever lost (e.g. an
-  # automatic-rename slips through), display-message -t <bad-name> falls back to the
-  # active client's window, which would misread firstmate's OWN pane path as the
-  # worktree and tangle a hook into the primary checkout. The window id never lies.
-  # The project comparison is physical: spawn_worktree_isolated screens each
-  # read against PROJ_ABS_REAL, not PROJ_ABS, because a symlinked project prefix
-  # would otherwise make the pane's OS-level cwd read differ from PROJ_ABS on
-  # the very first poll, before the pane has actually moved.
-  #
-  # A single read that already looks isolated is not proof the pane settled
-  # there: on some tmux/WSL setups a brand-new window's pane_current_path
-  # transiently reports an unrelated stale path (seen live as another real git
-  # checkout entirely) before the shell catches up with treehouse get's cd. That
-  # stale path passes spawn_worktree_isolated too (it resolves to a real,
-  # distinct worktree top-level), so accepting it on one read alone silently
-  # records the wrong worktree= in state/<id>.meta. Require two consecutive
-  # reads to agree on the same isolated path before accepting it; a mismatch
-  # just becomes the new candidate rather than resetting the wait, so a pane
-  # that is already settled by the first real read only costs the one existing
-  # inter-poll sleep as confirmation, not a whole extra cycle on top.
-  #
-  # Every candidate is screened with the isolation guard's own predicate, so a
-  # read of the project itself or of the repository primary checkout is treated
-  # as the transient it is and the wait continues, instead of being adopted and
-  # then refused by the guard.
-  # A candidate the screen rejects is never adopted, so a host where the pane
-  # never reaches an isolated worktree spends the whole window before refusing.
-  # That wait is deliberate - telling a transient apart from a terminal
-  # misconfiguration would need machinery this path does not want - so the
-  # refusal has to be self-explaining instead: carry the last path seen and the
-  # reason it was rejected, and report both at the deadline.
-  candidate=""
-  last_seen=""
-  last_reason="the pane reported no path"
-  for _ in $(seq 1 60); do
-    p=$(spawn_current_path "$WT_TARGET" || true)
-    [ -z "$p" ] || last_seen="$p"
-    if [ -n "$p" ] && spawn_worktree_isolated "$p"; then
-      p_real=$(real_path_or_raw "$p")
-      last_reason="it is an isolated worktree, but no second read agreed with it"
-      if [ -n "$candidate" ] && [ "$p_real" = "$candidate" ]; then
-        WT="$p"
-        break
-      fi
-      candidate="$p_real"
-    else
-      candidate=""
-      [ -z "$p" ] || last_reason=$SPAWN_WT_REASON
-    fi
-    sleep 1
-  done
-  if [ -z "$WT" ]; then
-    echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${last_seen:-none}': $last_reason; spawning project '$PROJ_ABS'); inspect window $T" >&2
+  if ! spawn_wait_isolated_worktree; then
+    echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2
     exit 1
   fi
-
   validate_spawn_worktree "treehouse get" "$T"
+  if ! fm_treehouse_same_clone "$PROJ_ABS" "$WT"; then
+    # Treehouse reused an idle copy another clone created. Leave the
+    # interactive subshell so its own exit returns that copy; this clone does
+    # not own it, so it is never `treehouse return --force`d from here.
+    spawn_send_text_line "$WT_TARGET" 'exit'
+    if ! spawn_wait_left_path "$WT"; then
+      echo "error: could not leave the other clone's worktree '$WT' (spawning project '$PROJ_ABS'); refusing to launch" >&2
+      exit 1
+    fi
+    if ! spawn_lease_clone_worktree; then
+      exit 1
+    fi
+    if ! fm_treehouse_same_clone "$PROJ_ABS" "$SPAWN_PRIVATE_LEASE_PATH"; then
+      echo "error: worktree '$SPAWN_PRIVATE_LEASE_PATH' is not a worktree of spawning project '$PROJ_ABS'; refusing to launch a worker in another clone" >&2
+      exit 1
+    fi
+    spawn_send_text_line "$WT_TARGET" "cd -- $(shell_quote "$SPAWN_PRIVATE_LEASE_PATH")" || {
+      echo "error: could not move the pane into the leased worktree '$SPAWN_PRIVATE_LEASE_PATH' of '$PROJ_ABS'; refusing to launch" >&2
+      exit 1
+    }
+    if ! spawn_wait_isolated_worktree; then
+      echo "error: the per-home worktree '$SPAWN_PRIVATE_LEASE_PATH' did not become the pane's directory within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); refusing to launch" >&2
+      exit 1
+    fi
+    if [ "$(real_path_or_raw "$WT")" != "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" ]; then
+      echo "error: pane settled in '$WT' instead of the leased worktree '$SPAWN_PRIVATE_LEASE_PATH' of '$PROJ_ABS'; refusing to launch" >&2
+      exit 1
+    fi
+    validate_spawn_worktree "per-home treehouse lease" "$T"
+  fi
 
-  # Claim the pool slot for this task. The interactive `treehouse get` sent to
-  # the pane above records only a process lease (Treehouse's durable
-  # `get --lease --lease-holder`, which bin/fm-home-seed.sh uses for secondmate
-  # homes, is not this path), so Treehouse cannot say which task a slot belongs
-  # to once that task's worker exits - and that is exactly when the slot is
-  # handed on and this task's worktree= line goes stale. The claim is what lets
-  # bin/fm-teardown.sh leave a slot that has since been reassigned untouched, so
-  # a slot that cannot be claimed is refused here, at the cheapest point, rather
-  # than launching a worker whose slot teardown could later release out from
-  # under its successor.
+  # Claim the pool slot for this task. The interactive `treehouse get` records
+  # only a process lease (Treehouse's durable `get --lease --lease-holder`,
+  # which bin/fm-home-seed.sh uses for secondmate homes, is that other path),
+  # so Treehouse cannot say which task a slot belongs to once that task's
+  # worker exits - and that is exactly when the slot is handed on and this
+  # task's worktree= line goes stale. The claim is what lets bin/fm-teardown.sh
+  # leave a slot that has since been reassigned untouched, so a slot that
+  # cannot be claimed is refused here, at the cheapest point, rather than
+  # launching a worker whose slot teardown could later release out from under
+  # its successor.
   # Written under the Treehouse project lock held from before slot allocation
   # through metadata publication, so no other spawn or return sees a half-claim.
+  # A per-home lease is still a pool slot once its common dir is this clone, so
+  # the same claim covers it.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
     if ! fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME"; then
       echo "error: could not claim Treehouse pool slot $WT for task $ID; refusing to launch a worker whose slot cannot later be proved to be its own; inspect window $T" >&2
@@ -4773,7 +4952,27 @@ fi
     # on. Every hook command tolerates a refused event (|| true) so a stale-gen
     # writer can never break Claude's own lifecycle.
     mkdir -p "$WT/.claude"
-    fm_control_render_claude_settings "$FM_ROOT" "$STATE_REAL" "$ID" "$BUSY_GEN" "$TURNEND_NOTIFY" > "$WT/.claude/settings.local.json" || exit 1
+    # Claude's own statusLine (model, effort, worktree, plan windows, task) rides
+    # this firstmate-owned local settings file, only when the account the worker
+    # loads and the project define none, so the captain's statusLine wins and the
+    # launch line stays byte-identical.
+    sl_cmd=
+    if [ -n "$WORKER_ACCOUNT" ]; then
+      sl_settings="${WORKER_ACCOUNT_ROOT:-$HOME/.claude}/settings.json"
+    else
+      sl_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+    fi
+    case "$SCRIPT_DIR" in
+    *[[:cntrl:]]*) ;;
+    *)
+      if [ "$RAW_LAUNCH" -eq 0 ] \
+        && ! { [ -r "$sl_settings" ] && jq -e '.statusLine' "$sl_settings" >/dev/null 2>&1; } \
+        && ! { [ -r "$WT/.claude/settings.json" ] && jq -e '.statusLine' "$WT/.claude/settings.json" >/dev/null 2>&1; }; then
+        sl_cmd="$(shell_quote "$SCRIPT_DIR/fm-statusbar.sh") claude-line --task $(shell_quote "$ID")"
+      fi
+      ;;
+    esac
+    fm_control_render_claude_settings "$FM_ROOT" "$STATE_REAL" "$ID" "$BUSY_GEN" "$TURNEND_NOTIFY" "$sl_cmd" > "$WT/.claude/settings.local.json" || exit 1
     exclude_path '.claude/settings.local.json'
     ;;
   devin)
@@ -5202,6 +5401,12 @@ if [ "$RELAUNCH" -eq 0 ]; then
   fi
   SPAWN_META_TMP=
 fi
+# Operator status surfaces: record the task's facts on its tmux window and make
+# sure the window's session group shows the detail line. Best effort only.
+if [ "$BACKEND" = tmux ]; then
+  "$SCRIPT_DIR/fm-statusbar.sh" label "${WT_TARGET:-$T}" "$ID" "$HARNESS" "$MODEL" "$EFFORT" "$WT" >/dev/null 2>&1 || true
+  "$SCRIPT_DIR/fm-statusbar.sh" apply "$SES" >/dev/null 2>&1 || true
+fi
 
 # Fuse the backlog In-flight transition into the publication that just created
 # the record (bin/fm-backlog-transition-lib.sh owns the invariant). It runs under
@@ -5606,8 +5811,9 @@ if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   exit 1
 fi
 sleep 0.3
-SPAWN_LAUNCH_SENT=1
+SPAWN_LAUNCH_ATTEMPTED=1
 spawn_send_literal "$T" ". $(shell_quote "$LAUNCH_FILE")"
+SPAWN_LAUNCH_SENT=1
 sleep 0.3
 if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -5759,3 +5965,6 @@ SPAWN_ACCOUNT=
 # Opt-in fleet activity ledger (docs/fleet-ledger.md); off costs one file test.
 [ ! -e "$CONFIG/fleet-ledger" ] || [ "$RELAUNCH" -eq 1 ] || FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-fleet-ledger.sh" dispatched "$ID" "$KIND" "${PROJ_ABS##*/}" "$HARNESS" "$MODEL" || true
 echo "spawned $ID harness=$HARNESS kind=$KIND$SPAWN_DELIVERY window=$META_WINDOW worktree=$WT$SPAWN_ACCOUNT"
+
+FM_LAUNCH_OUTCOME=worker-published
+FM_LAUNCH_OUTCOME_REASON=launch-and-backlog-committed

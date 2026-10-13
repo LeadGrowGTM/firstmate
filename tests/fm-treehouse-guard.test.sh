@@ -320,7 +320,182 @@ test_unknown_command_is_refused_before_any_treehouse_call() {
   [ -z "$(calls "$world")" ] || fail "an unknown command reached treehouse"
 }
 
+test_prune_also_prunes_a_present_per_home_pool() {
+  local world home pool out rc=0
+  world=$(make_world per-home-pool)
+  home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  case "$pool/" in
+    "$home"/*) fail "the home's own pool is inside the home: $pool" ;;
+  esac
+  mkdir -p "$pool/.treehouse/alpha-0a1b2c"
+  cat > "$world/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+dir=${FAKE_TREEHOUSE_DIR:?}
+printf '%s\t%s\t%s\n' "$(pwd -P)" "$*" "${HOME-}" >> "$dir/log"
+case "$*" in
+  'prune --yes') exit 0 ;;
+  *)
+    echo "unexpected treehouse call: $*" >&2
+    exit 64
+    ;;
+esac
+SH
+  chmod +x "$world/fakebin/treehouse"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
+  expect_code 0 "$rc" "prune with a per-home pool"$'\n'"$out"
+  [ -z "$out" ] || fail "a per-home prune that ran should be silent: $out"
+  assert_equals "$(printf '%s\t%s\t%s\n%s\t%s\t%s' \
+    "$home/projects/alpha" 'prune --yes' "$world/user" \
+    "$home/projects/alpha" 'prune --yes' "$pool")" \
+    "$(calls "$world")" "the home's own pool was not pruned with treehouse pointed at it"
+
+  : > "$world/fake/log"
+  rm -rf "$pool/.treehouse/alpha-0a1b2c"
+  mkdir -p "$pool/.treehouse/other-0a1b2c"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" prune "$home/projects/alpha" 2>&1) || rc=$?
+  expect_code 0 "$rc" "prune without a pool of this clone"$'\n'"$out"
+  assert_equals "$(printf '%s\t%s\t%s' "$home/projects/alpha" 'prune --yes' "$world/user")" \
+    "$(calls "$world")" "a home pool holding no pool of this clone was still pruned"
+}
+
+test_sweep_sizes_a_present_per_home_pool_once() {
+  local world home pool out
+  world=$(make_world per-home-size)
+  home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$pool/.treehouse/alpha-0a1b2c"
+  printf '%s\n' "$pool/.treehouse" > "$world/fake/size-pool"
+  cat > "$world/fakebin/du" <<'SH'
+#!/usr/bin/env bash
+dir=${FAKE_TREEHOUSE_DIR:?}
+target=${@: -1}
+printf '%s\n' "$target" >> "$dir/du-log"
+pool=$(cat "$dir/size-pool")
+case "$pool" in
+  "$target"|"$target"/*) printf '%s\t%s\n' "$((6 * 1048576))" "$target" ;;
+  *) printf '0\t%s\n' "$target" ;;
+esac
+SH
+  chmod +x "$world/fakebin/du"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "per-home pool sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $pool/.treehouse (limit 5 GB)" "$out" \
+    "the per-home pool's size was not reported once"
+
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/user/.treehouse/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$pool/.treehouse/alpha-0a1b2c"
+  printf '%s\n' "$pool/.treehouse" > "$world/fake/size-pool"
+  : > "$world/fake/du-log"
+  out=$(XDG_STATE_HOME="$world/user/.treehouse/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "nested per-home pool sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $world/user/.treehouse (limit 5 GB)" "$out" \
+    "the nested per-home pool was reported twice"
+  assert_equals 0 "$(grep -Fxc -- "$pool/.treehouse" "$world/fake/du-log")" \
+    "the nested per-home pool was measured again under its parent"
+}
+
+test_sweep_sizes_linked_and_nested_roots_once() {
+  local world home pool out
+  world=$(make_world linked-size)
+  home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$world/actual-pool" "$pool"
+  rmdir "$world/user/.treehouse"
+  ln -s "$world/actual-pool" "$world/user/.treehouse"
+  ln -s "$world/actual-pool" "$pool/.treehouse"
+  cat > "$world/fakebin/du" <<'SH'
+#!/usr/bin/env bash
+dir=${FAKE_TREEHOUSE_DIR:?}
+printf '%s\n' "${@: -1}" >> "$dir/du-log"
+printf '%s\t%s\n' "$((6 * 1048576))" "${@: -1}"
+SH
+  chmod +x "$world/fakebin/du"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "linked pool sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $world/user/.treehouse (limit 5 GB)" "$out" \
+    "linked default and per-home roots were not reported once"
+  assert_equals "$world/actual-pool" "$(cat "$world/fake/du-log")" \
+    "linked roots were not measured at their one physical directory"
+
+  rm "$world/user/.treehouse" "$pool/.treehouse"
+  mkdir -p "$pool/.treehouse/child"
+  ln -s "$pool/.treehouse/child" "$world/user/.treehouse"
+  : > "$world/fake/du-log"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "linked nested pool sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $pool/.treehouse (limit 5 GB)" "$out" \
+    "linked child and parent roots were not reported once"
+  assert_equals "$pool/.treehouse" "$(cat "$world/fake/du-log")" \
+    "linked child was measured again under its parent"
+}
+
+test_sweep_reports_unresolvable_default_and_per_home_roots() {
+  local world home pool out
+  world=$(make_world unresolvable-size)
+  home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$pool/.treehouse"
+  chmod 000 "$world/user/.treehouse" "$pool/.treehouse"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "unresolvable root sweep failed: $out"
+  chmod 700 "$world/user/.treehouse" "$pool/.treehouse"
+  assert_contains "$out" "size of $world/user/.treehouse could not be measured (root could not be resolved)" \
+    "the default root resolution failure was omitted"
+  assert_contains "$out" "size of $pool/.treehouse could not be measured (root could not be resolved)" \
+    "the per-home root resolution failure was omitted"
+  pass "both existing unreadable roots report an unmeasurable size"
+}
+
+test_sweep_rejects_partial_du_totals_for_both_roots() {
+  local world home pool out
+  world=$(make_world partial-du)
+  home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$pool/.treehouse"
+  cat > "$world/fakebin/du" <<'SH'
+#!/usr/bin/env bash
+printf '4096\t%s\n' "${@: -1}"
+exit 3
+SH
+  chmod +x "$world/fakebin/du"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "partial du sweep failed: $out"
+  assert_equals "treehouse-guard: size of $world/user/.treehouse could not be measured (du exited 3); size of $pool/.treehouse could not be measured (du exited 3)" "$out" \
+    "a numeric partial du total was accepted for either root"
+  pass "partial du totals fail size measurement for both roots"
+}
+
 test_prune_runs_only_the_safe_prune_from_the_project
+test_prune_also_prunes_a_present_per_home_pool
+test_sweep_sizes_a_present_per_home_pool_once
+test_sweep_sizes_linked_and_nested_roots_once
+test_sweep_reports_unresolvable_default_and_per_home_roots
+test_sweep_rejects_partial_du_totals_for_both_roots
 test_prune_refuses_a_directory_that_is_not_a_clone_root
 test_prune_failure_warns_and_exits_nonzero
 test_prune_bound_is_reported_as_a_prune_that_did_not_finish

@@ -312,24 +312,26 @@ No path here closes a captain call without either the captain's words through `a
 
 ## Card hygiene: a landed subject is not a live call
 
-`bin/fm-bearings-board.sh build` cross-checks every `decision` card before it publishes and drops stale subjects rather than trusting the composed inventory alone.
+`bin/fm-bearings-board.sh build` cross-checks main-home decision cards and structured landed subjects before publishing, then moves identified stale cards into a separate candidate list without resolving their tasks.
 
-Three checks run, all on exact identity and none on prose:
+The checks use exact identity or an explicitly verified stale reason, never a matching title alone:
 
-- The card's key is the captain-held task id, so `bin/fm-captain-hold.sh open --distinguish-absent` is asked whether that task is still an open captain call.
-  - Exit 1 means the task is present but closed, or no longer held for the captain, and drops the card.
+- For a main-home decision card, the key is the captain-held task id, so `bin/fm-captain-hold.sh open --distinguish-absent` is asked whether that task is still an open captain call.
+  - Exit 1 means the task is present but closed, or no longer held for the captain, and moves the card to stale candidates.
   - Exit 2 means the answer could not be established, and keeps the card.
   - Exit 3 means the task is absent from the main backlog, which includes a home carrying no backlog file at all, and keeps the card.
 
   Exits 2 and 3 keep the card because a card wrongly shown is recoverable and a call wrongly hidden is not.
+  Foreign-home calls are not checked against the main backlog.
 - The payload's own `landed` rows are the recently-landed artifacts.
-  A decision card whose task id or `pr_url` appears among them has already shipped its subject, so it drops.
+  A card whose owner-qualified task id or `pr_url` appears among them has shipped its subject, so it moves to stale candidates.
 - A version decision can carry a structured `subject` with an artifact and numeric three-part version.
-  A landed row carrying the same artifact at that version or a newer one supersedes the card without parsing prose.
+  A landed row carrying the same artifact at that version or a newer one moves the card to stale candidates without parsing prose.
+- A supplied `stale_reason` or confirmed linked `pr_state` marks a candidate; `pr_state` requires the linked `pr_url`.
 
-### Dropped and kept cards
+### Stale candidates and active cards
 
-Dropped cards are named on stderr as `dropped-landed-card:` lines, so a rebuild states what it removed rather than quietly shrinking Captain's Call.
+Cards removed from the active list are named on stderr as `dropped-landed-card:` lines and remain visible as stale candidates, so a rebuild does not quietly shrink Captain's Call.
 The landing procedure requires one immediate board rebuild to remove already-stale merged-PR and superseded-version cards without a committed migration or change-worktree state mutation.
 A subject whose state cannot be established is kept, because a wrongly shown card is safer than a wrongly hidden call.
 The validator's reservation scope must equal the adapter's reconcile-classification scope.
@@ -339,8 +341,8 @@ That scope is all card types, because the captured payload carries no card type.
 
 Owner-aware routing for remote-secondmate decision cards is tracked separately.
 That follow-up must query landedness and route reconciliation in the authoritative secondmate home while honoring the remote and local consistency principle.
-Until then, an absent main-home task passes through this hygiene check unchanged.
-Its Reconcile selection remains announced but cannot create a main-home request, because the main intake refuses an absent task.
+Until then, a foreign-home card is not checked against the main backlog and cannot submit an answer or Reconcile selection through the board.
+The card directs the captain to give the choice to firstmate for recording in its owner home.
 For a main-home call, the reconcile option is the recovery path for whatever still slips through.
 
 ## Structured read surfaces
@@ -371,7 +373,7 @@ That aging is a projection safety net only.
 The durable deferral remains re-holding with `--until`.
 
 The fleet snapshot's secondmate-home summary classifies an actionable captain hold as `captain_decision`.
-It preserves every captain hold in the bounded queued inventory of the owning home.
+Its compact queued inventory is bounded; the detailed layout below uses `decision_records` for complete coverage of readable current-format home summaries.
 
 ### Bearings placement
 
@@ -385,6 +387,8 @@ It preserves every captain hold in the bounded queued inventory of the owning ho
 `--all-decisions` reveals every captain hold available within the remote-summary bound and drops its gate.
 An available hold is therefore never in both Captain's Call and Charted Next.
 An actively worked held task may also appear in Underway, which reports running work independently of those decision buckets.
+The opt-in `--fields decisions` layout instead reads complete `decision_records` from each readable current-format home summary, including deferred holds.
+Older summaries retain only the known held calls available within their legacy bounds and disclose missing detailed coverage.
 
 ### Accepted limits
 
@@ -392,8 +396,8 @@ Three accepted limits remain deliberate:
 
 - A remote or secondmate hold retains the producer home's age and aging decision from the summary's capture time and threshold rather than being recomputed by the parent.
 - A rare concurrent answer-close and re-hold race can leave the newly re-held task without its age basis.
-- Cross-home summaries remain bounded by `FM_SNAPSHOT_SECONDMATE_DECISIONS` and `FM_SNAPSHOT_SECONDMATE_QUEUED`.
-  A remote deferred hold beyond those bounds is not exported, so it can be neither gated nor revealed.
+- The compact cross-home `decisions_open` and `queued` fields remain bounded by `FM_SNAPSHOT_SECONDMATE_DECISIONS` and `FM_SNAPSHOT_SECONDMATE_QUEUED`.
+  In an older summary without `decision_records`, a remote deferred hold beyond those bounds cannot be revealed by the detailed layout either.
 
 Re-holding through the wrapper with `--until` remains the durable fix rather than relying on the projection safety net.
 
@@ -611,7 +615,7 @@ The board's half is pinned in `tests/fm-bearings-board.test.sh`:
 - Every published decision card carries exactly one reconcile option.
 - Authored options reserve that value across every card type.
 - Recommendations name authored options.
-- A decision card whose structured subject appears in the payload's landed rows is dropped.
+- A card whose structured subject appears in the payload's landed rows leaves active calls and remains in stale candidates.
   A genuinely open one is kept even when an unrelated landed id contains its key after a newline.
 - A build requires a fresh authoritative listed-open result before binding or arming.
 - A reopen retires the pre-reopen source generation and waits for a fresh live listener.

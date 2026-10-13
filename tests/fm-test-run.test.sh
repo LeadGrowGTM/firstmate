@@ -428,6 +428,26 @@ test_changed_dependency_selection_and_unmapped_failure() {
   pass "changed selection covers dependents, fails closed for live unmapped source, and accepts retired unconsumed source"
 }
 
+test_changed_scheduler_selects_its_regression() {
+  local tmp repo listed
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-run-schedule-selection.XXXXXX")
+  repo="$tmp/repo"
+  init_changed_fixture_repo "$repo"
+  printf '#!/usr/bin/env bash\n' >"$repo/bin/fm-schedule-check.sh"
+  printf '#!/usr/bin/env bash\n' >"$repo/tests/fm-schedule-check.test.sh"
+  git -C "$repo" add bin/fm-schedule-check.sh tests/fm-schedule-check.test.sh
+  git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm scheduler-baseline
+
+  printf '\n' >>"$repo/bin/fm-schedule-check.sh"
+  [ "$(git -C "$repo" diff --name-only HEAD)" = bin/fm-schedule-check.sh ] \
+    || fail "scheduler selection fixture must change only the scheduler source"
+  listed=$(cd "$repo" && bin/fm-test-run.sh --list --changed --base HEAD)
+  [ "$listed" = tests/fm-schedule-check.test.sh ] \
+    || fail "scheduler-only change must select its regression, got: $listed"
+  rm -rf "$tmp"
+  pass "a scheduler-only change selects its regression test"
+}
+
 # A direct test reference is per-script evidence. Widening it to the referencing
 # test's whole family is what turned a one-line change to a shared helper into
 # every real-Herdr E2E, including scripts with no dependency on it at all.
@@ -1834,6 +1854,7 @@ test_task_marker_refuses_the_primary_checkout
 test_changed_runner_surfaces_select_their_family
 test_shell_line_ending_policy_selects_runner_contract
 test_changed_dependency_selection_and_unmapped_failure
+test_changed_scheduler_selects_its_regression
 test_changed_bin_reference_selects_per_script_not_per_family
 test_changed_uses_bounded_automatic_concurrency
 test_windows_posix_mode_emulation_does_not_fail_parallel_runs

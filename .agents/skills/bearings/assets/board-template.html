@@ -155,36 +155,11 @@ a { color: inherit; text-decoration: none; }
 .bb-section__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .bb-cols { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 22px; }
 
-/* ---- Captain's Call: one card at a time, dealt off a visible stack ---- */
-.bb-callwrap { display: flex; flex-direction: column; gap: 12px; }
-/* extra top margin clears the pile edges that poke below the active card */
-.bb-stacknav { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-.bb-stacknav__count { flex: 1 1 auto; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
-.bb-stacknav__btn {
-  display: inline-grid; place-items: center; width: 34px; height: 34px; cursor: pointer;
-  background: var(--surface-card); color: var(--text-strong);
-  border: 1.5px solid var(--border-default); border-radius: var(--radius-sm);
-  transition: background 120ms, border-color 120ms;
-}
-.bb-stacknav__btn:hover { background: var(--paper-100); border-color: var(--ink-500); }
-.bb-stacknav__btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.bb-stacknav__btn[disabled] { opacity: 0.4; cursor: not-allowed; }
-.bb-stacknav__btn svg { width: 16px; height: 16px; }
-/* the stack: a squared-up paper pile - solid card faces at slight opposing
-   rotations, like dealt cards, not translucent offset rectangles. The pile
-   thins as cards are answered: two edges, then one, then none on the last. */
-.bb-call { position: relative; display: grid; }
-.bb-call::before, .bb-call::after {
-  content: ""; position: absolute; inset: 0; z-index: 0;
-  background: var(--surface-card); border: 2px solid var(--ink-900);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-hard-sm);
-}
-.bb-call::before { transform: rotate(1.3deg) translate(4px, 5px); }
-.bb-call::after  { transform: rotate(-1.1deg) translate(-3px, 9px); }
-.bb-call--penult::after { display: none; }
-.bb-call--last::before, .bb-call--last::after,
-.bb-call--empty::before, .bb-call--empty::after { display: none; }
-.bb-call > .bb-decision { grid-area: 1 / 1; z-index: 1; }
+/* Owner groups show every call together, with numbered references. */
+.bb-callwrap, .bb-call { display: flex; flex-direction: column; gap: 16px; }
+.bb-owner { margin: 8px 0 0; font-size: var(--fs-h4); }
+.bb-stale { border-top: 1px solid var(--border-default); padding-top: 16px; }
+.bb-decision { grid-area: 1 / 1; z-index: 1; }
 .bb-call > .bb-decision[hidden] { display: none; }
 .bb-decision { display: flex; flex-direction: column; }
 .bb-decision__pad { padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
@@ -307,17 +282,7 @@ a { color: inherit; text-decoration: none; }
     </div>
     <div class="bb-callwrap">
       <div class="bb-call" id="bb-call"></div>
-      <!-- nav sits under the stack so the active card's top edge aligns with
-           the Charted Next card across the row -->
-      <div class="bb-stacknav">
-        <span class="bb-stacknav__count" id="bb-stack-count">-</span>
-        <button type="button" class="bb-stacknav__btn" id="bb-stack-prev" aria-label="Previous card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
-        <button type="button" class="bb-stacknav__btn" id="bb-stack-next" aria-label="Next card">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-        </button>
-      </div>
+      <div class="bb-stale" id="bb-stale"></div>
     </div>
   </section>
 
@@ -459,8 +424,9 @@ __FM_BEARINGS_BOARD_DATA__
 
   /* stat strip */
   var callTotal = data.captains_call.length;
+  var actionableTotal = data.captains_call.filter(function (item) { return !item.gate; }).length;
   var stats = [
-    { n: callTotal, l: "need you", call: true },
+    { n: actionableTotal, l: "need you", call: true },
     { n: data.underway.length, l: "underway" },
     { n: data.landed.length, l: "landed recently" },
     { n: chartedQueued(data.charted).length + chartedMoreQueued, l: "charted next" }
@@ -473,9 +439,9 @@ __FM_BEARINGS_BOARD_DATA__
     strip.appendChild(t);
   });
   document.getElementById("bb-call-sub").textContent =
-    callTotal ? callTotal + " item" + (callTotal === 1 ? "" : "s") + " wait on you, captain" : "nothing needs you, captain";
+    callTotal ? callTotal + " recorded call" + (callTotal === 1 ? "" : "s") + " · " + actionableTotal + " actionable" : "no active calls recorded; check coverage";
 
-  /* Captain's Call deck: every item renders as the same full card */
+  /* Captain's Call list: every item renders as the same full card */
   var deck = document.getElementById("bb-call");
   function ctxRow(k, v, rec) {
     var row = el("div", "bb-ctx__row" + (rec ? " bb-ctx__row--rec" : ""));
@@ -484,9 +450,24 @@ __FM_BEARINGS_BOARD_DATA__
     return row;
   }
 
-  data.captains_call.forEach(function (item) {
+  var orderedCalls = data.captains_call.map(function (item, index) { return {item:item, index:index}; });
+  orderedCalls.sort(function (a, b) {
+    var ownerA = a.item.owner || "(main)", ownerB = b.item.owner || "(main)";
+    return ownerA.localeCompare(ownerB) || (b.item.impact || 0) - (a.item.impact || 0) || a.index - b.index;
+  });
+  var previousOwner = null;
+  orderedCalls.forEach(function (entry, index) {
+    var item = entry.item;
+    var owner = item.owner || "(main)";
+    if (owner !== previousOwner) {
+      deck.appendChild(el("h3", "bb-owner", owner === "(main)" ? "Main home" : owner));
+      previousOwner = owner;
+    }
     var card = el("div", "fm-card fm-card--poster bb-decision");
     var pad = el("div", "bb-decision__pad");
+    var authoredOptions = item.options.filter(function (o) { return o.value !== "reconcile"; });
+    var recommended = authoredOptions.find(function (o) { return o.value === item.recommend_value; });
+    var incomplete = !authoredOptions.length || !recommended || authoredOptions.some(function (o) { return !o.hint || !o.hint.trim(); });
 
     var top = el("div", "bb-decision__top");
     if (item.type === "merge") {
@@ -496,9 +477,10 @@ __FM_BEARINGS_BOARD_DATA__
       top.appendChild(badge("solid", "decision"));
       top.appendChild(el("span", "bb-decision__repo", item.repo));
     }
+    if (incomplete) top.appendChild(badge("warn", "incomplete"));
     pad.appendChild(top);
 
-    pad.appendChild(el("h3", "bb-decision__title", item.title));
+    pad.appendChild(el("h3", "bb-decision__title", "D" + (index + 1) + " · " + item.title));
 
     if (item.type === "merge") {
       if (item.detail) pad.appendChild(el("p", "bb-decision__detail", item.detail));
@@ -507,14 +489,21 @@ __FM_BEARINGS_BOARD_DATA__
         pr.href = item.pr_url; pr.target = "_blank"; pr.rel = "noopener";
         pad.appendChild(pr);
       }
-    } else {
-      /* the rec marker on the option itself carries the recommendation */
-      var ctx = el("div", "bb-ctx");
-      if (item.about) ctx.appendChild(ctxRow("about", item.about));
-      if (item.decide) ctx.appendChild(ctxRow("decide", item.decide));
-      pad.appendChild(ctx);
     }
+    var ctx = el("div", "bb-ctx");
+    if (item.about) ctx.appendChild(ctxRow("about", item.about));
+    if (item.decide) ctx.appendChild(ctxRow("decide", item.decide));
+    if (item.type !== "merge" && item.detail) ctx.appendChild(ctxRow("context", item.detail));
+    if (!authoredOptions.length)
+      ctx.appendChild(ctxRow("options", "Missing options and consequences - ask firstmate to supply them"));
+    ctx.appendChild(ctxRow("recommend", recommended ? recommended.label : "Missing recommendation - ask firstmate to supply it"));
+    pad.appendChild(ctx);
 
+    if (item.gate) pad.appendChild(ctxRow("gate", item.gate));
+    var remoteOwner = owner !== "(main)";
+    pad.appendChild(ctxRow("answer", remoteOwner
+      ? "Tell firstmate your choice for " + owner + "/" + item.key + "; it must be recorded in that owner home."
+      : "Select an option or enter your answer, then Queue answer. You can also tell firstmate D" + (index + 1) + "."));
     var form = document.createElement("form");
     form.setAttribute("data-lavish-question", item.key);
     var opts = el("div", "bb-opts");
@@ -525,7 +514,8 @@ __FM_BEARINGS_BOARD_DATA__
       lab.appendChild(input);
       var body = el("span", "bb-opt__body");
       body.appendChild(el("span", "bb-opt__label", o.label));
-      if (o.hint) body.appendChild(el("span", "bb-opt__hint", o.hint));
+      if (o.hint && o.hint.trim()) body.appendChild(el("span", "bb-opt__hint", o.hint));
+      else if (o.value !== "reconcile") body.appendChild(el("span", "bb-opt__hint", "Missing consequence - ask firstmate to supply it"));
       lab.appendChild(body);
       if (item.recommend_value && o.value === item.recommend_value) {
         lab.appendChild(el("span", "bb-opt__rec", "rec"));
@@ -534,7 +524,7 @@ __FM_BEARINGS_BOARD_DATA__
     });
     form.appendChild(opts);
 
-    if (item.allow_freeform) {
+    if (item.allow_freeform || incomplete) {
       var ff = document.createElement("input");
       ff.type = "text"; ff.name = "note"; ff.className = "bb-freeform";
       ff.placeholder = item.freeform_hint || "or answer in your own words…";
@@ -544,6 +534,7 @@ __FM_BEARINGS_BOARD_DATA__
     var foot = el("div", "bb-decision__foot");
     var btn = el("button", "fm-btn fm-btn--sm " + (item.type === "merge" ? "fm-btn--gold" : "fm-btn--primary"), "Queue answer");
     btn.type = "submit";
+    btn.disabled = remoteOwner;
     foot.appendChild(btn);
     var q = el("span", "bb-queued");
     q.innerHTML = CHECK_SVG + " queued";
@@ -555,6 +546,7 @@ __FM_BEARINGS_BOARD_DATA__
 
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
+      if (remoteOwner) return;
       answerLimit.classList.remove("is-visible");
       var fd = new FormData(form);
       var value = fd.get("answer");
@@ -583,8 +575,7 @@ __FM_BEARINGS_BOARD_DATA__
         );
       }
       card.classList.add("is-queued");
-      /* deal the next card once this one is answered */
-      setTimeout(function () { showCard(active < cards.length - 1 ? active + 1 : active); }, 450);
+
     });
 
     pad.appendChild(form);
@@ -592,34 +583,17 @@ __FM_BEARINGS_BOARD_DATA__
     deck.appendChild(card);
   });
 
-  /* stack navigation: one card at a time, dealt off the pile */
-  var cards = Array.prototype.slice.call(deck.children);
-  var active = 0;
-  var stackCount = document.getElementById("bb-stack-count");
-  var stackPrev = document.getElementById("bb-stack-prev");
-  var stackNext = document.getElementById("bb-stack-next");
-  var stackNav = stackCount.parentNode;
-  function showCard(i) {
-    active = Math.max(0, Math.min(cards.length - 1, i));
-    cards.forEach(function (c, j) { c.hidden = j !== active; });
-    var answered = deck.querySelectorAll(".is-queued").length;
-    stackCount.textContent = "card " + (active + 1) + " of " + cards.length +
-      (answered ? " · " + answered + " answered" : "");
-    stackPrev.disabled = active === 0;
-    stackNext.disabled = active === cards.length - 1;
-    /* the pile thins as the deal approaches the bottom */
-    deck.classList.toggle("bb-call--penult", active === cards.length - 2);
-    deck.classList.toggle("bb-call--last", active === cards.length - 1);
-  }
-  if (cards.length) {
-    stackPrev.addEventListener("click", function () { showCard(active - 1); });
-    stackNext.addEventListener("click", function () { showCard(active + 1); });
-    showCard(0);
-  } else {
-    deck.classList.add("bb-call--empty");
-    deck.appendChild(el("div", "bb-empty", "Nothing needs your action right now."));
-    stackNav.hidden = true;
-  }
+  if (!orderedCalls.length) deck.appendChild(el("div", "bb-empty", "No actionable calls recorded in this board. Check snapshot coverage before treating the fleet as clear."));
+  var stale = document.getElementById("bb-stale");
+  stale.appendChild(el("h3", "bb-owner", "Stale candidates"));
+  if (!(data.stale_candidates || []).length) stale.appendChild(el("div", "bb-empty", "No stale candidates identified."));
+  (data.stale_candidates || []).forEach(function (item) {
+    var row = el("div", "bb-stale-row");
+    row.appendChild(el("h4", "bb-decision__title", (item.owner || "(main)") + " · " + item.title));
+    row.appendChild(el("p", "bb-decision__detail", item.stale_reason));
+    row.appendChild(el("p", "bb-decision__detail", "Ask firstmate to verify " + (item.owner || "(main)") + "/" + item.key + ". This view does not resolve tasks."));
+    stale.appendChild(row);
+  });
 
   /* Underway */
   var uw = document.getElementById("bb-underway");

@@ -689,7 +689,7 @@ test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief() {
   assert_trust_only_no_import_consent "$config/.claude.json" "$proj" \
     "the claude spawn lost project trust or added import approval"
   assert_present "$launch_log" "the claude spawn sent no launch command"
-  assert_grep 'claude --dangerously-skip-permissions' "$launch_log" \
+  assert_grep 'claude --allow-dangerously-skip-permissions --permission-mode auto' "$launch_log" \
     "the launch command was not the claude worker launch"
   launch=$(cat "$launch_log")
   doorbell=$(claude_launch_doorbell "$launch")
@@ -721,7 +721,7 @@ test_secondmate_standalone_clone_home_is_trusted() {
   assert_trusted "$case_dir/claude-config/.claude.json" "$home" \
     "the claude secondmate spawn did not pre-register trust for its standalone-clone home"
   assert_present "$case_dir/launch.log" "the claude secondmate spawn sent no launch command"
-  assert_grep 'claude --dangerously-skip-permissions' "$case_dir/launch.log" \
+  assert_grep 'claude --allow-dangerously-skip-permissions --permission-mode auto' "$case_dir/launch.log" \
     "the launch command was not the claude secondmate launch"
   launch=$(cat "$case_dir/launch.log")
   doorbell=$(claude_launch_doorbell "$launch")

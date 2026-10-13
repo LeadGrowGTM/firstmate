@@ -184,6 +184,18 @@ fm_cursor_resolve_binary() {
   return 1
 }
 
+fm_cursor_executable_candidate_exists() {
+  local name candidate
+  for name in cursor-agent agent; do
+    candidate=$(command -v "$name" 2>/dev/null || true)
+    [ -z "$candidate" ] || [ ! -x "$candidate" ] || return 0
+  done
+  for name in cursor-agent agent; do
+    [ -z "${HOME:-}" ] || [ ! -x "$HOME/.local/bin/$name" ] || return 0
+  done
+  return 1
+}
+
 # Read argv[0] without flattening it into a whitespace-delimited command line.
 fm_cursor_argv0_for_pid() {  # <pid> [comm-fallback]
   local pid=$1 fallback=${2:-} proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc} argv0=
@@ -240,4 +252,3 @@ fm_cursor_process_matches() {  # <comm> <args> [argv0]
   case "$comm" in */*) fm_cursor_path_is_cursor "$comm" && return 0 ;; esac
   return 1
 }
-

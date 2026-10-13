@@ -384,9 +384,10 @@ fm_control_wiring_json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+# Optional sixth argument: the Claude statusLine command spawn chose to add.
 fm_control_render_claude_settings() {
-  local FM_ROOT=$1 STATE_REAL=$2 ID=$3 BUSY_GEN=$4 TURNEND_NOTIFY=$5 TURNEND
-  local busy_cmd_prefix busy_suffix turnend_touch j_submit j_pretool j_stop j_stopfail j_sessionend
+  local FM_ROOT=$1 STATE_REAL=$2 ID=$3 BUSY_GEN=$4 TURNEND_NOTIFY=$5 STATUSLINE_CMD=${6:-} TURNEND
+  local busy_cmd_prefix busy_suffix turnend_touch j_submit j_pretool j_stop j_stopfail j_sessionend j_statusline
   [ -n "$BUSY_GEN" ] || return 1
   TURNEND="$STATE_REAL/$ID.turn-ended"
   busy_cmd_prefix="$(fm_control_wiring_shell_quote "$FM_ROOT/bin/fm-busy-event.sh") apply $(fm_control_wiring_shell_quote "$STATE_REAL") $(fm_control_wiring_shell_quote "$ID")"
@@ -398,8 +399,10 @@ fm_control_render_claude_settings() {
   j_stop=$(fm_control_wiring_json_escape "$turnend_touch$busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
   j_stopfail=$(fm_control_wiring_json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
   j_sessionend=$(fm_control_wiring_json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
+  j_statusline=
+  [ -z "$STATUSLINE_CMD" ] || j_statusline=",\"statusLine\":{\"type\":\"command\",\"command\":\"$(fm_control_wiring_json_escape "$STATUSLINE_CMD")\"}"
   cat <<EOF
-{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":".*","hooks":[{"type":"command","command":"$j_pretool"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":".*","hooks":[{"type":"command","command":"$j_pretool"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}$j_statusline}
 EOF
 }
 

@@ -194,6 +194,7 @@ new_case() {
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   printf '%s' fmses > "$dir/fake/session-name"
   make_tmux_stub "$dir"
+  fm_fake_exit0 "$dir/fakebin" claude
   printf '%s\n' "$dir"
 }
 
@@ -238,7 +239,7 @@ run_control() {  # <case-dir> <args...>
   mkdir -p "$dir/user-home"
   env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION -u HERDR_SOCKET_PATH \
     -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
-    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    PATH="$dir/fakebin:$PATH" FM_HOME="${FM_TEST_CONTROL_HOME:-$dir/home}" FM_FAKE_DIR="$dir/fake" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
@@ -2723,6 +2724,176 @@ SH
   pass "fm-control exit removes the dialog file before it releases the control lock"
 }
 
+
+test_scheduled_control_receipts() {
+  local dir out rc receipt
+  dir=$(new_case receipt-live rl-receipt-live)
+  add_ship_task "$dir" rl-receipt-live claude
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_control "$dir" rl-receipt-live relaunch --note "checkpoint for fallback"); rc=$?
+  expect_code 0 "$rc" "guarded continuation should confirm a live receipt: $out"
+  jq -e --arg gen "$(meta_field "$dir" rl-receipt-live spawn_gen)" \
+    '.outcome == "live-worker" and .exit_code == 0 and .spawn_gen == $gen and
+     .task == "rl-receipt-live" and .backend == "tmux" and .harness == "claude" and .launch_sent == true' "$receipt" >/dev/null \
+    || fail "live receipt must bind the confirmed replacement generation"
+
+  dir=$(new_case receipt-late rl-receipt-late)
+  add_ship_task "$dir" rl-receipt-late claude
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START=1 \
+    run_control "$dir" rl-receipt-late relaunch --note "checkpoint preserved after transport failure"); rc=$?
+  expect_code 1 "$rc" "late continuation transport failure should fail: $out"
+  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "a started replacement cannot grant prepublication retry authority"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "late-failure fixture must have started the replacement"
+  dir=$(new_case receipt-relative rl-receipt-relative)
+  add_ship_task "$dir" rl-receipt-relative claude
+  receipt="$dir/outcome.json"
+  out=$(cd "$dir" && FM_TEST_CONTROL_HOME=home FM_STATE_OVERRIDE=home/state \
+    FM_SPAWN_OUTCOME_FILE="$receipt" run_control "$dir" rl-receipt-relative relaunch --note "relative state checkpoint"); rc=$?
+  expect_code 0 "$rc" "relative state relaunch should confirm a receipt: $out"
+  jq -e '.outcome == "live-worker" and .exit_code == 0 and .launch_sent == true' "$receipt" >/dev/null \
+    || fail 'relative state did not produce a live receipt'
+  dir=$(new_case receipt-stop rl-receipt-stop)
+  add_ship_task "$dir" rl-receipt-stop claude
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP=1 \
+    run_control "$dir" rl-receipt-stop relaunch --note "checkpoint after partial stop"); rc=$?
+  expect_code 1 "$rc" "partial stop should fail closed: $out"
+  jq -e '.outcome == "uncertain" and .exit_code == 1 and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "a failed stop must remain uncertain without claiming a replacement launch"
+  pass "control receipts bind live confirmation and preserve late-launch uncertainty"
+}
+
+test_scheduled_control_fences_the_expected_generation() {
+  local dir out rc id=rl-generation meta brief
+  dir=$(new_case generation "$id")
+  add_ship_task "$dir" "$id" claude
+  meta="$dir/home/state/$id.meta"
+  brief="$dir/home/data/$id/brief.md"
+  printf 'spawn_gen=gen-2\n' >> "$meta"
+  cp "$meta" "$dir/meta-before"
+  cp "$brief" "$dir/brief-before"
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen gen-1 --note 'stale checkpoint'); rc=$?
+  expect_code 1 "$rc" "stale exhaustion generation must refuse: $out"
+  [[ "$out" == *generation*changed* ]] || fail 'refusal must identify the changed incarnation'
+  cmp -s "$dir/meta-before" "$meta" || fail 'stale generation changed G2 metadata'
+  cmp -s "$dir/brief-before" "$brief" || fail 'stale generation appended a checkpoint to G2 instructions'
+  [ ! -e "$dir/home/state/$id.control-relaunch" ] || fail 'stale generation recorded a relaunch checkpoint'
+  [ ! -e "$dir/home/state/$id.control-relaunch.note" ] || fail 'stale generation recorded a progress note'
+  [ ! -s "$dir/fake/literal" ] || fail 'stale generation sent lifecycle input to G2'
+  [ ! -s "$dir/fake/keys" ] || fail 'stale generation sent keys to G2'
+  [ "$(cat "$dir/fake/command")" = claude ] || fail 'stale generation stopped G2'
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen '' --note 'empty generation'); rc=$?
+  expect_code 1 "$rc" "an empty expected generation must refuse: $out"
+  cmp -s "$dir/meta-before" "$meta" || fail 'empty generation changed G2 metadata'
+  [ ! -s "$dir/fake/literal" ] || fail 'empty generation sent lifecycle input'
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen gen-2 --note 'current checkpoint'); rc=$?
+  expect_code 0 "$rc" "matching generation should relaunch: $out"
+  assert_grep 'current checkpoint' "$brief" 'matching generation did not carry its checkpoint'
+  [ -s "$dir/fake/literal" ] || fail 'matching generation did not launch a replacement'
+  pass 'scheduled control fences stale and empty generations before mutation, and relaunches the matching one'
+}
+
+test_scheduled_control_rechecks_generation_after_lock_admission() {
+  local dir out rc id=rl-generation-lock-race meta brief lock_hook
+  dir=$(new_case generation-lock-race "$id")
+  add_ship_task "$dir" "$id" claude
+  meta="$dir/home/state/$id.meta"
+  brief="$dir/home/data/$id/brief.md"
+  printf 'spawn_gen=gen-1\n' >> "$meta"
+  cp "$brief" "$dir/brief-before"
+
+  # Change only the fixture metadata immediately before the lock symlink is
+  # created. This places the generation transition after admission begins.
+  lock_hook="$dir/fakebin/ln"
+  cat > "$lock_hook" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = -s ] && [ "${3:-}" = "$FM_HOME/state/.control-rl-generation-lock-race.lock" ] \
+  && [ ! -e "$FM_FAKE_DIR/lock-generation-flipped" ]; then
+  sed 's/^spawn_gen=.*/spawn_gen=gen-2/' \
+    "$FM_HOME/state/rl-generation-lock-race.meta" > "$FM_FAKE_DIR/meta.gen-2"
+  mv "$FM_FAKE_DIR/meta.gen-2" "$FM_HOME/state/rl-generation-lock-race.meta"
+  : > "$FM_FAKE_DIR/lock-generation-flipped"
+fi
+exec /usr/bin/ln "$@"
+SH
+  chmod +x "$lock_hook"
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen gen-1 --note 'race checkpoint'); rc=$?
+  expect_code 1 "$rc" "changed generation at lock admission must refuse: $out"
+  [ -e "$dir/fake/lock-generation-flipped" ] || fail 'lock-boundary generation hook did not fire'
+  [[ "$out" == *generation*changed* ]] || fail 'refusal must identify the changed incarnation'
+  grep -E '^spawn_gen=gen-2$' "$meta" >/dev/null || fail 'lock-boundary metadata change was not preserved'
+  cmp -s "$dir/brief-before" "$brief" || fail 'generation race appended a checkpoint to G2 instructions'
+  [ ! -e "$dir/home/state/$id.control-relaunch" ] || fail 'generation race recorded a relaunch checkpoint'
+  [ ! -e "$dir/home/state/$id.control-relaunch.note" ] || fail 'generation race recorded a progress note'
+  [ ! -s "$dir/fake/literal" ] || fail 'generation race sent lifecycle input to G2'
+  [ ! -s "$dir/fake/keys" ] || fail 'generation race sent keys to G2'
+  [ "$(cat "$dir/fake/command")" = claude ] || fail 'generation race stopped the original worker'
+  pass 'scheduled control rechecks generation after lock admission and preserves the live worker'
+}
+
+test_scheduled_control_preflight_keeps_worker_live() {
+  local dir out rc receipt id=rl-preflight-missing
+  dir=$(new_case preflight-missing "$id")
+  add_ship_task "$dir" "$id" claude
+  receipt="$dir/outcome.json"
+  cp "$dir/home/state/$id.meta" "$dir/meta-before"
+  out=$(PATH="$(dirname "$(command -v jq)"):/usr/bin:/bin" FM_SPAWN_OUTCOME_FILE="$receipt" \
+    run_control "$dir" "$id" relaunch --harness opencode --note "continue on selected replacement"); rc=$?
+  expect_code 1 "$rc" "a missing replacement executable must refuse before stopping the worker: $out"
+  jq -e '.outcome == "worker-unavailable" and .reason == "selected-executable-missing-before-stop" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "a missing replacement executable must permit another selected candidate"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "the prior worker stopped for a missing replacement"
+  [ ! -s "$dir/fake/literal" ] || fail "a missing replacement sent lifecycle input"
+  cmp -s "$dir/meta-before" "$dir/home/state/$id.meta" || fail "a missing replacement changed the task record"
+
+  dir=$(new_case preflight-cursor rl-preflight-cursor)
+  add_ship_task "$dir" rl-preflight-cursor claude
+  cat > "$dir/fakebin/agent" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then /bin/sleep 2; fi
+exit 0
+SH
+  chmod +x "$dir/fakebin/agent"
+  receipt="$dir/outcome.json"
+  out=$(PATH=/usr/bin:/bin FM_CURSOR_PROBE_TIMEOUT=1 FM_SPAWN_OUTCOME_FILE="$receipt" \
+    run_control "$dir" rl-preflight-cursor relaunch --harness cursor --note "continue on Cursor"); rc=$?
+  expect_code 1 "$rc" "a timed-out Cursor identity probe must refuse: $out"
+  jq -e '.outcome == "uncertain" and .reason == "selected-executable-identity-inconclusive-before-stop" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "a timed-out Cursor identity probe must not grant fallback"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "Cursor identity timeout stopped the prior worker"
+  [ ! -s "$dir/fake/literal" ] || fail "Cursor identity timeout sent lifecycle input"
+
+  dir=$(new_case preflight-unknown rl-preflight-unknown)
+  add_ship_task "$dir" rl-preflight-unknown claude
+  mkdir -p "$dir/home/config" "$dir/work"
+  printf '%s\n' "$dir/work" > "$dir/home/config/claude-account"
+  cat > "$dir/fakebin/claude" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then exit 124; fi
+exit 0
+SH
+  chmod +x "$dir/fakebin/claude"
+  receipt="$dir/outcome.json"
+  out=$(FM_SPAWN_OUTCOME_FILE="$receipt" run_control "$dir" rl-preflight-unknown relaunch --note "continue after account check"); rc=$?
+  expect_code 1 "$rc" "an inconclusive replacement account check must refuse: $out"
+  jq -e '.outcome == "uncertain" and .reason == "selected-account-check-inconclusive-before-stop" and .launch_sent == false' "$receipt" >/dev/null \
+    || fail "an inconclusive replacement account check must block reselection"
+  [ "$(cat "$dir/fake/command")" = claude ] || fail "an inconclusive account check stopped the prior worker"
+  [ ! -s "$dir/fake/literal" ] || fail "an inconclusive account check sent lifecycle input"
+  pass "scheduled continuation distinguishes missing CLI from inconclusive account before stopping"
+}
+
+test_scheduled_control_receipts
+test_scheduled_control_fences_the_expected_generation
+test_scheduled_control_rechecks_generation_after_lock_admission
+test_scheduled_control_preflight_keeps_worker_live
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint

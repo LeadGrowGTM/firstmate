@@ -1094,6 +1094,121 @@ test_run_reports_a_failed_session_start_as_digest_text() {
   pass "run wrapper: a session start that cannot take the lock still opens the session and says so"
 }
 
+test_run_statusbar_uses_primary_or_detached_fleet() {
+  local root="$TMP_ROOT/run-statusbar" former_root="$TMP_ROOT/run-statusbar-former" real_tmux socket pane out long_task
+  command -v tmux >/dev/null 2>&1 || { echo 'skip: tmux not found'; return 0; }
+  make_run_primary "$root"
+  real_tmux=$(command -v tmux)
+  socket="fm-sessionstart-status-$$"
+  : >"$root/empty.conf"
+  cat >"$root/bin/tmux" <<SH
+#!/usr/bin/env bash
+exec "$real_tmux" -L "$socket" -f "$root/empty.conf" "\$@"
+SH
+  chmod +x "$root/bin/tmux"
+  PATH="$root/bin:$RUN_PATH" tmux new-session -d -s fleet -n primary 'sleep 600'
+  PATH="$root/bin:$RUN_PATH" tmux new-window -d -t fleet: -n worker 'sleep 600'
+  PATH="$root/bin:$RUN_PATH" tmux new-session -d -s unrelated 'sleep 600'
+  pane=$(PATH="$root/bin:$RUN_PATH" tmux display-message -p -t fleet:primary '#{pane_id}')
+  FM_HOME="$root" FM_STATE_OVERRIDE="$root/parent-state" PATH="$root/bin:$RUN_PATH" \
+    bash "$ROOT/bin/fm-statusbar.sh" label "$pane" run-statusbar codex gpt-6-sol high "$root"
+  mkdir -p "$root/parent-state"
+  printf 'backend=tmux\nwindow=fleet:primary\n' >"$root/parent-state/run-statusbar.meta"
+  cat >"$root/state/worker.meta" <<META
+backend=tmux
+window=fleet:worker
+harness=codex
+model=gpt-6-sol
+effort=high
+worktree=$root
+META
+  out=$(TMUX_PANE="$pane" RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
+  assert_not_contains "$out" 'READ-ONLY SESSION' "statusbar fixture failed to acquire its own lock"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_task)" = run-statusbar ] \
+    || fail "session start overwrote a spawned secondmate task"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_state)" = "$root/parent-state" ] \
+    || fail "session start claimed a spawned secondmate label"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_model)" = gpt-6-sol ] \
+    || fail "session start overwrote the spawned model"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_effort)" = high ] \
+    || fail "session start overwrote the spawned effort"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_account)" = codex-home ] \
+    || fail "session start overwrote the spawned account"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_provider)" = codex ] \
+    || fail "session start overwrote the spawned provider"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" = '#{E:pane-border-format}' ] \
+    || fail "session start did not format its primary pane's fleet"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t unrelated status-right)" != '#{E:pane-border-format}' ] \
+    || fail "session start formatted an unrelated session"
+  long_task=secondmate-task-id-longer-than-forty-characters-123456
+  PATH="$root/bin:$RUN_PATH" tmux new-window -d -t fleet: -n long 'sleep 600'
+  pane=$(PATH="$root/bin:$RUN_PATH" tmux display-message -p -t fleet:long '#{pane_id}')
+  FM_HOME="$root" FM_STATE_OVERRIDE="$root/parent-state" PATH="$root/bin:$RUN_PATH" \
+    bash "$ROOT/bin/fm-statusbar.sh" label "$pane" "$long_task" codex gpt-6-sol high "$root"
+  printf 'backend=tmux\nwindow=fleet:long\n' >"$root/parent-state/$long_task.meta"
+  out=$(TMUX_PANE="$pane" RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
+  assert_not_contains "$out" 'READ-ONLY SESSION' "long spawned task fixture lost its lock"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:long @fm_task)" = "$long_task" ] \
+    || fail "session start lost a full-length spawned task label"
+  PATH="$root/bin:$RUN_PATH" tmux new-window -d -t fleet: -n fresh 'sleep 600'
+  pane=$(PATH="$root/bin:$RUN_PATH" tmux display-message -p -t fleet:fresh '#{pane_id}')
+  out=$(TMUX_PANE="$pane" FM_PRIMARY_MODEL=gpt-6-astra FM_PRIMARY_EFFORT=xhigh \
+    RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
+  assert_not_contains "$out" 'READ-ONLY SESSION' "ordinary primary fixture lost its lock"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_model)" = gpt-6-astra ] \
+    || fail "ordinary primary did not receive its launch model"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_effort)" = xhigh ] \
+    || fail "ordinary primary did not receive its launch effort"
+  FM_HOME="$root" PATH="$root/bin:$RUN_PATH" bash "$ROOT/bin/fm-statusbar.sh" \
+    label "$pane" run-statusbar pi xai/grok-4.5 high "$root/old-home"
+  out=$(TMUX_PANE="$pane" FM_PRIMARY_MODEL='' FM_PRIMARY_EFFORT='' \
+    RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
+  assert_not_contains "$out" 'READ-ONLY SESSION' "relaunched primary fixture lost its lock"
+  [ -z "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_model)" ] \
+    || fail "relaunch kept a stale primary model"
+  [ -z "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_effort)" ] \
+    || fail "relaunch kept stale primary effort"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_provider)" != grok ] \
+    || fail "relaunch kept a stale primary provider"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_account)" != xai ] \
+    || fail "relaunch kept a stale primary account"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_wt)" = run-statusbar ] \
+    || fail "relaunch kept a stale primary worktree"
+  make_run_primary "$former_root"
+  PATH="$root/bin:$RUN_PATH" tmux new-window -d -t fleet: -n former 'sleep 600'
+  pane=$(PATH="$root/bin:$RUN_PATH" tmux display-message -p -t fleet:former '#{pane_id}')
+  FM_HOME="$former_root" FM_STATE_OVERRIDE="$former_root/state" PATH="$root/bin:$RUN_PATH" \
+    bash "$ROOT/bin/fm-statusbar.sh" label "$pane" former-home pi xai/grok-4.5 high "$former_root"
+  printf 'backend=tmux\nwindow=fleet:worker\n' >"$former_root/state/former-home.meta"
+  out=$(TMUX_PANE="$pane" RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
+  assert_not_contains "$out" 'READ-ONLY SESSION' "cross-home primary fixture lost its lock"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:former @fm_task)" = run-statusbar ] \
+    || fail "new primary kept the former home's task"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:former @fm_state)" = "$root/state" ] \
+    || fail "new primary kept the former home's cache"
+  [ -z "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:former @fm_model)" ] \
+    || fail "new primary kept the former home's model"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:former @fm_provider)" != grok ] \
+    || fail "new primary kept the former home's provider"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:former @fm_account)" != xai ] \
+    || fail "new primary kept the former home's account"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:former @fm_wt)" = run-statusbar ] \
+    || fail "new primary kept the former home's worktree"
+  PATH="$root/bin:$RUN_PATH" tmux new-session -d -s firstmate -n detached 'sleep 600'
+  PATH="$root/bin:$RUN_PATH" tmux set-option -t fleet status-right ''
+  PATH="$root/bin:$RUN_PATH" tmux set-option -t firstmate status-right ''
+  out=$(unset TMUX_PANE; RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
+  assert_not_contains "$out" 'READ-ONLY SESSION' "detached statusbar fixture lost its lock"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t firstmate status-right)" = '#{E:pane-border-format}' ] \
+    || fail "detached startup missed the firstmate session"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" != '#{E:pane-border-format}' ] \
+    || fail "detached startup formatted an older recorded task session"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t unrelated status-right)" != '#{E:pane-border-format}' ] \
+    || fail "detached startup formatted an unrelated session"
+  "$real_tmux" -L "$socket" kill-server
+  pass "session start preserves spawn facts and targets the primary or detached fleet"
+}
+
 test_genuine_primary_nudges
 test_gate_env_is_silent
 test_gate_common_dir_is_silent
@@ -1116,6 +1231,7 @@ test_run_gate_and_scope_are_silent
 test_run_creates_missing_state_on_a_fresh_primary
 test_run_reports_a_state_dir_it_cannot_create
 test_run_reports_a_failed_session_start_as_digest_text
+test_run_statusbar_uses_primary_or_detached_fleet
 test_pi_startup_classifies_cli_continuations
 test_pi_sessionstart_generation_prerequisite
 test_pi_reload_releases_sessionstart_exit_listener

@@ -538,10 +538,43 @@ The lab home was deleted and the test entry was removed from the store and verif
 That automated spawn case runs against a fake claude, so it asserts the store entry and the launch command and nothing more; the live arms above are what establish that the entry actually suppresses the dialog.
 The composer-classification record below observes the same gate from the other side, where an untrusted worktree left Claude, Grok, and Muse unverified because the guard reads a first-launch trust dialog as an unreadable composer.
 
+## Claude permission mode
+
+Verified 2026-10-13 on Claude Code 2.1.296.
+An absent `config/claude-permission-mode` launches `claude --allow-dangerously-skip-permissions --permission-mode auto`.
+The probe started that flag pair in a private tmux server from an already-trusted directory, submitted no prompt, and sent shift+tab (`BTab`) once per step.
+
+```
+== initial (claude 2.1.296) ==
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+== after shift+tab x1 ==
+  ⏸ manual mode on · ? for shortcuts · ← for agents
+== after shift+tab x2 ==
+  ⏵⏵ accept edits on (shift+tab to cycle) · ← for agents
+== after shift+tab x3 ==
+  ⏸ plan mode on (shift+tab to cycle) · ← for agents
+== after shift+tab x4 ==
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+== after shift+tab x5 ==
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+```
+
+The same cycle from `claude --permission-mode auto` alone returned from plan mode straight to auto mode, with no bypass step:
+
+```
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+  ⏸ manual mode on · ? for shortcuts · ← for agents
+  ⏵⏵ accept edits on (shift+tab to cycle) · ← for agents
+  ⏸ plan mode on (shift+tab to cycle) · ← for agents
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+```
+
+The probing host had already accepted the once-per-machine bypass confirmation, so this record does not establish whether the default launch meets that confirmation on a machine that never accepted it.
+
 ## Claude Remote Control launch flag
 
 Verified 2026-10-11 on Claude Code 2.1.296.
-`bin/fm-spawn.sh` adds `--remote-control 'fm-<id>'` to a Claude secondmate launch directly after the permission flag.
+`bin/fm-spawn.sh` adds `--remote-control 'fm-<id>'` to a Claude secondmate launch directly after the permission flags.
 The probe ran the secondmate launch shape in a private tmux server against a throwaway `HOME` and `CLAUDE_CONFIG_DIR`, signed in with a placeholder API key only, so no real account or session was involved.
 
 ```sh
@@ -776,7 +809,7 @@ None of these three runs ever answered its dialog (Escape only, never Enter), so
 
 ## Worker account pin sign-in check
 
-`bin/fm-worker-account-lib.sh` decides whether a pinned account is signed in from vendor output: the exit status of `claude auth status`, the JSON of `pi auth check`, and the provider column of `pi --list-models`.
+`bin/fm-worker-account-lib.sh` decides whether a pinned account is signed in from vendor output: the exit status of `claude auth status`, the JSON of `pi auth check`, and, only for the [documented fallback cases](../configuration.md#launch-scope-and-sign-in-checks), the provider column of `pi --list-models`.
 `tests/fm-worker-account-live-e2e.test.sh` asks the real installed runners about synthetic roots that need no login and no network, under a throwaway `HOME`.
 A Claude root whose `settings.json` names an `apiKeyHelper` reports `loggedIn: true`, a Pi root holding a stored API key reports `ready`, and a provider registered by an extension in the Pi root's `extensions/` answers `pi auth check` with `not_ready`/`provider_not_found` while `pi --list-models` lists it.
 Each refusal is paired with the divergence it depends on: the same runner, given `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or the extension's key variable, answers signed in for the empty root, so the refusal proves the check's cleared environment.
