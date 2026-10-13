@@ -1,0 +1,23 @@
+Firstmate real tmux spawn with configured root pointing at the other clone
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.g7S69o
+warning: /tmp/fm-lab.g7S69o/data/live-foreign-refuse/launch-brief.md records no ship branch; defaulting to legacy branch fm/live-foreign-refuse
+warning: /tmp/fm-lab.g7S69o/data/live-foreign-refuse/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+error: worktree '/tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget' is not a worktree of spawning project '/tmp/fm-lab.g7S69o/projects/widget'; refusing to launch a worker in another clone
+
+Post-refusal state:
+Foreign copy still exists: /tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget
+No task record or worker launch was published
+Foreign copy remains registered to home A clone
+node
+fm-live-foreign-refuse
+
+Treehouse persisted lease after refusal:
+{
+  "worktrees": [
+    {
+      "path": "/tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget",
+      "leased": true,
+      "lease_holder": "live-foreign-refuse"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+Fresh Firstmate spawn in a private tmux lab, with real Treehouse and Codex
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.Wqv4yT
+warning: /tmp/fm-lab.Wqv4yT/data/live-fallback/launch-brief.md records no ship branch; defaulting to legacy branch fm/live-fallback
+warning: /tmp/fm-lab.Wqv4yT/data/live-fallback/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned live-fallback harness=codex kind=ship mode=local-only yolo=on window=primary:fm-live-fallback worktree=/tmp/fm-lab.Wqv4yT/xdg-state/firstmate/fm-lab.Wqv4yT-4d7827/.treehouse/widget-e6eaa5/1/widget
+
+Published task worktree: /tmp/fm-lab.Wqv4yT/xdg-state/firstmate/fm-lab.Wqv4yT-4d7827/.treehouse/widget-e6eaa5/1/widget
+Worker pane cwd: /tmp/fm-lab.Wqv4yT/xdg-state/firstmate/fm-lab.Wqv4yT-4d7827/.treehouse/widget-e6eaa5/1/widget
+Foreign copy remains: /tmp/fm-lab.Wqv4yT/operator/.treehouse/widget-e6eaa5/1/widget
+Foreign copy Treehouse state: [{"leased":null,"lease_holder":null}]
+Home B copy Treehouse state: [{"leased":true,"lease_holder":"live-fallback"}]
+
+Worker CLI pane:
+  Welcome to Codex, OpenAI's command-line coding agent
+
+  Sign in with ChatGPT to use Codex as part of your paid plan
+  or connect an API key for usage-based billing
+
+> 1. Sign in with ChatGPT
+     Usage included with Plus, Pro, Business, and Enterprise plans
+
+  2. Sign in with Device Code
+     Sign in from another device with a one-time code
+
+  3. Provide your own API key
+     Pay for what you use
+
+  Press enter to continue
+
+
+
+
+
+
+
+
+

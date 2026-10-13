@@ -1,0 +1,17 @@
+Firstmate spawn of this home clone from a scratch configured pool
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.g7S69o
+warning: /tmp/fm-lab.g7S69o/data/live-own-launch/launch-brief.md records no ship branch; defaulting to legacy branch fm/live-own-launch
+warning: /tmp/fm-lab.g7S69o/data/live-own-launch/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned live-own-launch harness=codex kind=ship mode=local-only yolo=on window=primary:fm-live-own-launch worktree=/tmp/fm-lab.g7S69o/own-configured-pool/.treehouse/widget-5a3ac9/1/widget
+
+Published task record:
+window=primary:fm-live-own-launch
+endpoint_task_id=live-own-launch
+worktree=/tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget
+project=/tmp/fm-lab.g7S69o/projects/widget
+harness=codex
+kind=ship
+mode=local-only
+yolo=on
+branch=fm/live-own-launch
+Worker pane cwd: /tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget

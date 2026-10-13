@@ -1,0 +1,14 @@
+Firstmate relaunch of an existing task whose recorded copy belongs to the other clone
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.g7S69o
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 155s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: /tmp/fm-lab.g7S69o/data/live-own-launch/launch-brief.md records no ship branch; defaulting to legacy branch fm/live-own-launch
+warning: /tmp/fm-lab.g7S69o/data/live-own-launch/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+spawned live-own-launch harness=codex kind=ship mode=local-only yolo=on window=primary:fm-live-own-launch worktree=/tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget
+Recorded worktree: /tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget
+Relaunched pane cwd: /tmp/fm-lab.g7S69o/configured-pool/.treehouse/widget-5a3ac9/1/widget

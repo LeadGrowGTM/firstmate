@@ -1,0 +1,12 @@
+Real Treehouse: shared default pool and per-home lease
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-5a3ac9/1/widget. Run 'treehouse return ~/.treehouse/widget-5a3ac9/1/widget' to release it.
+Selected by home B: /tmp/fm-lab.g7S69o/operator/.treehouse/widget-5a3ac9/1/widget
+Firstmate clone ownership: foreign copy rejected
+🌳 Worktree returned to pool.
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-5a3ac9/1/widget. Run 'treehouse return ~/.treehouse/widget-5a3ac9/1/widget' to release it.
+Per-home lease: /tmp/fm-lab.g7S69o/xdg-state/firstmate/fm-lab.g7S69o-48b551/.treehouse/widget-5a3ac9/1/widget
+Per-home lease belongs to home B and uses its isolated pool
+🌳 Worktree returned to pool.
+Scratch leases returned
