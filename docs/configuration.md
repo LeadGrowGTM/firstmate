@@ -1151,7 +1151,7 @@ Its header owns the exact treehouse flags, exit codes, record files, and time bo
 ### Prune after cleanup
 
 After a cleanup returns a copy to a pool, Firstmate asks Treehouse to safe prune the project's configured pool and, when a per-home slot is detected, attempts a second prune.
-A prune that fails, times out, or declines to run prints one warning and never fails the cleanup, which has already finished.
+A failed or timed-out prune prints one warning and never fails the cleanup, which has already finished.
 A pool that another launch or cleanup is using at that moment is skipped silently and can be reclaimed by a later cleanup or daily sweep while it remains in the guard's selected location.
 Because a returned copy whose work has landed is exactly what treehouse prunes, the next launch on that project usually creates a fresh copy instead of reusing a returned one.
 
@@ -1175,7 +1175,7 @@ A reported finding is a recommendation, not cleanup authority.
 
 - It never asks treehouse to remove a copy that is unlanded, in use, or leased, and it never prunes by age.
 - It does not scan another home's project clones or per-home pool directories.
-  It invokes prune from this home's project clones and from a detected per-home pool; a clone-local root can redirect both invocations.
+  It invokes prune from this home's project clones, with a second call when a per-home slot is detected; a clone-local root can redirect both invocations.
 - It never makes a machine-wide treehouse call: each treehouse command is `treehouse prune --yes` run from a project clone.
   The size checks are read-only measurements taken with `du`.
 
@@ -1183,7 +1183,7 @@ Treehouse still keys its default pool by directory name plus origin, so two clon
 A fresh launch asks Treehouse for a copy first and keeps it only when it is a worktree of the spawning clone.
 When treehouse hands it another clone's idle copy, the launch leaves that copy at once and attempts to lease a worktree of its own clone using this home's per-home pool folder.
 The per-home pool folder is named under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/`; a clone-local `treehouse.toml` root can select a different Treehouse location.
-`<home>` is the home's folder name and `<hash>` is the first six hex digits of the sha256 of the home's absolute path, so two homes with one folder name stay apart.
+`<home>` is the home's folder name and `<hash>` is the first six hex digits of the sha256 of the home's physical path, so two homes with one folder name stay apart.
 On the ordinary fallback path, treehouse resets the idle copy it offered to the default branch before handing it over, and takes it back unleased when the launch leaves it; no copy is added there.
 Treehouse reads its default pool location from `HOME`, so that lease and its prune run treehouse with `HOME` set to the pool folder, while every git process it starts keeps the operator's `HOME`, git configuration, and credential helpers.
 The user-level treehouse configuration therefore does not apply to this pool; a `treehouse.toml` in the clone still does.
