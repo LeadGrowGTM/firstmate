@@ -281,8 +281,8 @@
 #   that subshell, which returns the copy, and attempts a lease using this
 #   home's pool folder (bin/fm-wake-lib.sh's fm_treehouse_home_pool, under the user
 #   state directory). A lease that is still another clone is not returned and
-#   the launch stops. Relaunch resumes in the recorded worktree whichever clone it
-#   belongs to. Orca and secondmate launches do not use this pool.
+#   the launch stops. Relaunch resumes in the recorded worktree; Claude refuses
+#   a recorded copy from another clone. Orca and secondmate launches do not use this pool.
 #   That worktree isolation is proven only at launch. Every ship or scout pane therefore
 #   also receives `export FM_TASK_ID=<task-id>` before the launch command, on
 #   the same channel as GOTMPDIR, and bin/fm-test-run.sh refuses to execute the
@@ -3210,6 +3210,16 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
+if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" != secondmate ]; then
+  case "$HARNESS" in
+    claude*)
+      if ! fm_treehouse_same_clone "$PROJ_ABS" "$RELAUNCH_WT"; then
+        echo "error: Claude relaunch refused: recorded worktree '$RELAUNCH_WT' is not a worktree of recorded project '$PROJ_ABS'" >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
 # Project capacity admission (bin/fm-project-capacity-lib.sh owns the
 # declaration, what holds a place, and why this is race-safe). A fresh worker
 # for a project whose declared capacity is already held is deferred here, before
@@ -4530,18 +4540,17 @@ spawn_wait_left_path() {  # <path>
 }
 
 spawn_lease_clone_worktree() {
-  local errfile leased rc=0 bound=${FM_SPAWN_TREEHOUSE_LEASE_SECS:-600}
-  case "$bound" in ''|*[!0-9]*|0*) bound=600 ;; esac
+  local errfile leased rc=0
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
     {
       cd "$PROJ_ABS" &&
-        fm_treehouse_home_pool_run "$FM_HOME" "$bound" get --lease --lease-holder "$ID"
+        fm_treehouse_home_pool_run "$FM_HOME" 600 get --lease --lease-holder "$ID"
     } 2>"$errfile"
   ) || rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$leased" ]; then
     if fm_timed_out "$rc"; then
-      echo "error: leasing a worktree of '$PROJ_ABS' from this home's own pool did not finish in ${bound}s" >&2
+      echo "error: leasing a worktree of '$PROJ_ABS' from this home's own pool did not finish in 600s" >&2
     else
       echo "error: could not lease a worktree of '$PROJ_ABS' from this home's own pool (treehouse exit $rc)" >&2
     fi

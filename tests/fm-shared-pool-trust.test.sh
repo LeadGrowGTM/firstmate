@@ -60,10 +60,17 @@ case "$*" in
     fi
     exit 0
     ;;
+  *"#{pane_current_command}"*)
+    printf 'bash\n'
+    exit 0
+    ;;
+  *"#{pane_tty}"*)
+    exit 0
+    ;;
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  list-windows) [ -z "${FM_FAKE_RELAUNCH_WINDOW:-}" ] || printf '%s\n' "$FM_FAKE_RELAUNCH_WINDOW"; exit 0 ;;
   has-session|new-session|new-window|kill-window|set-window-option) exit 0 ;;
   send-keys)
     if [ -n "${FM_FAKE_PANE_LOG:-}" ]; then
@@ -425,6 +432,37 @@ test_spawn_keeps_the_shared_copy_of_its_own_clone() {
   pass "a shared copy of the spawning clone is kept"
 }
 
+test_claude_relaunch_refuses_a_recorded_copy_of_another_clone() {
+  local id=pool-foreign-relaunch case_dir=$TMP_ROOT/spawn-foreign-relaunch
+  local foreign pane_log tree_log out status=0
+  prepare_spawn_home "$case_dir" "$id"
+  foreign=$case_dir/shared-pool/1/widget
+  add_worktree "$case_dir/other/projects/widget" "$foreign"
+  {
+    printf 'window=fake:fm-%s\n' "$id"
+    printf 'endpoint_task_id=%s\n' "$id"
+    printf 'worktree=%s\n' "$foreign"
+    printf 'project=%s\n' "$CASE_HOME/projects/widget"
+    printf 'harness=claude\nkind=ship\nmode=no-mistakes\nyolo=off\n'
+    printf 'branch=fm/%s\n' "$id"
+  } > "$CASE_HOME/state/$id.meta"
+  pane_log=$case_dir/pane.log
+  tree_log=$case_dir/treehouse.log
+  : > "$pane_log"
+  : > "$tree_log"
+  fm_fake_exit0 "$CASE_FAKEBIN" claude
+  out=$(FM_FAKE_RELAUNCH_WINDOW="fm-$id" FM_FAKE_PANE_LOG="$pane_log" \
+    FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    fm_test_run_spawn "$CASE_HOME" "$foreign" "$CASE_FAKEBIN" "$id" --relaunch --harness claude) || status=$?
+  [ "$status" -ne 0 ] || fail "Claude relaunched in a copy of another clone"$'\n'"$out"
+  assert_contains "$out" "Claude relaunch refused" "the refusal did not name the Claude relaunch"
+  assert_contains "$out" "$foreign" "the refusal did not name the recorded worktree"
+  assert_contains "$out" "$CASE_HOME/projects/widget" "the refusal did not name the recorded project"
+  [ ! -s "$pane_log" ] || fail "the refused relaunch sent a command to the pane"
+  [ ! -s "$tree_log" ] || fail "the refused relaunch touched a treehouse pool"
+  pass "Claude relaunch refuses a foreign recorded copy before launch"
+}
+
 # Lease from a home's own pool with the real binary. The clone's origin is an
 # alias only the operator's global git configuration rewrites to the real
 # repository, so the fetch treehouse runs succeeds only when its git still
@@ -513,6 +551,7 @@ test_spawn_refuses_a_configured_foreign_lease_without_returning_it
 test_spawn_that_stops_after_the_lease_returns_it
 test_spawn_keeps_lease_after_dispatch_rollback_with_open_endpoint
 test_spawn_keeps_the_shared_copy_of_its_own_clone
+test_claude_relaunch_refuses_a_recorded_copy_of_another_clone
 test_real_treehouse_leases_from_the_homes_own_pool_with_the_operators_git
 
 echo "# all fm-shared-pool-trust tests passed"

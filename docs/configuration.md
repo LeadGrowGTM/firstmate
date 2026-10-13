@@ -1187,9 +1187,10 @@ The per-home pool folder is named under `${XDG_STATE_HOME:-~/.local/state}/first
 On the ordinary fallback path, treehouse resets the idle copy it offered to the default branch before handing it over, and takes it back unleased when the launch leaves it; no copy is added there.
 Treehouse reads its default pool location from `HOME`, so that lease and its prune run treehouse with `HOME` set to the pool folder, while every git process it starts keeps the operator's `HOME`, git configuration, and credential helpers.
 The user-level treehouse configuration therefore does not apply to this pool; a `treehouse.toml` in the clone still does.
-The lease is bounded by `FM_SPAWN_TREEHOUSE_LEASE_SECS` (default 600), and a fetch that would prompt for credentials fails instead of waiting.
+The lease is bounded to 600 seconds, and a fetch that would prompt for credentials fails instead of waiting.
 A launch that still cannot get a worktree of its own clone stops before the worker starts.
-Relaunch resumes in the recorded worktree even if it belongs to another clone.
+Relaunch resumes in the recorded worktree; a Claude relaunch refuses an old record whose worktree belongs to another clone and names both the worktree and recorded project.
+Non-Claude relaunches continue to use their recorded worktree.
 If a clone-local `treehouse.toml` root redirects the fallback lease to another clone's copy, the launch refuses it and does not force-return that foreign copy; a stopped launch returns only a lease of its own clone.
 The attempted `get --lease` may already have marked that foreign copy leased, so the refusal leaves its Treehouse state for the pool owner to inspect.
 Git still refuses to remove a worktree from a clone that does not own it, so a shared pool is not cleared by the other home.

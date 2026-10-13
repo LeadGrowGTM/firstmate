@@ -243,16 +243,29 @@ measure_treehouse_root() {  # <resolved-root> <display-root>
   append_finding "worktree copies use $(awk -v k="$kib" 'BEGIN { printf "%.1f", k / 1048576 }') GB under $display (limit $SIZE_LIMIT_GB GB)"
 }
 
+resolve_treehouse_root() {  # <display-root>
+  local root=$1
+  TREEHOUSE_ROOT_REAL=
+  if [ -d "$root" ] || [ -L "$root" ]; then
+    TREEHOUSE_ROOT_REAL=$(CDPATH='' cd -- "$root" 2>/dev/null && pwd -P) || {
+      TREEHOUSE_ROOT_REAL=
+      append_finding "size of $root could not be measured (root could not be resolved)"
+    }
+  fi
+}
+
 sweep_size() {
   local pool default= default_real= pool_root= pool_real=
   if [ -n "${HOME:-}" ]; then
     default=$HOME/.treehouse
-    default_real=$(CDPATH='' cd -- "$default" 2>/dev/null && pwd -P) || default_real=
+    resolve_treehouse_root "$default"
+    default_real=$TREEHOUSE_ROOT_REAL
   fi
   pool=$(fm_treehouse_home_pool "$FM_HOME" 2>/dev/null || true)
   if [ -n "$pool" ]; then
     pool_root=$pool/.treehouse
-    pool_real=$(CDPATH='' cd -- "$pool_root" 2>/dev/null && pwd -P) || pool_real=
+    resolve_treehouse_root "$pool_root"
+    pool_real=$TREEHOUSE_ROOT_REAL
   fi
   if [ -n "$default_real" ] && [ -n "$pool_real" ]; then
     case "$pool_real/" in
