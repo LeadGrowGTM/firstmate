@@ -374,6 +374,94 @@ fm_control_claude_settings_operator_owned() {  # <worktree>
     ! grep -qF 'fm-busy-event.sh' "$1/.claude/settings.local.json" 2>/dev/null
 }
 
+fm_control_wiring_shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+fm_control_wiring_json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+fm_control_render_claude_settings() {
+  local FM_ROOT=$1 STATE_REAL=$2 ID=$3 BUSY_GEN=$4 TURNEND_NOTIFY=$5 TURNEND
+  local busy_cmd_prefix busy_suffix turnend_touch j_submit j_pretool j_stop j_stopfail j_sessionend
+  [ -n "$BUSY_GEN" ] || return 1
+  TURNEND="$STATE_REAL/$ID.turn-ended"
+  busy_cmd_prefix="$(fm_control_wiring_shell_quote "$FM_ROOT/bin/fm-busy-event.sh") apply $(fm_control_wiring_shell_quote "$STATE_REAL") $(fm_control_wiring_shell_quote "$ID")"
+  busy_suffix="--gen $(fm_control_wiring_shell_quote "$BUSY_GEN") --source claude-hook"
+  turnend_touch=
+  [ "$TURNEND_NOTIFY" -eq 0 ] || turnend_touch="touch $(fm_control_wiring_shell_quote "$TURNEND"); "
+  j_submit=$(fm_control_wiring_json_escape "$busy_cmd_prefix busy $busy_suffix --event user-prompt-submit 2>/dev/null || true")
+  j_pretool=$(fm_control_wiring_json_escape "$busy_cmd_prefix busy $busy_suffix --event pre-tool-use >/dev/null 2>&1 || true")
+  j_stop=$(fm_control_wiring_json_escape "$turnend_touch$busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
+  j_stopfail=$(fm_control_wiring_json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
+  j_sessionend=$(fm_control_wiring_json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
+  cat <<EOF
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":".*","hooks":[{"type":"command","command":"$j_pretool"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
+EOF
+}
+
+fm_control_render_opencode_plugin() {
+  local FM_ROOT=$1 STATE_REAL=$2 ID=$3 BUSY_GEN=$4 JS_TURNEND_NOTIFY=$5 TURNEND
+  [ -n "$BUSY_GEN" ] || return 1
+  TURNEND="$STATE_REAL/$ID.turn-ended"
+  cat <<EOF
+// Firstmate semantic busy-state events + turn-end notification; written by
+// fm-spawn under the contract owned by bin/fm-busy-lib.sh.
+// Semantic state comes from OpenCode's session.status events: busy and retry
+// are active, idle is inactive. Scoping latches the first session that
+// reports activity (the worker's main session - a subagent child session can
+// only start while the main session is already busy) and ignores other
+// sessions' status until the latched session settles, so a child's idle can
+// never clear the worker's busy state. The session.idle touch stays the
+// watcher's wake NOTIFICATION, never current-state truth, and a secondmate
+// launch writes none (notifyTurnEnd false).
+import { execFile } from "node:child_process";
+const notifyTurnEnd = $JS_TURNEND_NOTIFY;
+const busyEvent = (state, event) =>
+  new Promise((resolve) => {
+    execFile("$FM_ROOT/bin/fm-busy-event.sh", [
+      "apply", "$STATE_REAL", "$ID", state,
+      "--gen", "$BUSY_GEN", "--source", "opencode-plugin", "--event", event,
+    ], () => resolve());
+  });
+export const FmBusyState = async () => {
+  let activeSession = null;
+  return {
+    event: async ({ event }) => {
+      if (event.type === "session.status") {
+        const sessionID = event.properties.sessionID;
+        const statusType = event.properties.status && event.properties.status.type;
+        if (statusType === "busy" || statusType === "retry") {
+          if (activeSession === null) activeSession = sessionID;
+          if (sessionID === activeSession) await busyEvent("busy", "session-" + statusType);
+          return;
+        }
+        if (statusType === "idle" && sessionID === activeSession) {
+          activeSession = null;
+          await busyEvent("idle", "session-status-idle");
+        }
+        return;
+      }
+      if (event.type === "session.idle") {
+        if (event.properties.sessionID === activeSession) {
+          activeSession = null;
+          await busyEvent("idle", "session-idle");
+        }
+        if (notifyTurnEnd) {
+          await new Promise((resolve) => {
+            execFile("touch", ["$TURNEND"], () => resolve());
+          });
+        }
+      }
+    },
+  };
+};
+EOF
+}
+
 # The per-task wiring artifacts a harness leaves behind, so a relaunch that
 # changes harness (or re-arms the same one with a fresh busy generation) can
 # clear the previous incarnation's wiring instead of leaving a stale hook

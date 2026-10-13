@@ -1969,7 +1969,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -1993,12 +1993,33 @@ validate_worktree_teardown_safety() {
     return 1
   fi
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    state_real=$(cd "$STATE" && pwd -P) || return 1
     dirty=
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       case "$line" in
         '?? .fm-grok-turnend'|'!! .fm-grok-turnend') suffix=grok ; pointer=.fm-grok-turnend ;;
         '?? .fm-kimi-turnend'|'!! .fm-kimi-turnend') suffix=kimi ; pointer=.fm-kimi-turnend ;;
+        '?? .claude/settings.local.json'|'!! .claude/settings.local.json')
+          if [ -n "$BUSY_GEN" ] \
+            && [ -f "$WT/.claude/settings.local.json" ] && [ ! -L "$WT/.claude/settings.local.json" ] \
+            && cmp -s "$WT/.claude/settings.local.json" \
+              <(fm_control_render_claude_settings "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" 1); then
+            continue
+          fi
+          dirty="${dirty:+$dirty$'\n'}$line"
+          continue
+          ;;
+        '?? .opencode/plugins/fm-busy-state.js'|'!! .opencode/plugins/fm-busy-state.js')
+          if [ -n "$BUSY_GEN" ] \
+            && [ -f "$WT/.opencode/plugins/fm-busy-state.js" ] && [ ! -L "$WT/.opencode/plugins/fm-busy-state.js" ] \
+            && cmp -s "$WT/.opencode/plugins/fm-busy-state.js" \
+              <(fm_control_render_opencode_plugin "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" true); then
+            continue
+          fi
+          dirty="${dirty:+$dirty$'\n'}$line"
+          continue
+          ;;
         *) dirty="${dirty:+$dirty$'\n'}$line"; continue ;;
       esac
       token=$(cat "$STATE/$ID.$suffix-turnend-token" 2>/dev/null || true)

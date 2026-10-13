@@ -4,6 +4,8 @@
 set -eu
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=bin/fm-control-lib.sh
+. "$ROOT/bin/fm-control-lib.sh"
 fm_git_identity sweep-test sweep@example.invalid
 TMP_ROOT=$(fm_test_tmproot fm-deadweight-sweep)
 SWEEP="$ROOT/bin/fm-deadweight-sweep.sh"
@@ -170,6 +172,47 @@ test_ignored_work_kept() {
   assert_present "$home/state/task.meta" 'edited settings record kept'
   assert_present "$home/worker/.claude/settings.local.json" 'edited settings file kept'
   pass 'sweep preserves ignored operator files'
+}
+
+test_generated_wiring_exact_and_edited() {
+  local harness home out path state_real
+  for harness in claude opencode; do
+    home=$(make_home "$harness-exact"); add_worker "$home"
+    printf 'busy_gen=sweep-generation\n' >> "$home/state/task.meta"
+    state_real=$(cd "$home/state" && pwd -P)
+    if [ "$harness" = claude ]; then
+      path=.claude/settings.local.json
+      mkdir -p "$home/worker/.claude"
+      fm_control_render_claude_settings "$ROOT" "$state_real" task sweep-generation 1 > "$home/worker/$path"
+    else
+      path=.opencode/plugins/fm-busy-state.js
+      mkdir -p "$home/worker/.opencode/plugins"
+      fm_control_render_opencode_plugin "$ROOT" "$state_real" task sweep-generation true > "$home/worker/$path"
+    fi
+    printf '%s\n' "$path" >> "$home/projects/project/.git/info/exclude"
+    out=$(sweep "$home")
+    assert_contains "$out" 'swept: 1 workers, 1 copies' "$harness exact wiring swept"
+    assert_absent "$home/state/task.meta" "$harness exact wiring record removed"
+    assert_absent "$home/worker" "$harness exact wiring copy removed"
+
+    home=$(make_home "$harness-edited"); add_worker "$home"
+    printf 'busy_gen=sweep-generation\n' >> "$home/state/task.meta"
+    state_real=$(cd "$home/state" && pwd -P)
+    if [ "$harness" = claude ]; then
+      mkdir -p "$home/worker/.claude"
+      fm_control_render_claude_settings "$ROOT" "$state_real" task sweep-generation 1 > "$home/worker/$path"
+    else
+      mkdir -p "$home/worker/.opencode/plugins"
+      fm_control_render_opencode_plugin "$ROOT" "$state_real" task sweep-generation true > "$home/worker/$path"
+    fi
+    printf 'operator edit\n' >> "$home/worker/$path"
+    printf '%s\n' "$path" >> "$home/projects/project/.git/info/exclude"
+    out=$(sweep "$home")
+    assert_contains "$out" 'uncommitted changes' "$harness edited wiring refused"
+    assert_present "$home/state/task.meta" "$harness edited wiring record kept"
+    assert_grep 'operator edit' "$home/worker/$path" "$harness edited wiring kept"
+  done
+  pass 'sweep removes exact Claude and OpenCode wiring and keeps edits'
 }
 
 test_missing_copy_remote_branch_kept_until_merged() {
@@ -461,6 +504,7 @@ test_detached_sweep_survives_watcher_timeout() {
 test_clean_stopped_and_idempotence
 test_changes_kept
 test_ignored_work_kept
+test_generated_wiring_exact_and_edited
 test_missing_copy_remote_branch_kept_until_merged
 test_decisions_secondmates_and_unknown_kept
 test_recorded_pr_kept_until_merged
