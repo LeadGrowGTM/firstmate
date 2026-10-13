@@ -1,0 +1,2 @@
+Changed tracked path: bin/fm-schedule-check.sh
+Runner --list --changed selection: tests/fm-schedule-check.test.sh

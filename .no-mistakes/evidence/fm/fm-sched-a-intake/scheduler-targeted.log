@@ -1,0 +1,28 @@
+FM_TEST_BEGIN 2026-10-13T20:37:59Z tests/fm-schedule-check.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - absent/disabled config is off; explicit arm uses authenticated registration
+ok - arm and disarm refuse a foreign authenticated check
+ok - failed rearm restores the prior shim and trust together
+ok - daily gate, frozen brief, ordinary backlog intake, downtime and lifecycle receipts
+ok - disabled and removed schedules reconcile filed task lifecycle without new detection
+ok - simultaneous polls converge on one occurrence and wake
+ok - bounded batch preserves remaining intent and continues past queued jobs
+ok - five pending jobs advance past a repeatedly failing first job
+ok - interval gates and backward clock preserve successful receipt
+ok - cadence edits retain completed active slots and prune expired identities
+ok - interval identity follows the UTC window across cadence edits
+ok - daily gate edits cannot repeat a completed local date
+ok - timezone edits retain completed local-date identity while its slot is active
+ok - completed local date survives until it ends in every possible zone
+ok - spring gap catches up; fall repeat stays one occurrence per local date
+ok - whole-config validation refuses executable fields and reports one failure episode
+ok - uncertain durable add reuses frozen occurrence and existing backlog row
+ok - disappeared or quickly archived task stays pending without duplicate recreation
+ok - task-type request freezes owner section and leaves worker profile to current intake
+ok - task-type renderer failures name the rejected type and project
+ok - watcher timeout bound preserves retry and recovers stale operation lock
+ok - unsafe journal/config destinations are refused
+ok - authenticated shim reaches production watcher with isolated backend double
+FM_TEST_END 2026-10-13T20:39:45Z tests/fm-schedule-check.test.sh exit=0 duration_ms=106364 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=106485
+FM_TEST_SUMMARY_FAMILY family=watcher-wake-lock count=1 duration_ms=106364 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-schedule-check.test.sh duration_ms=106364
