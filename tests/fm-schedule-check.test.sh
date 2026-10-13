@@ -60,6 +60,49 @@ bash "$CHECK" disarm >/dev/null
 [ ! -e "$FM_HOME/state/scheduled-work.check.sh" ] || fail 'disarm retained shim'
 pass 'absent/disabled config is off; explicit arm uses authenticated registration'
 
+world foreign-check
+config
+printf '#!/usr/bin/env bash\nexit 0\n' > "$FM_HOME/state/scheduled-work.check.sh"
+chmod 0700 "$FM_HOME/state/scheduled-work.check.sh"
+bash "$ROOT/bin/fm-check-register.sh" scheduled-work >/dev/null
+cp "$FM_HOME/state/scheduled-work.check.sh" "$FM_HOME/foreign-shim"
+cp "$FM_HOME/state/scheduled-work.check-trust" "$FM_HOME/foreign-trust"
+OUT=$(bash "$CHECK" arm 2>&1) && fail 'arm replaced a foreign scheduled-work check'
+assert_contains "$OUT" 'not scheduler-owned' 'foreign arm refusal lacked ownership evidence'
+OUT=$(bash "$CHECK" disarm 2>&1) && fail 'disarm removed a foreign scheduled-work check'
+assert_contains "$OUT" 'not scheduler-owned' 'foreign disarm refusal lacked ownership evidence'
+cmp -s "$FM_HOME/foreign-shim" "$FM_HOME/state/scheduled-work.check.sh" || fail 'foreign shim changed'
+cmp -s "$FM_HOME/foreign-trust" "$FM_HOME/state/scheduled-work.check-trust" || fail 'foreign trust changed'
+fm_custom_check_registered "$FM_HOME/state" scheduled-work || fail 'foreign check lost its authenticated trust'
+pass 'arm and disarm refuse a foreign authenticated check'
+
+world failed-rearm
+config
+bash "$CHECK" arm >/dev/null
+cp "$FM_HOME/state/scheduled-work.check.sh" "$FM_HOME/prior-shim"
+cp "$FM_HOME/state/scheduled-work.check-trust" "$FM_HOME/prior-trust"
+REAL_MV=$(command -v mv)
+export REAL_MV
+mkdir -p "$FM_HOME/fakebin"
+cat > "$FM_HOME/fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+for arg; do target=$arg; done
+if [ "$target" = "$FM_HOME/state/scheduled-work.check-trust" ] && [ ! -e "$FM_HOME/fakebin/failed-once" ]; then
+  "$REAL_MV" "$@" || exit $?
+  printf 'corrupt\n' > "$target"
+  : > "$FM_HOME/fakebin/failed-once"
+  exit 1
+fi
+exec "$REAL_MV" "$@"
+SH
+chmod +x "$FM_HOME/fakebin/mv"
+PATH="$FM_HOME/fakebin:$PATH" bash "$CHECK" arm >/dev/null 2>&1 && fail 'failed rearm unexpectedly succeeded'
+[ -e "$FM_HOME/fakebin/failed-once" ] || fail 'rearm fixture did not corrupt trust after registration'
+cmp -s "$FM_HOME/prior-shim" "$FM_HOME/state/scheduled-work.check.sh" || fail 'failed rearm changed prior shim'
+cmp -s "$FM_HOME/prior-trust" "$FM_HOME/state/scheduled-work.check-trust" || fail 'failed rearm did not restore prior trust'
+fm_custom_check_registered "$FM_HOME/state" scheduled-work || fail 'failed rearm broke the prior authenticated check'
+pass 'failed rearm restores the prior shim and trust together'
+
 world daily
 config
 export FM_SCHEDULE_NOW=1791889140 # 2026-10-13 06:59 Toronto

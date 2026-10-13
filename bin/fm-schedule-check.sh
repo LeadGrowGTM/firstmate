@@ -53,6 +53,12 @@ ERROR_RECORD="$STATE/.schedule-error"
 
 usage() { awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; }
 fail() { printf 'fm-schedule-check: %s\n' "$*" >&2; exit 1; }
+scheduler_shim_content() {
+  printf '%s\n' '#!/usr/bin/env bash' "export FM_HOME=$(printf '%q' "$FM_HOME")" "exec $(printf '%q' "$SCRIPT_DIR/fm-schedule-check.sh") check"
+}
+scheduler_shim_owned() {
+  [ -f "$CHECK_SHIM" ] && scheduler_shim_content | cmp -s - "$CHECK_SHIM"
+}
 
 case "${1:-check}" in
   -h|--help|help) usage; exit 0 ;;
@@ -357,7 +363,7 @@ PY
 }
 
 locked() {
-  local op=${1:-check} keys key task tmp want prepared observed backlog_state project kind title note backup='' rc=0 processed=0
+  local op=${1:-check} keys key task tmp prepared observed backlog_state project kind title note trust_backup='' new_shim=0 rc=0 processed=0
   shift || true
   fm_lock_acquire_wait "$STATE/.schedule-check.lock" || return 1
   trap 'fm_lock_release "$STATE/.schedule-check.lock"' EXIT
@@ -399,30 +405,48 @@ locked() {
     arm)
       engine validate || return 1
       fm_pr_regular_destination_on_device_or_absent "$CHECK_SHIM" "$DEVICE" || return 1
+      fm_pr_regular_destination_on_device_or_absent "$STATE/$CHECK_ID.check-trust" "$DEVICE" || return 1
       if [ -f "$CHECK_SHIM" ]; then
-        backup=$(umask 077; mktemp "$STATE/.schedule-shim-backup.XXXXXX") || return 1
-        if ! cp "$CHECK_SHIM" "$backup" || ! chmod 0700 "$backup"; then
-          rm -f -- "$backup"
+        scheduler_shim_owned || fail 'scheduled-work check is not scheduler-owned'
+      elif [ -e "$STATE/$CHECK_ID.check-trust" ]; then
+        fail 'scheduled-work trust has no scheduler-owned shim'
+      fi
+      if [ -f "$STATE/$CHECK_ID.check-trust" ]; then
+        trust_backup=$(umask 077; mktemp "$STATE/.schedule-trust-backup.XXXXXX") || return 1
+        if ! cp -p "$STATE/$CHECK_ID.check-trust" "$trust_backup"; then
+          rm -f -- "$trust_backup"
           return 1
         fi
       fi
-      want=$(printf '%s\n' '#!/usr/bin/env bash' "export FM_HOME=$(printf '%q' "$FM_HOME")" "exec $(printf '%q' "$SCRIPT_DIR/fm-schedule-check.sh") check")
-      tmp=$(umask 077; mktemp "$STATE/.schedule-shim.XXXXXX") || return 1
-      if ! printf '%s\n' "$want" > "$tmp" || ! chmod 0700 "$tmp" || ! mv -f -- "$tmp" "$CHECK_SHIM"; then
-        rm -f -- "$tmp" "$backup"
-        return 1
+      if [ ! -f "$CHECK_SHIM" ]; then
+        tmp=$(umask 077; mktemp "$STATE/.schedule-shim.XXXXXX") || { rm -f -- "$trust_backup"; return 1; }
+        if ! scheduler_shim_content > "$tmp" || ! chmod 0700 "$tmp" || ! mv -f -- "$tmp" "$CHECK_SHIM"; then
+          rm -f -- "$tmp" "$trust_backup"
+          return 1
+        fi
+        new_shim=1
       fi
       if ! "$SCRIPT_DIR/fm-check-register.sh" "$CHECK_ID"; then
-        if [ -n "$backup" ]; then
-          mv -f -- "$backup" "$CHECK_SHIM" || return 1
+        if [ -n "$trust_backup" ]; then
+          mv -f -- "$trust_backup" "$STATE/$CHECK_ID.check-trust" || return 1
         else
-          rm -f -- "$CHECK_SHIM"
+          rm -f -- "$STATE/$CHECK_ID.check-trust" || return 1
         fi
+        [ "$new_shim" -eq 0 ] || rm -f -- "$CHECK_SHIM" || return 1
         return 1
       fi
-      [ -z "$backup" ] || rm -f -- "$backup"
+      [ -z "$trust_backup" ] || rm -f -- "$trust_backup"
       ;;
-    disarm) "$SCRIPT_DIR/fm-check-unregister.sh" "$CHECK_ID" ;;
+    disarm)
+      fm_pr_regular_destination_on_device_or_absent "$CHECK_SHIM" "$DEVICE" || return 1
+      fm_pr_regular_destination_on_device_or_absent "$STATE/$CHECK_ID.check-trust" "$DEVICE" || return 1
+      if [ -f "$CHECK_SHIM" ]; then
+        scheduler_shim_owned || fail 'scheduled-work check is not scheduler-owned'
+      elif [ -e "$STATE/$CHECK_ID.check-trust" ]; then
+        fail 'scheduled-work trust has no scheduler-owned shim'
+      fi
+      "$SCRIPT_DIR/fm-check-unregister.sh" "$CHECK_ID"
+      ;;
     *) return 2 ;;
   esac
 }
