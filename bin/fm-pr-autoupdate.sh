@@ -283,7 +283,11 @@ process_pr() {
     [ "$(meta_value "$meta" branch)" = "$(jq -r '.head.ref' "$TMP/core")" ] || { REASON='recorded branch does not match PR head'; return 0; }
     local_head=$(bounded git -C "$(meta_value "$meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
     if [ "$PENDING" = true ]; then
-      [ "$local_head" = "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] || { REASON='local head changed since refresh'; return 0; }
+      if [ "$local_head" != "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] \
+        || [ "$(meta_value "$meta" pr_head)" != "$(printf '%s' "$RECEIPT" | jq -r '.old_head')" ]; then
+        [ "$local_head" = "$HEAD" ] && [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] \
+          || { REASON='local head changed since refresh'; return 0; }
+      fi
     else
       [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] || { REASON='recorded ready head changed'; return 0; }
       if [ "$local_head" != "$HEAD" ]; then
@@ -356,7 +360,7 @@ process_pr() {
   RECEIPT=$(jq -cn --arg head "$expected" --arg base "$previous" --slurpfile core "$TMP/core" \
     '{old_head:$head,base_sha:$base,base_ref:$core[0].base.ref,head_ref:$core[0].head.ref,head_repo:$core[0].head.repo.full_name,pending:true}')
   for id in $OWNERS; do
-    local_head=$(bounded git -C "$(meta_value "$STATE/$id.meta" worktree)" rev-parse --verify HEAD)
+    local_head=$(bounded git -C "$(meta_value "$STATE/$id.meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
     RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --arg id "$id" --arg head "$local_head" '.local_heads[$id]=$head')
   done
   PENDING=true; RESULT=pending; REASON='request prepared; awaiting confirmed head'

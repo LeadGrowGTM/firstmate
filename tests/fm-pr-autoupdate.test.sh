@@ -97,7 +97,13 @@ shift 2
 case "$*" in
   'symbolic-ref --quiet --short HEAD') printf 'topic\n' ;;
   'status --porcelain') cat "$FIXTURES/git-status" ;;
-  'rev-parse --verify HEAD') cat "$FIXTURES/local-head" ;;
+  'rev-parse --verify HEAD')
+    if [ -e "$FIXTURES/local-head-read-count" ]; then
+      count=$(cat "$FIXTURES/local-head-read-count")
+      printf '%s\n' "$((count + 1))" > "$FIXTURES/local-head-read-count"
+      [ "$count" -eq 0 ] || exit 124
+    fi
+    cat "$FIXTURES/local-head" ;;
   *) exit 91 ;;
 esac
 SH
@@ -163,6 +169,28 @@ run "$home" check 17200 >/dev/null
 assert_equals 2 "$(put_count "$home")" 'later ready push can receive a new guarded update'
 assert_equals "$HEAD_C" "$(jq -r --arg url "$URL" '.receipts[$url].old_head' "$home/state/pr-autoupdate.json")" 'new request captures current head'
 
+home=$(world pending_pushed_after_update)
+run "$home" >/dev/null
+printf '%s\n' "$HEAD_C" > "$home/fixtures/local-head"
+set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+sed -i "s/pr_head=$HEAD_A/pr_head=$HEAD_C/" "$home/state/task.meta"
+run "$home" >/dev/null
+assert_equals true "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'unpublished ready head keeps receipt pending'
+set_fixture "$home" core '.head.sha="dddddddddddddddddddddddddddddddddddddddd"'
+set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+set_fixture "$home" checks '.check_runs[0].head_sha="dddddddddddddddddddddddddddddddddddddddd"'
+run "$home" >/dev/null
+assert_equals updated "$(result "$home")" 'pending request reconciles a newer ready push'
+assert_equals "$HEAD_C" "$(jq -r --arg url "$URL" '.receipts[$url].result_head' "$home/state/pr-autoupdate.json")" 'pending receipt records resulting ready head'
+assert_equals 1 "$(put_count "$home")" 'pending reconciliation never repeats publication'
+
+home=$(world local_read_timeout)
+printf '0\n' > "$home/fixtures/local-head-read-count"
+run "$home" >/dev/null
+assert_equals incomplete "$(result "$home")" 'later local head read leaves incomplete receipt'
+assert_equals 'local head unavailable' "$(jq -r --arg url "$URL" '.receipts[$url].reason' "$home/state/pr-autoupdate.json")" 'local read failure has explicit reason'
+assert_equals 0 "$(put_count "$home")" 'local read failure prevents publication'
+
 home=$(world base_advanced)
 run "$home" >/dev/null
 set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | .base.sha="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"'
@@ -202,6 +230,14 @@ assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_B" 'confirmation
 set_fixture "$home" input '.tasks[0].pr.head="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
 env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:01:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
 jq -e '.rows[0].checked == false and .rows[0].actor == "fleet" and .rows[0].head == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$home/fixtures/projected.json" >/dev/null || fail 'old green observation remained ready after head changed'
+set_fixture "$home" input '.tasks[0].pr.head="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | .state="closed"'
+set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+jq --arg head "$HEAD_B" '.records[0].observation.state="closed" | .records[0].observation.head=$head' "$home/data/task/contributions.json" > "$home/fixtures/terminal-record"
+mv "$home/fixtures/terminal-record" "$home/data/task/contributions.json"
+chmod 600 "$home/data/task/contributions.json"
+env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:01:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+jq -e --arg head "$HEAD_B" '.rows[0].checked == true and .rows[0].final == true and .rows[0].head == $head and .rows[0].actor == "nobody"' "$home/fixtures/projected.json" >/dev/null || fail 'terminal observation lost its final observed head'
 
 for scenario in current conflict unknown draft closed queued scope worker pipeline dirty race unavailable checks remote uninitialized; do
   home=$(world "$scenario")
