@@ -1321,7 +1321,6 @@ ORCA_VIEW_HANDLE=
 ORCA_VIEW_SESSION=
 ORCA_VIEW_OWNED=
 ORCA_VIEW_CREATED=0
-ORCA_VIEW_PRIOR_VALID=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -1492,7 +1491,7 @@ spawn_abort_cleanup() {
     if [ "$ORCA_VIEW_ABORT_CLOSE" = 1 ]; then
       ORCA_VIEW_ABORT_CLOSE=0
       if [ "$ORCA_VIEW_CREATED" = 1 ]; then
-        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" || true
+        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" --target "$T" || true
       else
         "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
       fi
@@ -5401,23 +5400,13 @@ orca_view_close_prior() {
   local -a close_args=()
   [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
     [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ] || return 0
-  if [ "$ORCA_VIEW_PRIOR_VALID" != 1 ] ||
-    ! tmux has-session -t "=$ORCA_VIEW_PRIOR_SESSION" 2>/dev/null ||
-    ! orca_view_name_usable "$ORCA_VIEW_PRIOR_SESSION"; then
-    echo "note: prior Orca view $ORCA_VIEW_PRIOR_SESSION did not pass current ownership validation, so it was left alone" >&2
-    return 0
-  fi
-  if [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] &&
+  if [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
     [ "$ORCA_VIEW_PRIOR_SESSION" != "$ORCA_VIEW_SESSION" ]; then
-    close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION")
+    close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION" --target "$T")
   fi
   "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" "${close_args[@]}" || true
 }
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
-  if [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
-    orca_view_name_usable "$ORCA_VIEW_PRIOR_SESSION"; then
-    ORCA_VIEW_PRIOR_VALID=1
-  fi
   ORCA_VIEW_NAME="orca-$ID"
   if ! orca_view_name_usable "$ORCA_VIEW_NAME"; then
     case "$SES" in
@@ -5452,7 +5441,7 @@ if [ "$ORCA_VIEW_ENABLED" = on ]; then
       fi
       if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE"); then
         if [ "$ORCA_VIEW_CREATED" = 1 ]; then
-          "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" || true
+          "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" --target "$T" || true
         else
           "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
         fi

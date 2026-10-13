@@ -16,6 +16,7 @@ set -u
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 
 CONTROL="$ROOT/bin/fm-control.sh"
+TEARDOWN="$ROOT/bin/fm-teardown.sh"
 TMP_ROOT=$(fm_test_tmproot fm-spawn-orca-view)
 mkdir -p "$TMP_ROOT"
 
@@ -25,6 +26,7 @@ install_view_fakes() {
   local fb=$1 vd=$2
   mkdir -p "$vd"
   : > "$vd/orca.log"
+  : > "$vd/killed"
   mv "$fb/tmux" "$fb/tmux.base"
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
@@ -551,7 +553,7 @@ test_cross_home_view_name_collision() {
     "the first home's view remains untouched"
   assert_equals term-1 "$(meta sm-cross orca_view_handle)" \
     "the second home records the tab it opened"
-  assert_absent "$VIEW_DIR/killed" "no foreign view is removed"
+  assert_no_grep 'kill-session' "$VIEW_DIR/killed" "no foreign view is removed"
   mkdir -p "$TMP_ROOT/cross-dotted/view"
   : > "$TMP_ROOT/cross-dotted/view/session-orca-sm-cross"
   printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-orca-sm-cross"
@@ -662,7 +664,7 @@ EOF
   assert_equals orca-dev-s-beta-1 "$(meta dev orca_view_session)" "respawn creates its own view"
   assert_equals @1 "$(cat "$VIEW_DIR/option-orca-dev-s-beta")" "respawn leaves the other secondmate's view target alone"
   assert_no_grep 'kill-session' "$VIEW_DIR/killed" "replacement cleanup never kills the rejected recycled view"
-  assert_no_grep 'terminal close --terminal term-old' "$VIEW_DIR/orca.log" "replacement cleanup leaves the rejected prior view alone"
+  assert_grep 'terminal close --terminal term-old' "$VIEW_DIR/orca.log" "replacement closes its own old tab while leaving the recycled session alone"
   assert_equals 1 "$(meta dev orca_view_owned)" "ownership is assigned to the newly created view only"
   pass "respawn: a recycled prior view name cannot retarget another secondmate's view"
 }
@@ -684,6 +686,25 @@ EOF
     "a view recorded as owned by another secondmate is never adopted"
   assert_absent "$VIEW_DIR/option-orca-dev-s-beta" "the other owner's untracked view is untouched"
   pass "respawn: creates a distinct view when another secondmate owns the recorded prior name"
+}
+
+test_teardown_does_not_kill_recycled_view() {
+  local out status
+  spawn_secondmate teardown-recycled sm-teardown on
+  expect_code 0 "$STATUS" "the teardown fixture must spawn: $OUT"
+  printf '@1\n' > "$VIEW_DIR/option-orca-sm-teardown"
+  printf 'off\n' > "$HOME_DIR/config/orca-view-tabs"
+  : > "$VIEW_DIR/killed"
+  out=$(PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" \
+    FM_FAKE_VIEW_DIR="$VIEW_DIR" FM_FAKE_PANE_PATH="$CASE_DIR/sm" \
+    FM_ORCA_CLI="$FAKEBIN/orca-ide" FM_WSL_INTEROP_DIR="$CASE_DIR/no-wsl" \
+    TMUX=fake,1,0 "$TEARDOWN" sm-teardown --force 2>&1)
+  status=$?
+  expect_code 0 "$status" "switch-off teardown should finish: $out"
+  assert_no_grep 'kill-session' "$VIEW_DIR/killed" "teardown never kills another task's recycled view"
+  assert_equals @1 "$(cat "$VIEW_DIR/option-orca-sm-teardown")" "teardown leaves the other task's tracking intact"
+  assert_grep 'terminal close --terminal term-1 --tab --json' "$VIEW_DIR/orca.log" "teardown closes only its recorded Orca tab"
+  pass "teardown: switch-off cleanup leaves a recycled view belonging to another task intact"
 }
 
 test_incomplete_identity_keeps_prior_tab() {
@@ -768,6 +789,7 @@ test_same_group_view_name_alias
 test_base_session_is_not_a_view_candidate
 test_recycled_prior_view_is_not_reused
 test_another_recorded_owner_is_not_adopted
+test_teardown_does_not_kill_recycled_view
 test_incomplete_identity_keeps_prior_tab
 test_relaunch_adopts_a_secondmate_launched_before_the_switch
 test_relaunch_with_switch_off_keeps_the_tab
