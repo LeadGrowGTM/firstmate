@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validate or spawn a single code-only worker in the dedicated Boat overflow home.
-# Usage: fm-boat-worker.sh validate|spawn < request.json; teardown <task-id>.
+# Usage: fm-boat-worker.sh validate|spawn < request.json; teardown <task-id>; idle.
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
 #   id: safe task id; project: firstmate|dev-loop; kind: ship|scout;
@@ -16,6 +16,11 @@
 # clones. It generates a normal remote brief and uses fm-spawn.sh, forcing yolo
 # off and a three-worker box-wide cap under one lock. An id without a spawn
 # record may be retried; unknown transport completion must be reconciled.
+# Failed post-launch backlog commits retain boat_launch_unreconciled=1 in
+# metadata; it reserves capacity and refuses teardown. Reconcile the endpoint
+# and backlog by hand, then clear that field before ordinary teardown.
+# A failed spawn preflight emits boat-launch: refused-before-spawn on stdout.
+# idle reports whether any task records remain under the same worker lock.
 # no-mistakes requires the operator's config/boat-no-mistakes-proven receipt:
 # one successful proof PR URL after a real box pipeline, plus an installed CLI.
 # Neither validation nor dispatch manufactures that proof or downgrades a mode.
@@ -32,23 +37,27 @@ case "${1:-}" in
   --help) sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
   validate|spawn) [ "$#" -eq 1 ] || die 'one operation required' ;;
   teardown) [ "$#" -eq 2 ] || die 'task id required' ;;
-  *) die 'expected validate, spawn, or teardown' ;;
+  idle) [ "$#" -eq 1 ] || die 'idle takes no arguments' ;;
+  *) die 'expected validate, spawn, teardown, or idle' ;;
 esac
-if [ "$1" = teardown ]; then
+if [ "$1" = teardown ] || [ "$1" = idle ]; then
   FM_HOME=${FM_HOME:?FM_HOME is required}
-  ID=$2
-  case "$ID" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) die 'invalid task id' ;; esac
   [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
     [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] || die 'not the purpose-built boat-eng home'
   [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] || die 'unsafe overflow state directory'
   fm_lock_acquire_wait "$FM_HOME/state/.boat-worker.lock" || die 'overflow teardown lock unavailable'
   trap 'fm_lock_release "$FM_HOME/state/.boat-worker.lock" || true' EXIT
-  [ -f "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task has no safe spawn record; reconcile before teardown'
-  kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
-  project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
-  case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
-  case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
-  "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
+  if [ "$1" = teardown ]; then
+    ID=$2
+    case "$ID" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) die 'invalid task id' ;; esac
+    [ -f "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task has no safe spawn record; reconcile before teardown'
+    kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
+    project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
+    case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
+    case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
+    [ "$(sed -n 's/^boat_launch_unreconciled=//p' "$FM_HOME/state/$ID.meta")" != 1 ] || die 'failed Boat launch needs manual reconciliation before teardown'
+    "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
+  fi
   for meta in "$FM_HOME/state/"*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
     printf 'boat-tasks-remaining: yes\n'
@@ -59,9 +68,15 @@ if [ "$1" = teardown ]; then
 fi
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-boat-worker.XXXXXX")
 LOCK=
+OP=$1
+LAUNCH_ATTEMPTED=0
 cleanup() {
+  local status=$?
   rm -rf -- "$TMP"
   [ -z "$LOCK" ] || fm_lock_release "$LOCK" || true
+  if [ "$status" -ne 0 ] && [ "$OP" = spawn ] && [ "$LAUNCH_ATTEMPTED" -eq 0 ]; then
+    printf 'boat-launch: refused-before-spawn\n'
+  fi
 }
 trap cleanup EXIT
 head -c 65537 > "$TMP/request"
@@ -146,5 +161,6 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
 cat "$TMP/brief" > "$BRIEF"
 if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
 ARGS+=(--harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
+LAUNCH_ATTEMPTED=1
 "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"

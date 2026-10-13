@@ -76,12 +76,20 @@ SH
 cat > "$BIN/fm-on.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'on %s\n' "$*" >> "$FIXTURES/calls"
+if [ "$*" = 'boat-eng fm-boat-worker.sh idle' ]; then
+  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" idle
+  exit $?
+fi
 if [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = teardown ]; then
   FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" teardown "$4"
   exit $?
 fi
 [ "$*" = '--stdin boat-eng fm-boat-worker.sh spawn' ] || exit 97
 cat > "$FIXTURES/transport.request"
+if [ -e "$FIXTURES/use-real-worker" ]; then
+  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" spawn < "$FIXTURES/transport.request"
+  exit $?
+fi
 exit "$(cat "$FIXTURES/transport.code" 2>/dev/null || printf 0)"
 SH
 cat > "$BIN/fm-brief.sh" <<'SH'
@@ -420,6 +428,20 @@ test_teardown_stop() {
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 0 "$CODE" 'teardown with another task'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'other task was stopped'
+  new_case unreconciled-task-remains
+  seed_receipt
+  seed_worker task-one ship firstmate 'state: done complete'
+  seed_worker task-two ship firstmate 'state: working active'
+  printf 'boat_launch_unreconciled=1\n' >> "$REMOTE_HOME/state/task-two.meta"
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" 'teardown with unreconciled launch'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unreconciled launch was stopped'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-two
+  expect_code 1 "$CODE" 'unreconciled launch requires manual reconciliation'
+  if grep -Fx 'teardown task-two' "$FIXTURES/calls" >/dev/null; then
+    fail 'unreconciled launch reached ordinary teardown'
+  fi
+  assert_present "$REMOTE_HOME/state/task-two.meta" 'unreconciled launch lost its reservation'
   new_case dev-loop-scout-teardown
   seed_receipt
   seed_worker task-one scout dev-loop 'state: done complete'
@@ -462,6 +484,34 @@ test_teardown_stop() {
   expect_code 1 "$CODE" 'teardown without no-env receipt'
   assert_no_grep 'on boat-eng' "$FIXTURES/calls" 'teardown without receipt contacted remote'
   pass 'last-task teardown stops only the approved box after ordinary cleanup succeeds'
+}
+
+test_confirmed_prelaunch_refusal_stop() {
+  new_case resumed-refusal-empty
+  set_json request '.mode = "no-mistakes"'
+  : > "$FIXTURES/use-real-worker"
+  send_task
+  expect_code 1 "$CODE" 'confirmed prelaunch no-mistakes refusal'
+  assert_contains "$OUT" 'has not been proven' 'remote refusal was not preserved'
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'confirmed empty refusal left newly resumed box on'
+  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'refused box kept its receipt'
+  assert_no_grep 'spawn ' "$FIXTURES/calls" 'prelaunch refusal spawned a worker'
+  new_case running-refusal-empty
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  seed_receipt
+  set_json request '.mode = "no-mistakes"'
+  : > "$FIXTURES/use-real-worker"
+  send_task
+  expect_code 1 "$CODE" 'prelaunch refusal on a previously running box'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'refusal stopped a box this send did not resume'
+  new_case resumed-refusal-busy
+  seed_worker earlier-worker ship firstmate 'state: working active'
+  set_json request '.mode = "no-mistakes"'
+  : > "$FIXTURES/use-real-worker"
+  send_task
+  expect_code 1 "$CODE" 'confirmed refusal with retained workers'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'confirmed refusal stopped another worker'
+  pass 'confirmed prelaunch refusal stops only a newly resumed empty box'
 }
 
 seed_project() {
@@ -545,6 +595,7 @@ test_remote_cap_and_merge_authority() {
   pass 'remote capacity spans projects until teardown, excludes secondmates, and merge authority is off'
 }
 
+test_confirmed_prelaunch_refusal_stop
 test_validation
 test_whole_timer_reservation
 test_unreadable_caps

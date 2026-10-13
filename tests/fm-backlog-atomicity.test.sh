@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Behavior tests for the backlog<->record pairing invariant:
-# `state/<id>.meta` exists <=> this home's backlog row for that id is In flight.
+# Ordinary dispatch pairs `state/<id>.meta` with an In flight backlog row.
+# Boat's post-launch failure retains a capacity record for manual reconciliation
+# instead of hiding its live endpoint; fm-boat-worker.sh owns that exception.
 #
 # bin/fm-backlog-transition-lib.sh states the contract; the three scripts that
 # own a task's physical record enforce it. These tests drive those real scripts
@@ -1343,6 +1345,29 @@ test_dispatch_leaves_no_record_when_the_transition_fails() {
   [ "$(row_state "$case_dir" "$id")" = queued ] \
     || fail "a failed dispatch left the backlog item in $(row_state "$case_dir" "$id")"
   pass "a failed backlog transition fails the dispatch loudly and leaves no record"
+}
+
+test_boat_postlaunch_failure_reserves_capacity() {
+  local case_dir home id out rc=0
+  id=boat-postlaunch-failure
+  case_dir=$(make_home boat-postlaunch-failure "$id")
+  home=$(home_of "$case_dir")
+  printf 'boat-eng\n' > "$home/.fm-secondmate-home"
+  add_item "$case_dir" "$id"
+  break_verb "$case_dir" start
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "Boat spawn reported success after backlog failure"
+  assert_present "$home/state/$id.meta" "Boat postlaunch failure lost its capacity record"
+  assert_grep 'boat_launch_unreconciled=1' "$home/state/$id.meta" "failed launch needs manual reconciliation"
+  fm_write_meta "$home/state/worker-two.meta" 'kind=ship'
+  fm_write_meta "$home/state/worker-three.meta" 'kind=scout'
+  rc=0
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-boat-worker.sh" spawn <<'JSON'
+{"id":"worker-four","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"A fourth task","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
+JSON
+  ) || rc=$?
+  expect_code 75 "$rc" "orphaned Boat endpoint must occupy its worker slot: $out"
+  pass "Boat postlaunch backlog failure preserves capacity and refuses a fourth worker"
 }
 
 test_dispatch_reports_an_incomplete_record_rollback() {
@@ -3035,6 +3060,7 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
   pass "dispatching a persistent secondmate needs no backlog item"
 }
 
+test_boat_postlaunch_failure_reserves_capacity
 test_backend_resolution_preserves_config_errors
 test_backend_resolution_preserves_precedence_and_defaults
 test_backlog_callers_refuse_unreadable_backend_config
