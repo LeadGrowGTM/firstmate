@@ -1446,7 +1446,6 @@ This section owns the version 1 configuration schema:
 | --- | --- |
 | `version` | Exactly `1`. |
 | `enabled` | Required boolean, default posture is off. |
-| `max_pages` | Optional per-feed pagination bound, integer 1 through 100, default 20; reaching it without proving completion fails that source's coverage. |
 | `sources` | Up to 100 source objects, each with a unique safe `id` and one `kind` below. |
 
 | Source kind | Required fields and coverage |
@@ -1454,12 +1453,14 @@ This section owns the version 1 configuration schema:
 | `repository` | `repo: "owner/repository"`; read newly merged PRs and newly created issues across that repository, preserving actual PR base/head and changed-file metadata. |
 | `skills` | Absolute `root`; discover Markdown instruction fingerprints beneath it, including `SKILL.md`, supporting instruction resources, additions, and removals. |
 | `plugin-files` | Absolute `root` and nonempty `files` array of relative `path` plus file `kind`; explicitly declare the installed manifest, enablement settings, version manifests, and relevant instruction files. |
+| `remote-inventory` | `route` is a registered remote secondmate id and `source` is a local inventory source id in that home's configuration. The parent requests its bounded read-only snapshot through `fm-on.sh`. |
 | `unavailable` | Nonempty `reason`; disclose an unavailable home/host or input instead of treating it as current. |
 
 Inventory sources optionally declare absolute `symlink_roots` for permitted external symlink targets.
 Declare only specific safe roots and instruction files; credentials, environment files, client data, browser profiles, generated logs, and runtime state are excluded.
 A resolved target outside the declared roots fails coverage, and the collector never discovers or reads another home's endpoints.
-Missing remote inventory remains `unavailable` until that owning home supplies its bounded observation through the existing parent transport.
+An unreachable or unreadable remote inventory fails that source's coverage without advancing its checkpoint. A remote source needs a corresponding configured `skills` or `plugin-files` source in its owning home.
+Forge feed pages are read twice with a fixed internal 20-page bound; a changed feed or exhausted bound fails coverage.
 
 The `plugin-files` file kinds are `plugin-manifest` (installed `plugins` records with version/scope/path metadata), `plugin-enablement` (the effective `enabledPlugins` boolean map), `plugin-version` (name/version), and `instruction` (content digest and bounded text).
 Only those manifest fields are retained; unrelated settings fields are excluded from fingerprints and evidence.
@@ -1480,7 +1481,7 @@ An off example, to adapt only after the separate activation approval:
   "sources": [
     { "id": "firstmate", "kind": "repository", "repo": "owner/firstmate" },
     { "id": "local-skills", "kind": "skills", "root": "/absolute/safe/skills" },
-    { "id": "remote-inventory", "kind": "unavailable", "reason": "Owning host has not supplied its inventory" }
+    { "id": "remote-inventory", "kind": "remote-inventory", "route": "remote-mate-id", "source": "local-skills" }
   ]
 }
 ```

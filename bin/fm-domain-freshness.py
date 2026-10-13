@@ -17,6 +17,14 @@ class CoverageError(Exception):
     pass
 
 
+MAX_JSON_BYTES = 8 * 1024 * 1024
+MAX_PAGES = 20
+
+
+def encoded_size(value):
+    return len(json.dumps(value, sort_keys=True, ensure_ascii=True).encode()) + 1
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -39,10 +47,10 @@ def safe_path(path):
     return path
 
 
-def load(path):
+def load(path, limit=MAX_JSON_BYTES):
     safe_path(path)
-    if path.stat().st_size > 8 * 1024 * 1024:
-        raise ValueError('JSON input exceeds 8 MiB')
+    if path.stat().st_size > limit:
+        raise ValueError('JSON input exceeds read limit')
     with path.open() as handle:
         return json.load(handle)
 
@@ -85,8 +93,8 @@ def api(path):
         raise CoverageError('malformed forge response: ' + path) from error
 
 
-def pages(path, max_pages):
-    for page in range(1, max_pages + 1):
+def pages(path):
+    for page in range(1, MAX_PAGES + 1):
         rows = api(path + ('&' if '?' in path else '?') + 'per_page=100&page=' + str(page))
         if not isinstance(rows, list) or len(rows) > 100 or any(not isinstance(row, dict) for row in rows):
             raise CoverageError('malformed forge page: ' + path)
@@ -96,7 +104,43 @@ def pages(path, max_pages):
     raise CoverageError('pagination limit reached: ' + path)
 
 
-def forge(source, previous, now, max_pages):
+def stable_feed(path, ordering, lower):
+    def scan():
+        result = []
+        for rows in pages(path):
+            result.append(rows)
+            if any(instant(row.get(ordering)) < lower for row in rows):
+                break
+        return result
+
+    first = scan()
+    second = scan()
+    if first != second:
+        raise CoverageError('forge feed changed during pagination: ' + path)
+    return second
+
+
+def linked_observations(home, url):
+    result = []
+    data = safe_path(Path(home) / 'data')
+    for path in sorted(data.glob('*/contributions.json')):
+        record = load(path, 1024 * 1024)
+        if not isinstance(record, dict) or record.get('schema') != 'fm-contributions.v1' or record.get('task') != path.parent.name or not isinstance(record.get('records'), list):
+            raise CoverageError('invalid durable contribution record')
+        for row in record['records']:
+            if not isinstance(row, dict):
+                raise CoverageError('invalid durable contribution row')
+            if row.get('url') == url:
+                observed = row.get('observation')
+                if observed is not None and not isinstance(observed, dict):
+                    raise CoverageError('invalid durable contribution observation')
+                result.append({'task': record['task'], 'checked_at': row.get('checked_at'),
+                               'error': row.get('error'), 'observation': None if observed is None else
+                               {key: observed.get(key) for key in ('head', 'state', 'draft', 'mergeable')}})
+    return result
+
+
+def forge(source, previous, now, home):
     start = instant(previous['checkpoint']) if previous else now - dt.timedelta(days=1)
     lower = start - dt.timedelta(seconds=300) if previous else start
     seen = dict(previous.get('seen', {})) if previous else {}
@@ -105,12 +149,9 @@ def forge(source, previous, now, max_pages):
     prefix = '/repos/' + repo
     for kind, endpoint, timestamp in [('merged-pr', '/pulls?state=closed&sort=updated&direction=desc', 'merged_at'),
                                        ('new-issue', '/issues?state=all&sort=created&direction=desc&since=' + iso(lower), 'created_at')]:
-        for rows in pages(prefix + endpoint, max_pages):
-            stop = False
+        ordering = 'updated_at' if kind == 'merged-pr' else 'created_at'
+        for rows in stable_feed(prefix + endpoint, ordering, lower):
             for row in rows:
-                ordering = 'updated_at' if kind == 'merged-pr' else 'created_at'
-                if instant(row.get(ordering)) < lower:
-                    stop = True
                 if kind == 'new-issue' and 'pull_request' in row:
                     continue
                 when = row.get(timestamp)
@@ -138,7 +179,7 @@ def forge(source, previous, now, max_pages):
                     if not base.get('ref') or not head.get('sha') or (base.get('repo') or {}).get('full_name') != repo:
                         raise CoverageError('missing PR base/head metadata')
                     files = []
-                    for file_rows in pages(prefix + '/pulls/' + str(number) + '/files', max_pages):
+                    for file_rows in pages(prefix + '/pulls/' + str(number) + '/files'):
                         for item in file_rows:
                             if not isinstance(item.get('filename'), str) or not isinstance(item.get('status'), str):
                                 raise CoverageError('malformed PR file metadata')
@@ -147,11 +188,9 @@ def forge(source, previous, now, max_pages):
                         raise CoverageError('truncated PR changed-file set')
                     event.update(base={'repository': repo, 'ref': base['ref'], 'sha': base.get('sha')},
                                  head={'repository': (head.get('repo') or {}).get('full_name'), 'ref': head.get('ref'), 'sha': head['sha']},
-                                 files=files)
+                                 files=files, linked_contributions=linked_observations(home, url))
                 events.append(event)
                 seen[key] = when
-            if stop:
-                break
     # Only identities in the overlap need retention after a complete read.
     seen = {key: value for key, value in seen.items() if instant(value) >= now - dt.timedelta(seconds=300)}
     return {'checkpoint': iso(now), 'seen': seen}, events, {'window_start': iso(lower), 'window_end': iso(now)}
@@ -199,7 +238,7 @@ def projection(value, kind):
     return {'plugins': result}
 
 
-def inventory(source, previous, now):
+def inventory_snapshot(source):
     root = Path(source['root'])
     roots = [Path(item).resolve(strict=True) for item in [source['root'], *source.get('symlink_roots', [])]]
     inventory_path(root, roots)
@@ -227,6 +266,8 @@ def inventory(source, previous, now):
         paths = [(root / item['path'], item['kind']) for item in source['files']]
     records = {}
     for path, kind in paths:
+        if source['kind'] == 'plugin-files' and kind in ('instruction', 'plugin-version') and not path.exists() and not path.is_symlink():
+            continue
         resolved = inventory_path(path, roots)
         if not resolved.is_file() or resolved.stat().st_size > 1048576:
             raise CoverageError('inventory file unavailable or exceeds 1 MiB')
@@ -239,6 +280,12 @@ def inventory(source, previous, now):
             value = projection(json.loads(content), kind)
             metadata = {'digest': digest(value), 'manifest': value}
         records[str(path.relative_to(root))] = {'kind': kind, **metadata}
+    return {'root': str(root), 'inventory': records, 'surfaces': sorted({kind for _, kind in paths})}
+
+
+def inventory_changes(snapshot, previous, now):
+    root = Path(snapshot['root'])
+    records = snapshot['inventory']
     old = previous.get('inventory', {}) if previous else {}
     changes = []
     for path in sorted(set(records) | set(old)):
@@ -249,12 +296,34 @@ def inventory(source, previous, now):
     if previous is None and not changes:
         changes.append({'kind': 'inventory-baseline', 'root': str(root), 'entries': 0})
     return {'checkpoint': iso(now), 'inventory': records}, changes, {'baseline': previous is None, 'root': str(root),
-            'surfaces': sorted({kind for _, kind in paths}), 'session_visibility': 'unmeasured'}
+            'surfaces': snapshot['surfaces'], 'session_visibility': 'unmeasured'}
+
+
+def remote_inventory(source, home):
+    command = ['bash', str(Path(__file__).with_name('fm-on.sh')), source['route'],
+               'fm-domain-freshness.sh', 'inventory', source['source']]
+    try:
+        result = subprocess.run(command, env={**os.environ, 'FM_HOME': home}, capture_output=True, timeout=60, check=False)
+    except subprocess.TimeoutExpired as error:
+        raise CoverageError('remote inventory transport timed out') from error
+    if result.returncode:
+        raise CoverageError('remote inventory transport failed (exit %s)' % result.returncode)
+    if len(result.stdout) > MAX_JSON_BYTES:
+        raise CoverageError('remote inventory exceeds read limit')
+    try:
+        snapshot = json.loads(result.stdout)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise CoverageError('invalid remote inventory response') from error
+    if not isinstance(snapshot, dict) or snapshot.get('source') != source['source'] or not isinstance(snapshot.get('root'), str) or not isinstance(snapshot.get('inventory'), dict) or not isinstance(snapshot.get('surfaces'), list):
+        raise CoverageError('invalid remote inventory response')
+    return snapshot
 
 
 def validate_config(config):
     if not isinstance(config, dict) or config.get('version') != 1 or type(config.get('enabled')) is not bool:
         raise ValueError('config requires version:1 and boolean enabled')
+    if 'max_pages' in config:
+        raise ValueError('max_pages is unsupported')
     sources = config.get('sources')
     if not isinstance(sources, list) or len(sources) > 100:
         raise ValueError('sources must be an array of at most 100 entries')
@@ -288,11 +357,24 @@ def validate_config(config):
         elif kind == 'unavailable':
             if not isinstance(source.get('reason'), str) or not source['reason'].strip():
                 raise ValueError('unavailable source requires a reason')
+        elif kind == 'remote-inventory':
+            if not all(isinstance(source.get(field), str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', source[field]) for field in ('route', 'source')):
+                raise ValueError('remote inventory requires safe route and source ids')
         else:
             raise ValueError('unsupported source kind')
-    limit = config.get('max_pages', 20)
-    if type(limit) is not int or not 1 <= limit <= 100:
-        raise ValueError('max_pages must be 1..100')
+
+
+def inventory_cli(home, config_path, source_id):
+    config = load(Path(config_path))
+    validate_config(config)
+    source = next((item for item in config['sources'] if item['id'] == source_id), None)
+    if source is None or source['kind'] not in ('skills', 'plugin-files'):
+        raise ValueError('undeclared local inventory source')
+    snapshot = {'source': source_id, **inventory_snapshot(source)}
+    if encoded_size(snapshot) > MAX_JSON_BYTES:
+        raise CoverageError('inventory exceeds read limit')
+    print(json.dumps(snapshot, sort_keys=True, ensure_ascii=True))
+    return 0
 
 
 def main():
@@ -339,12 +421,17 @@ def main():
                 if previous and instant(previous['checkpoint']) > now:
                     raise CoverageError('clock precedes successful checkpoint')
                 if source['kind'] == 'repository':
-                    saved, events, detail = forge(source, previous, now, config.get('max_pages', 20))
+                    saved, events, detail = forge(source, previous, now, home)
                 elif source['kind'] == 'unavailable':
                     raise CoverageError(source['reason'])
+                elif source['kind'] == 'remote-inventory':
+                    saved, events, detail = inventory_changes(remote_inventory(source, home), previous, now)
                 else:
-                    saved, events, detail = inventory(source, previous, now)
-                cursor['sources'][key] = {**saved, 'binding': binding}
+                    saved, events, detail = inventory_changes(inventory_snapshot(source), previous, now)
+                candidate = {**cursor, 'sources': {**cursor['sources'], key: {**saved, 'binding': binding}}}
+                if encoded_size(candidate) > MAX_JSON_BYTES:
+                    raise CoverageError('cursor exceeds read limit')
+                cursor = candidate
                 coverage.append({'id': key, 'kind': source['kind'], 'complete': True, **detail})
                 evidence.extend({'source': key, **event} for event in events)
             except (CoverageError, OSError, ValueError, KeyError, TypeError) as error:
@@ -355,7 +442,7 @@ def main():
         identity = digest(bundle)
         output = bundles / (identity + '.json')
         if output.exists():
-            if load(output) != bundle:
+            if load(output, max(MAX_JSON_BYTES, encoded_size(bundle))) != bundle:
                 raise ValueError('bundle identity collision')
         else:
             publish(output, bundle)
@@ -369,7 +456,7 @@ def main():
 
 if __name__ == '__main__':
     try:
-        sys.exit(main())
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+        sys.exit(inventory_cli(*sys.argv[2:]) if sys.argv[1] == 'inventory' else main())
+    except (OSError, ValueError, KeyError, TypeError, CoverageError) as exc:
         print('fm-domain-freshness: ' + str(exc), file=sys.stderr)
         sys.exit(1)

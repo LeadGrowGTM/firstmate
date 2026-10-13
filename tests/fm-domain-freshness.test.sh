@@ -20,6 +20,14 @@ set -eu
 [ "$#" -eq 6 ] && [ "$1" = api ] && [ "$2" = GET ] && [ "$4" = --jq ] && [ "$5" = @base64 ] && [ "$6" = --full ] || exit 91
 path=$3
 printf '%s\n' "$path" >> "$FM_FAKE_FEED/requests"
+if [ -f "$FM_FAKE_FEED/shift" ] && [[ "$path" == *'page=2' ]]; then
+  kind=$(cat "$FM_FAKE_FEED/shift")
+  if [[ "$path" == *"/$kind?"* ]]; then
+    mv "$FM_FAKE_FEED/$kind-1-shift.json" "$FM_FAKE_FEED/$kind-1.json"
+    mv "$FM_FAKE_FEED/$kind-2-shift.json" "$FM_FAKE_FEED/$kind-2.json"
+    rm "$FM_FAKE_FEED/shift"
+  fi
+fi
 case "$path" in
   /repos/*/pulls\?*)
     page=${path##*page=}
@@ -54,9 +62,9 @@ new_home() {
   : > "$FEED/requests"
 }
 
-config() { # sources JSON, optional max pages
-  jq -n --argjson sources "$1" --argjson pages "${2:-20}" \
-    '{version:1,enabled:true,sources:$sources,max_pages:$pages}' > "$HOME_DIR/config/domain-freshness.json"
+config() { # sources JSON
+  jq -n --argjson sources "$1" \
+    '{version:1,enabled:true,sources:$sources}' > "$HOME_DIR/config/domain-freshness.json"
 }
 
 collect() { # home, time; exposes status and output, saves stderr in scratch
@@ -142,6 +150,23 @@ jq -e '.evidence | length == 2 and (any(.[]; .after.manifest.plugins.demo[0].ver
 pass 'plugin projections omit irrelevant fields and detect effective changes'
 
 new_home
+mkdir -p "$HOME_DIR/plugins"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"name":"demo","version":"1"}' > "$HOME_DIR/plugins/version.json"
+printf '# Installed\n' > "$HOME_DIR/plugins/PLUGIN.md"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"version.json",kind:"plugin-version"},{path:"PLUGIN.md",kind:"instruction"}]}]')"
+collect "$HOME_DIR" "$NOW"
+rm "$HOME_DIR/plugins/version.json" "$HOME_DIR/plugins/PLUGIN.md"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 0 "$STATUS" 'removed plugin content'
+bundle
+jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-change" and .after == null)' "$OUT" >/dev/null || fail 'removed plugin content did not produce null after'
+rm "$HOME_DIR/plugins/manifest.json"
+collect "$HOME_DIR" 2026-10-15T12:00:00Z
+expect_code 2 "$STATUS" 'missing required plugin manifest'
+pass 'plugin content removal is a delta and required manifest loss fails coverage'
+
+new_home
 config "$repo_sources"
 collect "$HOME_DIR" "$NOW"
 expect_code 0 "$STATUS" 'empty forge baseline'
@@ -165,7 +190,7 @@ assert_no_grep '/pulls/7' "$FEED/requests" 'old PR detail was fetched'
 pass 'old merged PR updates and PR issue-feed rows are filtered'
 
 new_home
-config "$repo_sources" 3
+config "$repo_sources"
 pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
 detail 12 2026-10-13T11:00:00Z 101 > "$FEED/detail-12.json"
 jq -n '[range(0;100)|{filename:("src/file-"+(.|tostring)),status:"modified",sha:"sha",additions:1,deletions:0,changes:1}]' > "$FEED/files-12-1.json"
@@ -176,6 +201,18 @@ bundle
 jq -e '.evidence[0].kind == "merged-pr" and (.evidence[0].files | length == 101) and .evidence[0].files[-1].filename == "src/last" and .evidence[0].base.ref == "main" and .evidence[0].head.sha == "head-sha"' "$OUT" >/dev/null || fail 'paginated PR file metadata incomplete'
 assert_grep '/pulls/12/files?per_page=100&page=2' "$FEED/requests" 'second PR file page was not requested'
 pass 'merged PR includes every paginated file and base/head metadata'
+
+new_home
+config "$repo_sources"
+mkdir -p "$HOME_DIR/data/owned"
+printf '%s\n' '{"schema":"fm-contributions.v1","task":"owned","records":[{"url":"https://github.com/acme/widgets/pull/12","kind":"pr","checked_at":"2026-10-13T11:30:00Z","error":null,"observation":{"head":"0123456789012345678901234567890123456789","state":"merged","draft":false,"mergeable":"mergeable"}}]}' > "$HOME_DIR/data/owned/contributions.json"
+pr 12 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+detail 12 2026-10-13T11:00:00Z 0 > "$FEED/detail-12.json"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'linked contribution observation'
+bundle
+jq -e '.evidence[0].linked_contributions == [{"task":"owned","checked_at":"2026-10-13T11:30:00Z","error":null,"observation":{"head":"0123456789012345678901234567890123456789","state":"merged","draft":false,"mergeable":"mergeable"}}]' "$OUT" >/dev/null || fail 'linked contribution observation missing'
+pass 'repository discovery reuses durable linked contribution observation'
 
 new_home
 config "$repo_sources"
@@ -237,8 +274,41 @@ bundle
 jq -e '.complete == false and (.domains | length == 2) and (any(.domains[]; .id == "design" and .scope == "design and research")) and (any(.domains[]; .id == "sales" and .host == "remote-mac")) and (any(.coverage[]; .id == "remote" and .complete == false and (.reason | contains("remote home"))))' "$OUT" >/dev/null || fail 'cross-domain context or unavailable coverage missing'
 pass 'remote gap is explicit beside cross-domain registry context'
 
+cat > "$FAKEBIN/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "${FM_FAKE_REMOTE_FAIL:-}" != 1 ] || exit 93
+last=${!#}
+decoded=$(printf '%s' "$last" | base64 -d | tr '\0' '\n')
+[ "$decoded" = $'fm-domain-freshness.sh\ninventory\nremote-skills' ] || exit 94
+FM_HOME="$FM_FAKE_REMOTE_HOME" bash "$FM_FAKE_COLLECTOR" inventory remote-skills
+SH
+chmod +x "$FAKEBIN/fake-ssh"
 new_home
-config "$repo_sources" 3
+REMOTE_HOME="$TMP_ROOT/remote-home"
+mkdir -p "$REMOTE_HOME/config" "$REMOTE_HOME/skills"
+printf '# Remote original\n' > "$REMOTE_HOME/skills/SKILL.md"
+jq -n --arg root "$REMOTE_HOME/skills" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"skills",root:$root}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+printf '%s\n' "- remote - Remote operations (host: fixture-host; root: $ROOT; home: $REMOTE_HOME; scope: fixtures; projects: app; added 2026-10-01)" > "$HOME_DIR/data/secondmates.md"
+config '[{"id":"remote","kind":"remote-inventory","route":"remote","source":"remote-skills"}]'
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'remote inventory baseline'
+bundle
+jq -e '.evidence[0].kind == "inventory-baseline" and .evidence[0].after.content == "# Remote original\n"' "$OUT" >/dev/null || fail 'remote baseline absent'
+printf '# Remote changed\n' > "$REMOTE_HOME/skills/SKILL.md"
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 0 "$STATUS" 'remote inventory change'
+bundle
+jq -e '.evidence[0].kind == "inventory-change" and .evidence[0].after.content == "# Remote changed\n"' "$OUT" >/dev/null || fail 'remote delta absent'
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_FAIL=1 FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-15T12:00:00Z
+expect_code 2 "$STATUS" 'remote transport unavailable'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("remote inventory transport"))' "$OUT" >/dev/null || fail 'remote transport failure lost coverage reason'
+jq -e '.sources.remote.checkpoint == "2026-10-14T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'failed remote transport advanced checkpoint'
+pass 'fake parent transport returns bounded remote inventory and preserves failed cursor'
+
+new_home
+config "$repo_sources"
 jq -n '[range(100;200)|{number:.,html_url:("https://github.com/acme/widgets/issues/"+(.|tostring)),title:"page one",labels:[],created_at:"2026-10-13T11:00:00Z"}]' > "$FEED/issues-1.json"
 issue 200 2026-10-13T10:00:00Z | jq -s . > "$FEED/issues-2.json"
 collect "$HOME_DIR" "$NOW"
@@ -255,7 +325,7 @@ jq -e '(.evidence | length) == 1 and .evidence[0].url == "https://github.com/acm
 pass 'issue pagination and newly visible overlap events retain coverage'
 
 new_home
-config "$repo_sources" 2
+config "$repo_sources"
 collect "$HOME_DIR" "$NOW"
 jq -n '[range(100;200)|{number:.,html_url:("https://github.com/acme/widgets/pull/"+(.|tostring)),title:"closed",labels:[],merged_at:null,updated_at:"2026-10-14T11:00:00Z"}]' > "$FEED/pulls-1.json"
 printf '%s\n' '/repos/acme/widgets/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=2' > "$FEED/fail"
@@ -266,15 +336,53 @@ jq -e '.sources.forge.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/doma
 assert_grep 'per_page=100&page=2' "$FEED/requests" 'PR feed second page was not attempted'
 pass 'failed PR feed page retains previous successful window'
 
+for feed_kind in pulls issues; do
+  new_home
+  config "$repo_sources"
+  if [ "$feed_kind" = pulls ]; then
+    jq -n '[range(1;101)|{number:.,html_url:("https://github.com/acme/widgets/pull/"+(.|tostring)),merged_at:"2026-10-13T11:00:00Z",updated_at:"2026-10-13T11:00:00Z"}]' > "$FEED/pulls-1.json"
+    pr 101 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-2.json"
+  else
+    jq -n '[range(1;101)|{number:.,html_url:("https://github.com/acme/widgets/issues/"+(.|tostring)),created_at:"2026-10-13T11:00:00Z"}]' > "$FEED/issues-1.json"
+    issue 101 2026-10-13T11:00:00Z | jq -s . > "$FEED/issues-2.json"
+  fi
+  jq -s '.[1] + .[0][0:99]' "$FEED/$feed_kind-1.json" "$FEED/$feed_kind-2.json" > "$FEED/$feed_kind-1-shift.json"
+  jq '.[99:100]' "$FEED/$feed_kind-1.json" > "$FEED/$feed_kind-2-shift.json"
+  printf '%s\n' "$feed_kind" > "$FEED/shift"
+  collect "$HOME_DIR" "$NOW"
+  expect_code 2 "$STATUS" "shifting $feed_kind feed"
+  bundle
+  jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("feed changed"))' "$OUT" >/dev/null || fail "shifting $feed_kind feed advanced coverage"
+  jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail "shifting $feed_kind feed advanced cursor"
+done
+pass 'shifting PR and issue pages fail coverage before checkpoint'
+
 new_home
-config "$repo_sources" 1
-jq -n '[range(100;200)|{number:.,html_url:("https://github.com/acme/widgets/issues/"+(.|tostring)),created_at:"2026-10-13T11:00:00Z"}]' > "$FEED/issues-1.json"
+config "$repo_sources"
+for page in $(seq 1 20); do
+  jq -n --argjson page "$page" '[range(1;101)|(. + ($page - 1) * 100) | {number:.,html_url:("https://github.com/acme/widgets/issues/"+(.|tostring)),created_at:"2026-10-13T11:00:00Z"}]' > "$FEED/issues-$page.json"
+done
 collect "$HOME_DIR" "$NOW"
 expect_code 2 "$STATUS" 'bounded page limit'
 bundle
 jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("pagination limit"))' "$OUT" >/dev/null || fail 'page limit claimed complete coverage'
 jq -e '.sources.forge == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'page limit advanced cursor'
 pass 'pagination bounds remain explicit incomplete coverage'
+
+new_home
+mkdir -p "$HOME_DIR/plugins"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+head -c 4096 /dev/zero | tr '\0' x > "$HOME_DIR/plugins/preview.md"
+for number in $(seq 1 1999); do
+  cp "$HOME_DIR/plugins/preview.md" "$HOME_DIR/plugins/instruction-$number.md"
+done
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"large",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"}] + [range(1;2000)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'oversized inventory cursor'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("cursor exceeds read limit"))' "$OUT" >/dev/null || fail 'oversized cursor did not fail source coverage'
+jq -e '.sources.large == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'oversized cursor was published'
+pass 'cursor read limit fails oversized source without unreadable state'
 
 new_home
 mkdir -p "$HOME_DIR/skills/one"

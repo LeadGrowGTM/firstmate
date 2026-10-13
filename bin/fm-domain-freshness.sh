@@ -2,6 +2,7 @@
 # Collect declared domain evidence without changing any forge or installation.
 #
 # Usage: FM_HOME=<home> fm-domain-freshness.sh collect
+#        FM_HOME=<home> fm-domain-freshness.sh inventory <local-source-id>
 #        fm-domain-freshness.sh --help
 #
 # No configuration or enabled:false is a silent no-op. Nothing arms this command.
@@ -32,22 +33,29 @@
 # complete passes print the bundle path and exit 0. Invalid config/state exits 1.
 # Page/file limits and timeouts fail coverage rather than treating a partial feed
 # as complete. A source's declared identity/config digest binds its checkpoint.
-# No remote inventories are fetched here: a declared unavailable source records
-# that coverage gap until its owning home supplies evidence via parent transport.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "${1:-}" in
   -h|--help) sed -n '2,/^set -eu$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
   collect) [ "$#" -eq 1 ] || exit 1 ;;
+  inventory) [ "$#" -eq 2 ] || exit 1 ;;
   *) printf 'usage: fm-domain-freshness.sh collect\n' >&2; exit 1 ;;
 esac
 FM_HOME=${FM_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}
 [ ! -L "$FM_HOME" ] || { echo 'fm-domain-freshness: symlinked home is unsafe' >&2; exit 1; }
 FM_HOME=$(cd "$FM_HOME" && pwd -P)
 CONFIG="$FM_HOME/config/domain-freshness.json"
-[ -e "$CONFIG" ] || [ -L "$CONFIG" ] || exit 0
+if [ ! -e "$CONFIG" ] && [ ! -L "$CONFIG" ]; then
+  [ "$1" = collect ] && exit 0
+  echo 'fm-domain-freshness: inventory config is missing' >&2
+  exit 1
+fi
 command -v python3 >/dev/null 2>&1 || { echo 'fm-domain-freshness: python3 is required' >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo 'fm-domain-freshness: jq is required' >&2; exit 1; }
+if [ "$1" = inventory ]; then
+  python3 "$SCRIPT_DIR/fm-domain-freshness.py" inventory "$FM_HOME" "$CONFIG" "$2"
+  exit $?
+fi
 # shellcheck source=bin/fm-secondmate-registry-lib.sh
 . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-domain-registry.XXXXXX")
