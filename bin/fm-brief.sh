@@ -678,17 +678,22 @@ else
   SETUP_BASE="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch."
 fi
 
-# Rule 3 of both task contracts keeps visual or review pages on lavish-axi
-# or local HTML while allowing plain report files and chat text.
+# Rule 3 of both task contracts keeps visual, report, and review pages on
+# lavish-axi or local HTML while allowing the accepted plain-text outputs.
 # fm-spawn.sh disables the claude.ai Artifact tool and cloud-published
 # claude.ai Docs for a Claude worker.
 TOOLS_RULE='3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.
-   Present visual or review pages through lavish-axi or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs.
-   Plain report files and chat text remain available.'
+   Present visual, report, or review pages through lavish-axi or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs.
+   Open lavish-axi pages directly without asking the captain first; route captain decisions through the existing decision path instead of opening a worker decision board.
+   Report files on disk, plain-text bootstrap diagnostics, scout text reports when Lavish is unavailable, and chat text remain available.'
 
 if [ "$KIND" = scout ]; then
 if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
-  LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, use the lavish-axi rule: arm your board with bin/fm-procevent-lavish.sh arm <artifact.html> --for <task-id>; never run lavish-axi poll yourself. Re-arm with the reply after each nonterminal round to acknowledge it, route the board feedback through your steering inbox, write needs-decision [key=board-review] with the live board URL when the captain owes a decision, and stop at session_ended or an empty End without re-arming - acknowledge that final round with bin/fm-procevent.sh handled <source-id> <sequence> to conclude and retire your board.'
+  LAVISH_LINE='If your deliverable is a visual, report, or review page, open it directly in lavish-axi without asking the captain first.
+Arm the review page with bin/fm-procevent-lavish.sh arm <artifact.html> --for <task-id>; never run lavish-axi poll yourself.
+Re-arm with the reply after each nonterminal round to acknowledge it, and route board feedback through your steering inbox.
+When feedback requires a captain decision, write needs-decision [key=board-review] with the live review URL through the existing decision path instead of opening a decision board.
+Stop at session_ended or an empty End without re-arming, and acknowledge that final round with bin/fm-procevent.sh handled <source-id> <sequence> to conclude and retire your board.'
 else
   LAVISH_LINE='Lavish is unavailable (lavish-axi is missing or below its supported version floor), so deliver your findings as a text report without Lavish, even for a visual deliverable.'
 fi

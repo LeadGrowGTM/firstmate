@@ -75,7 +75,8 @@ The controls are scoped to the launched process and never modify the captain's g
 
 ## claude.ai publishing tools
 
-The spawn removes the claude.ai Artifact tool family and cloud-published claude.ai Docs from standard and raw Claude launches for workers and secondmates, so their visual or review pages use `lavish-axi` or a local HTML page as `AGENTS.md` section 1 requires.
+The spawn removes the claude.ai Artifact tool family and cloud-published claude.ai Docs from standard and direct or leading-assignment raw Claude launches for workers and secondmates, so their visual, report, or review pages use `lavish-axi` or a local HTML page as `AGENTS.md` section 1 requires.
+Env-wrapped and compound raw Claude commands are outside this launch-time denial.
 Plain report files and chat text remain available.
 The control is scoped to the launched process and never modifies the captain's own Claude settings or primary session; `bin/fm-spawn.sh` owns the exact tool names and placement, and [`docs/verification/runtime-backends.md`](../../../../../docs/verification/runtime-backends.md#claude-claudeai-publishing-tools) records the live proof.
 
