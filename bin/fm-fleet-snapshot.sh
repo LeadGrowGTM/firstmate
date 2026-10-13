@@ -470,44 +470,6 @@ backlog_json() (  # [<backlog-path>] - defaults to this home's $BACKLOG
         end;
     def local_note($rest):
       cap(($rest | strip_trailing_metadata); ".*(?:^|[[:space:]]+-[[:space:]]+|[[:space:]])(?<v>local main)$");
-    def valid_decision_option:
-      if type != "object" then false
-      else ((keys_unsorted - ["value","label","hint"]) | length) == 0
-        and (.value | type) == "string"
-        and (.value | test("^[A-Za-z0-9._-]{1,128}$"))
-        and .value != "reconcile"
-        and (.label | type) == "string" and (.label | length) > 0
-        and ((has("hint") | not) or (.hint | type) == "string")
-      end;
-    def valid_captain_decision:
-      if type != "object" then false
-      else . as $decision
-        | ((keys_unsorted - ["about","decide","options","recommended","report","pr_url"]) | length) == 0
-          and (.about | type) == "string"
-          and (.decide | type) == "string"
-          and (.options | type) == "array"
-          and all(.options[]; valid_decision_option)
-          and ([.options[].value] | unique | length) == (.options | length)
-          and ((has("recommended") | not)
-               or ((.recommended | type) == "string"
-                   and ([.options[].value] | index($decision.recommended)) != null))
-          and ((has("report") | not) or (.report | type) == "string")
-          and ((has("pr_url") | not)
-               or ((.pr_url | type) == "string"
-                   and (.pr_url | test("^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^[:space:]]*)?$"))))
-      end;
-    def captain_decision($lines):
-      ([$lines[] | select(test("^Resolution recorded by fm-(captain|decision)-hold\\.$"))] | length + 1) as $occurrence
-      | [$lines[] | capture("^Captain options for hold (?<n>[0-9]+): (?<v>.*)$")?
-          | select(.n == ($occurrence | tostring)) | .v] as $scoped
-      | (if ($scoped | length) > 0 then $scoped
-         elif $occurrence == 1 then
-           [$lines[] | select(startswith("Captain options: ")) | ltrimstr("Captain options: ")]
-         else [] end) as $entries
-      | if ($entries | length) != 1 then null
-        else (try ($entries[0] | fromjson) catch null) as $decision
-        | if (try ($decision | valid_captain_decision) catch false) then $decision else null end
-        end;
     def completion($rest):
       (metadata_word($rest; "merged")) as $merged
       | (metadata_word($rest; "reported")) as $reported
@@ -615,10 +577,40 @@ backlog_json() (  # [<backlog-path>] - defaults to this home's $BACKLOG
                     and .hold_age_days >= $age_days then "aged"
                else "live" end)
           | .captain_actionable = (.hold_bucket == "live")
-          | .decision = (if .hold_bucket != null then captain_decision(.body_lines) else null end)
+          | .decision = null
         else . end)
     | del(.section,.order)
-  ' < "$backlog" | fm_hold_reason_decode_stream json
+  ' < "$backlog" | fm_hold_reason_decode_stream json | jq '
+    def valid_decision_option:
+      if type != "object" then false
+      else ((keys_unsorted - ["value","label","hint"]) | length) == 0
+        and (.value | type) == "string"
+        and (.value | test("^[A-Za-z0-9._-]{1,128}$"))
+        and .value != "reconcile"
+        and (.label | type) == "string" and (.label | length) > 0
+        and ((has("hint") | not) or (.hint | type) == "string")
+      end;
+    def valid_captain_decision:
+      if type != "object" then false
+      else . as $decision
+        | ((keys_unsorted - ["about","decide","options","recommended","report","pr_url"]) | length) == 0
+          and (.about | type) == "string"
+          and (.decide | type) == "string"
+          and (.options | type) == "array"
+          and all(.options[]; valid_decision_option)
+          and ([.options[].value] | unique | length) == (.options | length)
+          and ((has("recommended") | not)
+               or ((.recommended | type) == "string"
+                   and ([.options[].value] | index($decision.recommended)) != null))
+          and ((has("report") | not) or (.report | type) == "string")
+          and ((has("pr_url") | not)
+               or ((.pr_url | type) == "string"
+                   and (.pr_url | test("^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^[:space:]]*)?$"))))
+      end;
+    .records |= map(.decision =
+      (if .hold_bucket != null and (try (.decision | valid_captain_decision) catch false)
+       then .decision else null end))
+  '
 )
 
 SNAPSHOT_TASK_DIR=
