@@ -130,6 +130,11 @@ test_switch_values() {
   assert_equals on "$(run_view enabled "$cfg")" "on turns the tabs on"
   printf ' off \n' > "$cfg/orca-view-tabs"
   assert_equals off "$(run_view enabled "$cfg")" "off keeps the tabs off"
+  printf ' o n \n' > "$cfg/orca-view-tabs"
+  out=$(run_view enabled "$cfg" 2>"$TMP_ROOT/err")
+  assert_equals off "$out" "whitespace inside a value does not turn tabs on"
+  assert_contains "$(cat "$TMP_ROOT/err")" "accepted values are on and off" \
+    "an internally spaced value is rejected"
   printf 'yes\n' > "$cfg/orca-view-tabs"
   out=$(run_view enabled "$cfg" 2>"$TMP_ROOT/err")
   err=$(cat "$TMP_ROOT/err")
@@ -197,24 +202,77 @@ test_open_views_the_window_and_writes_identity() {
 }
 
 test_identity_filters_input() {
-  local f="$TMP_ROOT/raw.identity" ident
+  local f="$TMP_ROOT/raw.identity" ident missing name value mode
   {
     printf 'ORCA_PANE_KEY=t:l\n'
     printf 'ORCA_TAB_ID=it'\''s\n'
     printf 'ORCA_AGENT_HOOK_ENDPOINT=/e/endpoint.env\n'
-    printf 'ORCA_WORKTREE_ID=bad\033[2J\n'
+    printf 'ORCA_WORKTREE_ID=wt-1\n'
+    printf 'ORCA_AGENT_HOOK_ENV=production\n'
+    printf 'ORCA_AGENT_HOOK_VERSION=1\n'
     printf 'ORCA_AGENT_HOOK_TOKEN=secret\n'
     printf 'PATH=/evil\n'
   } > "$f"
   ident=$(run_view identity --file "$f" --wait 0) || fail "identity refused valid input"
   assert_not_contains "$ident" "secret" "a token is never exported"
   assert_not_contains "$ident" "PATH" "only Orca identity names are exported"
-  assert_not_contains "$ident" "ORCA_WORKTREE_ID" "a value with control bytes is dropped"
   # shellcheck disable=SC2016
   assert_equals "it's" "$(env -i sh -c "$ident"'; printf "%s" "$ORCA_TAB_ID"')" "values survive shell quoting"
+  for missing in ORCA_PANE_KEY ORCA_TAB_ID ORCA_WORKTREE_ID ORCA_AGENT_HOOK_ENDPOINT \
+    ORCA_AGENT_HOOK_ENV ORCA_AGENT_HOOK_VERSION; do
+    for mode in absent empty; do
+      : > "$f"
+      for name in ORCA_PANE_KEY ORCA_TAB_ID ORCA_WORKTREE_ID ORCA_AGENT_HOOK_ENDPOINT \
+        ORCA_AGENT_HOOK_ENV ORCA_AGENT_HOOK_VERSION; do
+        [ "$name" != "$missing" ] || [ "$mode" != absent ] || continue
+        value=valid
+        [ "$name" != "$missing" ] || value=
+        printf '%s=%s\n' "$name" "$value" >> "$f"
+      done
+      expect_code 3 "$(run_view identity --file "$f" --wait 0 >/dev/null 2>&1; echo $?)" \
+        "$missing $mode must not yield a partial identity"
+    done
+  done
+  {
+    printf 'ORCA_PANE_KEY=t:l\nORCA_TAB_ID=tab\nORCA_WORKTREE_ID=wt\n'
+    printf 'ORCA_AGENT_HOOK_ENDPOINT=/e\nORCA_AGENT_HOOK_ENV=production\n'
+    printf 'ORCA_AGENT_HOOK_VERSION=bad\033[2J\n'
+  } > "$f"
+  expect_code 3 "$(run_view identity --file "$f" --wait 0 >/dev/null 2>&1; echo $?)" \
+    "a control byte makes the six-field identity incomplete"
   expect_code 3 "$(run_view identity --file "$TMP_ROOT/never" --wait 0 >/dev/null 2>&1; echo $?)" \
     "an identity that never arrives steps aside"
-  pass "identity: exports only valid Orca identity names and steps aside when none arrives"
+  pass "identity: exports only six nonempty safe fields and refuses missing or incomplete delivery"
+}
+
+test_failed_open_restores_existing_view() {
+  local out status prior_hook window_view="orca-w${DEV_ID#@}"
+  "$SHIM/tmux" new-session -d -t firstmate -s orca-rollback
+  "$SHIM/tmux" select-window -t "=orca-rollback:$CLAUDE_ID"
+  "$SHIM/tmux" set-option -t '=orca-rollback:' @fm_view_window "$CLAUDE_ID"
+  "$SHIM/tmux" set-hook -t '=orca-rollback:' session-window-changed 'display-message previous'
+  prior_hook=$("$SHIM/tmux" show-options -H -t '=orca-rollback:' session-window-changed)
+  out=$(FM_FAKE_ORCA_FAIL=1 run_view open --target firstmate:fm-dev --view-session orca-rollback 2>&1)
+  status=$?
+  expect_code 3 "$status" "a refused create reports failure on a reused view"
+  assert_equals "$CLAUDE_ID" "$("$SHIM/tmux" display-message -p -t '=orca-rollback:' '#{window_id}')" \
+    "a refused create restores the selected window"
+  assert_equals "$CLAUDE_ID" "$("$SHIM/tmux" show-options -v -t '=orca-rollback:' @fm_view_window)" \
+    "a refused create restores the view option"
+  assert_equals "$prior_hook" "$("$SHIM/tmux" show-options -H -t '=orca-rollback:' session-window-changed)" \
+    "a refused create restores the hook"
+  "$SHIM/tmux" new-session -d -t firstmate -s "$window_view"
+  "$SHIM/tmux" select-window -t "=$window_view:$CLAUDE_ID"
+  out=$(FM_FAKE_ORCA_FAIL=1 run_view window "$DEV_ID" 2>&1)
+  status=$?
+  expect_code 3 "$status" "a refused window helper create reports failure"
+  assert_equals "$CLAUDE_ID" "$("$SHIM/tmux" display-message -p -t "=$window_view:" '#{window_id}')" \
+    "the window helper restores a reused view's selection"
+  assert_equals "" "$("$SHIM/tmux" show-options -v -t "=$window_view:" @fm_view_window 2>/dev/null)" \
+    "the window helper removes an option that was absent"
+  assert_equals "" "$("$SHIM/tmux" show-options -H -t "=$window_view:" session-window-changed 2>/dev/null)" \
+    "the window helper removes a hook that was absent"
+  pass "a failed create restores every prior state of reused open and window views"
 }
 
 test_unavailable_orca_steps_aside() {
@@ -396,6 +454,7 @@ test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
 test_view_follows_the_agent_window
 test_identity_filters_input
+test_failed_open_restores_existing_view
 test_unavailable_orca_steps_aside
 test_wsl_uses_live_interop
 test_window_helper
