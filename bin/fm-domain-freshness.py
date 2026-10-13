@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic collector implementation; fm-domain-freshness.sh owns the CLI."""
 import base64
+import binascii
 import datetime as dt
 import fcntl
 import hashlib
@@ -12,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from urllib.parse import quote
 
 
 class CoverageError(Exception):
@@ -137,10 +139,37 @@ def linked_observations(home):
             if observed is not None and not isinstance(observed, dict):
                 raise CoverageError('invalid durable contribution observation')
             fields = ('head', 'state', 'draft', 'mergeable') if row.get('kind') == 'pr' else ('state', 'ready')
-            result.setdefault(row.get('url'), []).append({'task': record['task'], 'checked_at': row.get('checked_at'),
+            result.setdefault(str(row.get('url')).casefold(), []).append({'task': record['task'], 'checked_at': row.get('checked_at'),
                 'error': row.get('error'), 'observation': None if observed is None else
                 {key: observed.get(key) for key in fields}})
     return result
+
+
+def forge_identity(url, repo, kind, number):
+    match = re.fullmatch(r'https://github\.com/([^/]+/[^/]+)/(pull|issues)/([1-9]\d*)', url or '')
+    if not match or match[1].casefold() != repo.casefold() or match[2] != kind or int(match[3]) != number:
+        raise CoverageError('noncanonical forge identity')
+    return match[1]
+
+
+def instruction_file(path):
+    parts = path.lower().split('/')
+    return parts[-1] in ('agents.md', 'claude.md', 'gemini.md', 'skill.md') or ('skills' in parts[:-1] and parts[-1].endswith('.md'))
+
+
+def pr_instruction(repo, path, revision):
+    value = api('/repos/%s/contents/%s?ref=%s' % (repo, quote(path, safe='/'), quote(revision, safe='')))
+    if not isinstance(value, dict) or value.get('type') != 'file' or value.get('encoding') != 'base64' or not isinstance(value.get('content'), str):
+        raise CoverageError('invalid PR instruction content')
+    try:
+        content = base64.b64decode(''.join(value['content'].splitlines()), validate=True)
+        excerpt = content.decode('utf-8')
+    except (ValueError, UnicodeDecodeError, binascii.Error) as error:
+        raise CoverageError('invalid PR instruction content') from error
+    if len(content) > 1048576:
+        raise CoverageError('PR instruction exceeds 1 MiB')
+    return {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content),
+            'content': excerpt[:4096], 'content_truncated': len(excerpt) > 4096}
 
 
 def forge(source, previous, now, contributions):
@@ -166,33 +195,39 @@ def forge(source, previous, now, contributions):
                 number = row.get('number')
                 if type(number) is not int or number < 1:
                     raise CoverageError('invalid forge object number')
-                url = 'https://github.com/%s/%s/%s' % (repo, 'pull' if kind == 'merged-pr' else 'issues', number)
-                if row.get('html_url') != url:
-                    raise CoverageError('noncanonical forge identity')
+                url = row.get('html_url')
+                actual_repo = forge_identity(url, repo, 'pull' if kind == 'merged-pr' else 'issues', number)
                 key = kind + ':' + url
                 if key in seen:
                     continue
-                event = {'kind': kind, 'url': url, 'repository': repo, timestamp: when,
+                event = {'kind': kind, 'url': url, 'repository': actual_repo, timestamp: when,
                          'title': row.get('title'), 'labels': row.get('labels', [])}
                 if kind == 'merged-pr':
                     detail = api(prefix + '/pulls/' + str(number))
                     if not isinstance(detail, dict) or detail.get('merged_at') != when or detail.get('html_url') != url:
                         raise CoverageError('inconsistent merged PR detail')
                     base, head = detail.get('base', {}), detail.get('head', {})
-                    if not base.get('ref') or not head.get('sha') or (base.get('repo') or {}).get('full_name') != repo:
+                    base_repo = (base.get('repo') or {}).get('full_name')
+                    if not base.get('ref') or not base.get('sha') or not head.get('sha') or not isinstance(base_repo, str) or base_repo.casefold() != repo.casefold():
                         raise CoverageError('missing PR base/head metadata')
                     files = []
                     for file_rows in pages(prefix + '/pulls/' + str(number) + '/files'):
                         for item in file_rows:
                             if not isinstance(item.get('filename'), str) or not isinstance(item.get('status'), str):
                                 raise CoverageError('malformed PR file metadata')
-                            files.append({key: item.get(key) for key in ['filename', 'previous_filename', 'status', 'sha', 'additions', 'deletions', 'changes', 'blob_url', 'raw_url']})
+                            file = {key: item.get(key) for key in ['filename', 'previous_filename', 'status', 'sha', 'additions', 'deletions', 'changes', 'blob_url', 'raw_url']}
+                            old_path = item.get('previous_filename') if item['status'] == 'renamed' else item['filename']
+                            if instruction_file(item['filename']) or (isinstance(old_path, str) and instruction_file(old_path)):
+                                file['instruction'] = {
+                                    'before': None if item['status'] == 'added' else pr_instruction(base_repo, old_path, base['sha']),
+                                    'after': None if item['status'] == 'removed' else pr_instruction(actual_repo, item['filename'], head['sha'])}
+                            files.append(file)
                     if type(detail.get('changed_files')) is not int or len(files) != detail['changed_files']:
                         raise CoverageError('truncated PR changed-file set')
-                    event.update(base={'repository': repo, 'ref': base['ref'], 'sha': base.get('sha')},
+                    event.update(base={'repository': base_repo, 'ref': base['ref'], 'sha': base['sha']},
                                  head={'repository': (head.get('repo') or {}).get('full_name'), 'ref': head.get('ref'), 'sha': head['sha']},
                                  files=files)
-                event['linked_contributions'] = contributions.get(url, [])
+                event['linked_contributions'] = contributions.get(url.casefold(), [])
                 events.append(event)
                 seen[key] = when
     # Only identities in the overlap need retention after a complete read.
@@ -243,6 +278,8 @@ def projection(value, kind):
 
 
 def inventory_snapshot(source):
+    if source['kind'] == 'plugin-files' and not {'plugin-manifest', 'plugin-enablement'} <= {item['kind'] for item in source['files']}:
+        raise CoverageError('plugin manifest and enablement surfaces are required')
     root = Path(source['root'])
     roots = [Path(item).resolve(strict=True) for item in [source['root'], *source.get('symlink_roots', [])]]
     inventory_path(root, roots)
@@ -268,14 +305,15 @@ def inventory_snapshot(source):
                 resolved = inventory_path(item, roots)
                 if resolved.is_dir():
                     walk(item)
-                elif item.suffix.lower() == '.md':
-                    paths.append((item, 'instruction'))
+                elif resolved.is_file():
+                    paths.append((item, 'instruction' if item.suffix.lower() == '.md' else 'asset'))
         walk(root)
     else:
         paths = [(root / item['path'], item['kind']) for item in source['files']]
     records = {}
     for path, kind in paths:
         if source['kind'] == 'plugin-files' and kind in ('instruction', 'plugin-version') and not path.exists() and not path.is_symlink():
+            inventory_path(path.parent, roots)
             continue
         resolved = inventory_path(path, roots)
         if not resolved.is_file() or resolved.stat().st_size > 1048576:
@@ -285,11 +323,14 @@ def inventory_snapshot(source):
             text = content.decode('utf-8')
             metadata = {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content),
                         'content': text[:4096], 'content_truncated': len(text) > 4096}
+        elif kind == 'asset':
+            metadata = {'digest': hashlib.sha256(content).hexdigest(), 'bytes': len(content)}
         else:
             value = projection(json.loads(content), kind)
             metadata = {'digest': digest(value), 'manifest': value}
         records[str(path.relative_to(root))] = {'kind': kind, **metadata}
-    return {'root': str(root), 'inventory': records, 'surfaces': sorted({kind for _, kind in paths})}
+    return {'root': str(root), 'inventory': records, 'surfaces': sorted({record['kind'] for record in records.values()}),
+            'source_binding': digest({key: source.get(key) for key in ('kind', 'root', 'files', 'symlink_roots')})}
 
 
 def inventory_changes(snapshot, previous, now):
@@ -323,7 +364,7 @@ def remote_inventory(source, home):
         snapshot = json.loads(result.stdout)
     except (ValueError, UnicodeDecodeError) as error:
         raise CoverageError('invalid remote inventory response') from error
-    if not isinstance(snapshot, dict) or snapshot.get('source') != source['source'] or not isinstance(snapshot.get('root'), str) or not isinstance(snapshot.get('inventory'), dict) or not isinstance(snapshot.get('surfaces'), list):
+    if not isinstance(snapshot, dict) or snapshot.get('source') != source['source'] or not isinstance(snapshot.get('root'), str) or not isinstance(snapshot.get('inventory'), dict) or not isinstance(snapshot.get('surfaces'), list) or not isinstance(snapshot.get('source_binding'), str):
         raise CoverageError('invalid remote inventory response')
     return snapshot
 
@@ -361,7 +402,7 @@ def validate_config(config):
                     if not isinstance(path, str) or not path or Path(path).is_absolute() or '..' in Path(path).parts or path in names:
                         raise ValueError('invalid or duplicate inventory filename')
                     names.add(path)
-                    if item.get('kind') not in ('instruction', 'plugin-manifest', 'plugin-enablement', 'plugin-version'):
+                    if item.get('kind') not in ('instruction', 'asset', 'plugin-manifest', 'plugin-enablement', 'plugin-version'):
                         raise ValueError('invalid inventory file kind')
         elif kind == 'unavailable':
             if not isinstance(source.get('reason'), str) or not source['reason'].strip():
@@ -431,9 +472,12 @@ def main():
             key = source['id']
             binding = digest(source)
             previous = cursor['sources'].get(key)
-            if previous and previous.get('binding') != binding:
-                previous = None
             try:
+                snapshot = remote_inventory(source, home) if source['kind'] == 'remote-inventory' else None
+                if snapshot is not None:
+                    binding = digest({'source': source, 'remote': snapshot['source_binding']})
+                if previous and previous.get('binding') != binding:
+                    previous = None
                 if previous and instant(previous['checkpoint']) > now:
                     raise CoverageError('clock precedes successful checkpoint')
                 if source['kind'] == 'repository':
@@ -443,7 +487,7 @@ def main():
                 elif source['kind'] == 'unavailable':
                     raise CoverageError(source['reason'])
                 elif source['kind'] == 'remote-inventory':
-                    saved, events, detail = inventory_changes(remote_inventory(source, home), previous, now)
+                    saved, events, detail = inventory_changes(snapshot, previous, now)
                 else:
                     saved, events, detail = inventory_changes(inventory_snapshot(source), previous, now)
                 candidate = {**cursor, 'sources': {**cursor['sources'], key: {**saved, 'binding': binding}}}

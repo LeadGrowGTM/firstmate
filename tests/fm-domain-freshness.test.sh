@@ -39,6 +39,10 @@ case "$path" in
     number=${path#*/pulls/}; number=${number%%/*}
     page=${path##*page=}
     file="$FM_FAKE_FEED/files-$number-$page.json" ;;
+  /repos/*/contents/*\?ref=*)
+    name=${path#*/contents/}; name=${name%%\?*}; name=${name##*/}
+    revision=${path##*ref=}
+    file="$FM_FAKE_FEED/content-$revision-$name.json" ;;
   /repos/*/pulls/*)
     number=${path##*/}
     file="$FM_FAKE_FEED/detail-$number.json" ;;
@@ -90,6 +94,10 @@ pr() { # number, merged time, updated time
 detail() { # number, merged time, changed count
   jq -n --argjson n "$1" --arg when "$2" --argjson count "$3" \
     '{html_url:("https://github.com/acme/widgets/pull/"+($n|tostring)),merged_at:$when,changed_files:$count,base:{ref:"main",sha:"base-sha",repo:{full_name:"acme/widgets"}},head:{ref:"topic",sha:"head-sha",repo:{full_name:"acme/widgets"}}}'
+}
+instruction_content() {
+  jq -n --arg content "$(printf '%s' "$3" | base64 | tr -d '\n')" \
+    '{type:"file",encoding:"base64",content:$content}' > "$FEED/content-$1-$2.json"
 }
 issue() { # number, created time
   jq -n --argjson n "$1" --arg when "$2" \
@@ -150,21 +158,70 @@ jq -e '.evidence | length == 2 and (any(.[]; .after.manifest.plugins.demo[0].ver
 pass 'plugin projections omit irrelevant fields and detect effective changes'
 
 new_home
+mkdir -p "$HOME_DIR/skills/one" "$HOME_DIR/plugins"
+printf 'first script' > "$HOME_DIR/skills/one/run.py"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
+printf 'first template' > "$HOME_DIR/plugins/template.txt"
+config "$(jq -nc --arg skills "$HOME_DIR/skills" --arg plugins "$HOME_DIR/plugins" '[
+  {id:"skills",kind:"skills",root:$skills},
+  {id:"plugins",kind:"plugin-files",root:$plugins,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"template.txt",kind:"asset"}]}
+]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'asset baselines'
+printf 'second script' > "$HOME_DIR/skills/one/run.py"
+printf 'second template' > "$HOME_DIR/plugins/template.txt"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 0 "$STATUS" 'asset changes'
+bundle
+jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-change" and .before.kind == "asset" and .after.kind == "asset" and .before.digest != .after.digest and (.after | has("content") | not) and (.after | has("manifest") | not))' "$OUT" >/dev/null || fail 'effective asset change or digest-only evidence missing'
+pass 'skill and plugin assets change digest-only fingerprints'
+
+new_home
+mkdir -p "$HOME_DIR/plugins"
+printf '# Only instructions\n' > "$HOME_DIR/plugins/PLUGIN.md"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"PLUGIN.md",kind:"instruction"}]}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 2 "$STATUS" 'plugin source without install state'
+bundle
+jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("manifest and enablement")) and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'instruction-only plugin source claimed complete coverage'
+jq -e '.sources.plugins == null' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'incomplete plugin source advanced cursor'
+pass 'plugin coverage requires manifest and enablement declarations'
+
+new_home
 mkdir -p "$HOME_DIR/plugins"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
 printf '%s\n' '{"name":"demo","version":"1"}' > "$HOME_DIR/plugins/version.json"
 printf '# Installed\n' > "$HOME_DIR/plugins/PLUGIN.md"
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"version.json",kind:"plugin-version"},{path:"PLUGIN.md",kind:"instruction"}]}]')"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"version.json",kind:"plugin-version"},{path:"PLUGIN.md",kind:"instruction"}]}]')"
 collect "$HOME_DIR" "$NOW"
 rm "$HOME_DIR/plugins/version.json" "$HOME_DIR/plugins/PLUGIN.md"
 collect "$HOME_DIR" 2026-10-14T12:00:00Z
 expect_code 0 "$STATUS" 'removed plugin content'
 bundle
 jq -e '(.evidence | length) == 2 and all(.evidence[]; .kind == "inventory-change" and .after == null)' "$OUT" >/dev/null || fail 'removed plugin content did not produce null after'
+jq -e '.coverage[0].surfaces == ["plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'absent optional files counted as observed'
 rm "$HOME_DIR/plugins/manifest.json"
 collect "$HOME_DIR" 2026-10-15T12:00:00Z
 expect_code 2 "$STATUS" 'missing required plugin manifest'
 pass 'plugin content removal is a delta and required manifest loss fails coverage'
+
+new_home
+mkdir -p "$HOME_DIR/plugins/optional"
+printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"plugins",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"optional/PLUGIN.md",kind:"instruction"},{path:"optional/version.json",kind:"plugin-version"}]}]')"
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'absent optional plugin files'
+rmdir "$HOME_DIR/plugins/optional"
+ln -s "$HOME_DIR/plugins/missing" "$HOME_DIR/plugins/optional"
+collect "$HOME_DIR" 2026-10-14T12:00:00Z
+expect_code 2 "$STATUS" 'broken optional inventory parent'
+bundle
+jq -e '.coverage[0].complete == false and (.evidence | length) == 0' "$OUT" >/dev/null || fail 'broken optional parent claimed complete coverage'
+jq -e '.sources.plugins.checkpoint == "2026-10-13T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'broken optional parent advanced checkpoint'
+pass 'missing optional files remain optional only under available parents'
 
 new_home
 config "$repo_sources"
@@ -201,6 +258,38 @@ bundle
 jq -e '.evidence[0].kind == "merged-pr" and (.evidence[0].files | length == 101) and .evidence[0].files[-1].filename == "src/last" and .evidence[0].base.ref == "main" and .evidence[0].head.sha == "head-sha"' "$OUT" >/dev/null || fail 'paginated PR file metadata incomplete'
 assert_grep '/pulls/12/files?per_page=100&page=2' "$FEED/requests" 'second PR file page was not requested'
 pass 'merged PR includes every paginated file and base/head metadata'
+
+new_home
+config '[{"id":"forge","kind":"repository","repo":"ACME/WIDGETS"}]'
+mkdir -p "$HOME_DIR/data/owned"
+printf '%s\n' '{"schema":"fm-contributions.v1","task":"owned","records":[{"url":"https://github.com/AcMe/WidGets/pull/30","kind":"pr","observation":{"state":"merged"}}]}' > "$HOME_DIR/data/owned/contributions.json"
+pr 30 2026-10-13T11:00:00Z 2026-10-13T11:00:00Z | jq -s . > "$FEED/pulls-1.json"
+issue 31 2026-10-13T11:00:00Z | jq -s . > "$FEED/issues-1.json"
+detail 30 2026-10-13T11:00:00Z 4 > "$FEED/detail-30.json"
+jq -n '[
+  {filename:"AGENTS.md",status:"modified"},
+  {filename:"skills/one/SKILL.md",status:"added"},
+  {filename:"CLAUDE.md",status:"removed"},
+  {filename:"skills/new.md",previous_filename:"skills/old.md",status:"renamed"}
+]' > "$FEED/files-30-1.json"
+instruction_content base-sha AGENTS.md '# Before'
+instruction_content head-sha AGENTS.md '# After'
+instruction_content head-sha SKILL.md '# Added'
+instruction_content base-sha CLAUDE.md '# Removed'
+instruction_content base-sha old.md '# Old name'
+instruction_content head-sha new.md '# New name'
+collect "$HOME_DIR" "$NOW"
+expect_code 0 "$STATUS" 'canonical forge casing and instruction revisions'
+bundle
+jq -e '(.evidence | length) == 2 and
+  (any(.evidence[]; .kind == "new-issue" and .repository == "acme/widgets")) and
+  (any(.evidence[]; .kind == "merged-pr" and .repository == "acme/widgets" and .base.repository == "acme/widgets" and
+    .linked_contributions[0].task == "owned" and
+    .files[0].instruction.before.content == "# Before" and .files[0].instruction.after.content == "# After" and
+    .files[1].instruction.before == null and .files[1].instruction.after.content == "# Added" and
+    .files[2].instruction.before.content == "# Removed" and .files[2].instruction.after == null and
+    .files[3].instruction.before.content == "# Old name" and .files[3].instruction.after.content == "# New name"))' "$OUT" >/dev/null || fail 'canonical casing or instruction content missing'
+pass 'canonical repository casing and changed instruction revisions retain provenance'
 
 new_home
 config "$repo_sources"
@@ -338,6 +427,28 @@ expect_code 2 "$STATUS" 'remote transport unavailable'
 bundle
 jq -e '.coverage[0].complete == false and (.coverage[0].reason | contains("remote inventory transport"))' "$OUT" >/dev/null || fail 'remote transport failure lost coverage reason'
 jq -e '.sources.remote.checkpoint == "2026-10-14T12:00:00Z"' "$HOME_DIR/data/domain-freshness/cursors.json" >/dev/null || fail 'failed remote transport advanced checkpoint'
+mkdir -p "$REMOTE_HOME/skills-new"
+printf '# Different root\n' > "$REMOTE_HOME/skills-new/SKILL.md"
+jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"skills",root:$root}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-16T12:00:00Z
+expect_code 0 "$STATUS" 'reconfigured remote root'
+bundle
+jq -e '.coverage[0].baseline and .evidence[0].kind == "inventory-baseline" and .evidence[0].before == null and .evidence[0].after.content == "# Different root\n"' "$OUT" >/dev/null || fail 'remote root reconfiguration reused old before state'
+printf '%s\n' '{"plugins":{}}' > "$REMOTE_HOME/skills-new/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$REMOTE_HOME/skills-new/enabled.json"
+printf 'first asset' > "$REMOTE_HOME/skills-new/first.txt"
+printf 'second asset' > "$REMOTE_HOME/skills-new/second.txt"
+jq -n --arg root "$REMOTE_HOME/skills-new" '{version:1,enabled:false,sources:[{id:"remote-skills",kind:"plugin-files",root:$root,files:[{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"},{path:"first.txt",kind:"asset"},{path:"optional.json",kind:"plugin-version"}]}]}' > "$REMOTE_HOME/config/domain-freshness.json"
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-17T12:00:00Z
+expect_code 0 "$STATUS" 'remote plugin file baseline'
+bundle
+jq -e '.coverage[0].baseline and .coverage[0].surfaces == ["asset","plugin-enablement","plugin-manifest"]' "$OUT" >/dev/null || fail 'remote observed surfaces included absent optional file'
+jq '.sources[0].files[2].path = "second.txt"' "$REMOTE_HOME/config/domain-freshness.json" > "$REMOTE_HOME/config/domain-freshness-next.json"
+mv "$REMOTE_HOME/config/domain-freshness-next.json" "$REMOTE_HOME/config/domain-freshness.json"
+FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_REMOTE_HOME="$REMOTE_HOME" FM_FAKE_COLLECTOR="$COLLECTOR" collect "$HOME_DIR" 2026-10-18T12:00:00Z
+expect_code 0 "$STATUS" 'reconfigured remote file list'
+bundle
+jq -e '.coverage[0].baseline and all(.evidence[]; .kind == "inventory-baseline" and .before == null) and any(.evidence[]; .path | endswith("second.txt"))' "$OUT" >/dev/null || fail 'remote file-list reconfiguration reused old before state'
 pass 'fake parent transport returns bounded remote inventory and preserves failed cursor'
 
 new_home
@@ -405,11 +516,12 @@ pass 'pagination bounds remain explicit incomplete coverage'
 new_home
 mkdir -p "$HOME_DIR/plugins"
 printf '%s\n' '{"plugins":{}}' > "$HOME_DIR/plugins/manifest.json"
+printf '%s\n' '{"enabledPlugins":{}}' > "$HOME_DIR/plugins/enabled.json"
 head -c 4096 /dev/zero | tr '\0' x > "$HOME_DIR/plugins/preview.md"
-for number in $(seq 1 1999); do
+for number in $(seq 1 1998); do
   cp "$HOME_DIR/plugins/preview.md" "$HOME_DIR/plugins/instruction-$number.md"
 done
-config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"large",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"}] + [range(1;2000)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
+config "$(jq -nc --arg root "$HOME_DIR/plugins" '[{id:"large",kind:"plugin-files",root:$root,files:([{path:"manifest.json",kind:"plugin-manifest"},{path:"enabled.json",kind:"plugin-enablement"}] + [range(1;1999)|{path:("instruction-"+(.|tostring)+".md"),kind:"instruction"}])}]')"
 collect "$HOME_DIR" "$NOW"
 expect_code 2 "$STATUS" 'oversized inventory cursor'
 bundle
