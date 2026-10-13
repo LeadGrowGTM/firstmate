@@ -78,6 +78,9 @@ case "${1:-}" in
           Enter|C-m) continue ;;
           *)
             [ -n "$literal" ] || printf '%s\n' "$a" >> "$FM_FAKE_PANE_LOG"
+            if [ -n "$literal" ] && [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
+              printf '%s\n' "$a" >> "$FM_FAKE_LAUNCH_LOG"
+            fi
             if [ "$a" = exit ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ]; then
               : > "$FM_FAKE_EXIT_FLAG"
             fi
@@ -335,6 +338,65 @@ test_spawn_that_stops_after_the_lease_returns_it() {
   pass "a launch that stops after leasing returns the lease"
 }
 
+test_spawn_keeps_lease_after_dispatch_rollback_with_open_endpoint() {
+  local id=pool-dispatch-rollback case_dir=$TMP_ROOT/spawn-dispatch-rollback
+  local foreign own pane_log launch_log tree_log start_log out status=0
+  local real_tasks_axi
+  if ! real_tasks_axi=$(command -v tasks-axi); then
+    printf '%s\n' 'ok - skipped dispatch rollback (tasks-axi is not installed)'
+    return
+  fi
+  prepare_spawn_home "$case_dir" "$id"
+  foreign=$case_dir/shared-pool/1/widget
+  own=$CASE_POOL/.treehouse/kept/1/widget
+  add_worktree "$case_dir/other/projects/widget" "$foreign"
+  add_worktree "$CASE_HOME/projects/widget" "$own" "kept-$id"
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' \
+    > "$CASE_HOME/data/backlog.md"
+  cat > "$CASE_HOME/.tasks.toml" <<'EOF'
+backend = "markdown"
+
+[markdown]
+path = "data/backlog.md"
+EOF
+  tasks-axi add "$id" "item for $id" --kind ship \
+    --file "$CASE_HOME/data/backlog.md" >/dev/null || fail "could not add dispatch backlog item"
+  cat > "$CASE_FAKEBIN/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = start ]; then
+  printf '%s\n' "$*" >> "$FM_TEST_START_LOG"
+  echo 'error: backlog transition refused' >&2
+  exit 1
+fi
+exec "$FM_TEST_REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$CASE_FAKEBIN/tasks-axi"
+  pane_log=$case_dir/pane.log
+  launch_log=$case_dir/launch.log
+  tree_log=$case_dir/treehouse.log
+  start_log=$case_dir/start.log
+  : > "$pane_log"
+  : > "$launch_log"
+  : > "$tree_log"
+  : > "$start_log"
+  out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_LAUNCH_LOG="$launch_log" \
+    FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+    FM_FAKE_TREEHOUSE_PRINT="$own" FM_FAKE_PANE_AFTER_EXIT="$own" \
+    FM_FAKE_EXIT_FLAG="$case_dir/exited" FM_TEST_START_LOG="$start_log" \
+    FM_TEST_REAL_TASKS_AXI="$real_tasks_axi" run_spawn "$foreign" "$id") || status=$?
+  [ "$status" -ne 0 ] || fail "spawn succeeded after dispatch rollback"$'\n'"$out"
+  assert_contains "$out" "could not be moved to In flight" \
+    "spawn did not report the failed dispatch"
+  assert_equals 2 "$(wc -l < "$start_log" | tr -d ' ')" \
+    "dispatch was not retried before rollback"
+  assert_grep "launch." "$launch_log" "the worker launch was not sent before rollback"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "rollback retained the task record"
+  [ -d "$own" ] || fail "rollback removed the worker's leased worktree"
+  assert_no_grep "args=return --force $own" "$tree_log" \
+    "rollback returned a lease while its worker endpoint remained open"
+  pass "dispatch rollback leaves an open worker endpoint's lease intact"
+}
+
 test_spawn_keeps_the_shared_copy_of_its_own_clone() {
   local id=pool-owned case_dir=$TMP_ROOT/spawn-owned
   local own pane_log tree_log out status
@@ -442,6 +504,7 @@ test_spawn_handed_the_other_clones_copy_leases_this_homes_own_worktree
 test_spawn_labels_treehouses_own_error_when_the_lease_fails
 test_spawn_refuses_a_leased_worktree_of_the_other_clone
 test_spawn_that_stops_after_the_lease_returns_it
+test_spawn_keeps_lease_after_dispatch_rollback_with_open_endpoint
 test_spawn_keeps_the_shared_copy_of_its_own_clone
 test_real_treehouse_leases_from_the_homes_own_pool_with_the_operators_git
 

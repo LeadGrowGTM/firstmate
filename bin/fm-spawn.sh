@@ -1478,12 +1478,9 @@ spawn_abort_cleanup() {
       echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it" >&2
     fi
   fi
-  # A per-home lease is not the interactive subshell `treehouse get` returns on
-  # exit. Drop it here when this spawn never published its record; teardown
-  # returns a lease whose record survived. The path is the one this spawn
-  # leased, never the spawning project.
   if [ -n "$SPAWN_PRIVATE_LEASE_PATH" ] &&
-    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
+    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] &&
+    { [ "$SPAWN_LAUNCH_SENT" = 0 ] || [ "$SPAWN_ENDPOINT_CLOSED" = 1 ]; }; then
     if [ "$(real_path_or_raw "$SPAWN_PRIVATE_LEASE_PATH")" != "$PROJ_ABS_REAL" ]; then
       if ! treehouse return --force "$SPAWN_PRIVATE_LEASE_PATH" >/dev/null 2>&1; then
         echo "warning: could not return the per-home treehouse lease at $SPAWN_PRIVATE_LEASE_PATH" >&2
@@ -4531,9 +4528,6 @@ spawn_wait_left_path() {  # <path>
   return 1
 }
 
-# Lease from this home's own pool. Sets SPAWN_PRIVATE_LEASE_PATH the moment the
-# lease is known, so every later exit returns it through spawn_abort_cleanup
-# until the task record is published.
 spawn_lease_clone_worktree() {
   local errfile leased rc=0 bound=${FM_SPAWN_TREEHOUSE_LEASE_SECS:-600}
   case "$bound" in ''|*[!0-9]*|0*) bound=600 ;; esac
