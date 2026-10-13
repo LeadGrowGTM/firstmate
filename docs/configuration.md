@@ -185,7 +185,7 @@ An absent file uses these defaults; a partial object overrides only the supplied
 All limits are nonnegative integers; `stale_days` must be positive, and unknown fields are refused.
 `open_prs` is an inclusive maximum, so the default implements fewer than five open PRs.
 The forge metrics cover the authenticated GitHub user's open PRs and default-branch failures in the immediate local clones under this home's projects directory.
-Non-GitHub or unreadable clones make those metrics unknown instead of silently dropping them.
+Non-GitHub clones are outside these GitHub metrics; unavailable evidence for a GitHub clone makes them unknown.
 Default-branch failures include failed commit statuses and completed unsuccessful check runs on the current head; pending checks alone are not red.
 The local backlog metric counts unfinished structured rows unchanged for at least `stale_days`, including held rows for visibility, without authorizing work on them.
 The initial implementation supports the local markdown backlog; another tasks-axi backend is refused explicitly.
@@ -200,15 +200,11 @@ Portable behavior fixtures live in `tests/fm-idle-sweep.test.sh`.
 
 An absent `config/idle-sweep.json` uses the default targets and considers every prepared queued task with a reversible brief and delivery contract.
 An indented `Idle target: red_default_branches`, `Idle target: open_prs`, or `Idle target: stale_backlog` line in a backlog row associates that task with one standing target; an untagged row remains ordinary backlog work.
-The file can switch the sweep off or override a named step's target:
+The file can switch the sweep off:
 
 ```json
 {
-  "enabled": true,
-  "steps": [
-    {"id": "fix-ci", "target": "red_default_branches"},
-    {"id": "prepare-pr-review", "target": "open_prs"}
-  ]
+  "enabled": false
 }
 ```
 
@@ -222,9 +218,8 @@ If the task needs one of those actions, report needs-decision to firstmate and s
 ```
 
 Set `enabled: false` to stop future automatic batches; existing workers continue normally.
-Each override requires a unique safe task ID and a target of `red_default_branches`, `open_prs`, `stale_backlog`, or `backlog`.
 The sweep derives scout delivery from a scout row and ship delivery from the brief's `Delivery contract: mode=` line.
-Unknown fields and malformed overrides are refused.
+Unknown fields are refused.
 Each backlog row supplies the local project clone and must be unheld, unblocked, queued ordinary work with no metadata record or open task decision.
 Targeted work runs only while its gap is positive; red-branch work must name a red project and stale-backlog work must name a stale row.
 Before targeted dispatch, the sweep rechecks the target's current gap and project or row match.

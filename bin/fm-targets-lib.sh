@@ -90,8 +90,9 @@ fm_targets_collect() {  # <canonical backlog JSON>
     remote=$(git -C "$dir" config --get remote.origin.url 2>/dev/null) || remote=''
     repo=$(printf '%s\n' "$remote" | sed -nE 's#^(https://github.com/|git@github.com:|ssh://git@github.com/)([^/]+/[^/]+)$#\2#p')
     repo=${repo%.git}
+    [ -n "$repo" ] || continue
     count=null; red=null
-    if [ -n "$repo" ] && [ -n "$identity" ]; then
+    if [ -n "$identity" ]; then
       count=$(fm_targets_gh "search/issues?q=repo:$repo+is:pr+is:open+author:$identity" --jq .total_count 2>/dev/null) || count=null
       case "$count" in ''|*[!0-9]*) count=null ;; esac
       # jq variables in the query are evaluated by gh-axi.

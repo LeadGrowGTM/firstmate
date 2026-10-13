@@ -56,12 +56,7 @@ case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
   list-windows) exit 0 ;;
   has-session|new-session|new-window|kill-window) exit 0 ;;
-  send-keys)
-    if [ -n "${FM_FAKE_PANE_LOG:-}" ] && [ "${5:-}" = Enter ]; then
-      printf '%s\n' "${4:-}" >> "$FM_FAKE_PANE_LOG"
-    fi
-    exit 0
-    ;;
+  send-keys) exit 0 ;;
 esac
 exit 0
 SH

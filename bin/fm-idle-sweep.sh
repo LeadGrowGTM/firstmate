@@ -42,18 +42,13 @@ if [ -e "$FM_HOME/.fm-lab-home" ] || [ -L "$FM_HOME/.fm-lab-home" ]; then
 fi
 idle_config() {
   if [ ! -e "$CONFIG/idle-sweep.json" ] && [ ! -L "$CONFIG/idle-sweep.json" ]; then
-    printf '%s\n' '{"enabled":true,"steps":[]}'
+    printf '%s\n' '{"enabled":true}'
     return
   fi
-  jq -se 'length == 1 and (.[0] | type == "object" and (keys - ["enabled","steps"] | length == 0) and
-    (if has("enabled") then (.enabled | type) == "boolean" else true end) and
-    (if has("steps") then (.steps | type) == "array" else true end) and
-    ([(.steps // [])[].id] | length) == ([(.steps // [])[].id] | unique | length) and
-    all((.steps // [])[]; type == "object" and (keys - ["id","target"] | length == 0) and
-      (.id | type) == "string" and (.id | test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
-      (.target as $t | ["red_default_branches","open_prs","stale_backlog","backlog"] | index($t)) != null))
+  jq -se 'length == 1 and (.[0] | type == "object" and (keys - ["enabled"] | length == 0) and
+    (if has("enabled") then (.enabled | type) == "boolean" else true end))
   ' "$CONFIG/idle-sweep.json" >/dev/null &&
-    jq -c '{enabled:(if has("enabled") then .enabled else true end),steps:(.steps // [])}' "$CONFIG/idle-sweep.json"
+    jq -c '{enabled:(if has("enabled") then .enabled else true end)}' "$CONFIG/idle-sweep.json"
 }
 config=$(idle_config) || { echo 'fm-idle-sweep: invalid configuration' >&2; exit 2; }
 [ "$(printf '%s' "$config" | jq -r .enabled)" = true ] || exit 0
@@ -117,7 +112,7 @@ remaining=$((target_deadline - $(date +%s)))
 targets=$(fm_run_timed "$remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || exit 1
 # Red-branch evidence must be complete before a lower-priority task may start.
 printf '%s' "$targets" | jq -e '.targets[] | select(.id == "red_default_branches") | .gap != null' >/dev/null || exit 0
-candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" --argjson config "$config" '
+candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" '
   def row_target:
     [.body_lines[] | select(startswith("Idle target: ")) | ltrimstr("Idle target: ")] as $tags |
     if ($tags | length) == 0 then "backlog"
@@ -129,7 +124,7 @@ candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" 
       .hold_kind == null and (.unresolved_blocker_ids | length) == 0 and
       (.kind == null or .kind == "task" or .kind == "ship" or .kind == "scout")) |
     . as $row |
-    ([$config.steps[] | select(.id == $row.id)][0].target // ($row | row_target)) as $target |
+    ($row | row_target) as $target |
     select($target != null) |
     select($target == "backlog" or any($targets.targets[]; .id == $target and .gap != null and .gap > 0)) |
     select($target != "red_default_branches" or any($targets.repos[]; .project == $row.repo and .red_default_branches == 1)) |

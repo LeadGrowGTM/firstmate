@@ -91,10 +91,7 @@ perl -0pi -e 's/(^[-*] \[ \] red - [^\n]*)/$1\n  Idle target: red_default_branch
 bash "$home/bin/fm-tasks-axi.sh" hold held --reason 'on hold' >/dev/null
 bash "$home/bin/fm-tasks-axi.sh" hold captain --kind captain --reason 'captain call' >/dev/null
 bash "$home/bin/fm-tasks-axi.sh" start flight >/dev/null
-cat > "$home/config/idle-sweep.json" <<'JSON'
-{"enabled":true,"steps":[
- {"id":"extra3","target":"open_prs"}]}
-JSON
+printf '{"enabled":true}\n' > "$home/config/idle-sweep.json"
 sweep() { bash "$home/bin/fm-idle-sweep.sh" > "$TMP_ROOT/out"; }
 no_starts() { [ ! -s "$TEST_SPAWN_LOG" ] || fail "$1"; pass "$1"; }
 cp "$home/config/idle-sweep.json" "$TMP_ROOT/enrollment.json"
@@ -130,7 +127,7 @@ sweep
 no_starts 'in-flight row started during target collection holds the batch'
 bash "$home/bin/fm-tasks-axi.sh" reopen extra3 >/dev/null
 unset TEST_FORGE_HOOK TEST_FORGE_HOOK_MARKER
-jq '.steps |= map(select(.id=="ordinary"))' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
+cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 cp "$home/data/ordinary/brief.md" "$TMP_ROOT/ordinary-brief"
 printf "# Task\n## Captain's intent\nFix the fixture.\n## Firstmate spec\nNo boundary supplied.\n" > "$home/data/ordinary/brief.md"
 sweep
@@ -161,6 +158,21 @@ printf '%s' "$result" | jq -e '.targets == [
   {id:"open_prs",current:7,limit:4,gap:3},
   {id:"stale_backlog",current:8,limit:0,gap:8}]' >/dev/null || fail 'fixture target values and gaps'
 pass 'read-only target evaluator reports fixture values and gaps'
+mkdir -p "$home/projects/local-only"
+git -C "$home/projects/local-only" init -q
+git -C "$home/projects/local-only" remote add origin "$TMP_ROOT/local-origin"
+result=$(bash "$home/bin/fm-targets.sh" --json)
+printf '%s' "$result" | jq -e '
+  (.targets[] | select(.id == "red_default_branches") | .current == 1 and .gap == 1) and
+  (any(.repos[]; .project == "example" and .repo == "example/repo")) and
+  (all(.repos[]; .project != "local-only"))
+' >/dev/null || fail 'local-only clone changed GitHub target evidence'
+sweep
+grep -q '^red ' "$TEST_SPAWN_LOG" || fail 'local-only clone prevented eligible GitHub task dispatch'
+grep -q '^ordinary ' "$TEST_SPAWN_LOG" || fail 'local-only clone prevented ordinary backlog dispatch'
+for id in ordinary held captain red extra extra2 extra3 flight; do rm -f "$home/state/$id.meta"; done
+: > "$TEST_SPAWN_LOG"
+pass 'local-only clone does not block GitHub tasks or ordinary backlog'
 git -C "$home/projects/example" remote set-url origin ssh://git@github.com/example/repo.git
 ssh_result=$(bash "$home/bin/fm-targets.sh" --json)
 printf '%s' "$ssh_result" | jq -e 'any(.repos[]; .repo == "example/repo" and .open_prs == 7 and .red_default_branches == 1)' >/dev/null || fail 'SSH GitHub URL target metrics'
@@ -190,6 +202,7 @@ rm "$home/.fm-lab-home" "$home/state/.fm-lab-tmux-dir"
 [ "$(head -1 "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = red ] || fail 'tagged red task did not outrank ordinary backlog'
 [ "$(sed -n '2p' "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = ordinary ] || fail 'untagged work did not follow backlog order'
 pass 'absent configuration prioritizes tagged targets before ordinary backlog'
+perl -0pi -e 's/(^[-*] \[ \] extra3 - [^\n]*)/$1\n  Idle target: open_prs/m' "$home/data/backlog.md"
 for id in ordinary held captain red extra extra2 extra3 flight; do rm -f "$home/state/$id.meta"; done
 : > "$TEST_SPAWN_LOG"
 : > "$home/state/idle-sweep.status"
@@ -218,9 +231,9 @@ bash "$home/bin/fm-tasks-axi.sh" update ordinary --title 'Changed work' >/dev/nu
 result=$(bash "$home/bin/fm-targets.sh" --json)
 printf '%s' "$result" | jq -e '.targets[] | select(.id=="stale_backlog") | .current==null and .gap==null' >/dev/null || fail 'changed row stale age'
 pass 'changed row invalidates previously observed stale age'
-jq '.steps[0].mode="scout"' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
-if sweep 2> "$TMP_ROOT/error"; then fail 'mode override must be refused'; fi
-pass 'mode override is refused'
+jq '.steps=[{"id":"ordinary","target":"open_prs"}]' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
+if sweep 2> "$TMP_ROOT/error"; then fail 'per-step target override must be refused'; fi
+pass 'per-step target override is refused'
 cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 for id in ordinary held captain extra extra2 extra3 flight; do
   printf 'kind=crewmate\nwindow=fm-%s\n' "$id" > "$home/state/$id.meta"
