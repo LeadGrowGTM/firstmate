@@ -1,0 +1,13 @@
+
+=== selected codex ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-cli-lab.JwIEeW/home
+error: selected codex executable is unavailable before provisioning
+scheduled-worker: reselect occurrence=occ task=job receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-cli-lab.JwIEeW/home/state/scheduled-worker/occ/outcome.1.json
+phase=reselect attempted=1 metadata=absent
+
+=== selected claude ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-cli-lab.JwIEeW/home
+error: selected claude executable is unavailable before provisioning
+scheduled-worker: reselect occurrence=occ task=job receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-cli-lab.JwIEeW/home/state/scheduled-worker/occ/outcome.2.json
+phase=reselect attempted=2 metadata=absent
+{"phase":"reselect","attempt":2,"tried":[{"effort":"medium","harness":"codex","model":"gpt-6-sol","reasoning_class":"standard"},{"effort":"medium","harness":"claude","model":"sonnet","reasoning_class":"standard"}],"reason":"selected-executable-missing"}

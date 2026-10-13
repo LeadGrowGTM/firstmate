@@ -1,0 +1,11 @@
+
+=== invocation 1 ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-bound-lab.sYR2mg/home
+error: selected codex executable is unavailable before provisioning
+scheduled-worker: reselect occurrence=occ task=job receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-bound-lab.sYR2mg/home/state/scheduled-worker/occ/outcome.1.json
+{"phase":"reselect","attempt":1,"tried":[{"effort":"medium","harness":"codex","model":"gpt-6-sol","reasoning_class":"standard"}]}
+
+=== invocation 2 ===
+error: candidate already attempted this episode; reselect or leave pending
+{"phase":"reselect","attempt":1,"tried":[{"effort":"medium","harness":"codex","model":"gpt-6-sol","reasoning_class":"standard"}]}
+metadata=absent

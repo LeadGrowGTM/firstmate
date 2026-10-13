@@ -1,0 +1,17 @@
+
+=== selected codex ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-capacity-lab.neVAw7/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+deferred: project project admits 1 worker(s) at once on this machine (/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-capacity-lab.neVAw7/home/config/project-capacity) and 1 already hold a place (live); task job was not launched and its backlog item stays queued - dispatch it again once one of them records its ready PR or is cleaned up
+scheduled-worker: capacity occurrence=occ task=job receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-capacity-lab.neVAw7/home/state/scheduled-worker/occ/outcome.1.json
+phase=capacity tried=[] new-worker-metadata=absent
+
+=== selected grok ===
+error: capacity cannot switch subscription profile
+phase=capacity tried=[] new-worker-metadata=absent

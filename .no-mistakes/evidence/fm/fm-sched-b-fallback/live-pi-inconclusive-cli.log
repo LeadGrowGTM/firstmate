@@ -1,0 +1,21 @@
+
+=== timeout auth response ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-pi-lab.g4N40j/home
+error: config/pi-account sign-in check was inconclusive for provider 'openai-codex' (auth check exited 124)
+scheduled-worker: blocked occurrence=timeout task=timeout receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-pi-lab.g4N40j/home/state/scheduled-worker/timeout/outcome.1.json
+{"outcome":"uncertain","reason":"selected-account-check-inconclusive","launch_sent":false}
+phase=blocked metadata=absent
+
+=== empty auth response ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-pi-lab.g4N40j/home
+error: config/pi-account sign-in check was inconclusive for provider 'openai-codex' ()
+scheduled-worker: blocked occurrence=empty task=empty receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-pi-lab.g4N40j/home/state/scheduled-worker/empty/outcome.1.json
+{"outcome":"uncertain","reason":"selected-account-check-inconclusive","launch_sent":false}
+phase=blocked metadata=absent
+
+=== malformed auth response ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-pi-lab.g4N40j/home
+error: config/pi-account sign-in check was inconclusive for provider 'openai-codex' (inconclusive)
+scheduled-worker: blocked occurrence=malformed task=malformed receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VFQZYJKPX8A3ES51Z6PG1P/.nm-pi-lab.g4N40j/home/state/scheduled-worker/malformed/outcome.1.json
+{"outcome":"uncertain","reason":"selected-account-check-inconclusive","launch_sent":false}
+phase=blocked metadata=absent

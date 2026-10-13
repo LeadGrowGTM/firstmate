@@ -1,0 +1,5 @@
+=== no authorization ===
+error: invalid explicit fallback authorization
+=== stale selection ===
+error: selection needs fresh evidence and one exactly authorized profile
+journal=absent metadata=absent
