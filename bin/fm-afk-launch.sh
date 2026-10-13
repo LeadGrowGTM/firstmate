@@ -456,6 +456,7 @@ fm_afk_launch_close_terminal() {  # <backend> <target>
       ;;
     tmux)
       # target is the dedicated daemon session name - kill exactly it.
+      fm_backend_tmux_lab_check || return 1
       tmux kill-session -t "$target" 2>/dev/null
       ;;
     none)
@@ -482,6 +483,7 @@ fm_afk_launch_terminal_absent() {  # <backend> <target>
       [ "$code" = pane_not_found ]
       ;;
     tmux)
+      fm_backend_tmux_lab_check || return 1
       out=$(tmux has-session -t "$target" 2>&1)
       result=$?
       [ "$result" -eq 1 ] || return 1
@@ -516,6 +518,7 @@ fm_afk_launch_terminal_alive() {  # <backend> <target>
       fm_backend_herdr_cli "$session" pane get "$pane" >/dev/null 2>&1
       ;;
     tmux)
+      fm_backend_tmux_lab_check || return 1
       tmux has-session -t "$target" 2>/dev/null
       ;;
     *) return 1 ;;
@@ -681,6 +684,7 @@ fm_afk_launch_create_herdr() {  # <captain-target> <captain-backend>
 # captain pane by its %id from this separate session.
 fm_afk_launch_create_tmux() {  # <captain-target> <captain-backend>
   local captain_target=$1 captain_backend=$2 session cmd hash nonce
+  fm_backend_tmux_lab_check || return 1
   hash=$(printf '%s' "$FM_HOME" | cksum | cut -d' ' -f1)
   nonce="$$-${RANDOM:-0}-$(date '+%s')"
   session="fm-afk-daemon-$hash-$nonce"

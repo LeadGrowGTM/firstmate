@@ -13,7 +13,7 @@ export FM_BACKEND_LIB_DIR="$ROOT/bin"
 . "$ROOT/bin/backends/tmux.sh"
 
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fm-tmux-submit-busy.XXXXXX")
-trap 'rm -rf "$TMP_ROOT"' EXIT
+trap 'rm -rf "$TMP_ROOT"; fm_test_tmux_cleanup' EXIT
 
 # Override fm_pane_is_busy for testing: FM_FAKE_PANE_BUSY=1 means busy.
 fm_pane_is_busy() {

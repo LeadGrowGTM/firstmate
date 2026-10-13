@@ -49,7 +49,7 @@ cleanup() {
   chmod -R u+w "$TMP_ROOT" 2>/dev/null || true
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 # The remote host's tracked code root is this branch, as a real git repository:
 # fm-on and the remote entrypoint both require the dispatched command to be

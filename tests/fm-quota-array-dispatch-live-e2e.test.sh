@@ -32,7 +32,7 @@ CALLS="$LAB/quota-axi.calls"
 cleanup() {
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 mkdir -p "$PROJECT/.agents/skills/quota-array-dispatch" "$FAKEBIN"
 cp "$OWNER" "$PROJECT/.agents/skills/quota-array-dispatch/SKILL.md"

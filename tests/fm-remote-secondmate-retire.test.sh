@@ -47,7 +47,7 @@ cleanup() {
   chmod -R u+w "$REMOTE_HOME" 2>/dev/null || true
   rm -rf -- "$TMP_ROOT"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 # Materialize the current branch as the remote host's tracked code root: a real
 # git repository, because provisioning clones the home from it.

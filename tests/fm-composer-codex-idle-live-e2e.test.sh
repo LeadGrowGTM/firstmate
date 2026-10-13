@@ -51,7 +51,7 @@ note() { printf '# %s\n' "$1"; }
 cleanup() {
   tmux -L "$SOCKET" kill-server 2>/dev/null || true
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 # The library under test, driven against the private socket through a PATH
 # shim so its bare `tmux` calls stay isolated from any live fleet.

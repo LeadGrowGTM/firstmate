@@ -26,7 +26,7 @@ test_git_config_isolation() (
   git -C "$dir/caller" config commit.gpgsign false
   cd "$dir/caller" || exit 1
   cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/runner/bin/"
-  cp "$ROOT/tests/git-config-helpers.sh" "$dir/runner/tests/"
+  cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/tmux-helpers.sh" "$dir/runner/tests/"
   fakebin=$(fm_fakebin "$dir/standalone")
   fm_fake_exit0 "$fakebin" pi
   cat > "$fakebin/tmux" <<'SH'
@@ -323,6 +323,321 @@ SH
   pass "agent stand-in: a multicall sleep is refused, and the compiled stand-in survives a harness name"
 )
 
+test_tmux_isolation() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  local dir="$TMP_ROOT/tmux-isolation" sentinel_dir sentinel child recorder
+  mkdir -m 700 "$dir"
+  sentinel_dir=$(mktemp -d /tmp/fmo.XXXXXX) || fail 'could not create independent operator sentinel directory'
+  sentinel="$sentinel_dir/operator"
+  child=
+  cleanup_isolation() {
+    "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
+    [ -z "$child" ] || FM_TEST_TMUX_ROOT="$child" fm_test_tmux_cleanup
+    rmdir "$sentinel_dir" 2>/dev/null || true
+  }
+  trap cleanup_isolation EXIT
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 600' \
+    || fail 'could not start disposable operator sentinel'
+  export TMUX="$sentinel,0,0" TMUX_TMPDIR="$dir"
+  unset FM_TEST_TMUX_OWNER
+  . "$ROOT/tests/tmux-helpers.sh" || fail 'could not isolate inherited tmux'
+  child=$FM_TEST_TMUX_ROOT
+  tmux new-session -d -s lab 'exec sleep 60' || fail 'isolated test server did not start'
+  socket=$(tmux display-message -p '#{socket_path}')
+  [ "$socket" = "$(cd -P -- "$TMUX_TMPDIR" && pwd -P)/tmux-$(id -u)/fm-test" ] \
+    || fail 'bare call did not select the named test server'
+  ln -s "$child" "$dir/alias"
+  TMUX_TMPDIR="$dir/alias/s" tmux -L fm-test has-session -t lab \
+    || fail 'named socket refused through a symlinked parent spelling'
+  TMUX_TMPDIR="$dir/alias/s" tmux -S "$dir/alias/s/tmux-$(id -u)/fm-test" has-session -t lab \
+    || fail 'explicit socket refused through a symlinked parent spelling'
+  TMUX_TMPDIR="$dir/alias/s" TMUX="$dir/alias/s/tmux-$(id -u)/fm-test,0,0" \
+    tmux has-session -t lab || fail 'inherited socket refused through a symlinked parent spelling'
+  if tmux has-session -t protected 2>/dev/null; then fail 'test reached inherited operator server'; fi
+  tmux kill-server || fail 'isolated kill-server failed'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'lab killed operator sentinel'
+  if tmux -S "$sentinel" kill-server 2>"$dir/foreign.err"; then fail 'foreign private socket accepted'; fi
+  assert_grep 'unrecorded socket path' "$dir/foreign.err" 'foreign private socket was not refused'
+  ( cd "$sentinel_dir" && ! tmux -S operator kill-server ) 2>/dev/null \
+    || fail 'relative foreign private socket accepted'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'foreign selector reached operator sentinel'
+  mkdir -m 700 "$dir/recorded"
+  tmux -S "$dir/recorded/dedicated.sock" new-session -d -s disposable 'exec sleep 60' \
+    || fail 'recorded disposable socket refused'
+  tmux -S "$dir/recorded/dedicated.sock" has-session -t disposable \
+    || fail 'recorded disposable socket did not answer'
+  ( cd "$dir/recorded" && tmux -S dedicated.sock has-session -t disposable ) \
+    || fail 'relative recorded disposable socket did not answer'
+  tmux -f /dev/null -S "$dir/recorded/dedicated.sock" has-session -t disposable \
+    || fail 'required config option refused a recorded socket'
+  tmux -S "$dir/recorded/dedicated.sock" kill-server \
+    || fail 'recorded disposable socket did not stop'
+  recorder="$dir/recorder"
+  cat > "$recorder" <<'SH'
+#!/usr/bin/env bash
+printf 'contact\n' >> "$FM_TEST_CONTACT_LOG"
+exit 0
+SH
+  chmod +x "$recorder"
+  FM_TEST_TMUX_REAL="$recorder" FM_TEST_CONTACT_LOG="$dir/contact.log" \
+    bash -s -- "$ROOT" "$sentinel" "$sentinel_dir" <<'SH' \
+    || fail 'foreign socket refusal contacted the real tmux command'
+unset FM_TEST_TMUX_OWNER
+. "$1/tests/tmux-helpers.sh" || exit 1
+trap fm_test_tmux_cleanup EXIT
+if tmux -S "$2" list-sessions >/dev/null 2>&1; then exit 1; fi
+if tmux -vS "$2" kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -vS"$2" kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -vL default kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -vLdefault kill-server >/dev/null 2>&1; then exit 1; fi
+if tmux -T test kill-server >/dev/null 2>&1; then exit 1; fi
+if TMUX_TMPDIR="$3" tmux -L operator list-sessions >/dev/null 2>&1; then exit 1; fi
+[ ! -e "$FM_TEST_CONTACT_LOG" ]
+SH
+  if tmux -L default list-sessions 2>"$dir/default.err"; then fail 'default name accepted'; fi
+  assert_grep 'default or invalid' "$dir/default.err" 'default selector did not refuse'
+  if tmux -S "$dir/default" list-sessions 2>"$dir/path.err"; then fail 'default socket path accepted'; fi
+  assert_grep 'default or non-private' "$dir/path.err" 'default path did not refuse'
+  rm -f "$TMUX_TMPDIR/tmux-$(id -u)/fm-test"
+  rmdir "$TMUX_TMPDIR/tmux-$(id -u)" "$TMUX_TMPDIR" || fail 'could not remove unused private socket directory'
+  if tmux new-session -d -s escaped 2>"$dir/missing.err"; then fail 'missing socket directory fell back'; fi
+  assert_grep 'private TMUX_TMPDIR is missing' "$dir/missing.err" 'missing directory did not refuse'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'refusal touched operator sentinel'
+  # The runner must isolate a suite that never sources tests/lib.sh itself.
+  mkdir -p "$dir/runner/bin" "$dir/runner/tests"
+  cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/runner/bin/"
+  cp "$ROOT/tests/git-config-helpers.sh" "$ROOT/tests/tmux-helpers.sh" "$dir/runner/tests/"
+  cat > "$dir/runner/tests/fm-test-run.test.sh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+tmux new-session -d -s standalone 'exec sleep 60'
+[ "$(tmux display-message -p '#{socket_path}')" = "$(cd -P -- "$TMUX_TMPDIR" && pwd -P)/tmux-$(id -u)/fm-test" ]
+! tmux has-session -t protected 2>/dev/null
+tmux kill-server
+SH
+  TMUX="$sentinel,0,0" TMUX_TMPDIR="$dir" bash "$dir/runner/bin/fm-test-run.sh" \
+    tests/fm-test-run.test.sh > "$dir/runner.log" 2>&1 \
+    || fail "runner let standalone suite escape isolation: $(cat "$dir/runner.log")"
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'standalone suite killed operator sentinel'
+  pass 'tmux test isolation: inherited operator socket survives create/kill and unsafe selectors refuse'
+)
+
+test_tmux_cleanup_after_trap_override() (
+  local dir="$TMP_ROOT/tmux-trap-override" root real_mktemp
+  mkdir -p "$dir/bin"
+  real_mktemp=$(command -v mktemp) || fail 'mktemp is required for fixture cleanup test'
+  cat > "$dir/bin/mktemp" <<'SH'
+#!/usr/bin/env bash
+set -e
+allocated=$("$FM_TEST_REAL_MKTEMP" "$@")
+case "$allocated" in
+  /tmp/fmt.??????) printf '%s\n' "$allocated" >> "$FM_TEST_TMUX_ALLOCATIONS" ;;
+esac
+printf '%s\n' "$allocated"
+SH
+  chmod +x "$dir/bin/mktemp"
+  PATH="$dir/bin:$PATH" FM_TEST_REAL_MKTEMP="$real_mktemp" \
+    FM_TEST_TMUX_ALLOCATIONS="$dir/allocated" bash "$ROOT/tests/fm-cursor-harness.test.sh" \
+    > "$dir/suite.log" 2>&1 || fail "trap-override suite failed: $(cat "$dir/suite.log")"
+  [ -s "$dir/allocated" ] || fail 'trap-override suite did not create a private tmux fixture'
+  while IFS= read -r root; do
+    assert_absent "$root" 'trap-override suite left its private tmux fixture behind'
+  done < "$dir/allocated"
+  pass 'tmux fixture cleanup survives a suite replacing its EXIT trap'
+)
+
+test_tmux_signal_cleanup() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  local dir="$TMP_ROOT/tmux-signal" pid rc=0 i lab
+  mkdir -p "$dir"
+  cat > "$dir/child.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+. "$1/tests/lib.sh"
+OUTPUT_DIR=$2
+LAB=$(fm_test_tmproot signal)
+printf '%s\n' "$LAB" > "$OUTPUT_DIR/lab"
+tmux -S "$LAB/dedicated.sock" new-session -d -s disposable 'exec sleep 60' || exit 1
+stop_owned() {
+  [ -f "$LAB/.fm-test-fixture" ] || exit 3
+  tmux -S "$LAB/dedicated.sock" kill-server || exit 4
+  printf 'stopped\n' > "$OUTPUT_DIR/stopped"
+}
+trap 'fm_test_signal_cleanup 143 stop_owned' TERM
+printf 'ready\n' > "$OUTPUT_DIR/ready"
+while :; do sleep 0.1; done
+SH
+  bash "$dir/child.sh" "$ROOT" "$dir" > "$dir/child.log" 2>&1 &
+  pid=$!
+  for i in $(seq 1 50); do
+    [ -f "$dir/ready" ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [ -f "$dir/ready" ] || fail "signal fixture did not start: $(cat "$dir/child.log")"
+  lab=$(cat "$dir/lab")
+  kill -TERM "$pid" || fail 'could not signal disposable fixture'
+  wait "$pid" || rc=$?
+  [ "$rc" -eq 143 ] || fail "signal cleanup returned $rc: $(cat "$dir/child.log")"
+  [ -f "$dir/stopped" ] || fail 'signal cleanup did not stop the recorded server'
+  [ ! -e "$lab" ] || fail 'signal cleanup left the registered lab behind'
+  pass 'signal cleanup stops recorded server before removing its lab'
+)
+
+test_timed_suite_reaps_child_tmux() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  local dir="$TMP_ROOT/tmux-runner-timeout" repo mode topology label rc root server_pid i status
+  local -a jobs
+  repo="$dir/repo"
+  mkdir -p "$repo/bin" "$repo/tests"
+  cp "$ROOT/bin/fm-test-run.sh" "$ROOT/bin/fm-timeout-lib.sh" \
+    "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-path-lib.sh" "$repo/bin/"
+  cp "$ROOT/tests/lib.sh" "$ROOT/tests/git-config-helpers.sh" \
+    "$ROOT/tests/tmux-helpers.sh" "$repo/tests/"
+  cat > "$repo/tests/fm-test-run.test.sh" <<'SH'
+#!/usr/bin/env bash
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
+if [ "${FM_TEST_NESTED:-0}" = 1 ] && [ "${FM_TEST_LEAF:-0}" != 1 ]; then
+  FM_TEST_LEAF=1 bin/fm-test-run.sh --jobs 1 --per-script-timeout-secs 30 tests/fm-test-run.test.sh
+  exit $?
+fi
+printf '%s\n' "$FM_TEST_TMUX_ROOT" > "$FM_TEST_CHILD_ROOT_FILE"
+tmux new-session -d -s disposable 'exec sleep 600' || exit 1
+tmux display-message -p '#{pid}' > "$FM_TEST_CHILD_SERVER_PID_FILE"
+mkdir -m 700 "$FM_TEST_TMUX_ROOT/recorded" || exit 1
+printf '%s\n' "$$" > "$FM_TEST_TMUX_ROOT/recorded/.fm-test-fixture"
+tmux -S "$FM_TEST_TMUX_ROOT/recorded/dedicated.sock" new-session -d -s explicit 'exec sleep 600' || exit 1
+tmux -S "$FM_TEST_TMUX_ROOT/recorded/dedicated.sock" display-message -p '#{pid}' >> "$FM_TEST_CHILD_SERVER_PID_FILE"
+TMUX_TMPDIR="$FM_TEST_TMUX_ROOT/recorded" tmux -L fm-lab new-session -d -s lab-named 'exec sleep 600' || exit 1
+TMUX_TMPDIR="$FM_TEST_TMUX_ROOT/recorded" tmux -L fm-lab display-message -p '#{pid}' >> "$FM_TEST_CHILD_SERVER_PID_FILE"
+trap '' TERM
+sleep 600
+SH
+  chmod +x "$repo/tests/fm-test-run.test.sh"
+  cleanup_timed_fixture() {
+    local file recorded
+    for file in "$dir"/root.*; do
+      [ -s "$file" ] || continue
+      recorded=$(cat "$file")
+      FM_TEST_TMUX_ROOT="$recorded" fm_test_tmux_cleanup
+    done
+  }
+  trap cleanup_timed_fixture EXIT
+  for mode in serial captured; do
+    if [ "$mode" = serial ]; then jobs=(--jobs 1); else jobs=(--jobs 2); fi
+    for topology in direct nested; do
+      label="$mode.$topology"
+      rc=0
+      ( cd "$repo" && FM_TEST_NESTED=$([ "$topology" = nested ] && printf 1 || printf 0) \
+        FM_TEST_CHILD_ROOT_FILE="$dir/root.$label" \
+        FM_TEST_CHILD_SERVER_PID_FILE="$dir/pid.$label" \
+        bin/fm-test-run.sh "${jobs[@]}" --per-script-timeout-secs 3 \
+        tests/fm-test-run.test.sh ) > "$dir/$label.out" 2>&1 || rc=$?
+      [ "$rc" -eq 1 ] || fail "$label timed runner returned $rc: $(cat "$dir/$label.out")"
+      assert_grep 'exit=124' "$dir/$label.out" "$label suite did not time out"
+      [ -s "$dir/root.$label" ] && [ "$(wc -l < "$dir/pid.$label")" -eq 3 ] \
+        || fail "$label suite did not start three disposable servers"
+      root=$(cat "$dir/root.$label")
+      [ ! -e "$root" ] || fail "$label runner left the child socket root"
+      while IFS= read -r server_pid; do
+        for i in $(seq 1 50); do
+          status=$(ps -p "$server_pid" -o stat= 2>/dev/null || true)
+          status=${status//[[:space:]]/}
+          case "$status" in ''|Z*) break ;; esac
+          sleep 0.1
+        done
+        case "$status" in ''|Z*) ;; *) fail "$label runner left server $server_pid running" ;; esac
+      done < "$dir/pid.$label"
+    done
+  done
+  pass 'streamed and captured timeouts reap nested named and explicit child tmux servers'
+)
+
+test_grok_failed_cell_preserves_server() (
+  if [ -z "${FM_TEST_TMUX_REAL:-}" ] || ! command -v jq >/dev/null 2>&1; then
+    echo 'skip: tmux and jq are required for the Grok failure fixture'
+    exit 0
+  fi
+  local dir="$TMP_ROOT/grok-failed-cell" cell socket sentinel="$TMP_ROOT/grok-failed-cell/operator/operator.sock" rc=0
+  mkdir -p "$dir"
+  mkdir -m 700 "$dir/operator"
+  cat > "$dir/fake-grok" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then printf 'fake-grok\n'; exit 0; fi
+exit 7
+SH
+  chmod +x "$dir/fake-grok"
+  : > "$dir/auth.json"
+  cleanup_grok_cell() {
+    for cell in "$dir"/fm-grok-stop-native.*; do
+      [ -f "$cell/.fm-test-fixture" ] || continue
+      "$FM_TEST_TMUX_REAL" -S "$cell/dedicated.sock" kill-server >/dev/null 2>&1 || true
+    done
+    "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
+  }
+  trap cleanup_grok_cell EXIT
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 60' \
+    || fail 'could not start Grok fixture operator sentinel'
+  TMPDIR="$dir" FM_GROK_STOP_LIVE_E2E=1 FM_GROK_STOP_LIVE_TIMEOUT=5 \
+    FM_GROK_NATIVE_BIN="$dir/fake-grok" FM_GROK_LEGACY_BIN="$dir/fake-grok" \
+    FM_GROK_AUTH_FILE="$dir/auth.json" bash "$ROOT/tests/fm-grok-stop-live-e2e.test.sh" \
+    > "$dir/suite.log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail 'fake Grok failure unexpectedly passed'
+  cell=$(sed -n 's/^blocked: preserving failed isolated Grok cell at //p' "$dir/suite.log")
+  [ -n "$cell" ] && [ -f "$cell/.fm-test-fixture" ] || fail "failed Grok cell was not preserved: $(cat "$dir/suite.log")"
+  FM_E2E_TMUX_SOCKET_ID="$cell/dedicated.sock" \
+    env -u TMUX -u TMUX_PANE "$cell/bin/tmux" has-session -t native-e2e \
+    || fail 'failed Grok cell wrapper cannot inspect its server'
+  socket=$(FM_E2E_TMUX_SOCKET_ID="$cell/dedicated.sock" \
+    env -u TMUX -u TMUX_PANE "$cell/bin/tmux" display-message -p -t native-e2e:control '#{socket_path}') \
+    || fail 'failed Grok cell wrapper cannot report its socket'
+  case "$socket" in
+    dedicated.sock|"$cell/dedicated.sock") ;;
+    *) fail "failed Grok cell wrapper selected another socket: $socket" ;;
+  esac
+  if FM_E2E_TMUX_SOCKET_ID="$cell/dedicated.sock" \
+    env -u TMUX -u TMUX_PANE "$cell/bin/tmux" -vS "$sentinel" kill-server >/dev/null 2>&1; then
+    fail 'failed Grok cell wrapper accepted a foreign selector'
+  fi
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected \
+    || fail 'failed Grok cell wrapper contacted the operator sentinel'
+  pass 'failed Grok cell retains a socket-pinned wrapper for inspection'
+)
+
+test_standalone_afk_avoids_operator_socket() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  if command -v herdr >/dev/null 2>&1; then
+    echo 'skip: standalone AFK sentinel check requires a tmux-only host'
+    exit 0
+  fi
+  local sentinel_dir sentinel rc=0
+  sentinel_dir=$(mktemp -d /tmp/fmo.XXXXXX) || fail 'could not create AFK operator sentinel directory'
+  sentinel="$sentinel_dir/operator"
+  cleanup_afk_sentinel() {
+    "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
+    rm -rf "$sentinel_dir"
+  }
+  trap cleanup_afk_sentinel EXIT
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 600' \
+    || fail 'could not start AFK operator sentinel'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" set-hook -g session-created \
+    "run-shell 'printf contact >> $sentinel_dir/contact'" \
+    || fail 'could not arm AFK sentinel contact detector'
+  TMUX="$sentinel,0,0" TMUX_TMPDIR="$sentinel_dir" \
+    bash "$ROOT/tests/fm-afk-launch.test.sh" > "$sentinel_dir/afk.log" 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || fail "standalone AFK suite failed: $(grep '^not ok -' "$sentinel_dir/afk.log" || tail -n 20 "$sentinel_dir/afk.log")"
+  [ ! -e "$sentinel_dir/contact" ] || fail 'standalone AFK suite created a session on operator sentinel'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected \
+    || fail 'standalone AFK suite stopped operator sentinel'
+  pass 'standalone AFK suite keeps an inherited operator server untouched'
+)
+
+test_tmux_isolation || fail 'tmux fixture isolation'
+test_tmux_cleanup_after_trap_override || fail 'tmux fixture trap cleanup'
+test_tmux_signal_cleanup || fail 'tmux fixture signal cleanup'
+test_timed_suite_reaps_child_tmux || fail 'timed suite tmux cleanup'
+test_grok_failed_cell_preserves_server || fail 'Grok failed-cell preservation'
+test_standalone_afk_avoids_operator_socket || fail 'standalone AFK fixture isolation'
 test_git_config_isolation || fail "Git fixture config isolation"
 test_agent_standin_survives_a_multicall_sleep || fail "agent stand-in multicall case"
 test_touch_epoch_preserves_repeated_dst_hour

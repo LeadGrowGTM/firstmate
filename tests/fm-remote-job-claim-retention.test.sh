@@ -5,7 +5,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 TMP_ROOT=$(fm_test_tmproot fm-remote-job-claim-retention)
-trap 'rm -rf -- "$TMP_ROOT"' EXIT
+trap 'rm -rf -- "$TMP_ROOT"; fm_test_tmux_cleanup' EXIT
 export FM_REMOTE_JOB_STATE_ROOT="$TMP_ROOT/state"
 . "$ROOT/bin/fm-remote-job-lib.sh"
 mkdir -p "$TMP_ROOT/account"

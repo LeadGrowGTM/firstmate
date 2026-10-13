@@ -67,6 +67,9 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
+For a disposable marked lab home, use `bin/fm-lab-home.sh tmux` to address its recorded named server.
+Tmux backend calls refuse that home unless its private `fm-lab` socket is selected; the helper's header owns setup and teardown.
+
 ### Agent liveness probe
 
 A target-existence check proves only that the pane exists.

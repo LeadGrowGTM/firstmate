@@ -211,26 +211,95 @@ test_lab_home_private_tmux_socket_survives_deep_paths() {
   [ "${socket_dir#/tmp/fml.}" != "$socket_dir" ] || fail "socket directory is not under the short /tmp/fml prefix"
 
   cleanup_deep_lab() {
-    env TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server >/dev/null 2>&1 || true
+    env FM_TEST_TMUX_LAB_HOME="$lab" TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server >/dev/null 2>&1 || true
     "$LABHOME" teardown "$lab" >/dev/null 2>&1 || true
     fm_test_cleanup
   }
   trap cleanup_deep_lab EXIT
   # shellcheck disable=SC2016 # The fake primary expands $1 in its own sh process.
-  env TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab -f /dev/null new-session -d -s primary \
+  "$LABHOME" tmux "$lab" new-session -d -s primary \
     /bin/sh -c 'printf started > "$1"; exec sleep 60' sh "$ready" \
     || fail "tmux could not start the fake primary through the lab socket"
   [ -S "$socket_path" ] || fail "tmux did not create its socket in the private short directory"
   local attempts=0
   while [ ! -f "$ready" ] && [ "$attempts" -lt 20 ]; do sleep 0.05; attempts=$((attempts + 1)); done
   [ -f "$ready" ] || fail "fake primary did not start"
-  env TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab has-session -t primary \
+  env -u TMUX -u TMUX_TMPDIR "$LABHOME" tmux "$lab" has-session -t primary \
+    || fail 'lab helper depended on ambient socket settings'
+  [ "$("$LABHOME" tmux "$lab" display-message -p '#{socket_path}')" = "$socket_path" ] \
+    || fail 'lab helper did not use its recorded named socket'
+  if "$LABHOME" tmux "$lab" -L default list-sessions >/dev/null 2>&1; then
+    fail 'lab helper accepted a socket override'
+  fi
+  env FM_TEST_TMUX_LAB_HOME="$lab" TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab has-session -t primary \
     || fail "primary session is not reachable through the lab's TMUX_TMPDIR"
+  # A marked home must refuse before the adapter can probe an operator socket.
+  local fakebin="$lab/probe-bin" out rc selection socket_selection
+  mkdir "$fakebin"
+  printf '#!/bin/sh\ntouch "%s"\nexit 0\n' "$lab/tmux-contact" > "$fakebin/tmux"
+  chmod +x "$fakebin/tmux"
+  for selection in missing foreign default; do
+    case "$selection" in
+      missing) socket_selection='' ;;
+      foreign) socket_selection='/tmp/operator-sentinel,0,0' ;;
+      default) socket_selection="$socket_dir/tmux-$(id -u)/default,0,0" ;;
+    esac
+    out=$(FM_HOME="$lab" TMUX_TMPDIR="$socket_dir" TMUX="$socket_selection" PATH="$fakebin:$PATH" \
+      bash -c '. "$1/bin/fm-backend.sh"; fm_backend_source tmux && fm_backend_tmux_container_ensure' _ "$ROOT" 2>&1); rc=$?
+    [ "$rc" -ne 0 ] || fail "lab adapter accepted $selection socket"
+    assert_contains "$out" 'lab private named tmux socket is not selected' 'lab did not refuse selection'
+    assert_absent "$lab/tmux-contact" 'lab probed tmux before refusal'
+    for probe in exists close absent alive; do
+      out=$(FM_HOME="$lab" TMUX_TMPDIR="$socket_dir" TMUX="$socket_selection" PATH="$fakebin:$PATH" \
+        bash -c '
+          . "$1/bin/fm-afk-launch.sh"
+          case "$2" in
+            exists) fm_backend_target_exists tmux primary ;;
+            close) fm_afk_launch_close_terminal tmux primary ;;
+            absent) fm_afk_launch_terminal_absent tmux primary ;;
+            alive) fm_afk_launch_terminal_alive tmux primary ;;
+          esac
+        ' _ "$ROOT" "$probe" 2>&1); rc=$?
+      [ "$rc" -ne 0 ] || fail "lab $probe accepted $selection socket"
+      assert_absent "$lab/tmux-contact" "lab $probe invoked tmux before refusal"
+    done
+  done
+  FM_HOME="$lab" TMUX_TMPDIR="$socket_dir" TMUX="$socket_path,0,0" \
+    bash -c '. "$1/bin/fm-backend.sh"; fm_backend_source tmux && fm_backend_tmux_container_ensure' _ "$ROOT" \
+    || fail 'lab adapter rejected its private named socket'
+  FM_HOME="$lab" TMUX_TMPDIR="$socket_dir" TMUX="$socket_path,0,0" \
+    bash -c '. "$1/bin/fm-backend.sh"; fm_backend_target_exists tmux primary' _ "$ROOT" \
+    || fail 'lab direct liveness probe rejected its private named socket'
+  : > "$lab/config/supervision-host-off"
+  FM_HOME="$lab" "$ROOT/bin/fm-afk-launch.sh" enter --words 'test the lab socket' >/dev/null \
+    || fail 'could not enter the lab away posture'
+  printf '#!/bin/sh\nexec sleep 60\n' > "$lab/sleeper"
+  chmod +x "$lab/sleeper"
+  for selection in missing foreign default; do
+    case "$selection" in
+      missing) socket_selection='' ;;
+      foreign) socket_selection='/tmp/operator-sentinel,0,0' ;;
+      default) socket_selection="$socket_dir/tmux-$(id -u)/default,0,0" ;;
+    esac
+    out=$(FM_HOME="$lab" FM_CONFIG_OVERRIDE="$lab/config" FM_TEST_HARNESS=claude \
+      FM_SUPERVISOR_TARGET=primary:0 FM_SUPERVISOR_BACKEND=tmux FM_AFK_LAUNCH_ENTRY="$lab/sleeper" \
+      TMUX_TMPDIR="$socket_dir" TMUX="$socket_selection" PATH="$fakebin:$PATH" \
+      "$ROOT/bin/fm-afk-launch.sh" start 2>&1); rc=$?
+    [ "$rc" -ne 0 ] || fail "lab away launch accepted $selection socket"
+    assert_contains "$out" 'lab private named tmux socket is not selected' 'lab away launch did not refuse selection'
+    assert_absent "$lab/tmux-contact" 'lab away launch invoked tmux before refusal'
+  done
+  FM_HOME="$lab" FM_CONFIG_OVERRIDE="$lab/config" FM_TEST_HARNESS=claude \
+    FM_SUPERVISOR_TARGET=primary:0 FM_SUPERVISOR_BACKEND=tmux FM_AFK_LAUNCH_ENTRY="$lab/sleeper" \
+    TMUX_TMPDIR="$socket_dir" TMUX="$socket_path,0,0" "$ROOT/bin/fm-afk-launch.sh" start \
+    || fail 'lab away launch rejected its private named socket'
+  FM_HOME="$lab" TMUX_TMPDIR="$socket_dir" TMUX="$socket_path,0,0" \
+    "$ROOT/bin/fm-afk-launch.sh" stop || fail 'lab away teardown rejected its private named socket'
   if "$LABHOME" teardown "$lab" >/dev/null 2>&1; then
     fail "lab teardown removed the directory while its server was running"
   fi
   [ -d "$socket_dir" ] || fail "refused active-server teardown removed the socket directory"
-  env TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server \
+  env FM_TEST_TMUX_LAB_HOME="$lab" TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server \
     || fail "could not stop the isolated lab tmux server"
   mkdir -p "$TMP/failing-tmux-bin"
   printf '#!/bin/sh\necho "tmux: probe failed" >&2\nexit 1\n' > "$TMP/failing-tmux-bin/tmux"
@@ -468,11 +537,18 @@ run_teardown() {
 # run_teardown_lab <cwd> <case_dir> [ASSIGN...] -> combined output
 # Lab-home counterpart of run_teardown: FM_HOME=<case_dir>, no FM_*_OVERRIDE.
 run_teardown_lab() {
-  local cwd=$1 case_dir=$2; shift 2
-  ( cd "$cwd" && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS \
+  local cwd=$1 case_dir=$2 socket_dir; shift 2
+  (
+    if [ -f "$case_dir/.fm-lab-home" ]; then
+      socket_dir=$("$LABHOME" tmux-dir "$case_dir") || exit 1
+      trap '"$LABHOME" teardown "$case_dir" >/dev/null || exit 1' EXIT
+      set -- "TMUX_TMPDIR=$socket_dir" "TMUX=$socket_dir/tmux-$(id -u)/fm-lab,0,0" "$@"
+    fi
+    cd "$cwd" && env -u NO_MISTAKES_GATE -u FM_GATE_REFUSE_BYPASS \
       "FM_HOME=$case_dir" \
       "PATH=$case_dir/fakebin:$PATH" "$@" \
-      "$TEARDOWN" task-x1 ) 2>&1
+      "$TEARDOWN" task-x1
+  ) 2>&1
 }
 
 # make_teardown_lab_case <name> -> echoes a marked lab case dir holding the same
@@ -514,6 +590,7 @@ test_teardown_refuses_and_admits() {
   out=$(run_teardown_lab "$GATE_WT" "$case_dir"); rc=$?
   expect_code 0 "$rc" "teardown: gate + marked lab home must tear down landed work"
   assert_absent "$case_dir/state/task-x1.meta" "teardown: lab teardown should remove the task record"
+  assert_absent "$case_dir/state/.fm-lab-tmux-dir" "teardown: lab fixture should remove its socket directory record"
 
   # regression: a home reached through a symlinked spelling must not
   # self-collide in the slot-ownership scan - the canonical root home and the

@@ -35,10 +35,11 @@
 #                    on Pi; none leaves the file absent; off writes the
 #                    inherited supervision-host-off opt-out instead, so the
 #                    mate spawn inherits it).
-#   tmux server      private, through the lab home's bin/fm-lab-home.sh
-#                    tmux-dir, with no user tmux config (its plugins never run
-#                    in a lab), started from an empty environment so no inherited
-#                    TMUX, Herdr, or Pi marker reaches a lab process.
+#   tmux server      private named fm-lab socket through bin/fm-lab-home.sh,
+#                    with no user tmux config (its plugins never run in a lab).
+#                    The lab starts from an empty environment, then selects its
+#                    recorded socket; no inherited TMUX, Herdr, or Pi marker
+#                    reaches a lab process.
 #                    The lab notes project configures its Treehouse root inside
 #                    <lab-root>, and DISABLE_AUTOUPDATER=1
 #                    keeps Claude Code from replacing the shared binary under
@@ -160,15 +161,15 @@ load_lab() {  # <root>: refuse anything up did not build, then load its record
 }
 
 lab_tmux() {
-  [ -n "${TMUX_DIR:-}" ] || return 1
-  env -u TMUX TMUX_TMPDIR="$TMUX_DIR" tmux "$@"
+  "$LAB_HOME_HELPER" tmux "$LAB" "$@"
 }
 
 # The empty-environment base every lab process starts from.
 lab_env_base() {
   printf '%s\n' "HOME=$HOME" "USER=${USER:-$(id -un)}" "LOGNAME=${USER:-$(id -un)}" \
     "PATH=$PATH" "SHELL=${SHELL:-/bin/zsh}" "TERM=xterm-256color" "LANG=${LANG:-en_US.UTF-8}" \
-    "TMUX_TMPDIR=$TMUX_DIR" "FM_BACKEND=tmux" "DISABLE_AUTOUPDATER=1"
+    "TMUX_TMPDIR=$TMUX_DIR" "TMUX=$TMUX_DIR/tmux-$(id -u)/fm-lab,0,0" \
+    "FM_BACKEND=tmux" "DISABLE_AUTOUPDATER=1"
   [ -z "${CLAUDE_DIR:-}" ] || printf '%s\n' "CLAUDE_CONFIG_DIR=$CLAUDE_DIR"
 }
 
@@ -542,7 +543,7 @@ cmd_up() {
 
   TMUX_DIR=$("$LAB_HOME_HELPER" tmux-dir "$LAB") || die "cannot create the private tmux directory"
   echo "tmux_dir=$TMUX_DIR" >> "$ROOT/$RECORD_NAME"
-  lab_run tmux -f /dev/null new-session -d -s firstmate -n lab -x 220 -y 60 -c "$ROOT" || die "cannot start the lab tmux server"
+  lab_run "$LAB_HOME_HELPER" tmux "$LAB" new-session -d -s firstmate -n lab -x 220 -y 60 -c "$ROOT" || die "cannot start the lab tmux server"
   record_launch_pid "$(lab_tmux display-message -p '#{pid}')"
 
   if [ "$mate" = yes ]; then

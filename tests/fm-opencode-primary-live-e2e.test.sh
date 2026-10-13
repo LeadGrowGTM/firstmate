@@ -107,7 +107,7 @@ cleanup() {
   fi
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
 
 run_ahoy_case() {
   local label=$1 preceding=$2 expected=$3 db="$LAB/opencode-$1.db"

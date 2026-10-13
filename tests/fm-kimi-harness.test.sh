@@ -40,7 +40,7 @@ cleanup_kimi_harness() {
   [ -z "$KIMI_RUNTIME_LAUNCH_DIR" ] || fm_test_remove_tree "$KIMI_RUNTIME_LAUNCH_DIR"
   fm_test_remove_tree "$TMP_ROOT"
 }
-trap cleanup_kimi_harness EXIT
+trap 'cleanup_kimi_harness; fm_test_tmux_cleanup' EXIT
 
 make_spawn_fakebin() {
   local dir=$1 fakebin

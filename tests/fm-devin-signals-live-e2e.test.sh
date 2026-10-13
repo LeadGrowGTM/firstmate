@@ -22,7 +22,7 @@ if [ ! -r "$CREDENTIALS" ]; then
   printf 'skip: live: %s has no file credentials to copy into the isolated home\n' "$VERSION"
   exit 0
 fi
-LAB=$(mktemp -d "${TMPDIR:-/tmp}/dv.XXXXXX")
+LAB=$(fm_test_tmproot dv)
 LAB=$(cd "$LAB" && pwd -P)
 # Unix-domain socket paths have a small OS byte limit. Keep the socket name
 # relative when the isolated lab is under this checkout's working directory.
@@ -32,7 +32,11 @@ cleanup() {
   "$REAL_TMUX" -S "$SOCKET" kill-server >/dev/null 2>&1 || true
   rm -rf "$LAB"
 }
-trap cleanup EXIT
+trap 'cleanup; fm_test_tmux_cleanup' EXIT
+trap 'fm_test_signal_cleanup 130 cleanup' INT
+trap 'fm_test_signal_cleanup 143 cleanup' TERM
+trap 'fm_test_signal_cleanup 129 cleanup' HUP
+trap 'fm_test_signal_cleanup 131 cleanup' QUIT
 fail() { printf 'not ok - %s: %s\n' "$VERSION" "$1" >&2; exit 1; }
 # shellcheck source=bin/fm-busy-lib.sh
 . "$ROOT/bin/fm-busy-lib.sh"

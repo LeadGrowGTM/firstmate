@@ -67,7 +67,7 @@ cleanup() {
   tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   rm -rf "$LAB"
 }
-trap cleanup EXIT INT TERM
+trap 'cleanup; fm_test_tmux_cleanup' EXIT INT TERM
 
 capture() { tmux -L "$SOCKET" capture-pane -p -t "$1" -S -400 2>/dev/null || true; }
 
