@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Operator status surfaces for tmux-backed fleets: a detail line on each pane
-# and a compact Claude Code statusLine, both fed by durable
-# per-window data instead of per-refresh probes.
+# fed by durable per-window data and a compact Claude Code statusLine fed by
+# Claude's statusLine JSON input.
 #
 # Usage:
 #   fm-statusbar.sh [--socket <path>] theme
