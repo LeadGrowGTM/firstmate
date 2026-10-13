@@ -220,6 +220,30 @@ EOF
   return 1
 }
 
+# Codex exposes the current conversation id to tool shells. Accept it only
+# inside a Codex process ancestry, so an inherited value cannot claim a lock.
+fm_session_lock_trusted_codex_thread_id() {  # [<ancestry-pids>]
+  local id=${CODEX_THREAD_ID:-} pids=${1:-} pid comm args name
+  [ -n "$id" ] || return 1
+  case "$id" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  if [ -z "$pids" ]; then
+    pids=$(fm_harness_ancestry_pids) || return 1
+  fi
+  while IFS= read -r pid; do
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
+    args=$(ps -o args= -p "$pid" 2>/dev/null)
+    name=$(fm_harness_path_name "$comm") \
+      || name=$(fm_harness_path_name "${args%% *}") || continue
+    if [ "$name" = codex ]; then
+      printf '%s\n' "$id"
+      return 0
+    fi
+  done <<EOF
+$pids
+EOF
+  return 1
+}
+
 # Print the session id recorded beside the lock in state dir $1, or return 1.
 # bin/fm-lock.sh is the only writer of state/.lock-session; a missing,
 # symlinked, unreadable, or empty sidecar, or one whose first line contains a

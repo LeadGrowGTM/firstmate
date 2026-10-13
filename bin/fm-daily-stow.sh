@@ -54,13 +54,22 @@ skip() {
 [ ! -e "$STATE/.afk" ] && [ ! -e "$STATE/.afk-contract" ] \
   || skip 'away or quiet mode is active'
 READY=$("$SCRIPT_DIR/fm-inbox.sh" ready)
-REASON=$(python3 - "$READY" "$STATE/.last-stow-primary-pass" "$(date +%s)" "$MODE" "${BOUND_PID:-}" <<'PY'
+# A Codex tool may run in a PID namespace where the host lock pid is hidden.
+# Its own trusted conversation id proves the delivered note is in that session.
+# shellcheck source=bin/fm-session-lock-lib.sh
+. "$SCRIPT_DIR/fm-session-lock-lib.sh"
+RECIPIENT_SESSION_MATCH=0
+if [ "$MODE" = eligible ] && trusted=$(fm_session_lock_trusted_codex_thread_id); then
+  recorded=$(fm_session_lock_recorded_session_id "$STATE" 2>/dev/null || true)
+  [ "$recorded" != "codex:$trusted" ] || RECIPIENT_SESSION_MATCH=1
+fi
+REASON=$(python3 - "$READY" "$STATE/.last-stow-primary-pass" "$(date +%s)" "$MODE" "${BOUND_PID:-}" "$RECIPIENT_SESSION_MATCH" <<'PY'
 import json, pathlib, sys
 ready = json.loads(sys.argv[1])
 stamp = pathlib.Path(sys.argv[2])
 if ready['posture']['state'] != 'present':
     print('away/quiet posture or posture unknown')
-elif ready['lock']['state'] != 'held' or ready['lock']['live_harness'] is not True:
+elif (ready['lock']['state'] != 'held' or ready['lock']['live_harness'] is not True) and sys.argv[6] != '1':
     print('no proven live main session')
 elif sys.argv[4] == 'eligible' and ready['lock']['pid'] != int(sys.argv[5]):
     print('different main session holds the lock')
@@ -79,6 +88,15 @@ PY
 )
 [ -z "$REASON" ] || skip "$REASON"
 LOCK_PID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["lock"]["pid"])' <<< "$READY")
+if [ "$MODE" = queue ]; then
+  holder_harness=$("$SCRIPT_DIR/fm-harness.sh" ancestry "$LOCK_PID" 2>/dev/null || true)
+  case "$holder_harness" in
+    *' codex')
+      recorded=$(fm_session_lock_recorded_session_id "$STATE" 2>/dev/null || true)
+      case "$recorded" in codex:*) ;; *) skip 'Codex session identity is unavailable' ;; esac
+      ;;
+  esac
+fi
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-session-lock-lib.sh
@@ -89,9 +107,22 @@ if [ -e "$STATE/.lock-session" ] || [ -L "$STATE/.lock-session" ]; then
     || skip 'main session identity is unavailable'
   SESSION_IDENTITY="present:$SESSION_IDENTITY"
 fi
-HOLDER_IDENTITY=$({ fm_pid_identity "$LOCK_PID" && printf '\0%s' "$SESSION_IDENTITY"; } \
-  | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())') \
-  || skip 'main session identity is unavailable'
+if [ "$MODE" = eligible ]; then
+  case "$SESSION_IDENTITY" in
+    present:codex:*)
+      [ "$RECIPIENT_SESSION_MATCH" -eq 1 ] \
+        || skip 'different main session holds the lock'
+      ;;
+  esac
+fi
+if [ "${SESSION_IDENTITY#present:codex:}" != "$SESSION_IDENTITY" ]; then
+  HOLDER_IDENTITY=$(printf '%s' "$SESSION_IDENTITY" \
+    | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')
+else
+  HOLDER_IDENTITY=$({ fm_pid_identity "$LOCK_PID" && printf '\0%s' "$SESSION_IDENTITY"; } \
+    | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())') \
+    || skip 'main session identity is unavailable'
+fi
 if [ "$MODE" = eligible ]; then
   [ "$HOLDER_IDENTITY" = "$BOUND_IDENTITY" ] || skip 'different main session holds the lock'
   echo 'daily-stow: eligible'

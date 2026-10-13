@@ -158,6 +158,48 @@ expect_code 3 "$rc" 'disappearing session id cannot use the old note'
 assert_contains "$out" 'different main session holds the lock' 'sidecar disappearance drops the old note'
 pass 'session binding follows recorded id changes and presence'
 
+# A Codex tool can lose host PID visibility while its daemon still holds the
+# lock. A new conversation can also reuse that daemon PID after the TUI exits.
+home="$TMP_ROOT/codex-home"
+mkdir -p "$home/state" "$home/data" "$home/config"
+cat > "$TMP_ROOT/codex-session.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+export FM_HOME FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_CONFIG_OVERRIDE
+printf '%s\n' "$$" > "$FM_HOME/state/.lock"
+touch "$FM_HOME/state/.last-watcher-beat"
+out=$(FM_SUPERVISION_MODEL=autoarm bash "$ROOT/bin/fm-daily-stow.sh")
+printf 'unbound=%s\n' "$out"
+CODEX_THREAD_ID=old-thread bash "$ROOT/bin/fm-lock.sh" >/dev/null
+FM_SUPERVISION_MODEL=autoarm bash "$ROOT/bin/fm-daily-stow.sh" >/dev/null
+notes=$(bash "$ROOT/bin/fm-inbox.sh" list)
+read -r bound_pid bound_identity < <(printf '%s\n' "$notes" | python3 -c 'import re,sys; m=re.search(r"--eligible ([0-9]+) ([0-9a-f]{64})",sys.stdin.read()); print(*m.groups()) if m else sys.exit(1)')
+# Model the recipient's PID namespace: kill -0 cannot see the host lock PID.
+BOUND_TEST_PID=$bound_pid
+export BOUND_TEST_PID
+kill() {
+  if [ "${1:-}" = -0 ] && [ "${2:-}" = "$BOUND_TEST_PID" ]; then return 1; fi
+  builtin kill "$@"
+}
+export -f kill
+out=$(CODEX_THREAD_ID=old-thread bash "$ROOT/bin/fm-daily-stow.sh" --eligible "$bound_pid" "$bound_identity")
+printf 'same=%s\n' "$out"
+unset -f kill
+CODEX_THREAD_ID=new-thread bash "$ROOT/bin/fm-lock.sh" >/dev/null
+rc=0
+out=$(CODEX_THREAD_ID=new-thread bash "$ROOT/bin/fm-daily-stow.sh" --eligible "$bound_pid" "$bound_identity") || rc=$?
+printf 'replacement_rc=%s\nreplacement=%s\n' "$rc" "$out"
+SH
+out=$(ROOT="$ROOT" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+  FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
+  exec -a codex bash "$TMP_ROOT/codex-session.sh")
+assert_contains "$out" 'unbound=daily-stow: skipped (Codex session identity is unavailable)' \
+  'Codex without a recorded conversation cannot queue a transferable note'
+assert_contains "$out" 'same=daily-stow: eligible' 'Codex recipient accepts its bound note despite hidden host PID'
+assert_contains "$out" 'replacement_rc=3' 'replacement Codex conversation cannot use the old note'
+assert_contains "$out" 'different main session holds the lock' 'replacement skip names the session mismatch'
+pass 'Codex delivery survives a hidden host PID and rejects daemon reuse'
+
 # Validate copyable units through systemd itself without installing/enabling.
 if command -v systemd-analyze >/dev/null 2>&1; then
   python3 - "$ROOT" "$TMP_ROOT" <<'PY'
