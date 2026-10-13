@@ -1977,7 +1977,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged occupied entry path item
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged occupied entry path item tracked_wiring
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -1988,6 +1988,16 @@ validate_worktree_teardown_safety() {
   untracked=normal
   [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
   if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    if ! tracked_wiring=$(git -C "$WT" ls-files --cached -- \
+      .claude/settings.local.json .opencode/plugins/fm-turn-end.js \
+      .opencode/plugins/fm-busy-state.js .fm-grok-turnend .fm-kimi-turnend 2>/dev/null); then
+      echo "REFUSED: cannot inspect worktree $WT for tracked wiring." >&2
+      return 1
+    fi
+    if [ -n "$tracked_wiring" ]; then
+      echo "REFUSED: worktree $WT has tracked wiring at $tracked_wiring; needs a human look." >&2
+      return 1
+    fi
     if ! occupied=$(
       set -o pipefail
       git -C "$WT" ls-files -s -z 2>/dev/null | {

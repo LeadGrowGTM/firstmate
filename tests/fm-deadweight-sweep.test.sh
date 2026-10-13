@@ -153,6 +153,29 @@ test_changes_kept() {
   pass 'sweep keeps dirty, unpushed, pushed, and untracked Claude work'
 }
 
+test_tracked_wiring_kept() {
+  local home out path name
+  for path in .claude/settings.local.json .opencode/plugins/fm-turn-end.js \
+    .opencode/plugins/fm-busy-state.js .fm-grok-turnend .fm-kimi-turnend; do
+    name=${path##*/}
+    home=$(make_home "tracked-$name")
+    mkdir -p "$home/seed/$(dirname "$path")"
+    printf 'operator file\n' > "$home/seed/$path"
+    git -C "$home/seed" add -f "$path"
+    git -C "$home/seed" commit -qm operator-wiring
+    git -C "$home/seed" push -q origin main
+    git -C "$home/projects/project" pull -q
+    add_worker "$home"
+    out=$(sweep "$home")
+    assert_contains "$out" 'tracked wiring' "$path refusal reported"
+    assert_present "$home/state/task.meta" "$path record kept"
+    assert_present "$home/worker/$path" "$path file kept"
+    assert_equals 'operator file' "$(cat "$home/worker/$path")" "$path contents kept"
+    assert_present "$home/worker" "$path copy kept"
+  done
+  pass 'sweep preserves tracked operator wiring at every removal path'
+}
+
 test_ignored_work_kept() {
   local home out
   home=$(make_home ignored); add_worker "$home"
@@ -739,6 +762,7 @@ test_detached_sweep_survives_watcher_timeout() {
 
 test_clean_stopped_and_idempotence
 test_changes_kept
+test_tracked_wiring_kept
 test_ignored_work_kept
 test_flagged_tracked_edits_kept
 test_flagged_guard_under_pipefail
