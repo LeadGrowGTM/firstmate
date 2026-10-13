@@ -18,14 +18,14 @@ LIVE_LAB="$ROOT/bin/fm-live-lab.sh"
 TRUST="$ROOT/bin/fm-claude-trust.sh"
 
 live_lab_cleanup() {
-  local dir pid marker
+  local dir home pid marker
   for marker in "$TMP_ROOT/orphan-child" "$TMP_ROOT/late-child" "$TMP_ROOT/reused-child"; do
     [ ! -s "$marker" ] || printf '%s\n' "$(<"$marker")" >> "$TMP_ROOT/pids"
   done
   while read -r pid; do [ -n "$pid" ] && { pkill -P "$pid" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; }; done < "$TMP_ROOT/pids"
-  while read -r dir; do
+  while IFS=$'\t' read -r home dir; do
     [ -n "$dir" ] || continue
-    env -u TMUX TMUX_TMPDIR="$dir" tmux -L fm-lab kill-server 2>/dev/null
+    env -u TMUX FM_TEST_TMUX_LAB_HOME="$home" TMUX_TMPDIR="$dir" tmux -L fm-lab kill-server 2>/dev/null
     case "$dir" in /tmp/fml.*) rm -rf "$dir" ;; esac
   done < "$TMP_ROOT/tmux-dirs"
   rm -rf "/tmp/fm-labt$$-mate" "/tmp/fm-labt$$-worker" "/tmp/fm-labt$$-other" /tmp/fm-labt"$$"-*+*
@@ -63,7 +63,7 @@ make_lab() {
   git -C "$home" add -A bin AGENTS.md .pi
   git -C "$home" -c user.name=t -c user.email=t@example.invalid commit -qm lab
   tmux_dir=$("$ROOT/bin/fm-lab-home.sh" tmux-dir "$home") || fail "lab tmux dir"
-  printf '%s\n' "$tmux_dir" >> "$TMP_ROOT/tmux-dirs"
+  printf '%s\t%s\n' "$home" "$tmux_dir" >> "$TMP_ROOT/tmux-dirs"
   find "$HOME/.treehouse" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort > "$root/.treehouse-before"
   {
     echo 'fm-live-lab v1'
@@ -117,10 +117,10 @@ record_pid() {  # <root> <pid>
 }
 
 lab_tmux() {  # <root> <tmux args...>
-  local dir
+  local dir home="$1/home"
   dir=$(sed -n 's/^tmux_dir=//p' "$1/.fm-live-lab")
   shift
-  env -u TMUX TMUX_TMPDIR="$dir" tmux -L fm-lab "$@"
+  env -u TMUX FM_TEST_TMUX_LAB_HOME="$home" TMUX_TMPDIR="$dir" tmux -L fm-lab "$@"
 }
 
 start_sleeper() {

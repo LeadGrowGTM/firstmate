@@ -325,16 +325,18 @@ SH
 
 test_tmux_isolation() (
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
-  local dir="$TMP_ROOT/tmux-isolation" sentinel child
+  local dir="$TMP_ROOT/tmux-isolation" sentinel_dir sentinel child recorder
   mkdir -m 700 "$dir"
-  sentinel="$dir/operator"
+  sentinel_dir=$(mktemp -d /tmp/fmo.XXXXXX) || fail 'could not create independent operator sentinel directory'
+  sentinel="$sentinel_dir/operator"
   child=
   cleanup_isolation() {
     "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
     [ -z "$child" ] || FM_TEST_TMUX_ROOT="$child" fm_test_tmux_cleanup
+    rmdir "$sentinel_dir" 2>/dev/null || true
   }
   trap cleanup_isolation EXIT
-  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 60' \
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 600' \
     || fail 'could not start disposable operator sentinel'
   export TMUX="$sentinel,0,0" TMUX_TMPDIR="$dir"
   unset FM_TEST_TMUX_OWNER
@@ -346,6 +348,38 @@ test_tmux_isolation() (
   if tmux has-session -t protected 2>/dev/null; then fail 'test reached inherited operator server'; fi
   tmux kill-server || fail 'isolated kill-server failed'
   "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'lab killed operator sentinel'
+  if tmux -S "$sentinel" kill-server 2>"$dir/foreign.err"; then fail 'foreign private socket accepted'; fi
+  assert_grep 'unrecorded socket path' "$dir/foreign.err" 'foreign private socket was not refused'
+  ( cd "$sentinel_dir" && ! tmux -S operator kill-server ) 2>/dev/null \
+    || fail 'relative foreign private socket accepted'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected || fail 'foreign selector reached operator sentinel'
+  mkdir -m 700 "$dir/recorded"
+  tmux -S "$dir/recorded/dedicated.sock" new-session -d -s disposable 'exec sleep 60' \
+    || fail 'recorded disposable socket refused'
+  tmux -S "$dir/recorded/dedicated.sock" has-session -t disposable \
+    || fail 'recorded disposable socket did not answer'
+  ( cd "$dir/recorded" && tmux -S dedicated.sock has-session -t disposable ) \
+    || fail 'relative recorded disposable socket did not answer'
+  tmux -S "$dir/recorded/dedicated.sock" kill-server \
+    || fail 'recorded disposable socket did not stop'
+  recorder="$dir/recorder"
+  cat > "$recorder" <<'SH'
+#!/usr/bin/env bash
+printf 'contact\n' >> "$FM_TEST_CONTACT_LOG"
+exit 0
+SH
+  chmod +x "$recorder"
+  (
+    FM_TEST_TMUX_REAL="$recorder"
+    FM_TEST_CONTACT_LOG="$dir/contact.log"
+    export FM_TEST_TMUX_REAL FM_TEST_CONTACT_LOG
+    unset FM_TEST_TMUX_OWNER
+    . "$ROOT/tests/tmux-helpers.sh" || exit 1
+    trap fm_test_tmux_cleanup EXIT
+    if tmux -S "$sentinel" list-sessions >/dev/null 2>&1; then exit 1; fi
+    if TMUX_TMPDIR="$sentinel_dir" tmux -L operator list-sessions >/dev/null 2>&1; then exit 1; fi
+    [ ! -e "$FM_TEST_CONTACT_LOG" ]
+  ) || fail 'foreign socket refusal contacted the real tmux command'
   if tmux -L default list-sessions 2>"$dir/default.err"; then fail 'default name accepted'; fi
   assert_grep 'default or invalid' "$dir/default.err" 'default selector did not refuse'
   if tmux -S "$dir/default" list-sessions 2>"$dir/path.err"; then fail 'default socket path accepted'; fi
@@ -398,8 +432,37 @@ SH
   pass 'tmux fixture cleanup survives a suite replacing its EXIT trap'
 )
 
+test_standalone_afk_avoids_operator_socket() (
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
+  if command -v herdr >/dev/null 2>&1; then
+    echo 'skip: standalone AFK sentinel check requires a tmux-only host'
+    exit 0
+  fi
+  local sentinel_dir sentinel rc=0
+  sentinel_dir=$(mktemp -d /tmp/fmo.XXXXXX) || fail 'could not create AFK operator sentinel directory'
+  sentinel="$sentinel_dir/operator"
+  cleanup_afk_sentinel() {
+    "$FM_TEST_TMUX_REAL" -S "$sentinel" kill-server >/dev/null 2>&1 || true
+    rm -rf "$sentinel_dir"
+  }
+  trap cleanup_afk_sentinel EXIT
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" -f /dev/null new-session -d -s protected 'exec sleep 600' \
+    || fail 'could not start AFK operator sentinel'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" set-hook -g session-created \
+    "run-shell 'printf contact >> $sentinel_dir/contact'" \
+    || fail 'could not arm AFK sentinel contact detector'
+  TMUX="$sentinel,0,0" TMUX_TMPDIR="$sentinel_dir" \
+    bash "$ROOT/tests/fm-afk-launch.test.sh" > "$sentinel_dir/afk.log" 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || fail "standalone AFK suite failed: $(grep '^not ok -' "$sentinel_dir/afk.log" || tail -n 20 "$sentinel_dir/afk.log")"
+  [ ! -e "$sentinel_dir/contact" ] || fail 'standalone AFK suite created a session on operator sentinel'
+  "$FM_TEST_TMUX_REAL" -S "$sentinel" has-session -t protected \
+    || fail 'standalone AFK suite stopped operator sentinel'
+  pass 'standalone AFK suite keeps an inherited operator server untouched'
+)
+
 test_tmux_isolation || fail 'tmux fixture isolation'
 test_tmux_cleanup_after_trap_override || fail 'tmux fixture trap cleanup'
+test_standalone_afk_avoids_operator_socket || fail 'standalone AFK fixture isolation'
 test_git_config_isolation || fail "Git fixture config isolation"
 test_agent_standin_survives_a_multicall_sleep || fail "agent stand-in multicall case"
 test_touch_epoch_preserves_repeated_dst_hour

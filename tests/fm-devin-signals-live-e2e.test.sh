@@ -22,7 +22,7 @@ if [ ! -r "$CREDENTIALS" ]; then
   printf 'skip: live: %s has no file credentials to copy into the isolated home\n' "$VERSION"
   exit 0
 fi
-LAB=$(mktemp -d "${TMPDIR:-/tmp}/dv.XXXXXX")
+LAB=$(fm_test_tmproot dv)
 LAB=$(cd "$LAB" && pwd -P)
 # Unix-domain socket paths have a small OS byte limit. Keep the socket name
 # relative when the isolated lab is under this checkout's working directory.

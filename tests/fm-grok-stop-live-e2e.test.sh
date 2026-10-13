@@ -81,7 +81,7 @@ run_cell() {  # <native|legacy> <exact-binary>
   local stop_values outer_turns outer_text
   tmp_base=${TMPDIR:-/tmp}
   tmp_base=${tmp_base%/}
-  lab=$(mktemp -d "$tmp_base/fm-grok-stop-$kind.XXXXXX") || return 1
+  lab=$(TMPDIR="$tmp_base" fm_test_tmproot "fm-grok-stop-$kind") || return 1
   session="$kind-e2e"
   target="fm-$kind"
   ACTIVE_LAB=$lab

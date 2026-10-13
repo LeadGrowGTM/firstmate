@@ -82,7 +82,7 @@ case "${1:-}" in
       socket_parent="$socket_dir/tmux-$(id -u)"
       [ -d "$socket_parent" ] || mkdir -m 700 "$socket_parent" || exit 1
       [ ! -L "$socket_parent" ] || { fm_lab_home_error "unsafe tmux socket parent"; exit 1; }
-      exec env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$socket_dir" \
+      exec env -u TMUX -u TMUX_PANE FM_TEST_TMUX_LAB_HOME="$dir" TMUX_TMPDIR="$socket_dir" \
         tmux -S "$socket_dir/tmux-$(id -u)/fm-lab" -f /dev/null "$@"
     elif [ "$1" = tmux-check ]; then
       socket_path="$socket_dir/tmux-$(id -u)/fm-lab"
@@ -109,7 +109,8 @@ case "${1:-}" in
     # private TMUX_TMPDIR could have hosted before removing the directory.
     for socket in "$socket_dir/tmux-$(id -u)"/*; do
       [ -e "$socket" ] || [ -L "$socket" ] || continue
-      if probe=$(tmux -S "$socket" list-sessions 2>&1 >/dev/null) \
+      if probe=$(FM_TEST_TMUX_LAB_HOME="$dir" TMUX_TMPDIR="$socket_dir" \
+        tmux -S "$socket" list-sessions 2>&1 >/dev/null) \
         || [ "${probe#*no server running}" = "$probe" ]; then
         fm_lab_home_error "refusing teardown: cannot confirm the lab tmux server has stopped"
         exit 1

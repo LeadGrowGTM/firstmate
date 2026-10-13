@@ -211,7 +211,7 @@ test_lab_home_private_tmux_socket_survives_deep_paths() {
   [ "${socket_dir#/tmp/fml.}" != "$socket_dir" ] || fail "socket directory is not under the short /tmp/fml prefix"
 
   cleanup_deep_lab() {
-    env TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server >/dev/null 2>&1 || true
+    env FM_TEST_TMUX_LAB_HOME="$lab" TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server >/dev/null 2>&1 || true
     "$LABHOME" teardown "$lab" >/dev/null 2>&1 || true
     fm_test_cleanup
   }
@@ -231,7 +231,7 @@ test_lab_home_private_tmux_socket_survives_deep_paths() {
   if "$LABHOME" tmux "$lab" -L default list-sessions >/dev/null 2>&1; then
     fail 'lab helper accepted a socket override'
   fi
-  env TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab has-session -t primary \
+  env FM_TEST_TMUX_LAB_HOME="$lab" TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab has-session -t primary \
     || fail "primary session is not reachable through the lab's TMUX_TMPDIR"
   # A marked home must refuse before the adapter can probe an operator socket.
   local fakebin="$lab/probe-bin" out rc selection socket_selection
@@ -299,7 +299,7 @@ test_lab_home_private_tmux_socket_survives_deep_paths() {
     fail "lab teardown removed the directory while its server was running"
   fi
   [ -d "$socket_dir" ] || fail "refused active-server teardown removed the socket directory"
-  env TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server \
+  env FM_TEST_TMUX_LAB_HOME="$lab" TMUX_TMPDIR="$socket_dir" "$real_tmux" -L fm-lab kill-server \
     || fail "could not stop the isolated lab tmux server"
   mkdir -p "$TMP/failing-tmux-bin"
   printf '#!/bin/sh\necho "tmux: probe failed" >&2\nexit 1\n' > "$TMP/failing-tmux-bin/tmux"
