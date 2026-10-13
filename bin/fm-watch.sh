@@ -2,6 +2,8 @@
 # Firstmate watcher.
 # Classifies supervision wakes in bash. In normal mode it absorbs benign wakes
 # and keeps blocking; it queues and exits only for actionable wakes.
+# A home's heartbeat also runs fm-idle-sweep.sh before wake triage;
+# docs/configuration.md owns that per-home configuration.
 # The no-verb signal and stale path is absorb-only-on-positive-evidence: a wake
 # is absorbed only when the crew shows it is still working through an actively
 # running no-mistakes step or a backend busy signal. A home that opts in with
@@ -3277,6 +3279,14 @@ EOF
   hb=$(( HEARTBEAT * (1 << streak) ))
   [ "$hb" -gt "$HEARTBEAT_MAX" ] && hb=$HEARTBEAT_MAX
   if [ "$(age_of "$STATE/.last-heartbeat")" -ge "$hb" ]; then
+    # The sweep shares this heartbeat across primary harnesses and
+    # runtime backends; its own evidence gates fail closed without a new daemon.
+    if ! bash "$SCRIPT_DIR/fm-idle-sweep.sh" > /dev/null; then
+      triage_log "idle sweep refused; inspect its configuration or evidence"
+      fm_wake_append check idle-sweep "check: idle-sweep refused; inspect configuration or dispatch evidence" || exit 1
+      touch "$STATE/.last-heartbeat"
+      wake "check: idle-sweep"
+    fi
     # Triage: in always-on mode a heartbeat is benign unless the cheap fleet-scan
     # turns up a captain-relevant status the per-wake path missed. Absorb the
     # no-change case (advance the schedule and back off exactly as wake() would,
