@@ -68,8 +68,7 @@ case "${1:-check}" in
   check|arm|disarm|--locked) ;;
   *) usage >&2; exit 2 ;;
 esac
-# A missing config is OFF, including a fresh checkout without operational state.
-if [ "${1:-check}" = check ] && [ ! -e "$CONFIG" ] && [ ! -L "$CONFIG" ]; then exit 0; fi
+if [ "${1:-check}" = check ] && [ ! -e "$CONFIG" ] && [ ! -L "$CONFIG" ] && [ ! -e "$JOURNAL" ] && [ ! -L "$JOURNAL" ]; then exit 0; fi
 [ -d "$STATE" ] && [ ! -L "$STATE" ] || fail 'state directory is unavailable'
 [ -d "$(dirname "$CONFIG")" ] && [ ! -L "$(dirname "$CONFIG")" ] || fail 'config directory is unavailable'
 # shellcheck source=bin/fm-pr-lib.sh
@@ -257,13 +256,11 @@ try:
             if active != slots:
                 record["completed_slots"] = active
                 changed = True
-        pending = []
         for job in items:
             if not job["enabled"]:
                 continue
             old = data["jobs"].get(job["id"])
             if old and old["state"] != "completed":
-                pending.append(old["key"])
                 continue
             cadence = job["cadence"]
             if cadence["kind"] == "daily-local":
@@ -299,7 +296,7 @@ try:
                 "state": "detected", "detected_at": now, "intent": job,
                 "completed_slots": completed_slots}
             changed = True
-            pending.append(key)
+        pending = sorted(record["key"] for record in data["jobs"].values() if record["state"] != "completed")
         selected = []
         if pending:
             start = data["cursor"] % len(pending)

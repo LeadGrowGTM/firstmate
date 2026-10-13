@@ -146,15 +146,21 @@ pass 'daily gate, frozen brief, ordinary backlog intake, downtime and lifecycle 
 world disable-pending
 config
 bash "$CHECK" check
+TASK=$(field task_id)
 jq '.schedules[0].enabled=false' "$FM_HOME/config/schedules.json" > "$FM_HOME/config/off.json"
 mv "$FM_HOME/config/off.json" "$FM_HOME/config/schedules.json"
+tasks start "$TASK" >/dev/null
 bash "$CHECK" check
-[ "$(field state)" = enqueued ] || fail 'disable discarded pending intent'
-assert_contains "$(tasks show "$(field task_id)" --full)" 'state: queued' 'disable deleted already filed backlog work'
+[ "$(field state)" = dispatched ] || fail 'disabled schedule did not observe dispatch'
+[ "$(field task_id)" = "$TASK" ] || fail 'disable changed pending task identity'
 rm "$FM_HOME/config/schedules.json"
+tasks "done" "$TASK" --report "data/$TASK/report.md" --no-prune >/dev/null
 bash "$CHECK" check
-[ "$(field state)" = enqueued ] || fail 'removed schedule discarded pending intent'
-pass 'disable/remove retains filed work under ordinary task lifecycle'
+[ "$(field state)" = completed ] || fail 'removed schedule did not observe completion'
+export FM_SCHEDULE_NOW=1791975600
+bash "$CHECK" check
+[ "$(field task_id)" = "$TASK" ] || fail 'removed schedule detected new work'
+pass 'disabled and removed schedules reconcile filed task lifecycle without new detection'
 
 world concurrent
 config interval
