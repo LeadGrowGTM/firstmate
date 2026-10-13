@@ -1,6 +1,6 @@
 # Opt-in companion to fm-session-refresh.timer (docs/session-refresh.md).
 # Copy this and fm-daily-stow.timer into ~/.config/systemd/user/, replace
-# both /path/to/... placeholders, then run:
+# this service's two /path/to/... placeholders, then run:
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now fm-daily-stow.timer
 # Select MAIN only: the live primary's /stow already cascades to secondmates.

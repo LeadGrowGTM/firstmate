@@ -1,4 +1,4 @@
-# Nightly session refresh
+# Nightly session refresh and daily stow
 
 A long-lived second mate compacts its conversation again and again, and it keeps the instructions it read at launch.
 A re-read message only appends a second copy of those instructions, so replacing the agent is the only way it runs on a fresh session and the current instruction surface.
@@ -44,14 +44,14 @@ Any other scheduler works the same way, as long as it sets `FM_HOME` and a `PATH
 
 ## Daily stow before refresh
 
-The optional `fm-daily-stow.service` and `fm-daily-stow.timer` in [the same examples directory](examples/session-refresh/) queue a memory pass in the live main session at 01:30 America/Toronto daily.
+The optional `fm-daily-stow.service` and `fm-daily-stow.timer` in [the same examples directory](examples/session-refresh/) schedule a request for a main-session memory pass at 01:30 America/Toronto daily.
 Select the main operational home in the service: its existing [stow cascade](../.agents/skills/stow/SKILL.md#automatic-cascade-to-secondmates) reaches registered secondmate homes without separate timers.
 The trigger uses the [durable inbox](../bin/fm-inbox.sh) check path, so the session handles the instruction at a normal checkpoint after current work.
 It never sends terminal keys, interrupts a turn, or starts a replacement worker.
 The [script header](../bin/fm-daily-stow.sh) owns eligibility checks, the 20-hour primary-pass guard, retry semantics, and exit status.
 The primary records its memory pass through the cascade's `--record-pass` option; that record does not certify secondmate completion or reset safety.
-The recipient rechecks the original lock holder's identity and eligibility before acting on a delayed note.
-An inactive or unsupervised main, away or quiet posture, or a recent primary pass produces a logged skip rather than a queued instruction.
+The recipient rechecks the original lock holder's identity and eligibility before acting on a delayed note; a lock holder the host cannot classify may still receive a note.
+A missing or positively stale main lock, away or quiet posture, or a recent primary pass produces a logged skip rather than a queued instruction.
 The 01:30 occurrence exists on the spring daylight-saving transition, and the persistent timer catches up after downtime; a catch-up can run after the 03:00 refresh.
 Queueing at 01:30 normally leaves 90 minutes before refresh, but does not guarantee completion when main or a secondmate remains busy.
 
