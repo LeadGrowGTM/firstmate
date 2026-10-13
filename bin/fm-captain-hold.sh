@@ -2029,11 +2029,14 @@ command_migrate_options() (
     existing=0
     if task_show "$id"; then
       existing=1
+      title=$(show_field_value "$TASK_SHOW_OUTPUT" title)
       state=$(show_field "$TASK_SHOW_OUTPUT" state)
       if [ "$state" = "done" ]; then
         printf 'already-closed: %s\n' "$id"
         continue
       fi
+    elif ! printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$'; then
+      fail "could not read migration target $id"
     fi
     if [ "$apply" = 0 ]; then
       printf 'would-hold: %s %s\n' "$id" "$title"
