@@ -86,7 +86,7 @@ fm_targets_collect() {  # <canonical backlog JSON>
   # Read the authenticated login through the forge, never credential files.
   identity=$(fm_targets_gh_string user --jq .login 2>/dev/null) || identity=''
   for dir in "$PROJECTS"/*; do
-    [ -d "$dir" ] || continue
+    [ -d "$dir" ] && [ ! -L "$dir" ] || continue
     remote=$(git -C "$dir" config --get remote.origin.url 2>/dev/null) || remote=''
     repo=$(printf '%s\n' "$remote" | sed -nE 's#^(https://github.com/|git@github.com:|ssh://git@github.com/)([^/]+/[^/]+)$#\2#p')
     repo=${repo%.git}

@@ -185,7 +185,7 @@ An absent file uses these defaults; a partial object overrides only the supplied
 All limits are nonnegative integers; `stale_days` must be positive, and unknown fields are refused.
 `open_prs` is an inclusive maximum, so the default implements fewer than five open PRs.
 The forge metrics cover the authenticated GitHub user's open PRs and default-branch failures in the immediate local clones under this home's projects directory.
-Non-GitHub clones are outside these GitHub metrics; unavailable evidence for a GitHub clone makes them unknown.
+Non-GitHub clones and symlinked project entries are outside these GitHub metrics; unavailable evidence for a GitHub clone makes them unknown.
 Default-branch failures include failed commit statuses and completed unsuccessful check runs on the current head; pending checks alone are not red.
 The local backlog metric counts unfinished structured rows unchanged for at least `stale_days`, including held rows for visibility, without authorizing work on them.
 The initial implementation supports the local markdown backlog; another tasks-axi backend is refused explicitly.

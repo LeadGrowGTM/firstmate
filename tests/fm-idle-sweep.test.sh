@@ -10,8 +10,9 @@ TMP_ROOT=$(fm_test_tmproot fm-idle-sweep)
 home="$TMP_ROOT/home"
 mkdir -p "$home" "$home/data" "$home/state" "$home/config" "$home/projects/example" "$TMP_ROOT/fakebin"
 cp -R "$ROOT/bin" "$home/bin"
+TEST_REAL_DATE=$(command -v date)
 export FM_HOME="$home" FM_ROOT_OVERRIDE="$home" PATH="$TMP_ROOT/fakebin:$PATH"
-export TEST_QUOTA=80 TEST_RED=1 TEST_SPAWN_LOG="$TMP_ROOT/starts" TEST_ENDPOINT=dead
+export TEST_QUOTA=80 TEST_RED=1 TEST_SPAWN_LOG="$TMP_ROOT/starts" TEST_ENDPOINT=dead TEST_REAL_DATE
 : > "$TEST_SPAWN_LOG"
 git -C "$home/projects/example" init -q
 git -C "$home/projects/example" remote add origin https://github.com/example/repo.git
@@ -56,6 +57,14 @@ jq -cn --argjson percent "$TEST_QUOTA" --argjson stale "${TEST_QUOTA_STALE:-fals
   quotaSemantics:{status:"known",effectiveAvailability:[{scope:"all_models",status:"known",
     effectivePercentRemaining:$percent,runway:{status:"through_reset"}}]}}]}'
 SH
+cat > "$TMP_ROOT/fakebin/date" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = +%s ] && [ -n "${TEST_CLOCK_FILE:-}" ]; then
+  cat "$TEST_CLOCK_FILE"
+else
+  exec "$TEST_REAL_DATE" "$@"
+fi
+SH
 cat > "$home/bin/fm-backend.sh" <<'SH'
 fm_meta_get() { sed -n "s/^$2=//p" "$1" | head -1; }
 fm_backend_of_meta() { echo tmux; }
@@ -74,8 +83,12 @@ printf '%s\n' "$*" >> "$TEST_SPAWN_LOG"
 [ "${TEST_SPAWN_FAIL:-0}" = 0 ] || exit 1
 [ "${TEST_SPAWN_START_ROWS:-0}" != 1 ] || bash "$FM_HOME/bin/fm-tasks-axi.sh" start "$1" >/dev/null
 printf 'kind=crewmate\nwindow=fm-%s\n' "$1" > "$FM_HOME/state/$1.meta"
+if [ -n "${TEST_CLOCK_FILE:-}" ]; then
+  tick=$(cat "$TEST_CLOCK_FILE")
+  printf '%s\n' "$((tick + 121))" > "$TEST_CLOCK_FILE"
+fi
 SH
-chmod +x "$TMP_ROOT/fakebin/gh-axi" "$TMP_ROOT/fakebin/quota-axi"
+chmod +x "$TMP_ROOT/fakebin/gh-axi" "$TMP_ROOT/fakebin/quota-axi" "$TMP_ROOT/fakebin/date"
 
 add_task() {
   bash "$home/bin/fm-tasks-axi.sh" add "$1" "Reversible fixture $1" --repo example >/dev/null
@@ -161,18 +174,22 @@ pass 'read-only target evaluator reports fixture values and gaps'
 mkdir -p "$home/projects/local-only"
 git -C "$home/projects/local-only" init -q
 git -C "$home/projects/local-only" remote add origin "$TMP_ROOT/local-origin"
+mkdir -p "$TMP_ROOT/foreign-home/projects/foreign"
+git -C "$TMP_ROOT/foreign-home/projects/foreign" init -q
+git -C "$TMP_ROOT/foreign-home/projects/foreign" remote add origin https://github.com/foreign/repo.git
+ln -s "$TMP_ROOT/foreign-home/projects/foreign" "$home/projects/foreign-alias"
 result=$(bash "$home/bin/fm-targets.sh" --json)
 printf '%s' "$result" | jq -e '
   (.targets[] | select(.id == "red_default_branches") | .current == 1 and .gap == 1) and
   (any(.repos[]; .project == "example" and .repo == "example/repo")) and
-  (all(.repos[]; .project != "local-only"))
-' >/dev/null || fail 'local-only clone changed GitHub target evidence'
+  (all(.repos[]; .project != "local-only" and .project != "foreign-alias"))
+' >/dev/null || fail 'out-of-scope clone changed GitHub target evidence'
 sweep
 grep -q '^red ' "$TEST_SPAWN_LOG" || fail 'local-only clone prevented eligible GitHub task dispatch'
 grep -q '^ordinary ' "$TEST_SPAWN_LOG" || fail 'local-only clone prevented ordinary backlog dispatch'
 for id in ordinary held captain red extra extra2 extra3 flight; do rm -f "$home/state/$id.meta"; done
 : > "$TEST_SPAWN_LOG"
-pass 'local-only clone does not block GitHub tasks or ordinary backlog'
+pass 'local-only and symlinked clones do not block eligible work'
 git -C "$home/projects/example" remote set-url origin ssh://git@github.com/example/repo.git
 ssh_result=$(bash "$home/bin/fm-targets.sh" --json)
 printf '%s' "$ssh_result" | jq -e 'any(.repos[]; .repo == "example/repo" and .open_prs == 7 and .red_default_branches == 1)' >/dev/null || fail 'SSH GitHub URL target metrics'
@@ -321,6 +338,15 @@ if sweep 2> "$TMP_ROOT/error"; then fail 'dangling target configuration used def
 [ ! -s "$TEST_SPAWN_LOG" ] || fail 'dangling target configuration dispatched work'
 rm "$home/config/targets.json"
 pass 'dangling idle and target configuration paths refuse dispatch'
+rm -f "$home/state/red.meta" "$home/state/extra3.meta"
+printf '%s\n' "$(date +%s)" > "$TMP_ROOT/clock"
+export TEST_CLOCK_FILE="$TMP_ROOT/clock"
+sweep
+[ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 2 ] || fail 'launch time consumed target collection budget'
+[ "$(head -1 "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = red ] || fail 'long-launch fixture missed red target'
+[ "$(sed -n '2p' "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = extra3 ] || fail 'target recheck after long launch did not dispatch'
+unset TEST_CLOCK_FILE
+pass 'launch time does not consume the shared target collection budget'
 # Exercise the actual watcher heartbeat hook and its normal wake path without
 # launching a worker or touching a real terminal backend.
 # shellcheck source=tests/wake-helpers.sh

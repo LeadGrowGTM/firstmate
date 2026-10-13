@@ -106,10 +106,10 @@ quota_clear() {
   ' >/dev/null
 }
 quota_clear || exit 0
-target_deadline=$(($(date +%s) + 120))
-remaining=$((target_deadline - $(date +%s)))
-[ "$remaining" -gt 0 ] || exit 1
-targets=$(fm_run_timed "$remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || exit 1
+collection_remaining=120
+collection_start=$(date +%s)
+targets=$(fm_run_timed "$collection_remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || exit 1
+collection_remaining=$((collection_remaining - ($(date +%s) - collection_start)))
 # Red-branch evidence must be complete before a lower-priority task may start.
 printf '%s' "$targets" | jq -e '.targets[] | select(.id == "red_default_branches") | .gap != null' >/dev/null || exit 0
 candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" '
@@ -149,9 +149,10 @@ while IFS= read -r candidate; do
   [ -f "$brief" ] && [ ! -L "$brief" ] || continue
   quota_clear || break
   if [ "$target_kind" != backlog ]; then
-    remaining=$((target_deadline - $(date +%s)))
-    [ "$remaining" -gt 0 ] || { failed=1; break; }
-    latest_targets=$(fm_run_timed "$remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || { failed=1; break; }
+    [ "$collection_remaining" -gt 0 ] || { failed=1; break; }
+    collection_start=$(date +%s)
+    latest_targets=$(fm_run_timed "$collection_remaining" bash "$SCRIPT_DIR/fm-targets.sh" --json) || { failed=1; break; }
+    collection_remaining=$((collection_remaining - ($(date +%s) - collection_start)))
   fi
   current_config=$(idle_config) || { failed=1; break; }
   [ "$current_config" = "$config" ] || break
