@@ -4,7 +4,7 @@
 # per-window data instead of per-refresh probes.
 #
 # Usage:
-#   fm-statusbar.sh label <target> <id> <harness> <model> <effort> <worktree> [account-provider]
+#   fm-statusbar.sh label <target> <id> <harness> <model> <effort> <worktree>
 #       Record the task's facts as window user options (@fm_task,
 #       @fm_model, @fm_effort, @fm_wt) on one tmux window. fm-spawn
 #       calls it for every tmux spawn and relaunch. Never fails the caller.
@@ -62,6 +62,7 @@ fm_sb_wt_label() {  # <path>
 # Short model: drop the vendor prefix.
 fm_sb_model_label() {  # <model-id>
   local m=${1-}
+  m=${m##*/}
   m=${m#claude-}
   [ "$m" != default ] || m=
   printf '%s' "$m"
@@ -69,16 +70,16 @@ fm_sb_model_label() {  # <model-id>
 
 cmd_label() {
   local target=${1:-} id=${2:-} harness=${3:-} model=${4:-} effort=${5:-} wt=${6:-}
-  local account_provider=${7:-} provider= account
+  local provider= account
   [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 0
-  case "$harness" in
-    claude|codex|grok|kimi|cursor|agy) provider=$harness ;;
-    muse) provider=meta ;;
-    pi|pi-signed|omp|opencode)
-      case "${account_provider:-${model%%/*}}" in
+  provider=$(fm_quota_provider_for_harness "$harness" "$model") || provider=
+  case "$provider" in
+    pi)
+      case "${model%%/*}" in
         openai-codex*|codex-native) provider=codex ;;
         anthropic|claude-bridge) provider=claude ;;
         xai) provider=grok ;;
+        *) provider= ;;
       esac
       ;;
   esac
@@ -106,11 +107,11 @@ fm_sb_format() {
   wide="#[bold]#{=24:${task}}#[nobold] | #{=20:${model}} #{=7:${effort}} | #{=22:${wt}}"
   narrow="#{=9:${task}}|#{=10:${model}} #{=4:${effort}}|#{=13:${wt}}"
   compact="#{=3:${task}}|#{=2:${model}} #{=1:${effort}}|#{=2:${wt}}"
-  printf '%s' "#{?#{e|>=:#{client_width},100},${wide},#{?#{e|>=:#{client_width},60},${narrow},${compact}}}|${use}"
+  printf '%s' "${use}|#{?#{e|>=:#{client_width},100},${wide},#{?#{e|>=:#{client_width},60},${narrow},${compact}}}"
 }
 
 cmd_sync() {
-  local meta id win harness model effort wt backend home account_provider
+  local meta id win harness model effort wt backend home
   for meta in "$STATE"/*.meta; do
     [ -f "$meta" ] || continue
     id=${meta##*/}
@@ -122,10 +123,9 @@ cmd_sync() {
     harness=$(sed -n 's/^harness=//p' "$meta" | head -1)
     model=$(sed -n 's/^model=//p' "$meta" | head -1)
     effort=$(sed -n 's/^effort=//p' "$meta" | head -1)
-    account_provider=$(sed -n 's/^account_provider=//p' "$meta" | head -1)
     wt=$(sed -n 's/^worktree=//p' "$meta" | head -1)
     home=$(sed -n 's/^home=//p' "$meta" | head -1)
-    cmd_label "$win" "$id" "$harness" "$model" "$effort" "${home:-$wt}" "$account_provider"
+    cmd_label "$win" "$id" "$harness" "$model" "$effort" "${home:-$wt}"
   done
   return 0
 }
@@ -160,7 +160,7 @@ fm_sb_usage_refresh() {
       sub(/^  /, ""); n = split($0, row, ","); scope = row[2 + keyed]; rem = row[3 + keyed]
       if (n < 3 + keyed || (scope != "all_models" && scope != "all_products") ||
           rem !~ /^[0-9]+(\.[0-9]+)?$/ || rem + 0 > 100) next
-      printf "%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", sprintf("%g", 100 - rem)
+      printf "%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", sprintf("%.15g", 100 - rem)
     }
   ')
   [ -n "$rows" ] || return 1
@@ -188,7 +188,9 @@ fm_sb_usage_display() {  # <window>
       if (!matched) { print "u ?"; exit }
       code = provider == "claude" ? "cl" : provider == "codex" ? "cx" : provider == "grok" ? "gk" : substr(provider, 1, 2)
       label = length(key) <= 14 ? key : substr(key, 1, 6) "~" substr(key, length(key) - 6)
-      value = sprintf("%.1f", used); sub(/\.0$/, "", value)
+      if (used > 0 && used < 0.05) value = "<0.1"
+      else if (used < 100 && used >= 99.95) value = ">99.9"
+      else { value = sprintf("%.1f", used); sub(/\.0$/, "", value) }
       printf "u %s:%s%s%%\n", code, label, value
     }
   ' "$USAGE_CACHE"

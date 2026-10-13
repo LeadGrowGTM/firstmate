@@ -34,12 +34,15 @@ cat >"$WORK/bin/quota-axi" <<SH
 echo run >>"$WORK/quota-calls"
 [ ! -f "$WORK/quota-fail" ] || exit 1
 cat <<'X'
-quota[6]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[9]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,default,all_models,68,0.4,through_reset,high,none,none
+  codex,default,all_models,68,0.4,through_reset,high,none,none
   codex,codex-home,all_models,0.5,-1.9,through_reset,high,none,none
   codex,openai-codex-home,all_models,4,-1.9,through_reset,high,none,none
   codex,openai-codex-work,all_models,0.5,-1.9,through_reset,high,none,none
   codex,openai-codex-work2,all_models,0.5,-1.9,through_reset,high,none,none
+  codex,openai-codex-hi,all_models,0.04,-1.9,through_reset,high,none,none
+  codex,openai-codex-lo,all_models,99.9999,-1.9,through_reset,high,none,none
   claude,default,"model:fable",12,0.8,through_reset,high,none,none
 X
 SH
@@ -91,20 +94,20 @@ selected=$(bash "$SB" usage firstmate:fm-demo-task)
 tmux select-window -t orca-view:fm-demo-task
 wide=$(render orca-view 160 'u cl:default32%')
 case "$wide" in
-*"fm-demo-task"*"opus-5-5[1m] high"*"firstmate/17"*"u cl:default32%"*) pass "wide client shows task, model, effort, worktree and usage" ;;
+*"u cl:default32%"*"fm-demo-task"*"opus-5-5[1m] high"*"firstmate/17"*) pass "wide client shows task, model, effort, worktree and usage" ;;
 *) fail "wide render missing fields" "$wide" ;;
 esac
 
 narrow=$(render orca-view 60 'u cl:default32%')
 case "$narrow" in
-*"fm-demo"*"opus-5-5[1 high"*"firstmate/"*"u cl:default32%"*) ;;
+*"u cl:default32%"*"fm-demo"*"opus-5-5[1 high"*"firstmate/"*) ;;
 *) fail "narrow render lost a required field" "$narrow" ;;
 esac
 pass "narrow client keeps task, model, effort, worktree and usage"
 
 compact=$(render orca-view 40 'u cl:default32%')
 case "$compact" in
-*"fm-"*"op h"*"fi"*"u cl:default32%"*) pass "compact client keeps all required fields" ;;
+*"u cl:default32%"*"fm-"*"op h"*"fi"*) pass "compact client keeps all required fields" ;;
 *) fail "compact render lost a required field" "$compact" ;;
 esac
 
@@ -120,6 +123,11 @@ bash "$SB" apply firstmate
 tmux select-window -t orca-view:pi-work
 work_usage=$(render orca-view 40 'u cx:openai~ex-work99.5%')
 case "$work_usage" in *'u cx:openai~ex-work99.5%'*) pass "each pane shows its selected account usage" ;; *) fail "Pi selected another account" "$work_usage" ;; esac
+[ "$(tmux show-options -wqv -t firstmate:pi-work @fm_model)" = gpt-6-sol ] || fail "qualified model did not retain its model identity"
+wide_work=$(render orca-view 100 'u cx:openai~ex-work99.5%')
+case "$wide_work" in *'u cx:openai~ex-work99.5%'*'gpt-6-sol high'*) ;; *) fail "wide account usage or qualified model was clipped" "$wide_work" ;; esac
+narrow_work=$(render orca-view 60 'u cx:openai~ex-work99.5%')
+case "$narrow_work" in *'u cx:openai~ex-work99.5%'*'gpt-6-sol'*) pass "usage stays visible ahead of variable-width fields" ;; *) fail "narrow account usage or qualified model was clipped" "$narrow_work" ;; esac
 
 tmux new-window -d -t firstmate: -n pi-work2 "sleep 600"
 bash "$SB" label firstmate:pi-work2 pi-work2 pi openai-codex-work2/gpt-6-sol high /home/u/pi
@@ -134,6 +142,21 @@ bash "$SB" apply firstmate
 home2_usage=$(bash "$SB" usage firstmate:pi-home)
 [ "$home2_usage" = 'u cx:openai~ex-home96%' ] || fail "distinct account keys collapsed into one label" "$home2_usage"
 pass "bounded account labels distinguish two Codex accounts"
+
+tmux new-window -d -t firstmate: -n opencode-usage "sleep 600"
+bash "$SB" label firstmate:opencode-usage opencode-usage opencode openai/gpt-5.6-sol high /home/u/opencode
+[ "$(tmux show-options -wqv -t firstmate:opencode-usage @fm_provider)" = codex ] || fail "OpenCode missed the shared Codex provider"
+[ "$(tmux show-options -wqv -t firstmate:opencode-usage @fm_model)" = gpt-5.6-sol ] || fail "OpenCode model retained an account prefix"
+[ "$(bash "$SB" usage firstmate:opencode-usage)" = 'u cx:default32%' ] || fail "OpenCode missed its Codex quota"
+pass "OpenCode uses the shared provider mapping"
+
+tmux new-window -d -t firstmate: -n high-used "sleep 600"
+bash "$SB" label firstmate:high-used high-used pi openai-codex-hi/gpt-6-sol high /home/u/pi
+[ "$(bash "$SB" usage firstmate:high-used)" = 'u cx:openai~odex-hi>99.9%' ] || fail "nonterminal high usage rounded to 100%"
+tmux new-window -d -t firstmate: -n low-used "sleep 600"
+bash "$SB" label firstmate:low-used low-used pi openai-codex-lo/gpt-6-sol high /home/u/pi
+[ "$(bash "$SB" usage firstmate:low-used)" = 'u cx:openai~odex-lo<0.1%' ] || fail "nonterminal low usage rounded to 0%"
+pass "nonterminal usage values remain distinct from endpoints"
 
 tmux new-window -d -t firstmate: -n pinned-claude "sleep 600"
 bash "$SB" label firstmate:pinned-claude pinned-claude claude opus high /home/u/claude /home/u/.claude/settings.json
@@ -153,11 +176,12 @@ harness=pi
 model=openai-codex-work/gpt-6-sol
 effort=high
 account=ordinary
-account_provider=openai-codex
+account_provider=xai
 worktree=/home/u/pi
 META
 bash "$SB" sync
 [ "$(tmux show-options -wqv -t firstmate:pi-fallback @fm_account)" = openai-codex-work ] || fail "sync used a different quota lane than direct labeling"
+[ "$(tmux show-options -wqv -t firstmate:pi-fallback @fm_provider)" = codex ] || fail "sync let account metadata override the model's provider"
 [ "$(bash "$SB" usage firstmate:pi-fallback)" = 'u cx:openai~ex-work99.5%' ] || fail "synced Pi lane selected another account"
 pass "sync and direct labels use the same quota lane"
 
@@ -168,7 +192,7 @@ bash "$SB" apply firstmate
 tmux select-window -t orca-view:primary
 primary=$(render orca-view 100 'u cl:default32%')
 case "$primary" in
-*"firstmate | ? ? | firstmate|u cl:default32%"*) pass "a primary pane reports missing model and effort honestly" ;;
+*"u cl:default32%|firstmate | ? ? | firstmate"*) pass "a primary pane reports missing model and effort honestly" ;;
 *) fail "primary pane lost a required field" "$primary" ;;
 esac
 
@@ -262,6 +286,6 @@ META
 bash "$SB" sync
 tmux select-window -t orca-later:bare
 unknown=$(render orca-later 100 'u ?')
-case "$unknown" in *sync-task*'?'*'?'*proj/4*'u ?'*) pass "metadata defaults render as unknown facts" ;; *) fail "metadata default rendered as a fact" "$unknown" ;; esac
+case "$unknown" in *'u ?'*sync-task*'?'*'?'*proj/4*) pass "metadata defaults render as unknown facts" ;; *) fail "metadata default rendered as a fact" "$unknown" ;; esac
 
 echo "fm-statusbar: all passed"

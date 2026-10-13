@@ -182,6 +182,7 @@ fm_quota_provider_for_harness() {
     grok)         printf 'grok\n' ;;
     kimi)         printf 'kimi\n' ;;
     cursor)       printf 'cursor\n' ;;
+    agy)          printf 'agy\n' ;;
     muse)         printf 'meta\n' ;;
     *)            return 1 ;;
   esac
