@@ -2032,7 +2032,10 @@ command_migrate_options() (
       existing=1
       title=$(show_field_value "$TASK_SHOW_OUTPUT" title)
       state=$(show_field "$TASK_SHOW_OUTPUT" state)
-      if [ "$state" = "done" ]; then
+      if [ "$state" = "done" ] || {
+        [ "$(show_field_value "$TASK_SHOW_OUTPUT" hold_kind)" != captain ] \
+          && body_has_resolution_record "$(show_field "$TASK_SHOW_OUTPUT" body)"
+      }; then
         printf 'already-closed: %s\n' "$id"
         continue
       fi
