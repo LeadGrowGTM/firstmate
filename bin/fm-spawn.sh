@@ -1384,7 +1384,7 @@ parse_orca_worktree_result() {
 }
 
 spawn_abort_cleanup() {
-  local status=$?
+  local status=$? orca_restore
   local lease_dirty lease_unlanded
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
@@ -1469,13 +1469,28 @@ spawn_abort_cleanup() {
     fi
   fi
   if [ "$ORCA_VIEW_ABORT_CLOSE" = 1 ]; then
+    if [ "$RELAUNCH" -eq 1 ] &&
+      [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
+      orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
+      if ! { awk -F= '$1 !~ /^orca_view_(handle|session|owned)$/' "$STATE/$ID.meta" >"$orca_restore" &&
+        { [ -z "$ORCA_VIEW_PRIOR_HANDLE" ] ||
+          printf 'orca_view_handle=%s\norca_view_session=%s\norca_view_owned=%s\n' \
+            "$ORCA_VIEW_PRIOR_HANDLE" "$ORCA_VIEW_PRIOR_SESSION" "$ORCA_VIEW_PRIOR_OWNED" >>"$orca_restore"; } &&
+        fm_backlog_atomic_transition publish "$orca_restore" "$STATE/$ID.meta" "task record" "$STATE"; }; then
+        rm -f "$orca_restore"
+        echo "warning: could not restore the prior Orca tab record after aborted relaunch of $ID" >&2
+        ORCA_VIEW_ABORT_CLOSE=0
+      fi
+    fi
     # The view tab this aborted spawn opened. Its view session goes with it
     # only when this spawn created it; otherwise an earlier tab still uses it.
-    ORCA_VIEW_ABORT_CLOSE=0
-    if [ "$ORCA_VIEW_CREATED" = 1 ]; then
-      "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" || true
-    else
-      "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
+    if [ "$ORCA_VIEW_ABORT_CLOSE" = 1 ]; then
+      ORCA_VIEW_ABORT_CLOSE=0
+      if [ "$ORCA_VIEW_CREATED" = 1 ]; then
+        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" || true
+      else
+        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
+      fi
     fi
   fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
@@ -5356,8 +5371,19 @@ fi
 ORCA_VIEW_IDENTITY_FILE=
 ORCA_VIEW_EXPORT=
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
+  ORCA_VIEW_NAME="orca-$ID"
+  if tmux has-session -t "=$ORCA_VIEW_NAME" 2>/dev/null; then
+    ORCA_VIEW_GROUP=$(tmux display-message -p -t "=$ORCA_VIEW_NAME:" '#{session_group}' 2>/dev/null) || ORCA_VIEW_GROUP=
+    if [ "$ORCA_VIEW_GROUP" != "$SES" ]; then
+      case "$SES" in
+        *[!A-Za-z0-9_-]*)
+          ORCA_VIEW_NAME="orca-$ID-h-$(printf '%s' "$SES" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]')" ;;
+        *) ORCA_VIEW_NAME="orca-$ID-s-$SES" ;;
+      esac
+    fi
+  fi
   ORCA_VIEW_IDENTITY_FILE="$STATE/$ID.orca-view-identity"
-  if ORCA_VIEW_OUT=$("$SCRIPT_DIR/fm-orca-view.sh" open --target "$T" --view-session "orca-$ID" \
+  if ORCA_VIEW_OUT=$("$SCRIPT_DIR/fm-orca-view.sh" open --target "$T" --view-session "$ORCA_VIEW_NAME" \
     --title "$ID" --identity-file "$ORCA_VIEW_IDENTITY_FILE"); then
     ORCA_VIEW_HANDLE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^handle=//p')
     ORCA_VIEW_SESSION=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session=//p')
@@ -5810,10 +5836,8 @@ fi
 # tab already gave the reused pane. A forwarded identity also clears any
 # inherited hook port and token, which Orca's hook reads from the endpoint file.
 ORCA_VIEW_ENV_NAMES=
-if [ -n "$ORCA_VIEW_EXPORT" ]; then
-  spawn_send_text_line "$T" "unset ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"
-  spawn_send_text_line "$T" "$ORCA_VIEW_EXPORT"
-elif [ "$ORCA_VIEW_ENABLED" = on ] && { [ "$RELAUNCH" -eq 0 ] || [ -z "$ORCA_VIEW_PRIOR_HANDLE" ]; }; then
+if [ -z "$ORCA_VIEW_EXPORT" ] && [ "$ORCA_VIEW_ENABLED" = on ] &&
+  { [ "$RELAUNCH" -eq 0 ] || [ -z "$ORCA_VIEW_PRIOR_HANDLE" ]; }; then
   spawn_send_text_line "$T" "unset ORCA_PANE_KEY ORCA_TAB_ID ORCA_WORKTREE_ID ORCA_AGENT_HOOK_ENDPOINT ORCA_AGENT_HOOK_ENV ORCA_AGENT_HOOK_VERSION ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"
 fi
 if [ "$ORCA_VIEW_ENABLED" = on ] || { [ "$RELAUNCH" -eq 1 ] && [ -n "$ORCA_VIEW_PRIOR_HANDLE" ]; }; then
@@ -5915,6 +5939,10 @@ if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   rm -f "$LAUNCH_STAGE"
   echo "error: could not stage the launch command at $LAUNCH_FILE" >&2
   exit 1
+fi
+if [ -n "$ORCA_VIEW_EXPORT" ]; then
+  spawn_send_text_line "$T" "unset ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"
+  spawn_send_text_line "$T" "$ORCA_VIEW_EXPORT"
 fi
 sleep 0.3
 SPAWN_LAUNCH_ATTEMPTED=1

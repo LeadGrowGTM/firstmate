@@ -278,7 +278,7 @@ EOF
 }
 
 cmd_open() {
-  local cmd out handle PRIOR_OPTION_SET=0 PRIOR_OPTION='' PRIOR_HOOK='' PRIOR_WINDOW=''
+  local cmd out handle grouped group PRIOR_OPTION_SET=0 PRIOR_OPTION='' PRIOR_HOOK='' PRIOR_WINDOW=''
   parse_view_args "$@"
   resolve_target "$TARGET"
   command -v jq >/dev/null 2>&1 || note "jq is not installed, so Orca's reply cannot be read"
@@ -290,6 +290,11 @@ cmd_open() {
       note "tmux did not create view session $VIEW_SESSION"
     OWNED=1
   else
+    IFS=$'\t' read -r grouped group <<EOF
+$(tmux display-message -p -t "=$VIEW_SESSION:" $'#{session_grouped}\t#{session_group}' 2>/dev/null)
+EOF
+    [ "$grouped" = 1 ] && [ "$group" = "$BASE_SESSION" ] ||
+      note "view session $VIEW_SESSION belongs to another tmux base session"
     PRIOR_WINDOW=$(tmux display-message -p -t "=$VIEW_SESSION:" '#{window_id}') ||
       note "view session $VIEW_SESSION cannot report its selected window"
     if PRIOR_OPTION=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_window 2>/dev/null); then
