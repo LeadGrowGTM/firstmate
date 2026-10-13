@@ -41,3 +41,32 @@ Nothing schedules the refresh by default.
 Run it after any scheduled memory pass, so each second mate has written down what it holds before its conversation is replaced.
 A failed run leaves the unit failed in `systemctl --user status fm-session-refresh.service`, and the stopped second mate is reconciled by the ordinary recovery path.
 Any other scheduler works the same way, as long as it sets `FM_HOME` and a `PATH` that reaches the backend and harness tools an interactive session uses.
+
+## Daily stow before refresh
+
+The optional `fm-daily-stow.service` and `fm-daily-stow.timer` in [the same examples directory](examples/session-refresh/) queue a memory pass in the live main session at 02:00 America/Toronto daily.
+Select the main operational home in the service: its existing [stow cascade](../.agents/skills/stow/SKILL.md#automatic-cascade-to-secondmates) reaches registered secondmate homes without separate timers.
+The trigger uses the [durable inbox](../bin/fm-inbox.sh) check path, so the session handles the instruction at a normal checkpoint after current work.
+It never sends terminal keys, interrupts a turn, or starts a replacement worker.
+The [script header](../bin/fm-daily-stow.sh) owns eligibility checks, the 20-hour primary-pass guard, retry semantics, and exit status.
+The primary records its memory pass through the cascade's `--record-pass` option; that record does not certify secondmate completion or reset safety.
+The recipient rechecks eligibility before acting on a delayed note.
+An inactive or unsupervised main, away or quiet posture, or a recent primary pass produces a logged skip rather than a queued instruction.
+The timer has no catch-up run; its timezone follows Toronto's daylight-saving rules, including the missing 02:00 occurrence at the spring transition.
+Queueing at 02:00 leaves an hour before a 03:00 refresh, but does not guarantee completion when main or a secondmate remains busy.
+
+To install after reviewing the placeholder paths, copy the companion units alongside the refresh units:
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp docs/examples/session-refresh/fm-daily-stow.service docs/examples/session-refresh/fm-daily-stow.timer ~/.config/systemd/user/
+# Edit FM_HOME and ExecStart in ~/.config/systemd/user/fm-daily-stow.service.
+systemctl --user daemon-reload
+systemctl --user enable --now fm-daily-stow.timer
+systemctl --user list-timers fm-daily-stow.timer
+journalctl --user -u fm-daily-stow.service
+```
+
+Keep the refresh schedule at 03:00 America/Toronto when using this companion on a host whose local timezone differs.
+Pre-compaction or pre-reset delivery is a follow-up; this companion implements only the daily occurrence.
+Verify the guards and delivery with `bin/fm-test-run.sh tests/fm-daily-stow.test.sh tests/fm-stow-cascade.test.sh tests/fm-inbox.test.sh`.
