@@ -554,10 +554,10 @@ SH
 )
 
 test_grok_failed_cell_preserves_server() (
-  [ -n "${FM_TEST_TMUX_REAL:-}" ] && command -v jq >/dev/null 2>&1 || {
+  if [ -z "${FM_TEST_TMUX_REAL:-}" ] || ! command -v jq >/dev/null 2>&1; then
     echo 'skip: tmux and jq are required for the Grok failure fixture'
     exit 0
-  }
+  fi
   local dir="$TMP_ROOT/grok-failed-cell" cell socket sentinel="$TMP_ROOT/grok-failed-cell/operator/operator.sock" rc=0
   mkdir -p "$dir"
   mkdir -m 700 "$dir/operator"
