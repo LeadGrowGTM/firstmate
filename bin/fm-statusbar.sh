@@ -219,6 +219,8 @@ cmd_apply() {
     # Keep the original session's state binding in future grouped view jobs.
     hook="$hook; set-option -o @fm_fleet_state \"${STATE//\"/\\\"}\"; set-option status-left-length 40; set-option status-left \"${left//\"/\\\"}\""
   fi
+  # Quote the entire action for if-shell's outer tmux parser.
+  hook=${hook//\'/\'\\\'\'}
   tmux set-hook -g "after-new-session[$((10000 + group_id))]" \
     "if-shell -F '#{==:#{session_group},$group}' '$hook'" 2>/dev/null || true
   return 0

@@ -454,7 +454,7 @@ unknown=$(render orca-later 100 'u ?')
 case "$unknown" in *'u ?'*sync-task*'?'*'?'*proj/4*) pass "metadata defaults render as unknown facts" ;; *) fail "metadata default rendered as a fact" "$unknown" ;; esac
 
 # --- fleet: live worker and second-mate counts from recorded task metadata ---
-FLEET_STATE="$WORK/fleet-state"
+FLEET_STATE="$WORK/fleet's-state"
 mkdir -p "$FLEET_STATE"
 tmux new-window -d -t firstmate: -n fm-live-crew "sleep 600"
 tmux new-window -d -t firstmate: -n fm-live-second "sleep 600"
