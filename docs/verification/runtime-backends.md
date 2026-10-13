@@ -541,7 +541,7 @@ The composer-classification record below observes the same gate from the other s
 ## Claude permission mode
 
 Verified 2026-10-13 on Claude Code 2.1.296.
-The default `config/claude-permission-mode` token, `auto-allow-bypass`, launches `claude --allow-dangerously-skip-permissions --permission-mode auto`.
+An absent `config/claude-permission-mode` launches `claude --allow-dangerously-skip-permissions --permission-mode auto`.
 The probe started that flag pair in a private tmux server from an already-trusted directory, submitted no prompt, and sent shift+tab (`BTab`) once per step.
 
 ```

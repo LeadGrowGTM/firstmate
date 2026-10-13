@@ -347,7 +347,7 @@
 #   See docs/configuration.md for provider/Git setup and supported limits.
 # Claude permission mode (config/claude-permission-mode):
 #   One token selecting the permission flags every claude launch (ship, scout,
-#   secondmate, and relaunch) carries. Absent or `auto-allow-bypass` launches
+#   secondmate, and relaunch) carries. An absent file launches
 #   with `--allow-dangerously-skip-permissions --permission-mode auto`: the
 #   worker runs in Claude Code's classifier-reviewed auto mode while bypass
 #   stays one shift+tab away. `bypass` keeps `--dangerously-skip-permissions`
@@ -617,26 +617,22 @@ fi
 if ! CLAUDE_PERM_PRESENT=$(fm_config_source_present "$CONFIG/claude-permission-mode"); then
   exit 1
 fi
-CLAUDE_PERMISSION_MODE=auto-allow-bypass
+CLAUDE_PERM_FLAG='--allow-dangerously-skip-permissions --permission-mode auto'
 if [ "$CLAUDE_PERM_PRESENT" = 1 ]; then
   if [ ! -f "$CONFIG/claude-permission-mode" ] || [ ! -r "$CONFIG/claude-permission-mode" ]; then
-    echo "error: config/claude-permission-mode must be a readable regular file holding one of: auto-allow-bypass, bypass, auto" >&2
+    echo "error: config/claude-permission-mode must be a readable regular file holding one of: bypass, auto" >&2
     exit 1
   fi
   CLAUDE_PERMISSION_MODE=$(tr -d '[:space:]' <"$CONFIG/claude-permission-mode" || true)
   case "$CLAUDE_PERMISSION_MODE" in
-  auto-allow-bypass | bypass | auto) ;;
+  bypass) CLAUDE_PERM_FLAG='--dangerously-skip-permissions' ;;
+  auto) CLAUDE_PERM_FLAG='--permission-mode auto' ;;
   *)
-    echo "error: config/claude-permission-mode holds '$CLAUDE_PERMISSION_MODE'; accepted values are: auto-allow-bypass (--allow-dangerously-skip-permissions --permission-mode auto, the default when the file is absent), bypass (--dangerously-skip-permissions), auto (--permission-mode auto)" >&2
+    echo "error: config/claude-permission-mode holds '$CLAUDE_PERMISSION_MODE'; accepted values are: bypass (--dangerously-skip-permissions), auto (--permission-mode auto); an absent file defaults to --allow-dangerously-skip-permissions --permission-mode auto" >&2
     exit 1
     ;;
   esac
 fi
-case "$CLAUDE_PERMISSION_MODE" in
-bypass) CLAUDE_PERM_FLAG='--dangerously-skip-permissions' ;;
-auto) CLAUDE_PERM_FLAG='--permission-mode auto' ;;
-*) CLAUDE_PERM_FLAG='--allow-dangerously-skip-permissions --permission-mode auto' ;;
-esac
 # config/claude-remote-control (header above): resolved once per spawn or
 # relaunch, before any mutation, so a malformed file refuses instead of
 # launching a secondmate with a phone-reachability posture nobody chose.

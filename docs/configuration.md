@@ -853,12 +853,11 @@ The token is the file's whitespace-trimmed content.
 
 | Token | Launch permission flags |
 | --- | --- |
-| `auto-allow-bypass` | `--allow-dangerously-skip-permissions --permission-mode auto` |
 | `bypass` | `--dangerously-skip-permissions` |
 | `auto` | `--permission-mode auto` |
 
-An absent file defaults to `auto-allow-bypass`, so an unconfigured home launches every Claude worker in auto mode with bypass available but not active.
-Auto is Claude Code's classifier-reviewed permission mode; under `auto-allow-bypass` bypass stays reachable through the session's shift+tab mode cycle, while plain `auto` removes it from that cycle for a captain who refuses bypass mode entirely.
+An absent file launches every Claude worker with `--allow-dangerously-skip-permissions --permission-mode auto`, so bypass is available but not active.
+Auto is Claude Code's classifier-reviewed permission mode; with the file absent, bypass stays reachable through the session's shift+tab mode cycle, while explicit `auto` removes it from that cycle for a captain who refuses bypass mode entirely.
 `bypass` starts the worker with every permission check skipped.
 Only the permission flags change between the modes.
 The environment prefix, inline settings, model, effort flags, and the task-channel `--add-dir` grant below stay the same in every mode.

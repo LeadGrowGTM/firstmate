@@ -2043,10 +2043,9 @@ SH
   pass "fm-spawn: actual ship/scout launch commands deliver the worker role contract"
 }
 
-# config/claude-permission-mode (bin/fm-spawn.sh header): absent and
-# `auto-allow-bypass` must both produce the auto-with-bypass-available launch
-# byte-for-byte, `bypass` and `auto` swap only the permission flags, and any
-# other token refuses before endpoint or metadata.
+# config/claude-permission-mode (bin/fm-spawn.sh header): absence produces the
+# auto-with-bypass-available launch, `bypass` and `auto` swap only the permission
+# flags, and any other token refuses before endpoint or metadata.
 claude_settings_json_arg() {  # <launch>
   local command=$1
   while [[ "$command" == export\ *\;* ]]; do
@@ -2097,22 +2096,19 @@ claude_expected_launch() {  # <launch> <home> <id> <permission-flag>
 }
 
 test_claude_permission_mode_absent_defaults_to_auto_allow_bypass() {
-  local token rec id out status launch expected
-  for token in absent auto-allow-bypass; do
-    id="permmode-default-$token"
-    rec=$(make_spawn_case "permmode-default-$token" claude "$id")
-    read_case_record "$rec"
-    [ "$token" = absent ] || printf '%s\n' "$token" > "$HOME_DIR/config/claude-permission-mode"
+  local rec id out status launch expected
+  id=permmode-default-absent
+  rec=$(make_spawn_case permmode-default-absent claude "$id")
+  read_case_record "$rec"
 
-    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
-    status=$?
-    expect_code 0 "$status" "claude spawn with claude-permission-mode $token should succeed"$'\n'"$out"
-    launch=$(cat "$LAUNCH_LOG")
-    expected=$(claude_expected_launch "$launch" "$HOME_DIR" "$id" '--allow-dangerously-skip-permissions --permission-mode auto')
-    [ "$launch" = "$expected" ] || fail "$token did not launch in auto mode with bypass available"$'\n'"expected: $expected"$'\n'"actual:   $launch"
-    assert_not_contains "$launch" " --dangerously-skip-permissions" "$token must not start the worker in bypass mode"
-  done
-  pass "an absent config/claude-permission-mode and auto-allow-bypass both launch in auto mode with bypass available"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "claude spawn without claude-permission-mode should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  expected=$(claude_expected_launch "$launch" "$HOME_DIR" "$id" '--allow-dangerously-skip-permissions --permission-mode auto')
+  [ "$launch" = "$expected" ] || fail "absent config did not launch in auto mode with bypass available"$'\n'"expected: $expected"$'\n'"actual:   $launch"
+  assert_not_contains "$launch" " --dangerously-skip-permissions" "default must not start the worker in bypass mode"
+  pass "an absent config/claude-permission-mode launches in auto mode with bypass available"
 }
 
 test_claude_permission_mode_bypass_swaps_only_the_permission_flag() {
@@ -2207,12 +2203,12 @@ test_claude_task_worker_launch_never_carries_remote_control() {
 # scouts alike.
 test_claude_worker_launch_covers_task_channel_dirs() {
   local mode kind rec id out status launch reqs eval_out eval_rc
-  for mode in auto-allow-bypass bypass auto; do
+  for mode in absent bypass auto; do
     for kind in ship scout; do
       id="adddir-$mode-$kind"
       rec=$(make_spawn_case "adddir-$mode-$kind" claude "$id")
       read_case_record "$rec"
-      printf '%s\n' "$mode" > "$HOME_DIR/config/claude-permission-mode"
+      [ "$mode" = absent ] || printf '%s\n' "$mode" > "$HOME_DIR/config/claude-permission-mode"
       fm_fake_claude_outside_read_gate "$FAKEBIN_DIR"
       reqs="$CASE_DIR/channel-requirements.txt"
       printf '%s\n' "$HOME_DIR/state/$id.inbox" "$HOME_DIR/data/$id" "$ROOT/.agents/skills" > "$reqs"
@@ -2236,22 +2232,23 @@ test_claude_worker_launch_covers_task_channel_dirs() {
 }
 
 test_claude_permission_mode_invalid_refuses_before_endpoint_or_metadata() {
-  local rec id out status
-  id=permmode-invalid-z22
-  rec=$(make_spawn_case permmode-invalid claude "$id")
-  read_case_record "$rec"
-  printf 'yolo\n' > "$HOME_DIR/config/claude-permission-mode"
+  local token rec id out status
+  for token in auto-allow-bypass yolo; do
+    id="permmode-invalid-$token"
+    rec=$(make_spawn_case "permmode-invalid-$token" claude "$id")
+    read_case_record "$rec"
+    printf '%s\n' "$token" > "$HOME_DIR/config/claude-permission-mode"
 
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
-  status=$?
-  expect_code 1 "$status" "an unrecognized claude-permission-mode token must refuse the spawn"
-  assert_contains "$out" "config/claude-permission-mode holds 'yolo'" "refusal must name the file and the offending token"
-  assert_contains "$out" "auto-allow-bypass" "refusal must list auto-allow-bypass as an accepted value"
-  assert_contains "$out" "bypass (--dangerously-skip-permissions)" "refusal must list bypass as an accepted value"
-  assert_contains "$out" "--permission-mode auto" "refusal must list auto as an accepted value"
-  [ ! -s "$LAUNCH_LOG" ] || fail "an invalid permission mode must launch nothing (got: $(cat "$LAUNCH_LOG"))"
-  assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
-  pass "an unrecognized config/claude-permission-mode token refuses before any endpoint or metadata"
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+    status=$?
+    expect_code 1 "$status" "an unrecognized claude-permission-mode token must refuse the spawn"
+    assert_contains "$out" "config/claude-permission-mode holds '$token'" "refusal must name the file and the offending token"
+    assert_contains "$out" "bypass (--dangerously-skip-permissions)" "refusal must list bypass as an accepted value"
+    assert_contains "$out" "auto (--permission-mode auto)" "refusal must list auto as an accepted value"
+    [ ! -s "$LAUNCH_LOG" ] || fail "an invalid permission mode must launch nothing (got: $(cat "$LAUNCH_LOG"))"
+    assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
+  done
+  pass "unrecognized config/claude-permission-mode tokens refuse before any endpoint or metadata"
 }
 
 test_non_claude_harness_ignores_claude_permission_mode() {

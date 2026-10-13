@@ -1585,13 +1585,13 @@ test_spawn_secondmate_claude_permission_mode_auto() {
 # modes: the parent inbox must resolve inside the pane cwd or an --add-dir.
 test_spawn_secondmate_claude_grants_parent_inbox_dir() {
   local w sm launchlog launch reqs fakebin out status eval_out eval_rc
-  for mode in auto-allow-bypass auto bypass; do
+  for mode in absent auto bypass; do
     w="$TMP_ROOT/spawn-claude-adddir-$mode"
     sm="$w/sm"
     launchlog="$w/launch.log"
     mkdir -p "$w/home/config" "$w/home/state" "$w/home/data"
     printf 'claude\n' > "$w/home/config/secondmate-harness"
-    printf '%s\n' "$mode" > "$w/home/config/claude-permission-mode"
+    [ "$mode" = absent ] || printf '%s\n' "$mode" > "$w/home/config/claude-permission-mode"
     make_seeded_home "$sm" sm
 
     fakebin=$(make_launch_capturing_tmux "$w/tmux")
