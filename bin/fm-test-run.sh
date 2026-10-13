@@ -1419,7 +1419,7 @@ families_for_changed_path() {
   local path=$1 fixture_ref
   case "$path" in
     bin/fm-schedule-check.sh)
-      printf '%s\n' tests/fm-schedule-check.test.sh
+      printf '%s\n' __script__:fm-schedule-check.test.sh
       ;;
     tests/fm-backend-herdr-eventwait.test.py)
       printf '%s\n' real-herdr-gated
