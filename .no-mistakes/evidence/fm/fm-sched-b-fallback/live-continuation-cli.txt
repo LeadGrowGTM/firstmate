@@ -1,0 +1,57 @@
+driver completed
+FIRST SPAWN
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.mth/home
+spawned lab-worker harness=claude kind=ship mode=local-only yolo=off window=primary:fm-lab-worker worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.mth/project/.treehouse/project-ea3dbc/1/project
+scheduled-worker: worker-published occurrence=live-continue task=lab-worker receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.mth/home/state/scheduled-worker/live-continue/outcome.1.json
+rc=0
+REPLAY PUBLISHED OCCURRENCE
+already-published: lab-worker
+rc=0
+LOW WARNING MUST NOT STOP WORKER
+error: exhaustion must bind current incarnation; a low warning cannot relaunch
+rc=1
+GENERATION AFTER LOW WARNING
+spawn_gen=s1791921111.2281803.10248
+GENERATION-BOUND CONTINUATION
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.mth/home
+error: task lab-worker's composer state is 'unknown', not proven empty; refusing to type the /exit exit command because it could concatenate onto existing text. Clear the composer, then retry 'relaunch'
+error: relaunch of lab-worker failed while stopping the old agent, which is still running; its original instructions were restored
+scheduled-worker: blocked occurrence=live-continue task=lab-worker receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.mth/home/state/scheduled-worker/live-continue/outcome.2.json
+rc=1
+FINAL JOURNAL
+{
+  "phase": "blocked",
+  "attempt": 2,
+  "action": "relaunch",
+  "spawn_gen": "s1791921111.2281803.10248",
+  "exhaustion_gen": "s1791921111.2281803.10248",
+  "reason": "uncertain",
+  "tried": [
+    {
+      "effort": "medium",
+      "harness": "claude",
+      "model": "default",
+      "reasoning_class": "standard"
+    },
+    {
+      "effort": "medium",
+      "harness": "codex",
+      "model": "default",
+      "reasoning_class": "standard"
+    }
+  ]
+}
+RECEIPTS
+{"outcome":"worker-published","reason":"launch-and-backlog-committed","launch_sent":true,"exit_code":0,"spawn_gen":"s1791921111.2281803.10248","harness":"claude","backend":"tmux"}
+{"outcome":"uncertain","reason":"provisioning-or-delivery-started","launch_sent":false,"exit_code":1,"spawn_gen":"","harness":"codex","backend":"tmux"}
+FINAL TASK META
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.mth/project/.treehouse/project-ea3dbc/1/project
+harness=claude
+mode=local-only
+yolo=off
+spawn_gen=s1791921111.2281803.10248
+checkpoint file preserved
+checkpoint note persisted
+LAB TMUX WINDOWS
+claude @0 claude
+fm-lab-worker @2 claude

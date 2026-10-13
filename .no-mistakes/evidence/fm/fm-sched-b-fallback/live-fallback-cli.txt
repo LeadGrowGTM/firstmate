@@ -1,0 +1,41 @@
+FIRST: selected OpenCode unavailable
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.M8EjBz/home
+error: selected opencode executable is unavailable before provisioning
+scheduled-worker: reselect occurrence=live-fallback task=live-fallback receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.M8EjBz/home/state/scheduled-worker/live-fallback/outcome.1.json
+rc=1
+SECOND: stale selection and same candidate refused
+error: candidate already attempted this episode; reselect or leave pending
+rc=1
+THIRD: refreshed selection of Cursor unavailable
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.M8EjBz/home
+error: no verified cursor executable found; searched PATH for 'cursor-agent' and 'agent', plus '/home/mitch/.local/bin/cursor-agent' and '/home/mitch/.local/bin/agent'. A file named 'agent' is accepted only when it resolves into Cursor's install tree or its --help identifies the Cursor Agent CLI.
+scheduled-worker: blocked occurrence=live-fallback task=live-fallback receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.M8EjBz/home/state/scheduled-worker/live-fallback/outcome.2.json
+rc=1
+FOURTH: repeat Cursor refused without another spawn
+error: occurrence needs reconciliation before further attempts
+rc=1
+FINAL JOURNAL
+{
+  "phase": "blocked",
+  "attempt": 2,
+  "tried": [
+    {
+      "effort": "medium",
+      "harness": "opencode",
+      "model": "default",
+      "reasoning_class": "standard"
+    },
+    {
+      "effort": "medium",
+      "harness": "cursor",
+      "model": "default",
+      "reasoning_class": "standard"
+    }
+  ],
+  "reason": "uncertain"
+}
+RECEIPTS
+{"outcome":"worker-unavailable","reason":"selected-executable-missing","launch_sent":false,"exit_code":1}
+{"outcome":"uncertain","reason":"selected-executable-identity-inconclusive","launch_sent":false,"exit_code":1}
+TASK METADATA EXISTS?
+meta_exists=1

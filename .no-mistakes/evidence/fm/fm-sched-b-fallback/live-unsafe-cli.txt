@@ -1,0 +1,32 @@
+UNAUTHORIZED PLAN
+error: invalid explicit fallback authorization
+rc=1
+AUTHORIZED SELECTION WITH MISSING BRIEF
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.0MkGha/home
+error: task live-unsafe has no brief at inaccessible data path /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.0MkGha/home/data/live-unsafe/brief.md
+scheduled-worker: blocked occurrence=live-unsafe task=live-unsafe receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.0MkGha/home/state/scheduled-worker/live-unsafe/outcome.1.json
+rc=1
+ATTEMPT ANOTHER CANDIDATE AFTER UNSAFE REFUSAL
+error: occurrence needs reconciliation before further attempts
+rc=1
+FINAL STATE
+{
+  "phase": "blocked",
+  "attempt": 1,
+  "tried": [
+    {
+      "effort": "medium",
+      "harness": "codex",
+      "model": "default",
+      "reasoning_class": "standard"
+    }
+  ],
+  "reason": "unsafe-refusal"
+}
+{
+  "outcome": "unsafe-refusal",
+  "reason": "guard-refusal",
+  "launch_sent": false,
+  "exit_code": 1
+}
+no task metadata

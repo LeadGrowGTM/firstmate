@@ -1,0 +1,35 @@
+CAPACITY AT ONE OCCUPANT
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.8slhch/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+deferred: project 01M4VAPGM8MJRJA0MD2YCGVCA7 admits 1 worker(s) at once on this machine (/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.8slhch/home/config/project-capacity) and 1 already hold a place (existing-worker); task live-capacity was not launched and its backlog item stays queued - dispatch it again once one of them records its ready PR or is cleaned up
+scheduled-worker: capacity occurrence=live-capacity task=live-capacity receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.8slhch/home/state/scheduled-worker/live-capacity/outcome.1.json
+rc=75
+ATTEMPTED SUBSCRIPTION SWITCH WHILE QUEUED
+error: capacity cannot switch subscription profile
+rc=1
+JOURNAL
+{
+  "phase": "capacity",
+  "attempt": 1,
+  "tried": [],
+  "profile": {
+    "effort": "medium",
+    "harness": "codex",
+    "model": "default",
+    "reasoning_class": "standard"
+  }
+}
+RECEIPT
+{
+  "outcome": "capacity",
+  "reason": "project-capacity",
+  "launch_sent": false,
+  "exit_code": 75
+}
+no task metadata

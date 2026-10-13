@@ -1,0 +1,38 @@
+FIRST CANDIDATE
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.bSgWpF/home
+error: selected opencode executable is unavailable before provisioning
+scheduled-worker: reselect occurrence=live-bounded task=live-bounded receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.bSgWpF/home/state/scheduled-worker/live-bounded/outcome.1.json
+rc=1
+SECOND CANDIDATE WITH REFRESHED EVIDENCE
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.bSgWpF/home
+error: devin executable not found on PATH
+scheduled-worker: reselect occurrence=live-bounded task=live-bounded receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/.fm-test.bSgWpF/home/state/scheduled-worker/live-bounded/outcome.2.json
+rc=1
+REPEAT SECOND CANDIDATE
+error: candidate already attempted this episode; reselect or leave pending
+rc=1
+JOURNAL
+{
+  "phase": "reselect",
+  "attempt": 2,
+  "tried": [
+    {
+      "effort": "medium",
+      "harness": "opencode",
+      "model": "default",
+      "reasoning_class": "standard"
+    },
+    {
+      "effort": "medium",
+      "harness": "devin",
+      "model": "default",
+      "reasoning_class": "standard"
+    }
+  ],
+  "reason": "selected-executable-missing"
+}
+RECEIPTS
+{"outcome":"worker-unavailable","reason":"selected-executable-missing","launch_sent":false,"exit_code":1}
+{"outcome":"worker-unavailable","reason":"selected-executable-missing","launch_sent":false,"exit_code":1}
+NO TASK METADATA
+no metadata

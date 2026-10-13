@@ -1,0 +1,39 @@
+driver completed
+INITIAL LIVE WORKER
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.IlQ/home
+spawned lab-worker harness=claude kind=ship mode=local-only yolo=off window=primary:fm-lab-worker worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.IlQ/project/.treehouse/project-1ade58/1/project
+scheduled-worker: worker-published occurrence=missing-replacement task=lab-worker receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.IlQ/home/state/scheduled-worker/missing-replacement/outcome.1.json
+rc=0
+MISSING REPLACEMENT CLI BEFORE STOP
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.IlQ/home
+error: selected opencode executable is unavailable before stopping lab-worker
+scheduled-worker: reselect occurrence=missing-replacement task=lab-worker receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.IlQ/home/state/scheduled-worker/missing-replacement/outcome.2.json
+rc=1
+JOURNAL AND RECEIPTS
+{
+  "phase": "reselect",
+  "attempt": 2,
+  "reason": "selected-executable-missing-before-stop",
+  "tried": [
+    {
+      "effort": "medium",
+      "harness": "claude",
+      "model": "default",
+      "reasoning_class": "standard"
+    },
+    {
+      "effort": "medium",
+      "harness": "opencode",
+      "model": "default",
+      "reasoning_class": "standard"
+    }
+  ],
+  "spawn_gen": "s1791921317.2537516.27824"
+}
+{"outcome":"worker-published","reason":"launch-and-backlog-committed","launch_sent":true,"exit_code":0,"spawn_gen":"s1791921317.2537516.27824","harness":"claude"}
+{"outcome":"worker-unavailable","reason":"selected-executable-missing-before-stop","launch_sent":false,"exit_code":1,"spawn_gen":"","harness":"opencode"}
+PRIOR WORKER GENERATION
+spawn_gen=s1791921317.2537516.27824
+worktree checkpoint file preserved
+WORKER PANE COMMAND
+claude

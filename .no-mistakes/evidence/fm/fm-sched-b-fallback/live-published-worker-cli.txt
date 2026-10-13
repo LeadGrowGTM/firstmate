@@ -1,0 +1,33 @@
+REAL LAB SPAWN RESULT
+0
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.SJm/home
+spawned lab-worker harness=claude kind=ship mode=local-only yolo=off window=primary:fm-lab-worker worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.SJm/.treehouse/project-800783/1/project
+scheduled-worker: worker-published occurrence=live-publish task=lab-worker receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.SJm/home/state/scheduled-worker/live-publish/outcome.1.json
+JOURNAL
+{
+  "phase": "worker-published",
+  "attempt": 1,
+  "spawn_gen": "s1791921025.2148262.25166",
+  "reason": null
+}
+RECEIPT
+{
+  "outcome": "worker-published",
+  "reason": "launch-and-backlog-committed",
+  "launch_sent": true,
+  "exit_code": 0,
+  "spawn_gen": "s1791921025.2148262.25166",
+  "backend": "tmux",
+  "harness": "claude",
+  "mode": "local-only"
+}
+META
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.SJm/.treehouse/project-800783/1/project
+harness=claude
+kind=ship
+mode=local-only
+yolo=off
+spawn_gen=s1791921025.2148262.25166
+LAB TMUX WINDOWS
+claude @0 claude
+fm-lab-worker @2 claude

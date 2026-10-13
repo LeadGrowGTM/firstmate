@@ -1,0 +1,47 @@
+SPAWN
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.xRK/home
+spawned lab-worker harness=codex kind=ship mode=local-only yolo=off window=primary:fm-lab-worker worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.xRK/project/.treehouse/project-f2eb82/1/project
+scheduled-worker: worker-published occurrence=inspect-codex task=lab-worker receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.xRK/home/state/scheduled-worker/inspect-codex/outcome.1.json
+PANE GEOMETRY
+node 120x40
+WORKER PANE
+
+  Folder access
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.xRK/project/.treehouse/project-f2eb82/1
+  /project
+
+  Note: You’re in a subdirectory of a Git project. Trusting will apply to the repository root:
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VAPGM8MJRJA0MD2YCGVCA7/f.xRK/project
+
+  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder settings
+  can run code automatically, even without a model request. Continue only if you trust these files. Your trust
+  decision will be saved.
+
+› 1. Trust and continue
+  2. Quit
+
+  enter continue · esc quit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
