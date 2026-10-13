@@ -2025,7 +2025,8 @@ validate_worktree_teardown_safety() {
       echo "REFUSED: cannot inspect worktree $WT for flagged tracked paths." >&2
       return 1
     fi
-    if printf '%s\n' "$flagged" | grep -qE '^([a-z]|S) '; then
+    # A here-string, not a pipe, so pipefail cannot turn an early match false.
+    if grep -qE '^([a-z]|S) ' <<< "$flagged"; then
       echo "REFUSED: worktree $WT has tracked paths flagged assume-unchanged or skip-worktree; needs a human look." >&2
       return 1
     fi

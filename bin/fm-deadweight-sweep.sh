@@ -129,7 +129,8 @@ case "${1:-}" in
     out=$("$0" 2>&1) || rc=$?
     [ "$rc" = 0 ] || out="swept: cleanup failed: ${out:-exit $rc}"
     out=${out//[$'\t\r\n']/ }
-    publish "$RESULT" "$out"
+    # Nothing to report (or another sweep held the lock): keep any unread result.
+    [ -z "$out" ] || publish "$RESULT" "$out"
     exit 0
     ;;
 esac

@@ -175,6 +175,29 @@ test_ignored_work_kept() {
   pass 'sweep preserves ignored operator files'
 }
 
+test_flagged_guard_under_pipefail() {
+  local home i out
+  home=$(make_home flag-pipefail)
+  # Enough tracked paths after the flagged one to overflow a pipe buffer.
+  mkdir "$home/seed/many"
+  for i in $(seq 1 20000); do : > "$home/seed/many/f$i"; done
+  printf 'early\n' > "$home/seed/a-flagged"
+  git -C "$home/seed" add -A
+  git -C "$home/seed" commit -qm many
+  git -C "$home/seed" push -q origin main
+  git -C "$home/projects/project" pull -q
+  add_worker "$home"
+  [ "$(git -C "$home/worker" ls-files | wc -l | tr -d ' ')" -gt 20000 ] || fail 'large index fixture'
+  echo hidden-edit >> "$home/worker/a-flagged"
+  git -C "$home/worker" update-index --assume-unchanged a-flagged
+  out=$(env PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FIXTURE="$home" \
+    FM_TEARDOWN_GUARD_DONE=1 bash -o pipefail "$ROOT/bin/fm-teardown.sh" task --only-if-stopped 2>&1) || true
+  assert_contains "$out" 'flagged assume-unchanged or skip-worktree' 'flag guard refuses under pipefail'
+  assert_present "$home/state/task.meta" 'pipefail flag record kept'
+  assert_grep hidden-edit "$home/worker/a-flagged" 'pipefail flag edit kept'
+  pass 'flag guard refuses under pipefail with a large index'
+}
+
 test_flagged_tracked_edits_kept() {
   local home out flag
   for flag in assume-unchanged skip-worktree; do
@@ -599,6 +622,29 @@ wait_result() {
   assert_present "$1/state/.deadweight-sweep-result" 'detached sweep completed'
 }
 
+# A no-op sweep publishes nothing, so completion is its released lock after the prune.
+wait_sweep_finished() {
+  local i=0
+  while { [ ! -s "$1/treehouse-calls" ] || [ -e "$1/state/.deadweight-sweep.lock" ]; } && [ "$i" -lt 600 ]; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  assert_present "$1/treehouse-calls" 'detached sweep ran its prune'
+  assert_absent "$1/state/.deadweight-sweep.lock" 'detached sweep finished'
+}
+
+test_empty_scheduled_run_keeps_unread_report() {
+  local home
+  home=$(make_home keep-unread)
+  printf 'swept: 1 workers, 1 copies, 0 stale registrations\n' > "$home/state/.deadweight-sweep-result"
+  env PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FIXTURE="$home" \
+    FM_TEARDOWN_GUARD_DONE=1 "$SWEEP" scheduled
+  assert_equals 'swept: 1 workers, 1 copies, 0 stale registrations' \
+    "$(cat "$home/state/.deadweight-sweep-result")" 'unread report kept after an empty scheduled run'
+  assert_equals 'swept: 1 workers, 1 copies, 0 stale registrations' "$(check "$home")" 'unread report still delivered'
+  pass 'an empty scheduled sweep never overwrites an unread report'
+}
+
 test_default_daily_check_and_watcher() {
   local home out launched rc=0
   home=$(make_home automatic); add_worker "$home"
@@ -684,7 +730,8 @@ test_detached_sweep_survives_watcher_timeout() {
     "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 3 > "$home/checkpoint-out" 2>&1 || rc=$?
   assert_equals 124 "$rc" 'quiet watcher checkpoint times out'
   assert_absent "$home/state/.watch.lock/pid" 'timed-out watcher releases its lock'
-  wait_result "$home"
+  wait_sweep_finished "$home"
+  assert_absent "$home/state/.deadweight-sweep-result" 'empty detached sweep publishes nothing'
   assert_equals 1 "$(wc -l < "$home/treehouse-calls" | tr -d ' ')" 'detached safe prune completes once'
   assert_equals '' "$(check "$home")" 'empty maintenance result stays silent'
   pass 'detached sweep survives watcher timeout and leaves watcher lock clean'
@@ -694,6 +741,7 @@ test_clean_stopped_and_idempotence
 test_changes_kept
 test_ignored_work_kept
 test_flagged_tracked_edits_kept
+test_flagged_guard_under_pipefail
 test_initialized_submodule_kept
 test_generated_wiring_exact_and_edited
 test_late_work_kept
@@ -710,5 +758,6 @@ test_pipeline_and_captain_hold_kept
 
 test_default_daily_check_and_watcher
 test_due_check_runs_before_sweep_report
+test_empty_scheduled_run_keeps_unread_report
 test_unsafe_records
 test_detached_sweep_survives_watcher_timeout
