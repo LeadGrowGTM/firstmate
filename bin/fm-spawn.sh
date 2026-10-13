@@ -4782,8 +4782,28 @@ fi
     j_stop=$(json_escape "$turnend_touch$busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
     j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
     j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
+    # Claude's own statusLine (model, effort, context, plan windows, task) rides
+    # this firstmate-owned local settings file, only when the account the worker
+    # loads defines none, so the captain's own statusLine always wins and the
+    # launch line stays byte-identical. The command path must be JSON- and
+    # shell-inert; anything else installs no statusLine.
+    j_statusline=
+    if [ -n "$WORKER_ACCOUNT" ]; then
+      sl_settings="${WORKER_ACCOUNT_ROOT:-$HOME/.claude}/settings.json"
+    else
+      sl_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+    fi
+    sl_cmd="$SCRIPT_DIR/fm-statusbar.sh claude-line --task $ID --kind $KIND"
+    case "$sl_cmd" in
+    *[\'\"\\\$\`]* | *[[:cntrl:]]*) ;;
+    *)
+      if ! { [ -r "$sl_settings" ] && jq -e '.statusLine' "$sl_settings" >/dev/null 2>&1; }; then
+        j_statusline=",\"statusLine\":{\"type\":\"command\",\"command\":\"$sl_cmd\"}"
+      fi
+      ;;
+    esac
     cat >"$WT/.claude/settings.local.json" <<EOF
-{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":".*","hooks":[{"type":"command","command":"$j_pretool"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}}
+{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"$j_submit"}]}],"PreToolUse":[{"matcher":".*","hooks":[{"type":"command","command":"$j_pretool"}]}],"Stop":[{"hooks":[{"type":"command","command":"$j_stop"}]}],"StopFailure":[{"hooks":[{"type":"command","command":"$j_stopfail"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$j_sessionend"}]}]}$j_statusline}
 EOF
     exclude_path '.claude/settings.local.json'
     ;;
@@ -5264,6 +5284,12 @@ if [ "$RELAUNCH" -eq 0 ]; then
     exit 1
   fi
   SPAWN_META_TMP=
+fi
+# Operator status surfaces: record the task's facts on its tmux window and make
+# sure the window's session group shows the detail line. Best effort only.
+if [ "$BACKEND" = tmux ]; then
+  "$SCRIPT_DIR/fm-statusbar.sh" label "${WT_TARGET:-$T}" "$ID" "$KIND" "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$WT" >/dev/null 2>&1 || true
+  "$SCRIPT_DIR/fm-statusbar.sh" apply "$SES" >/dev/null 2>&1 || true
 fi
 
 # Fuse the backlog In-flight transition into the publication that just created

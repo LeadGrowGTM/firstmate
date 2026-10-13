@@ -249,6 +249,14 @@ test_claude_hooks_semantic_lifecycle() {
     jq -e ".hooks[\"$ev\"]" "$settings" >/dev/null || fail "claude hook settings lack $ev"
   done
 
+  # The status line is installed only when the account's own settings define none.
+  if jq -e '.statusLine' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" >/dev/null 2>&1; then
+    jq -e 'has("statusLine") | not' "$settings" >/dev/null || fail "a captain-defined statusLine must not be overridden"
+  else
+    jq -e '.statusLine.command | endswith("fm-statusbar.sh claude-line --task busy-cl-1 --kind ship")' "$settings" >/dev/null \
+      || fail "claude spawn did not install the task status line"
+  fi
+
   out=$(classify claude "$id" "$state")
   [ "$out" = "busy fm-spawn" ] || fail "seed after spawn must be 'busy fm-spawn', got '$out'"
 
