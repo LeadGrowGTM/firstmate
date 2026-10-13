@@ -320,8 +320,8 @@ SH
     FM_ORCA_CLI="$TMP_ROOT/orca-ide" FM_FAKE_ORCA_LOG="$TMP_ROOT/orca.log" FM_WSL_INTEROP_DIR="$TMP_ROOT/no-wsl" \
     "$ROOT/bin/fm-teardown.sh" design 2>&1) \
     || fail "teardown failed for the empty secondmate home: $teardown_out"
-  assert_grep 'terminal close --terminal term-5 --tab --json' "$TMP_ROOT/orca.log" \
-    "teardown did not close the secondmate's recorded Orca view tab"
+  assert_no_grep 'terminal close' "$TMP_ROOT/orca.log" \
+    "teardown must leave the recorded Orca view tab open"
   printf '%s\n' "$teardown_out" | grep -F 'Backlog:' >/dev/null \
     && fail "secondmate teardown emitted a main-backlog completion reminder"
   assert_absent "$SUB" "teardown did not remove the retired secondmate home"

@@ -1799,6 +1799,7 @@ printf '%s\n' "$*" >> "$FM_FAKE_ORCA_VIEW_LOG"
 printf '{"ok":true}\n'
 SH
   chmod +x "$fakebin/orca-ide"
+  : > "$orca_log"
 
   PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" \
     FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/procevent-force-fake/pane.txt" \
@@ -1806,8 +1807,8 @@ SH
     FM_ORCA_CLI="$fakebin/orca-ide" FM_WSL_INTEROP_DIR="$TMP_ROOT/no-wsl" \
     "$ROOT/bin/fm-teardown.sh" domain --force >/dev/null 2>/dev/null \
     || fail "force teardown failed after recursively sweeping process events"
-  grep -Fx 'terminal close --terminal term-nested --tab --json' "$orca_log" >/dev/null \
-    || fail "force teardown removed a nested secondmate record without closing its Orca tab"
+  ! grep -F 'terminal close' "$orca_log" >/dev/null \
+    || fail "force teardown closed a nested secondmate Orca view tab"
   grep -Fx "$subhome_abs" "$sweep_log" >/dev/null || fail "force teardown did not sweep the parent secondmate home"
   grep -Fx "$childhome_abs" "$sweep_log" >/dev/null || fail "force teardown did not sweep the nested secondmate home"
   [ ! -d "$subhome" ] || fail "force teardown retained the swept parent home"

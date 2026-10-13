@@ -1315,12 +1315,9 @@ spawn_remote_secondmate() {
 
 BACKEND=
 ORCA_ABORT_CLEANUP=0
-ORCA_VIEW_ABORT_CLOSE=0
 ORCA_VIEW_IDENTITY_SENT=0
 ORCA_VIEW_HANDLE=
 ORCA_VIEW_SESSION=
-ORCA_VIEW_OWNED=
-ORCA_VIEW_CREATED=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -1469,32 +1466,19 @@ spawn_abort_cleanup() {
       fi
     fi
   fi
-  if [ "$ORCA_VIEW_ABORT_CLOSE" = 1 ]; then
-    if [ "$ORCA_VIEW_IDENTITY_SENT" = 1 ]; then
-      ORCA_VIEW_ABORT_CLOSE=0
-      orca_view_close_prior
-    elif [ "$RELAUNCH" -eq 1 ] &&
-      [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
-      orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
-      if ! { awk -F= '$1 !~ /^orca_view_(handle|session|owned)$/' "$STATE/$ID.meta" >"$orca_restore" &&
-        { [ -z "$ORCA_VIEW_PRIOR_HANDLE" ] ||
-          printf 'orca_view_handle=%s\norca_view_session=%s\norca_view_owned=%s\n' \
-            "$ORCA_VIEW_PRIOR_HANDLE" "$ORCA_VIEW_PRIOR_SESSION" "$ORCA_VIEW_PRIOR_OWNED" >>"$orca_restore"; } &&
-        fm_backlog_atomic_transition publish "$orca_restore" "$STATE/$ID.meta" "task record" "$STATE"; }; then
-        rm -f "$orca_restore"
-        echo "warning: could not restore the prior Orca tab record after aborted relaunch of $ID" >&2
-        ORCA_VIEW_ABORT_CLOSE=0
-      fi
-    fi
-    # The view tab this aborted spawn opened. Its view session goes with it
-    # only when this spawn created it; otherwise an earlier tab still uses it.
-    if [ "$ORCA_VIEW_ABORT_CLOSE" = 1 ]; then
-      ORCA_VIEW_ABORT_CLOSE=0
-      if [ "$ORCA_VIEW_CREATED" = 1 ]; then
-        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" --target "$T" || true
-      else
-        "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
-      fi
+  # Before identity delivery, a failed relaunch still uses the previous tab's
+  # identity. Keep its record aligned with that pane; leave both tabs open.
+  if [ -n "$ORCA_VIEW_HANDLE" ] && [ "$ORCA_VIEW_IDENTITY_SENT" != 1 ] &&
+    [ "$RELAUNCH" -eq 1 ] &&
+    [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
+    orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
+    if ! { awk -F= '$1 !~ /^orca_view_(handle|session|owned)$/' "$STATE/$ID.meta" >"$orca_restore" &&
+      { [ -z "$ORCA_VIEW_PRIOR_HANDLE" ] ||
+        printf 'orca_view_handle=%s\norca_view_session=%s\n' \
+          "$ORCA_VIEW_PRIOR_HANDLE" "$ORCA_VIEW_PRIOR_SESSION" >>"$orca_restore"; } &&
+      fm_backlog_atomic_transition publish "$orca_restore" "$STATE/$ID.meta" "task record" "$STATE"; }; then
+      rm -f "$orca_restore"
+      echo "warning: could not restore the prior Orca tab record after aborted relaunch of $ID" >&2
     fi
   fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
@@ -5424,16 +5408,14 @@ fi
 # working and done state. Every Orca failure steps aside with a one-line note
 # and the spawn goes on without a tab. A relaunch, or a respawn over an
 # existing record, opens a fresh tab, records it in place of the previous one,
-# and closes the previous tab once the spawn has committed; when no fresh tab
-# opens, the previous one stays recorded.
+# and leaves the previous tab for the operator; when no fresh tab opens, the
+# previous one stays recorded. Firstmate never closes Orca view tabs.
 ORCA_VIEW_PRIOR_HANDLE=
 ORCA_VIEW_PRIOR_SESSION=
-ORCA_VIEW_PRIOR_OWNED=
 ORCA_VIEW_ENABLED=off
 if [ "$KIND" = secondmate ] && [ "$BACKEND" = tmux ]; then
   ORCA_VIEW_PRIOR_HANDLE=$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)
   ORCA_VIEW_PRIOR_SESSION=$(fm_meta_get "$STATE/$ID.meta" orca_view_session)
-  ORCA_VIEW_PRIOR_OWNED=$(fm_meta_get "$STATE/$ID.meta" orca_view_owned)
   ORCA_VIEW_ENABLED=$("$SCRIPT_DIR/fm-orca-view.sh" enabled "$CONFIG") || ORCA_VIEW_ENABLED=off
 fi
 ORCA_VIEW_IDENTITY_FILE=
@@ -5445,7 +5427,6 @@ orca_view_name_usable() {
     [ "$owner_meta" != "$STATE/$ID.meta" ] && [ -f "$owner_meta" ] || continue
     [ "$(fm_meta_get "$owner_meta" kind)" = secondmate ] || continue
     case "$(fm_meta_get "$owner_meta" backend)" in '' | tmux) ;; *) continue ;; esac
-    [ "$(fm_meta_get "$owner_meta" orca_view_owned)" = 1 ] || continue
     [ "$(fm_meta_get "$owner_meta" orca_view_session)" != "$1" ] || return 1
   done
   if ! tmux has-session -t "=$1" 2>/dev/null; then
@@ -5459,16 +5440,6 @@ orca_view_name_usable() {
   else
     [ "$1" = "orca-$ID" ]
   fi
-}
-orca_view_close_prior() {
-  local -a close_args=()
-  [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] &&
-    [ "$ORCA_VIEW_PRIOR_HANDLE" != "$ORCA_VIEW_HANDLE" ] || return 0
-  if [ -n "$ORCA_VIEW_PRIOR_SESSION" ] &&
-    [ "$ORCA_VIEW_PRIOR_SESSION" != "$ORCA_VIEW_SESSION" ]; then
-    close_args=(--view-session "$ORCA_VIEW_PRIOR_SESSION" --target "$T")
-  fi
-  "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_PRIOR_HANDLE" "${close_args[@]}" || true
 }
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
   ORCA_VIEW_NAME="orca-$ID"
@@ -5495,25 +5466,9 @@ if [ "$ORCA_VIEW_ENABLED" = on ]; then
       --title "$ID" --identity-file "$ORCA_VIEW_IDENTITY_FILE"); then
       ORCA_VIEW_HANDLE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^handle=//p')
       ORCA_VIEW_SESSION=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session=//p')
-      ORCA_VIEW_OWNED=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session_owned=//p')
-      ORCA_VIEW_CREATED=$ORCA_VIEW_OWNED
-      ORCA_VIEW_ABORT_CLOSE=1
-      # The previous tab's view session, reattached, stays this feature's to remove.
-      if [ "$ORCA_VIEW_OWNED" = 0 ] && [ "$ORCA_VIEW_PRIOR_OWNED" = 1 ] &&
-        [ "$ORCA_VIEW_SESSION" = "$ORCA_VIEW_PRIOR_SESSION" ]; then
-        ORCA_VIEW_OWNED=1
-      fi
       if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE"); then
-        if [ "$ORCA_VIEW_CREATED" = 1 ]; then
-          "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" --view-session "$ORCA_VIEW_SESSION" --target "$T" || true
-        else
-          "$SCRIPT_DIR/fm-orca-view.sh" close --handle "$ORCA_VIEW_HANDLE" || true
-        fi
         ORCA_VIEW_HANDLE=
         ORCA_VIEW_SESSION=
-        ORCA_VIEW_OWNED=
-        ORCA_VIEW_CREATED=0
-        ORCA_VIEW_ABORT_CLOSE=0
         ORCA_VIEW_IDENTITY_FILE=
       fi
     else
@@ -5598,11 +5553,9 @@ preserve_relaunch_meta() {
   if [ -n "$ORCA_VIEW_HANDLE" ]; then
     echo "orca_view_handle=$ORCA_VIEW_HANDLE"
     echo "orca_view_session=$ORCA_VIEW_SESSION"
-    echo "orca_view_owned=$ORCA_VIEW_OWNED"
   elif [ -n "$ORCA_VIEW_PRIOR_HANDLE" ]; then
     echo "orca_view_handle=$ORCA_VIEW_PRIOR_HANDLE"
     echo "orca_view_session=$ORCA_VIEW_PRIOR_SESSION"
-    echo "orca_view_owned=$ORCA_VIEW_PRIOR_OWNED"
   fi
   if [ "$RELAUNCH" -eq 1 ]; then
     preserve_relaunch_meta
@@ -6200,8 +6153,6 @@ if [ -n "$SPAWN_DEFERRED_SIGNAL" ]; then
 fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
-ORCA_VIEW_ABORT_CLOSE=0
-[ -z "$ORCA_VIEW_HANDLE" ] || orca_view_close_prior
 
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"
