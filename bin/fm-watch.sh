@@ -2799,7 +2799,6 @@ while :; do
       run_check_capture "$SCRIPT_DIR/fm-deadweight-sweep.sh" check || exit 1
     if [ -n "$FM_CHECK_RESULT" ]; then
       reason="check: deadweight-sweep: $FM_CHECK_RESULT"
-      fm_wake_append check deadweight-sweep "$reason" || exit 1
       touch "$STATE/.last-check"
       wake "$reason"
     fi

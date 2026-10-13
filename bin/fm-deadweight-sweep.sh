@@ -80,13 +80,25 @@ publish() {  # <destination> <bytes>
 }
 RESULT="$STATE/.deadweight-sweep-result"
 LAUNCHED="$STATE/.deadweight-sweep-launched"
+queue_report() {
+  local report=$1 consumed=${2:-0} status=0
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK"
+  fm_wake_append_locked check deadweight-sweep "check: deadweight-sweep: $report" || status=$?
+  if [ "$status" -eq 0 ] && [ "$consumed" = 1 ]; then
+    rm -f -- "$RESULT" || status=$?
+  fi
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+  [ "$status" -eq 0 ] || return "$status"
+  printf '%s\n' "$report"
+}
 case "${1:-}" in
   check)
     config="$FM_HOME/config/deadweight-sweep"
     if [ -e "$config" ] || [ -L "$config" ]; then
       [ -f "$config" ] && [ ! -L "$config" ] && [ -r "$config" ] \
         && [ "$(cat "$config")" = off ] || {
-        echo 'swept: automatic cleanup refused: config/deadweight-sweep must contain off' ; exit 1
+        queue_report 'swept: automatic cleanup refused: config/deadweight-sweep must contain off'
+        exit 1
       }
       exit 0
     fi
@@ -96,12 +108,14 @@ case "${1:-}" in
     device=$(fm_pr_file_device "$STATE")
     for record in "$RESULT" "$LAUNCHED"; do
       fm_pr_regular_destination_on_device_or_absent "$record" "$device" || {
-        echo 'swept: automatic cleanup refused: unsafe schedule record'; exit 1
+        queue_report 'swept: automatic cleanup refused: unsafe schedule record'
+        exit 1
       }
     done
     if [ -f "$RESULT" ]; then
-      cat "$RESULT"
-      rm -f -- "$RESULT"
+      report=$(cat "$RESULT")
+      [ -z "$report" ] || queue_report "$report" 1
+      [ -n "$report" ] || rm -f -- "$RESULT"
     fi
     launched=$(cat "$LAUNCHED" 2>/dev/null || true)
     now=$(date +%s)
@@ -190,7 +204,20 @@ for meta in "$STATE"/*.meta; do
     > "$TMP/teardown" 2>&1 || rc=$?
   case "$rc" in
     0) workers=$((workers + 1)) ;;
-    3) ;;
+    3)
+      if fm_backend_validate_task_endpoint "$meta" "$id" >/dev/null 2>&1; then
+        endpoint_state=$(fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET")
+        case "$endpoint_state" in
+          alive|unverified)
+            crew_state=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+              FM_CREW_STATE_NO_FORGE=1 "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null || true)
+            case "$crew_state" in
+              'state: idle '*|'state: done '*) note "idle-left $id" ;;
+            esac
+            ;;
+        esac
+      fi
+      ;;
     *) note "kept $id: $(reason "$TMP/teardown")" ;;
   esac
 done

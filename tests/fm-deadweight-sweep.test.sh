@@ -118,7 +118,16 @@ test_changes_kept() {
   assert_contains "$out" 'work not on any remote and not landed' 'unpushed refusal reported'
   assert_present "$home/state/task.meta" 'unpushed record kept'
   assert_grep unlanded "$home/worker/file" 'unpushed content kept'
-  pass 'sweep keeps dirty and unpushed workers and reports refusals'
+  home=$(make_home pushed); add_worker "$home"
+  echo pushed-unlanded >> "$home/worker/file"
+  git -C "$home/worker" add file
+  git -C "$home/worker" commit -qm pushed-unlanded
+  git -C "$home/worker" push -qu origin fm/task
+  out=$(sweep "$home")
+  assert_contains "$out" 'commits beyond its base not landed' 'pushed unlanded refusal reported'
+  assert_present "$home/state/task.meta" 'pushed unlanded record kept'
+  assert_grep pushed-unlanded "$home/worker/file" 'pushed unlanded content kept'
+  pass 'sweep keeps dirty, unpushed, and pushed unlanded work'
 }
 
 test_decisions_secondmates_and_unknown_kept() {
@@ -165,6 +174,13 @@ test_scout_gates_and_work_kept() {
     assert_contains "$out" 'uncommitted changes' 'completed scout with edits refused'
     assert_present "$home/state/task.meta" 'completed scout with edits kept'
     assert_grep changed "$home/worker/file" 'scout edits preserved'
+    git -C "$home/worker" add file
+    git -C "$home/worker" commit -qm scout-unlanded
+    git -C "$home/worker" push -qu origin fm/task
+    out=$(sweep "$home")
+    assert_contains "$out" 'commits beyond its base not landed' 'pushed scout work refused'
+    assert_present "$home/state/task.meta" 'pushed scout record kept'
+    assert_grep changed "$home/worker/file" 'pushed scout content kept'
   else
     printf 'skip: completed scout edit case requires tasks-axi\n'
   fi
@@ -272,8 +288,16 @@ test_default_daily_check_and_watcher() {
   wait_result "$home"
   assert_absent "$home/state/task.meta" 'default automatic sweep removes stopped worker'
   launched=$(cat "$home/state/.deadweight-sweep-launched")
+  mkdir "$home/state/unwritable-queue"
+  rc=0
+  out=$(FM_WAKE_QUEUE="$home/state/unwritable-queue" check "$home") || rc=$?
+  [ "$rc" -ne 0 ] || fail 'failed wake append must fail the check'
+  assert_present "$home/state/.deadweight-sweep-result" 'failed wake append keeps the result'
+  rmdir "$home/state/unwritable-queue"
   out=$(check "$home")
   assert_equals 'swept: 1 workers, 1 copies, 0 stale registrations' "$out" 'next poll reports result'
+  assert_absent "$home/state/.deadweight-sweep-result" 'queued result consumed'
+  assert_grep deadweight-sweep "$home/state/.wake-queue" 'result queued before consumption'
   out=$(check "$home")
   assert_equals '' "$out" 'result reported once'
   assert_equals "$launched" "$(cat "$home/state/.deadweight-sweep-launched")" 'same-day poll does not start again'
@@ -284,9 +308,14 @@ test_default_daily_check_and_watcher() {
   out=$(check "$home")
   wait_result "$home"
   assert_absent "$home/state/task.meta" 'next daily sweep removes new deadweight'
-  out=$(env PATH="$home/fakebin:$PATH" FM_HOME="$home" FIXTURE="$home" \
+  home=$(make_home watcher); add_worker "$home"
+  check "$home" >/dev/null
+  wait_result "$home"
+  rc=0
+  env PATH="$home/fakebin:$PATH" FM_HOME="$home" FIXTURE="$home" \
     FM_TEARDOWN_GUARD_DONE=1 FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=1 \
-    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 10 2>&1) || rc=$?
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 10 > "$home/watcher-out" 2> "$home/watcher-err" || rc=$?
+  out=$(cat "$home/watcher-out")
   assert_equals 0 "$rc" 'default watcher returns maintenance wake'
   assert_contains "$out" 'check: deadweight-sweep: swept: 1 workers' 'watcher reports without check shim'
   assert_grep deadweight-sweep "$home/state/.wake-queue" 'maintenance wake queued durably'

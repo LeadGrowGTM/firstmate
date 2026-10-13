@@ -1644,7 +1644,7 @@ pr_is_merged() {
 # "added". Returns non-zero when inconclusive (no default ref, or a merge conflict),
 # so the caller refuses rather than guesses.
 content_in_default() {
-  local name=${BASE_BRANCH:-} ref default_tree merged_tree
+  local name=${1:-${BASE_BRANCH:-}} ref default_tree merged_tree
   [ -n "$name" ] || name=$(default_branch) || return 1
   if git -C "$WT" remote get-url origin >/dev/null 2>&1; then
     git -C "$WT" fetch --quiet origin "+refs/heads/$name:refs/remotes/origin/$name" >/dev/null 2>&1 || return 1
@@ -1953,7 +1953,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -2014,6 +2014,24 @@ validate_worktree_teardown_safety() {
       echo "REFUSED: worktree $WT has work not on any remote and not landed." >&2
       printf 'unpushed commits:\n%s\n' "$unpushed" >&2
       echo "Push the branch, land its PR, or get the captain's explicit OK to discard, then --force." >&2
+      return 1
+    fi
+  fi
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    DEFAULT=$(default_branch) || {
+      echo "REFUSED: cannot determine default branch for $PROJ." >&2; return 1
+    }
+    base=${BASE_BRANCH:-$DEFAULT}
+    base_ref="refs/heads/$base"
+    if git -C "$WT" remote get-url origin >/dev/null 2>&1; then
+      git -C "$WT" fetch --quiet origin "+refs/heads/$base:refs/remotes/origin/$base" >/dev/null 2>&1 || {
+        echo "REFUSED: cannot verify base branch $base for $WT." >&2; return 1
+      }
+      base_ref="refs/remotes/origin/$base"
+    fi
+    if ! git -C "$WT" merge-base --is-ancestor HEAD "$base_ref" 2>/dev/null \
+      && ! content_in_default "$DEFAULT"; then
+      echo "REFUSED: worktree $WT has commits beyond its base not landed on $DEFAULT." >&2
       return 1
     fi
   fi

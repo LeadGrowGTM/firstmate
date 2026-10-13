@@ -1149,6 +1149,7 @@ Set `config/deadweight-sweep` to `off` to disable automatic cleanup in that home
 The sweep runs while the normal supervision cycle is active, starts at most once per day, and reports its result on the next slow-check poll.
 [`bin/fm-deadweight-sweep.sh`](../bin/fm-deadweight-sweep.sh) owns the schedule, state records, output, and safety gates.
 It uses teardown's landed-work and completion checks, preserves captain holds and secondmates, and delegates pool removal to treehouse's safe prune.
+Automatic teardown requires a proven dead or missing endpoint; alive idle workers and backends without reliable death proof remain in place and appear as `idle-left` in the one-line report when their state is idle or done.
 
 ## Worktree pool guard
 
