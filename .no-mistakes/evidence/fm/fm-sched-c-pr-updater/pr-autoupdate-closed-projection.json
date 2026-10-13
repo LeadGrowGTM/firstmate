@@ -1,0 +1,43 @@
+{
+  "known": 1,
+  "checked": 1,
+  "counts": {
+    "captain": 0,
+    "fleet": 0,
+    "maintainer": 0,
+    "nobody": 1
+  },
+  "unmeasured": 0,
+  "complete": true,
+  "proven_clear": true,
+  "stale_verdicts": 0,
+  "missing_verdicts": 0,
+  "unreadable_records": 0,
+  "valid_until": 1791886560,
+  "captain": [],
+  "captain_omitted": 0,
+  "rows": [
+    {
+      "task": "task",
+      "url": "https://github.com/o/r/pull/1",
+      "kind": "pr",
+      "checked_at": "2026-10-13T10:00:00Z",
+      "checked": true,
+      "final": true,
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "verdict": null,
+      "reviews": [],
+      "distinct_checks": 1,
+      "missing_verdicts": 0,
+      "pending_checks": 0,
+      "failed_checks": 0,
+      "stale_verdicts": 0,
+      "signals": [],
+      "actor": "nobody",
+      "reason": "forge reports closed",
+      "tasks": [
+        "task"
+      ]
+    }
+  ]
+}

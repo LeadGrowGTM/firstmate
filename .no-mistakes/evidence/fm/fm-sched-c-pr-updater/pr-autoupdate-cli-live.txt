@@ -1,0 +1,12 @@
+scenario: absent configuration
+exit=0 journal=absent
+scenario: disabled configuration
+exit=0 journal=absent
+scenario: disabled arm refused
+pr-autoupdate: incomplete: disabled configuration
+arm refused exit=1
+check shim=absent
+scenario: malformed grant refused
+pr-autoupdate: incomplete: invalid configuration
+check refused exit=1
+journal=absent
