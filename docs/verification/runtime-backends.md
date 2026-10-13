@@ -580,6 +580,26 @@ No live guard refreshes this, because the record only gains a `bridgeSessionId` 
 - The exact name the Claude app lists a secondmate's session under was not confirmed.
 - The link reported by a launch has not been compared against a live session since the read was added.
 
+## Claude claude.ai publishing tools
+
+Verified 2026-10-13 on Claude Code 2.1.296.
+`bin/fm-spawn.sh` adds `--disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs` to standard and direct or leading-assignment raw Claude launches, directly before `--settings`.
+Env-wrapped and compound raw Claude commands are outside this launch-time denial.
+The installed binary defines the Artifact tool family as exactly `Artifact`, `ArtifactComments`, `ArtifactData`, and `ArtifactCheck`; `ArtifactCheck` was gated off for the signed-in account (`verify=false preview=false` in the debug log) but is denied with its family.
+A headless `claude -p` session lists none of the four, so only an interactive launch can show the effect.
+
+Two interactive launches ran in a private tmux server from a directory outside any Firstmate home, signed in to a real account, using the default permission mode and asking the model to list matching tools without calling any:
+
+```sh
+claude --settings '{"feedbackDrafts":"off"}' --model haiku '<prompt>'
+claude --disallowedTools Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs --settings '{"feedbackDrafts":"off"}' --model haiku '<prompt>'
+```
+
+Without the flag the session listed `Artifact`, `ArtifactComments`, `ArtifactData`, and eight `mcp__claude_ai_Claude_Docs__*` tools.
+With the flag it listed `NONE`, the positional prompt still arrived as the first message, and a follow-up `ToolSearch` for `select:Artifact,ArtifactComments,ArtifactData,mcp__claude_ai_Claude_Docs__create` returned `No matching deferred tools found`, and the debug log recorded that select as failed with none of the four names found.
+
+`tests/fm-spawn-dispatch-profile.test.sh` and `tests/fm-secondmate-harness.test.sh` pin the flag in standard and direct or leading-assignment raw ship, scout, and secondmate launch shapes against a fake claude; only a live launch like the one above shows the tools are actually removed, so repeat it after a Claude Code upgrade that may rename them.
+
 ## Pi seeded-secondmate project trust
 
 [`fm-spawn.sh --help`](../../bin/fm-spawn.sh) owns the seeded-secondmate project-trust approval contract and compatibility fallback.

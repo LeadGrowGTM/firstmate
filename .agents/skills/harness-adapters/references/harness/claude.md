@@ -73,6 +73,13 @@ Styled capture stays internal to the boolean detector; `fm-peek` and model-facin
 The spawn disables Claude's `/bug` and `/feedback` model-drafted feedback flow for every Claude worker and secondmate, preventing a fleet-launched agent from queuing or submitting a bug report on the captain's behalf.
 The controls are scoped to the launched process and never modify the captain's global Claude settings; `launch_template()` in `../../../../../bin/fm-spawn.sh` owns their exact mechanics and defense-in-depth rationale.
 
+## claude.ai publishing tools
+
+The spawn removes the claude.ai Artifact tool family and cloud-published claude.ai Docs from standard and direct or leading-assignment raw Claude launches for workers and secondmates, so their visual, report, or review pages use `lavish-axi` or a local HTML page as `AGENTS.md` section 1 requires.
+Env-wrapped and compound raw Claude commands are outside this launch-time denial.
+Plain report files and chat text remain available.
+The control is scoped to the launched process and never modifies the captain's own Claude settings or primary session; `bin/fm-spawn.sh` owns the exact tool names and placement, and [`docs/verification/runtime-backends.md`](../../../../../docs/verification/runtime-backends.md#claude-claudeai-publishing-tools) records the live proof.
+
 ## Task control channel
 
 A Claude task worker's launch brief and Firstmate steering-inbox messages arrive as file-shaped content that is otherwise indistinguishable from indirect prompt injection.
