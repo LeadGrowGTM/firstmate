@@ -56,6 +56,7 @@ def projected($input; $saved; $now; $max_age):
     | ($record.error == null and ($o.state | IN("merged","closed"))) as $final
     | (($final or ($checked != null and ($now - $checked) >= 0 and ($now - $checked) <= $max_age))
        and (if $record.kind == "pr" then $observed_head != null
+            and ($recorded_head == null or $observed_head == $recorded_head)
             else $record.error == null and $record.observation != null end)
        and ($k.url | startswith("https://github.com/"))) as $fresh
     | (($o.checks // []) | latest_checks) as $checks
@@ -98,7 +99,7 @@ def projected($input; $saved; $now; $max_age):
        elif $o.can_merge == true then {actor:"captain",reason:"checks green; merge approval needed"}
        else {actor:"maintainer",reason:"delivery awaits the maintainer"} end) as $action
     | $k + {kind:($record.kind // (if ($k.url | contains("/issues/")) then "issue" else "pr" end)),
-         checked_at:$record.checked_at,checked:$fresh,final:$final,head:($observed_head // $recorded_head // $o.head),verdict:$verdict,reviews:$reviews,
+         checked_at:$record.checked_at,checked:$fresh,final:$final,head:($recorded_head // $observed_head // $o.head),verdict:$verdict,reviews:$reviews,
          distinct_checks:($checks | length),missing_verdicts:(($no_verdict | length) + (($o.absent_checks // []) | length)),
          pending_checks:($pending | length),failed_checks:($failed | length),
          stale_verdicts:((if $stale then 1 else 0 end) + ([$reviews[] | select(.freshness == "STALE")] | length)),

@@ -31,9 +31,8 @@
 # guarded gh-axi API PUT. A timeout or error may have published: never repeat that
 # PUT blindly. A later GET plus compare must prove a changed head contains the
 # captured base. Confirmation stores checks bound to the new head, rereads the
-# head after checks, then updates pr_head under the metadata locks. Existing
-# contribution verdicts/checks retain their old head and expire through their
-# owner; this command never grants readiness, review, or merge authority.
+# head after checks, then updates pr_head under the metadata locks. This
+# command never grants readiness, review, or merge authority.
 # Ambiguous requests remain pending for inspection even across disarm/re-arm.
 # It never changes local Git refs, rebases, force-pushes, launches repair workers,
 # merges, or drives any endpoint lifecycle. Live forge-write proof is separately
@@ -201,7 +200,10 @@ PENDING=$(printf '%s' "$RECEIPT" | jq -r '.pending // false')
 # --jq; validate that exact untruncated scalar before decoding with jq.
 api() {
   local out encoded
-  out=$(bounded gh-axi api "$@" --jq '"fm_payload=" + (tojson | @base64)' --full 2> "$TMP/api-error") || return 1
+  if ! out=$(bounded gh-axi api "$@" --jq '"fm_payload=" + (tojson | @base64)' --full 2> "$TMP/api-error"); then
+    if grep -Eq '(^|[^[:digit:]])(HTTP|status:|status_code:) ?422([^[:digit:]]|$)' "$TMP/api-error"; then return 22; fi
+    return 1
+  fi
   encoded=$(printf '%s\n' "$out" | sed -n 's/^  body: fm_payload=\([A-Za-z0-9+/=]*\)$/\1/p')
   printf '%s\n' "$out" | tail -1 | grep -qx '  truncated: false' || return 1
   [ -n "$encoded" ] && [ "$(printf '%s\n' "$encoded" | wc -l | tr -d ' ')" = 1 ] || return 1
@@ -280,10 +282,15 @@ process_pr() {
     meta="$STATE/$id.meta"
     [ "$(meta_value "$meta" branch)" = "$(jq -r '.head.ref' "$TMP/core")" ] || { REASON='recorded branch does not match PR head'; return 0; }
     local_head=$(bounded git -C "$(meta_value "$meta" worktree)" rev-parse --verify HEAD 2>/dev/null) || { REASON='local head unavailable'; return 0; }
-    if [ "$(printf '%s' "$RECEIPT" | jq -r '.local_heads // {} | length')" -gt 0 ]; then
+    if [ "$PENDING" = true ]; then
       [ "$local_head" = "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] || { REASON='local head changed since refresh'; return 0; }
     else
-      [ "$local_head" = "$HEAD" ] && [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] || { REASON='recorded ready head changed'; return 0; }
+      [ "$(meta_value "$meta" pr_head)" = "$HEAD" ] || { REASON='recorded ready head changed'; return 0; }
+      if [ "$local_head" != "$HEAD" ]; then
+        [ "$(printf '%s' "$RECEIPT" | jq -r '.result_head // ""')" = "$HEAD" ] \
+          && [ "$local_head" = "$(printf '%s' "$RECEIPT" | jq -r --arg id "$id" '.local_heads[$id] // ""')" ] \
+          || { REASON='local head changed since refresh'; return 0; }
+      fi
     fi
   done
   if [ "$PENDING" != true ]; then
@@ -315,6 +322,9 @@ process_pr() {
     expected=$HEAD
     core_read || return 0
     [ "$HEAD" = "$expected" ] || { REASON='head changed while reading checks'; return 0; }
+    compare "$BASE" "$HEAD" || return 0
+    local closing_behind
+    closing_behind=$(jq '.behind_by' "$TMP/compare")
     for id in $OWNERS; do
       meta="$STATE/$id.meta"
       awk '!/^pr_head=/' "$meta" > "$TMP/meta"
@@ -323,7 +333,11 @@ process_pr() {
     done
     RECEIPT=$(printf '%s' "$RECEIPT" | jq -c --slurpfile checks "$TMP/checks" --arg head "$HEAD" \
       '. + {result_head:$head,checks:{head:$head,check_runs:$checks[0].check_runs},validation:"unconfirmed; no merge authority"}')
-    RESULT=updated; REASON='captured base integrated; new-head validation required'; PENDING=false; return 0
+    PENDING=false
+    if [ "$closing_behind" -gt 0 ]; then
+      RESULT=incomplete; REASON='captured base integrated but current base advanced'; return 0
+    fi
+    RESULT=updated; REASON='captured base integrated; new-head validation required'; return 0
   fi
   compare "$BASE" "$HEAD" || return 0
   [ "$(jq '.behind_by' "$TMP/compare")" -gt 0 ] || { RESULT=current; REASON='base reachable from head'; return 0; }
@@ -348,8 +362,12 @@ process_pr() {
   PENDING=true; RESULT=pending; REASON='request prepared; awaiting confirmed head'
   record_result # Durable before the outward-facing side effect.
   jq -n --arg head "$expected" '{expected_head_sha:$head}' > "$TMP/request"
-  if api PUT "/repos/$PROJECT/pulls/$NUMBER/update-branch" --input "$TMP/request" > "$TMP/put"; then
+  local put_rc=0
+  api PUT "/repos/$PROJECT/pulls/$NUMBER/update-branch" --input "$TMP/request" > "$TMP/put" || put_rc=$?
+  if [ "$put_rc" -eq 0 ]; then
     REASON='update accepted; awaiting confirmed head'
+  elif [ "$put_rc" -eq 22 ]; then
+    PENDING=false; RESULT=incomplete; REASON='update refused with HTTP 422; re-observe PR before retry'
   else
     RESULT=incomplete; REASON='update request failed or uncertain; re-observe without repeated write'
   fi

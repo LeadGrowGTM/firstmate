@@ -51,7 +51,12 @@ case "$method:$path" in
       fi
     fi
     payload=$(cat "$FIXTURES/core.json") ;;
-  GET:/repos/o/r/compare/*) payload=$(cat "$FIXTURES/compare.json") ;;
+  GET:/repos/o/r/compare/*)
+    if [ -e "$FIXTURES/new-base" ] && [ "$path" = "/repos/o/r/compare/$(cat "$FIXTURES/new-base")...$(jq -r '.head.sha' "$FIXTURES/core.json")" ]; then
+      payload='{"behind_by":1,"status":"diverged"}'
+    else
+      payload=$(cat "$FIXTURES/compare.json")
+    fi ;;
   GET:/repos/o/r/commits/*/check-runs*) payload=$(cat "$FIXTURES/checks.json") ;;
   POST:/graphql)
     payload=$(jq --slurpfile core "$FIXTURES/core.json" '.data.repository.pullRequest.headRefOid=$core[0].head.sha' "$FIXTURES/queue.json") ;;
@@ -62,8 +67,9 @@ case "$method:$path" in
       if [ "$1" = --input ]; then shift; input=$1; fi
       shift
     done
-    [ -n "$input" ] && jq -e '.expected_head_sha == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$input" >/dev/null || exit 92
+    [ -n "$input" ] && jq -e --arg head "$(jq -r '.head.sha' "$FIXTURES/core.json")" '.expected_head_sha == $head' "$input" >/dev/null || exit 92
     jq -e '.receipts["https://github.com/o/r/pull/1"].pending == true' "$FM_HOME/state/pr-autoupdate.json" >/dev/null || exit 93
+    if [ -e "$FIXTURES/put-422" ]; then printf 'HTTP 422: expected head changed\n' >&2; exit 1; fi
     [ ! -e "$FIXTURES/put-fails" ] || exit 1
     payload='{"message":"Updating pull request branch.","url":"https://api.github.com/repos/o/r/pulls/1"}' ;;
   *) exit 94 ;;
@@ -75,7 +81,9 @@ chmod +x "$TOOLS/"*.sh "$TOOLS/gh-axi" "$TOOLS/no-mistakes"
 # All helper files are fixture copies; no backend tool is in PATH.
 HEAD_A=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 HEAD_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+HEAD_C=dddddddddddddddddddddddddddddddddddddddd
 BASE=cccccccccccccccccccccccccccccccccccccccc
+BASE_NEW=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 URL=https://github.com/o/r/pull/1
 world() {
   local home="$TMP_ROOT/$1"
@@ -141,6 +149,59 @@ assert_equals 1 "$(put_count "$home")" 'confirmation does not write'
 assert_equals '' "$(run "$home")" 'two-hour gate holds'
 run "$home" check 17200 >/dev/null
 assert_equals current "$(result "$home")" 'two-hour new sweep follows remote head without local ref mutation'
+
+home=$(world pushed_after_update)
+run "$home" >/dev/null
+set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+run "$home" >/dev/null
+printf '%s\n' "$HEAD_C" > "$home/fixtures/local-head"
+set_fixture "$home" core '.head.sha="dddddddddddddddddddddddddddddddddddddddd"'
+set_fixture "$home" compare '.behind_by=1 | .status="diverged"'
+sed -i "s/pr_head=$HEAD_B/pr_head=$HEAD_C/" "$home/state/task.meta"
+run "$home" check 17200 >/dev/null
+assert_equals 2 "$(put_count "$home")" 'later ready push can receive a new guarded update'
+assert_equals "$HEAD_C" "$(jq -r --arg url "$URL" '.receipts[$url].old_head' "$home/state/pr-autoupdate.json")" 'new request captures current head'
+
+home=$(world base_advanced)
+run "$home" >/dev/null
+set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | .base.sha="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"'
+set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+printf '%s\n' "$BASE_NEW" > "$home/fixtures/new-base"
+run "$home" >/dev/null
+assert_equals incomplete "$(result "$home")" 'advanced closing base leaves coverage incomplete'
+assert_equals false "$(jq '.coverage_complete' "$home/state/pr-autoupdate.json")" 'advanced base cannot complete sweep'
+assert_equals false "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'captured-base integration is settled'
+run "$home" >/dev/null
+assert_equals 2 "$(put_count "$home")" 'advanced base gets its own guarded update on next segment'
+
+home=$(world definitive_422)
+touch "$home/fixtures/put-422"
+run "$home" >/dev/null
+assert_equals false "$(jq -r --arg url "$URL" '.receipts[$url].pending' "$home/state/pr-autoupdate.json")" 'definitive 422 does not strand a pending receipt'
+set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+printf '%s\n' "$HEAD_B" > "$home/fixtures/local-head"
+sed -i "s/pr_head=$HEAD_A/pr_head=$HEAD_B/" "$home/state/task.meta"
+rm "$home/fixtures/put-422"
+run "$home" >/dev/null
+assert_equals 2 "$(put_count "$home")" 'fresh ready head is retried with its own expected SHA'
+assert_equals "$HEAD_B" "$(jq -r --arg url "$URL" '.receipts[$url].old_head' "$home/state/pr-autoupdate.json")" 'retry captures reobserved head'
+
+home=$(world stale_readiness)
+mkdir -p "$home/data/task"
+jq -n --arg url "$URL" --arg head "$HEAD_A" '{schema:"fm-contributions.v1",task:"task",records:[{url:$url,kind:"pr",checked_at:"2026-10-13T10:00:00Z",error:null,seen:[],pending:[],observation:{state:"open",head:$head,draft:false,mergeable:"mergeable",can_merge:true,review_decision:"APPROVED",checks:[{name:"ci",status:"completed",conclusion:"success"}],reviews:[],events:[]}}]}' > "$home/data/task/contributions.json"
+chmod 600 "$home/data/task/contributions.json"
+set_fixture "$home" input '.tasks[0].pr.head="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" | .tasks[0].merge_authority="away"'
+env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:01:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+jq -e '.rows[0].checked == true and .rows[0].reason == "checks green; merge is authorized by delivery posture"' "$home/fixtures/projected.json" >/dev/null || fail 'same-head contribution fixture was not ready'
+run "$home" >/dev/null
+set_fixture "$home" core '.head.sha="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+set_fixture "$home" compare '.behind_by=0 | .status="ahead"'
+run "$home" >/dev/null
+assert_contains "$(cat "$home/state/task.meta")" "pr_head=$HEAD_B" 'confirmation records the changed head'
+set_fixture "$home" input '.tasks[0].pr.head="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"'
+env FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_CONTRIBUTIONS_NOW=2026-10-13T10:01:00Z bash "$ROOT/bin/fm-contributions.sh" snapshot "$home/fixtures/input.json" --all > "$home/fixtures/projected.json"
+jq -e '.rows[0].checked == false and .rows[0].actor == "fleet" and .rows[0].head == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "$home/fixtures/projected.json" >/dev/null || fail 'old green observation remained ready after head changed'
 
 for scenario in current conflict unknown draft closed queued scope worker pipeline dirty race unavailable checks remote uninitialized; do
   home=$(world "$scenario")
