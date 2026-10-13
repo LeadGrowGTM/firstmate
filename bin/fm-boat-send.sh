@@ -68,6 +68,15 @@ fi
 LOCK_PATH="$FM_HOME/state/.boat-send.lock"
 fm_lock_acquire_wait "$LOCK_PATH" || die 'Boat send lock unavailable'
 SEND_LOCK="$LOCK_PATH"
+NO_ENV_RECEIPT="$FM_HOME/state/.boat-no-env"
+boat_instance() {
+  fm_run_timed 45 "$BOAT_BIN" --no-update exec "$BOX" --json -- cat /proc/sys/kernel/random/boot_id > "$TMP/instance" 2>/dev/null || return 1
+  jq -er 'select(.exitCode == 0) | .stdout | select(type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\n?$")) | rtrimstr("\n")' "$TMP/instance"
+}
+receipt_matches() {
+  [ -f "$NO_ENV_RECEIPT" ] && [ ! -L "$NO_ENV_RECEIPT" ] &&
+    [ "$(cat "$NO_ENV_RECEIPT")" = "$BOX $1" ]
+}
 REG="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
 if [ "$PREPARE" -eq 0 ]; then
   [ "$(secondmate_registry_field "$REG" "$ROUTE" host)" = boat-prove ] || die 'boat-eng must use boat-prove'
@@ -76,13 +85,14 @@ if [ "$PREPARE" -eq 0 ]; then
   [ "$REMOTE_HOME" != /home/user/fm-home ] || die 'the earlier proof mate home is not an overflow home'
 fi
 if [ -n "$TEARDOWN_ID" ]; then
-  receipt="$FM_HOME/state/.boat-no-env"
-  [ -f "$receipt" ] && [ ! -L "$receipt" ] && [ "$(cat "$receipt")" = "$BOX" ] || die 'approved box has no successful --no-env resume receipt'
+  instance=$(boat_instance) || die 'approved box instance is unavailable'
+  receipt_matches "$instance" || die 'approved box has no current --no-env resume receipt'
   remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh teardown "$TEARDOWN_ID") || die 'remote Boat teardown failed; reconcile before stopping'
   case "$remaining" in
     'boat-tasks-remaining: yes') printf 'teardown: %s; other Boat tasks remain\n' "$TEARDOWN_ID" ;;
     'boat-tasks-remaining: no')
       fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null || die 'last-task teardown completed but Boat stop failed'
+      rm -f -- "$NO_ENV_RECEIPT"
       printf 'teardown: %s; stopped %s\n' "$TEARDOWN_ID" "$BOX"
       ;;
     *) die 'remote Boat teardown result is invalid; reconcile before stopping' ;;
@@ -92,6 +102,7 @@ fi
 STOP_ON_REFUSAL=0
 stop_refuse() {
   if [ "$STOP_ON_REFUSAL" -eq 1 ]; then
+    rm -f -- "$NO_ENV_RECEIPT"
     fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null 2>&1 || true
     die "$1; dispatch refused (stop requested for $BOX)"
   fi
@@ -103,11 +114,13 @@ read_boat() {
 }
 read_boat info "$BOX"
 STATE=$(jq -r '.sandbox.state // empty' "$TMP/info")
-[ "$STATE" != stopped ] || STOP_ON_REFUSAL=1
+if [ "$STATE" = stopped ]; then
+  STOP_ON_REFUSAL=1
+  rm -f -- "$NO_ENV_RECEIPT"
+fi
 read_boat limits
 read_boat list --all
 read_boat usage "$BOX" --since "$(( $(date +%s) - 86400 ))"
-NO_ENV_RECEIPT="$FM_HOME/state/.boat-no-env"
 # Reserve the whole timer rather than trusting a worker's runtime estimate.
 TTL=$(jq -nr --slurpfile l "$TMP/limits" --slurpfile b "$TMP/list" \
   --slurpfile i "$TMP/info" --slurpfile u "$TMP/usage" --arg box "$BOX" '
@@ -131,15 +144,10 @@ TTL=$(jq -nr --slurpfile l "$TMP/limits" --slurpfile b "$TMP/list" \
   else $ttl end' 2> "$TMP/reason") || stop_refuse 'Boat safety or spend reservation failed'
 case "$STATE" in
   stopped)
-    "$BOAT_BIN" --no-update resume "$BOX" --no-env --ttl "$TTL" --json > "$TMP/resume" || stop_refuse 'Boat resume failed'
-    [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] && [ ! -L "$NO_ENV_RECEIPT" ] || stop_refuse 'unsafe no-env receipt path'
-    printf '%s\n' "$BOX" > "$NO_ENV_RECEIPT"
+    fm_run_timed 120 "$BOAT_BIN" --no-update resume "$BOX" --no-env --ttl "$TTL" --json > "$TMP/resume" || stop_refuse 'Boat resume failed'
     read_boat info "$BOX"
     ;;
-  ready|idle|running)
-    [ -f "$NO_ENV_RECEIPT" ] && [ ! -L "$NO_ENV_RECEIPT" ] &&
-      [ "$(cat "$NO_ENV_RECEIPT")" = "$BOX" ] || stop_refuse 'running box has no successful --no-env resume receipt'
-    ;;
+  ready|idle|running) ;;
   *) stop_refuse 'box is in an unsupported state' ;;
 esac
 jq -e --argjson ttl "$TTL" --argjson now "$(date +%s)" '
@@ -149,6 +157,13 @@ jq -e --argjson ttl "$TTL" --argjson now "$(date +%s)" '
   ((.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now > 0) and
   ((.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now <= $ttl)
 ' "$TMP/info" >/dev/null 2>&1 || stop_refuse 'box auto-stop timer is unavailable or exceeds the reserved budget'
+instance=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable'
+if [ "$STATE" = stopped ]; then
+  [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] && [ ! -L "$NO_ENV_RECEIPT" ] || stop_refuse 'unsafe no-env receipt path'
+  printf '%s %s\n' "$BOX" "$instance" > "$NO_ENV_RECEIPT"
+else
+  receipt_matches "$instance" || stop_refuse 'running box has no current --no-env resume receipt'
+fi
 FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" boat-prove || stop_refuse 'SSH refresh or hydration failed'
 if [ "$PREPARE" -eq 1 ]; then
   printf 'prepared: %s route=%s (no worker dispatched)\n' "$BOX" "$ROUTE"

@@ -18,6 +18,14 @@ for script in fm-boat-send.sh fm-boat-worker.sh fm-secondmate-registry-lib.sh \
   cp "$ROOT/bin/$script" "$BIN/$script"
 done
 REAL_DATE=$(command -v date)
+REAL_TIMEOUT=$(command -v timeout || command -v gtimeout || true)
+if [ -n "$REAL_TIMEOUT" ]; then
+  cat > "$FAKEBIN/timeout" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$3" >> "\$FIXTURES/timeout.calls"
+exec '$REAL_TIMEOUT' "\$@"
+SH
+fi
 cat > "$FAKEBIN/date" <<SH
 #!/usr/bin/env bash
 if [ "\$*" = +%s ]; then
@@ -36,13 +44,24 @@ case "$*" in
     file=info
     [ ! -e "$FIXTURES/resumed" ] || file=ready
     ;;
+  'exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id')
+    jq -n --arg id "$(cat "$FIXTURES/boot-id")" '{exitCode:0,stdout:($id+"\n")}'
+    exit 0
+    ;;
   "usage bx_ahnbu3qr --since $((BOAT_NOW - 86400)) --json") file=usage ;;
   'resume bx_ahnbu3qr --no-env --ttl 14400 --json'|'resume bx_ahnbu3qr --no-env --ttl 7200 --json')
     : > "$FIXTURES/resumed"
+    printf '%s\n' '22222222-2222-4222-8222-222222222222' > "$FIXTURES/boot-id"
     printf '{}\n'
     exit 0
     ;;
-  'stop bx_ahnbu3qr --json') printf '{}\n'; exit 0 ;;
+  'resume bx_ahnbu3qr --json')
+    : > "$FIXTURES/resumed"
+    printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
+    printf '{}\n'
+    exit 0
+    ;;
+  'stop bx_ahnbu3qr --json') rm -f "$FIXTURES/resumed"; printf '{}\n'; exit 0 ;;
   *) printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97 ;;
 esac
 [ ! -e "$FIXTURES/$file.fail" ] || exit 124
@@ -128,6 +147,7 @@ new_case() {
     > "$FIXTURES/ready.json"
   printf '%s\n' '{"sandboxId":"bx_ahnbu3qr","sandboxType":"default","secondsPerDollar":100000,"billingMultiplier":1,"seconds":3000}' \
     > "$FIXTURES/usage.json"
+  printf '%s\n' '11111111-1111-4111-8111-111111111111' > "$FIXTURES/boot-id"
   : > "$FIXTURES/calls"
 }
 
@@ -152,12 +172,13 @@ run_entry() {
 }
 send_task() { run_entry "$LOCAL_HOME" fm-boat-send.sh --code-only; }
 spawn_task() { run_entry "$REMOTE_HOME" fm-boat-worker.sh spawn; }
+seed_receipt() { printf 'bx_ahnbu3qr %s\n' "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-no-env"; }
 
 assert_pre_resume_refusal() {
   expect_code 1 "$CODE" "$1 refusal"
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" "$1 did not request stop"
   assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" "$1 resumed before refusing"
-  assert_no_grep 'on ' "$FIXTURES/calls" "$1 reached remote transport"
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" "$1 reached remote transport"
 }
 
 test_validation() {
@@ -280,38 +301,54 @@ test_sender_success_and_timer() {
     expect_code 0 "$CODE" "$plan dispatch: $OUT"
     assert_grep "boat --no-update resume bx_ahnbu3qr --no-env --ttl $ttl --json" \
       "$FIXTURES/calls" "$plan explicit safe resume"
+    if [ -n "$REAL_TIMEOUT" ]; then
+      grep -Fx 120 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan resume was not bounded"
+      grep -Fx 45 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan instance read was not bounded"
+    fi
     assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn' \
       "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
     cmp -s "$FIXTURES/request.json" "$FIXTURES/transport.request" || fail 'transport changed the request bytes'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
-    assert_equals bx_ahnbu3qr "$(cat "$LOCAL_HOME/state/.boat-no-env")" 'successful no-env resume receipt'
+    assert_equals 'bx_ahnbu3qr 22222222-2222-4222-8222-222222222222' "$(cat "$LOCAL_HOME/state/.boat-no-env")" 'successful no-env resume receipt'
   done
   new_case already-running
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   send_task
   expect_code 0 "$CODE" "already-running dispatch: $OUT"
   assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'running box timer was extended'
+  new_case plain-resume-after-stop
+  send_task
+  expect_code 0 "$CODE" 'initial safe resume before external stop'
+  FIXTURES="$FIXTURES" BOAT_NOW="$NOW" "$FAKEBIN/boat" --no-update stop bx_ahnbu3qr --json >/dev/null
+  FIXTURES="$FIXTURES" BOAT_NOW="$NOW" "$FAKEBIN/boat" --no-update resume bx_ahnbu3qr --json >/dev/null
+  : > "$FIXTURES/calls"
+  send_task
+  expect_code 1 "$CODE" 'plain resume must invalidate old no-env receipt'
+  assert_contains "$OUT" 'no current --no-env resume receipt' 'stale instance refusal explanation'
+  assert_no_grep '^on ' "$FIXTURES/calls" 'plain-resumed box received a worker'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'plain-resumed box was stopped by refusal'
   new_case running-no-receipt
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
   send_task
   expect_code 1 "$CODE" 'running box with no no-env receipt'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'running box with no receipt stopped existing work'
-  assert_no_grep 'on ' "$FIXTURES/calls" 'running box with no receipt reached transport'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'running box with no receipt reached transport'
   new_case timer-missing
   set_json ready 'del(.sandbox.archiveAfter)'
   send_task
   expect_code 1 "$CODE" 'missing auto-stop timer'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'missing timer must stop box'
-  assert_no_grep 'on ' "$FIXTURES/calls" 'missing timer reached transport'
+  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'failed resumed box retained no-env receipt'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'missing timer reached transport'
   new_case timer-too-long
   jq --argjson end "$((NOW + 14401))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
     "$FIXTURES/ready.json" > "$FIXTURES/info.json"
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   send_task
   expect_code 1 "$CODE" 'running timer exceeds reservation'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'running timer refusal stopped existing work'
-  assert_no_grep 'on ' "$FIXTURES/calls" 'running timer refusal reached transport'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'running timer refusal reached transport'
   new_case uncertain-transport
   printf '255\n' > "$FIXTURES/transport.code"
   send_task
@@ -324,14 +361,14 @@ test_sender_success_and_timer() {
 test_running_quota_and_route() {
   new_case running-start-quota
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   set_json limits '.canStart = false'
   send_task
   expect_code 0 "$CODE" "running box needs no start quota: $OUT"
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'running worker stopped at exhausted start quota'
   new_case running-cap-refusal
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   set_json limits '.creditUsedSeconds = 2000000'
   send_task
   expect_code 1 "$CODE" 'running box refuses a new task at spend cap'
@@ -368,29 +405,30 @@ test_prepare_before_route() {
 
 test_teardown_stop() {
   new_case last-task-teardown
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   seed_worker task-one ship firstmate 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 0 "$CODE" "last task teardown: $OUT"
   assert_grep 'teardown task-one' "$FIXTURES/calls" 'ordinary remote teardown was not called'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'last task did not stop approved box'
+  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'stopped box retained no-env receipt'
   assert_absent "$REMOTE_HOME/state/task-one.meta" 'last task record remained'
   new_case another-task-remains
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   seed_worker task-one ship firstmate 'state: done complete'
   seed_worker task-two scout dev-loop 'state: working active'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 0 "$CODE" 'teardown with another task'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'other task was stopped'
   new_case dev-loop-scout-teardown
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   seed_worker task-one scout dev-loop 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 0 "$CODE" "dev-loop scout teardown: $OUT"
   assert_grep 'teardown task-one' "$FIXTURES/calls" 'allowed scout teardown was not called'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'last scout did not stop approved box'
   new_case teardown-refused
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   seed_worker task-one ship firstmate 'state: working active'
   : > "$FIXTURES/teardown.fail"
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
@@ -398,21 +436,21 @@ test_teardown_stop() {
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'refused teardown stopped box'
   [ -f "$REMOTE_HOME/state/task-one.meta" ] || fail 'refused teardown removed task record'
   new_case teardown-other-home
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   seed_worker task-one secondmate firstmate 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 1 "$CODE" 'teardown of non-worker record'
   [ "$(grep -c '^teardown task-one$' "$FIXTURES/calls")" -eq 0 ] || fail 'non-worker record reached teardown'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-worker record stopped box'
   new_case teardown-wrong-project
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   seed_worker task-one ship other 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 1 "$CODE" 'teardown of non-Boat project'
   assert_no_grep '^teardown task-one$' "$FIXTURES/calls" 'non-Boat project reached teardown'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-Boat project stopped box'
   new_case teardown-short-project
-  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/state/.boat-no-env"
+  seed_receipt
   fm_write_meta "$REMOTE_HOME/state/task-one.meta" 'kind=ship' 'project=firstmate'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 1 "$CODE" 'teardown of noncanonical project record'

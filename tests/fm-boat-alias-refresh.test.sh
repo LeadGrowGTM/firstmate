@@ -67,6 +67,15 @@ SH
 chmod +x "$FAKE_BOAT"
 FAKEBIN=$(fm_fakebin "$TMP_ROOT")
 cp "$FAKE_BOAT" "$FAKEBIN/boat"
+REAL_TIMEOUT=$(command -v timeout || command -v gtimeout || true)
+if [ -n "$REAL_TIMEOUT" ]; then
+  cat > "$FAKEBIN/timeout" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$3" >> "\$FAKE_BOAT_DIR/timeout.calls"
+exec '$REAL_TIMEOUT' "\$@"
+SH
+  chmod +x "$FAKEBIN/timeout"
+fi
 
 # Two real host keys, as a sandbox would present before and after a resume.
 KEYS="$TMP_ROOT/keys"
@@ -178,6 +187,9 @@ test_first_run_writes_pinned_alias() {
   assert_equals "--no-update info $ID --json
 --no-update exec $ID --json -- cat /etc/ssh/ssh_host_ed25519_key.pub" "$(cat "$BOAT/calls")" \
     "only the two read-only Boat calls may run"
+  if [ -n "$REAL_TIMEOUT" ]; then
+    assert_equals $'15\n45' "$(cat "$BOAT/timeout.calls")" 'info and exec calls need individual bounds'
+  fi
   pass "T1 a first run writes a pinned, resolvable alias"
 }
 
@@ -348,6 +360,9 @@ test_restore_wait() {
   expect_code 0 "$CODE" "a restore that finishes in time must succeed"$'\n'"$ERR"
   assert_contains "$OUT" "hydrated=true waited=" "the finished restore must be reported"
   assert_equals 3 "$(cat "$BOAT/info.count")" "the restore must be polled until it finishes"
+  if [ -n "$REAL_TIMEOUT" ]; then
+    assert_equals 3 "$(grep -c '^15$' "$BOAT/timeout.calls")" 'every hydration info poll needs a bound'
+  fi
 
   new_case restore-late
   set_hostkey host1
