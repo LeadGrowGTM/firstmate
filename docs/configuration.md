@@ -1141,6 +1141,15 @@ A malformed or unreadable file refuses every fresh ship or scout spawn until it 
 Firstmate cannot see which part of a worker's life uses the resource, so the number bounds whole workers from launch to handoff, and the tightest resource every worker needs should decide it.
 [`bin/fm-project-capacity-lib.sh`](../bin/fm-project-capacity-lib.sh) owns the file format, what holds a place, and why concurrent spawns cannot both take the last one.
 
+## Automatic deadweight cleanup
+
+Every home's normal supervision watcher runs a daily deadweight sweep by default.
+No check shim or separate scheduler needs arming.
+Set `config/deadweight-sweep` to `off` to disable automatic cleanup in that home; missing configuration means on.
+The sweep runs while the normal supervision cycle is active, starts at most once per day, and reports its result on the next slow-check poll.
+[`bin/fm-deadweight-sweep.sh`](../bin/fm-deadweight-sweep.sh) owns the schedule, state records, output, and safety gates.
+It uses teardown's landed-work and completion checks, preserves captain holds and secondmates, and delegates pool removal to treehouse's safe prune.
+
 ## Worktree pool guard
 
 Treehouse reuses returned worktree copies, caps each repository's pool with `max_trees`, and prunes only copies that are merged, clean, idle, and unleased.

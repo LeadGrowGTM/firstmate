@@ -2,14 +2,21 @@
 # fm-deadweight-sweep.sh - remove stopped workers with no work to preserve.
 #
 # Usage: FM_HOME=/absolute/home bash /absolute/code/bin/fm-deadweight-sweep.sh
+#        fm-deadweight-sweep.sh check
 #        fm-deadweight-sweep.sh --help
 #
-# Opt in separately in each primary or secondmate home with a daily cron job:
-#   0 18 * * * FM_HOME=/absolute/home /bin/bash /absolute/code/bin/fm-deadweight-sweep.sh
-# Daily scheduling avoids repeated endpoint, git, and pool probes on every
-# supervision heartbeat, while clearing deadweight on the next daily run.
-# No schedule is installed by this script. Cron must provide the normal tool
-# PATH (including treehouse and tasks-axi where the home uses them).
+# Every home's watcher calls `check` by default on its slow-check cadence.
+# The check starts cleanup at most once every 86400 seconds, in a separate
+# process group so the watcher's check timeout cannot interrupt pool pruning.
+# Daily gating avoids repeated endpoint, git, and pool probes on every poll.
+# The next poll prints the completed sweep's one-line result once. No check
+# shim, cron entry, or extra daemon needs arming. The normal supervision cycle
+# must be running; this script does not launch one or administer a live home.
+# Set config/deadweight-sweep to `off` to disable automatic cleanup in that
+# home. Missing configuration means on; other contents refuse automatic work.
+# Direct invocation still runs a sweep for an explicit home.
+# state/.deadweight-sweep-launched records the last automatic start time;
+# state/.deadweight-sweep-result holds the unreported result.
 #
 # Only this home's ship/scout records are considered. Teardown's
 # --only-if-stopped guard checks endpoint and captain-decision state under its
@@ -35,9 +42,9 @@ export LC_ALL=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "${1:-}" in
-  --help|-h) sed -n '2,32{s/^# \{0,1\}//;p;}' "$0"; exit 0 ;;
-  '') ;;
-  *) echo 'error: expected no arguments or --help' >&2; exit 2 ;;
+  --help|-h) sed -n '2,/^set -eu/{ /^#/ {s/^# \{0,1\}//;p;} }' "$0"; exit 0 ;;
+  ''|check|scheduled) ;;
+  *) echo 'error: expected no arguments, check, or --help' >&2; exit 2 ;;
 esac
 [ -n "${FM_HOME:-}" ] && [ "${FM_HOME#/}" != "$FM_HOME" ] || {
   echo 'error: an explicit absolute FM_HOME is required' >&2; exit 2
@@ -54,6 +61,72 @@ fm_refuse_if_gate_agent
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+
+# shellcheck source=bin/fm-pr-lib.sh
+. "$SCRIPT_DIR/fm-pr-lib.sh"
+
+# Use the existing private-record destination checks for atomic publications.
+publish() {  # <destination> <bytes>
+  local dest=$1 value=$2 device tmp
+  device=$(fm_pr_file_device "$STATE") || return 1
+  fm_pr_regular_destination_on_device_or_absent "$dest" "$device" || return 1
+  tmp=$(umask 077; mktemp "$STATE/.deadweight-sweep-tmp.XXXXXX") || return 1
+  if ! printf '%s\n' "$value" > "$tmp" \
+    || ! fm_pr_regular_destination_on_device_or_absent "$dest" "$device" \
+    || ! mv -f -- "$tmp" "$dest"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+RESULT="$STATE/.deadweight-sweep-result"
+LAUNCHED="$STATE/.deadweight-sweep-launched"
+case "${1:-}" in
+  check)
+    config="$FM_HOME/config/deadweight-sweep"
+    if [ -e "$config" ] || [ -L "$config" ]; then
+      [ -f "$config" ] && [ ! -L "$config" ] && [ -r "$config" ] \
+        && [ "$(cat "$config")" = off ] || {
+        echo 'swept: automatic cleanup refused: config/deadweight-sweep must contain off' ; exit 1
+      }
+      exit 0
+    fi
+    CHECK_LOCK="$STATE/.deadweight-check.lock"
+    fm_lock_try_acquire "$CHECK_LOCK" || exit 0
+    trap 'fm_lock_release "$CHECK_LOCK" || true' EXIT
+    device=$(fm_pr_file_device "$STATE")
+    for record in "$RESULT" "$LAUNCHED"; do
+      fm_pr_regular_destination_on_device_or_absent "$record" "$device" || {
+        echo 'swept: automatic cleanup refused: unsafe schedule record'; exit 1
+      }
+    done
+    if [ -f "$RESULT" ]; then
+      cat "$RESULT"
+      rm -f -- "$RESULT"
+    fi
+    launched=$(cat "$LAUNCHED" 2>/dev/null || true)
+    now=$(date +%s)
+    case "$launched" in
+      ''|*[!0-9]*) due=1 ;;
+      *) if [ "$((now - launched))" -ge 86400 ] || [ "$now" -lt "$launched" ]; then due=1; else due=0; fi ;;
+    esac
+    if [ "$due" = 1 ]; then
+      publish "$LAUNCHED" "$now"
+      # A new process group survives run_check_capture's timeout and cleanup.
+      set -m
+      nohup "$0" scheduled </dev/null >/dev/null 2>&1 &
+      set +m
+    fi
+    exit 0
+    ;;
+  scheduled)
+    rc=0
+    out=$("$0" 2>&1) || rc=$?
+    [ "$rc" = 0 ] || out="swept: cleanup failed: ${out:-exit $rc}"
+    out=${out//[$'\t\r\n']/ }
+    publish "$RESULT" "$out"
+    exit 0
+    ;;
+esac
 
 LOCK="$STATE/.deadweight-sweep.lock"
 fm_lock_try_acquire "$LOCK" || exit 0

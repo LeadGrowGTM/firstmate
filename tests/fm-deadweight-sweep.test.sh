@@ -40,6 +40,7 @@ case "$1" in
   return) git -C "$FIXTURE/projects/project" worktree remove "$3" ;;
   prune)
     [ "$*" = 'prune --yes' ] || exit 1
+    [ ! -f "$FIXTURE/slow-prune" ] || sleep 6
     [ ! -f "$FIXTURE/prune-fail" ] || { echo 'prune refused' >&2; exit 1; }
     if [ -d "$FIXTURE/pool" ]; then
       git -C "$FIXTURE/projects/project" worktree remove "$FIXTURE/pool"
@@ -249,6 +250,85 @@ EOF
   pass 'sweep preserves stopped workers with active pipelines or captain holds'
 }
 
+check() {
+  env PATH="$1/fakebin:$PATH" FM_HOME="$1" FM_ROOT_OVERRIDE="$ROOT" FIXTURE="$1" \
+    FM_TEARDOWN_GUARD_DONE=1 "$SWEEP" check 2>&1
+}
+
+wait_result() {
+  local i=0
+  while [ ! -f "$1/state/.deadweight-sweep-result" ] && [ "$i" -lt 600 ]; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  assert_present "$1/state/.deadweight-sweep-result" 'detached sweep completed'
+}
+
+test_default_daily_check_and_watcher() {
+  local home out launched rc=0
+  home=$(make_home automatic); add_worker "$home"
+  out=$(check "$home")
+  assert_equals '' "$out" 'starting a daily sweep is silent'
+  wait_result "$home"
+  assert_absent "$home/state/task.meta" 'default automatic sweep removes stopped worker'
+  launched=$(cat "$home/state/.deadweight-sweep-launched")
+  out=$(check "$home")
+  assert_equals 'swept: 1 workers, 1 copies, 0 stale registrations' "$out" 'next poll reports result'
+  out=$(check "$home")
+  assert_equals '' "$out" 'result reported once'
+  assert_equals "$launched" "$(cat "$home/state/.deadweight-sweep-launched")" 'same-day poll does not start again'
+  add_worker "$home"
+  out=$(check "$home")
+  assert_present "$home/state/task.meta" 'new deadweight waits for daily gate'
+  echo 0 > "$home/state/.deadweight-sweep-launched"
+  out=$(check "$home")
+  wait_result "$home"
+  assert_absent "$home/state/task.meta" 'next daily sweep removes new deadweight'
+  out=$(env PATH="$home/fakebin:$PATH" FM_HOME="$home" FIXTURE="$home" \
+    FM_TEARDOWN_GUARD_DONE=1 FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=1 \
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 10 2>&1) || rc=$?
+  assert_equals 0 "$rc" 'default watcher returns maintenance wake'
+  assert_contains "$out" 'check: deadweight-sweep: swept: 1 workers' 'watcher reports without check shim'
+  assert_grep deadweight-sweep "$home/state/.wake-queue" 'maintenance wake queued durably'
+  pass 'automatic default-on daily gate runs detached and watcher reports once'
+}
+
+test_automatic_off_and_unsafe_records() {
+  local home out rc=0
+  home=$(make_home disabled); add_worker "$home"
+  echo off > "$home/config/deadweight-sweep"
+  out=$(check "$home")
+  assert_equals '' "$out" 'configuration disables automatic check'
+  assert_absent "$home/state/.deadweight-sweep-launched" 'disabled check does not launch'
+  assert_present "$home/state/task.meta" 'disabled check keeps worker'
+  echo unexpected > "$home/config/deadweight-sweep"
+  out=$(check "$home") || rc=$?
+  assert_equals 1 "$rc" 'invalid configuration refuses cleanup'
+  assert_contains "$out" 'automatic cleanup refused' 'invalid configuration reported'
+  rm "$home/config/deadweight-sweep"
+  ln -s "$home/untouched" "$home/state/.deadweight-sweep-launched"
+  rc=0; out=$(check "$home") || rc=$?
+  assert_equals 1 "$rc" 'unsafe schedule destination refused'
+  assert_absent "$home/untouched" 'schedule symlink target untouched'
+  assert_present "$home/state/task.meta" 'unsafe schedule keeps worker'
+  pass 'automatic cleanup switches off explicitly and refuses unsafe schedule records'
+}
+
+test_detached_sweep_survives_watcher_timeout() {
+  local home rc=0
+  home=$(make_home timeout)
+  touch "$home/slow-prune"
+  env PATH="$home/fakebin:$PATH" FM_HOME="$home" FIXTURE="$home" \
+    FM_TEARDOWN_GUARD_DONE=1 FM_POLL=1 FM_CHECK_INTERVAL=1 FM_CHECK_TIMEOUT=1 \
+    "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 3 > "$home/checkpoint-out" 2>&1 || rc=$?
+  assert_equals 124 "$rc" 'quiet watcher checkpoint times out'
+  assert_absent "$home/state/.watch.lock/pid" 'timed-out watcher releases its lock'
+  wait_result "$home"
+  assert_equals 1 "$(wc -l < "$home/treehouse-calls" | tr -d ' ')" 'detached safe prune completes once'
+  assert_equals '' "$(check "$home")" 'empty maintenance result stays silent'
+  pass 'detached sweep survives watcher timeout and leaves watcher lock clean'
+}
+
 test_clean_stopped_and_idempotence
 test_changes_kept
 test_decisions_secondmates_and_unknown_kept
@@ -257,3 +337,7 @@ test_stale_registration_and_live_copy
 test_pool_prune_count_and_failure
 test_guard_cannot_force
 test_pipeline_and_captain_hold_kept
+
+test_default_daily_check_and_watcher
+test_automatic_off_and_unsafe_records
+test_detached_sweep_survives_watcher_timeout
