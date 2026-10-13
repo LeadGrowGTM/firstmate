@@ -319,7 +319,7 @@ These steps are never automated and are always reported rather than silently att
 - FileVault, which holds a reboot at pre-boot authentication before any login session exists.
 - Installing any missing required tool that no safe wrapper can resolve.
 - Each worker runtime's own `/login`, and any keychain password prompt that login needs.
-- Claude Code's one-time Bypass Permissions confirmation, which a fresh host shows the first time a second mate launches on Claude there; [the launch refuses and names it](#first-launch-on-a-fresh-host) rather than answering it, and the [Boat setup](#set-up-the-sandbox) has a person accept it before the first launch.
+- Claude Code's one-time Bypass Permissions confirmation when a launch requests bypass on a fresh host; [the launch refuses and names it](#first-launch-on-a-fresh-host) rather than answering it, and the [Boat setup](#set-up-the-sandbox) explains how a person can accept it before the first launch.
 
 Firstmate never writes an auto-login password, never changes FileVault, and never stores an account password.
 A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own symlink is reported for the operator to inspect and is never overwritten.
@@ -389,7 +389,7 @@ Run these steps on the sandbox, as its `user` account.
 4. Log one worker runtime in with its own login command.
    This is a [step only a person can take](#steps-only-a-person-can-take), and [Sign-in on the sandbox](#sign-in-on-the-sandbox) owns which login to use and how long it stays.
 
-5. For Claude Code, accept its Bypass Permissions confirmation once after the sign-in, for which a new terminal on the sandbox is enough:
+5. If [Claude permission mode](configuration.md#claude-permission-mode-configclaude-permission-mode) is configured to start in bypass mode, accept its Bypass Permissions confirmation once after the sign-in, for which a new terminal on the sandbox is enough:
 
    ```sh
    claude --dangerously-skip-permissions
@@ -399,7 +399,7 @@ Run these steps on the sandbox, as its `user` account.
    At the dialog headed `WARNING: Claude Code running in Bypass Permissions mode`, choose `Yes, I accept`, then leave the session with `/exit`.
    This is a [step only a person can take](#steps-only-a-person-can-take): accepting it is that person's consent for the machine, and Firstmate never gives it.
    Claude Code stores the acceptance in the account's user settings the moment it is given, and a stop and resume keeps them, so every later launch and relaunch starts without the dialog.
-   Without this step the first launch is [refused at that dialog](#first-launch-on-a-fresh-host) until someone accepts it in the waiting pane.
+   Without this step a launch that meets the dialog is [refused there](#first-launch-on-a-fresh-host) until someone accepts it in the waiting pane.
    Run the command before the first launch, because it does not dismiss a dialog that is already open: a second mate already waiting on that dialog stays there until that pane is answered, and the next launch still refuses while that pane is open.
 
 6. For Claude Code, set the auto-compact window in the account's user settings, which a new sandbox does not have:
@@ -683,7 +683,7 @@ A launch that finds none still succeeds and reports no link, which is what anoth
 ### First launch on a fresh host
 
 A launch succeeds only once the new agent has started reading its charter, or has shown no recognized prompt for about 30 seconds.
-A host whose account has never run Claude Code in Bypass Permissions mode stops the first Claude launch at a one-time dialog headed `WARNING: Claude Code running in Bypass Permissions mode`, which opens on `No, exit`.
+A host whose account has never run Claude Code in Bypass Permissions mode stops a launch that requests bypass at a one-time dialog headed `WARNING: Claude Code running in Bypass Permissions mode`, which opens on `No, exit`.
 The launch then fails instead of reporting a second mate that is not working, and its error names the dialog, the waiting pane, and the host.
 The dialog is recognized however the pane lays it out: a narrow pane, such as the 54-column one a Boat sandbox gives the agent, breaks that heading across two lines, and the launch still refuses.
 
@@ -697,7 +697,7 @@ Clear it once per host:
 The waiting agent is left in place, so it continues into its charter as soon as the dialog is answered and the rerun adopts it rather than starting a second one.
 A rerun before the dialog is answered fails the same way.
 A host set up with the [Boat recipe](#set-up-the-sandbox) accepts the dialog once during setup instead, so its first launch never meets it.
-A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog.
+A second mate whose inherited `config/claude-permission-mode` selects `auto` never meets this dialog; whether the absent-file default launch meets it is not verified.
 The same refusal covers any other launch prompt the shared classifier in [`bin/fm-busy-lib.sh`](../bin/fm-busy-lib.sh) recognizes for the selected harness.
 A relaunch refuses on the same prompts, and [Relaunch a live remote second mate](#relaunch-a-live-remote-second-mate) owns what differs there.
 
