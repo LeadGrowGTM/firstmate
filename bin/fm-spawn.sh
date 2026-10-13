@@ -4692,6 +4692,7 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+  fm_treehouse_pool_check "$FM_HOME" "$PROJ_ABS" "$HOME" || exit 1
   spawn_send_text_line "$WT_TARGET" 'treehouse get'
   if ! spawn_wait_isolated_worktree; then
     echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2

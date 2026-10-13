@@ -1589,6 +1589,254 @@ fm_treehouse_same_clone() {  # <project-dir> <worktree>
   [ "$project_common" = "$slot_common" ]
 }
 
+# Resolve existing links and the nearest existing parent without creating a pool.
+_fm_treehouse_resolve_dir() {  # <path>
+  node - "$1" <<'JS'
+const fs = require('fs'), path = require('path');
+let dir = path.resolve(process.argv[2]), tail = [];
+try {
+  while (!fs.existsSync(dir)) {
+    // A dangling link cannot be treated as a future ordinary directory.
+    try { if (fs.lstatSync(dir).isSymbolicLink()) process.exit(1); }
+    catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const parent = path.dirname(dir);
+    if (parent === dir) process.exit(1);
+    tail.unshift(path.basename(dir));
+    dir = parent;
+  }
+  if (!fs.statSync(dir).isDirectory()) process.exit(1);
+  console.log(path.join(fs.realpathSync(dir), ...tail));
+} catch { process.exit(1); }
+JS
+}
+
+# True when path is root or a directory under it. A shared string prefix with
+# no slash boundary is not inside: /tmp/crew-extra is not inside /tmp/crew.
+_fm_treehouse_path_inside() {  # <path> <root>
+  local path=$1 root=$2
+  [ -n "$path" ] && [ -n "$root" ] || return 1
+  [ "$root" = / ] && return 0
+  [ "$path" = "$root" ] && return 0
+  case "$path" in
+    "$root"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# The value of one treehouse.toml root assignment, without its quotes.
+# Returns 1 when the assignment is not a plain quoted or bare value.
+_fm_treehouse_toml_value() {  # <text-after-equals>
+  local rest=$1 body
+  case "$rest" in
+    \"*)
+      [[ "$rest" =~ ^\"((\\.|[^\\\"])*)\"[[:space:]]*(#.*)?$ ]] || return 1
+      body=${BASH_REMATCH[1]}
+      _fm_treehouse_unescape "$body"
+      ;;
+    \'*)
+      [[ "$rest" =~ ^\'([^\']*)\'[[:space:]]*(#.*)?$ ]] || return 1
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      ;;
+    *)
+      [[ "$rest" =~ ^([^[:space:]#]+)[[:space:]]*(#.*)?$ ]] || return 1
+      body=${BASH_REMATCH[1]}
+      case "$body" in
+        \{*|\[*|*\"*|*\'*) return 1 ;;
+      esac
+      printf '%s\n' "$body"
+      ;;
+  esac
+}
+
+_fm_treehouse_unescape() {  # <quoted-body>
+  local s=$1
+  local out=''
+  local ch nxt
+  while [ -n "$s" ]; do
+    ch=${s%"${s#?}"}
+    s=${s#?}
+    case "$ch" in
+      \\)
+        if [ -n "$s" ]; then
+          nxt=${s%"${s#?}"}
+          s=${s#?}
+          [ "$nxt" = '"' ] || [ "$nxt" = "\\" ] || return 1
+          out=$out$nxt
+        else
+          return 1
+        fi
+        ;;
+      *) out=$out$ch ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+# Print a config file's root, or nothing when the file or key is absent.
+# The last root assignment wins. A value that cannot be read fails closed.
+_fm_treehouse_toml_root() {  # <file>
+  local file=$1 line trimmed rest val key found=0
+  [ -f "$file" ] || return 0
+  [ -r "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    trimmed=${line#$'\xef\xbb\xbf'}
+    while [ -n "$trimmed" ]; do
+      case "$trimmed" in
+        [[:space:]]*) trimmed=${trimmed#?} ;;
+        *) break ;;
+      esac
+    done
+    case "$trimmed" in
+      ''|'#'*) continue ;;
+      *\"\"\"*|*\'\'\'*)
+        printf 'error: could not read the treehouse root in %s; refusing to place a worker there\n' "$file" >&2
+        return 1
+        ;;
+      '['*) break ;;
+      \"*|\'*)
+        key=${trimmed%%=*}
+        case "$key" in
+          \"[rR][oO][oO][tT]\"*|\'[rR][oO][oO][tT]\'*|*\\*) rest=$trimmed ;;
+          *) continue ;;
+        esac
+        ;;
+      [rR][oO][oO][tT]*)
+        rest=${trimmed:4}
+        case "$rest" in
+          [[:space:]]*|'='*|''|.*) ;;
+          *) continue ;;
+        esac
+        ;;
+      *) continue ;;
+    esac
+    while [ -n "$rest" ]; do
+      case "$rest" in
+        [[:space:]]*) rest=${rest#?} ;;
+        *) break ;;
+      esac
+    done
+    case "$rest" in
+      '='*) rest=${rest#=} ;;
+      *)
+        printf 'error: could not read the treehouse root in %s; refusing to place a worker there\n' \
+          "$file" >&2
+        return 1
+        ;;
+    esac
+    while [ -n "$rest" ]; do
+      case "$rest" in
+        [[:space:]]*) rest=${rest#?} ;;
+        *) break ;;
+      esac
+    done
+    val=$(_fm_treehouse_toml_value "$rest") || {
+      printf 'error: could not read the treehouse root in %s; refusing to place a worker there\n' \
+        "$file" >&2
+      return 1
+    }
+    found=1
+  done < "$file"
+  if [ "$found" -eq 1 ]; then
+    printf '%s\n' "$val"
+  fi
+}
+
+# Expand supported environment references ($NAME and ${NAME}).
+# Lowercase names are refused because they can alias this shell's local variables.
+_fm_treehouse_expand_env() {  # <text>
+  local s=$1
+  local out=''
+  local ch name
+  while [ -n "$s" ]; do
+    case "$s" in
+      '$'*)
+        s=${s#\$}
+        name=
+        case "$s" in
+          '{'*)
+            s=${s#\{}
+            name=${s%%\}*}
+            [ "$name" != "$s" ] || return 1
+            s=${s#*"$name"}
+            s=${s#\}}
+            ;;
+          [A-Za-z_]*)
+            while [ -n "$s" ]; do
+              ch=${s%"${s#?}"}
+              case "$ch" in
+                [A-Za-z0-9_]) name=$name$ch; s=${s#?} ;;
+                *) break ;;
+              esac
+            done
+            ;;
+          *)
+            return 1
+            ;;
+        esac
+        if [[ "$name" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+          # Read only exported values, as Treehouse does, rather than this
+          # function's local variables that might share a configured name.
+          # shellcheck disable=SC2016 # Indirection expands in the child shell.
+          out=$out$(HOME="$HOME" bash -c 'printf "%s" "${!1-}"' _ "$name")
+        else
+          return 1
+        fi
+        ;;
+      *)
+        out=$out${s%%\$*}
+        if [ "$s" = "${s#*\$}" ]; then
+          break
+        fi
+        s=\$${s#*\$}
+        ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+# Check the pool Treehouse will use under the supplied HOME, before allocation.
+# A repository config replaces user settings even when it has no root key.
+# Relative roots are relative to the clone; environment expansion uses the
+# allocation's HOME. Resolve links before comparing the home and clone boundaries.
+fm_treehouse_pool_check() {  # <fm-home> <project> <treehouse-home>
+  local home project user=$3 config raw expanded base effective boundary label origin name
+  home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
+  project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
+  [ -n "$user" ] || return 1
+  config=$user/.config/treehouse/config.toml
+  [ ! -f "$project/treehouse.toml" ] || config=$project/treehouse.toml
+  raw=$(_fm_treehouse_toml_root "$config") || return 1
+  if [ -z "$raw" ]; then
+    base=$user
+  else
+    expanded=$(HOME=$user _fm_treehouse_expand_env "$raw") || {
+      printf 'error: could not expand the treehouse root in %s; refusing to place a worker there\n' "$config" >&2
+      return 1
+    }
+    case "$expanded" in
+      /*) base=$expanded ;;
+      *) base=$project/$expanded ;;
+    esac
+  fi
+  origin=$(git -C "$project" remote get-url origin 2>/dev/null) || origin=$project
+  name=$(node -e 'const c=require("crypto"),p=require("path"); console.log(p.basename(process.argv[1])+"-"+c.createHash("sha256").update(process.argv[2]).digest("hex").slice(0,6))' "$project" "$origin") || return 1
+  effective=$(_fm_treehouse_resolve_dir "$base/.treehouse/$name") || {
+    printf 'error: could not resolve treehouse pool %s; refusing to place a worker there\n' "$base/.treehouse/$name" >&2
+    return 1
+  }
+  for label in 'Firstmate home' 'project clone'; do
+    case "$label" in
+      'Firstmate home') boundary=$home ;;
+      *) boundary=$project ;;
+    esac
+    if _fm_treehouse_path_inside "$effective" "$boundary"; then
+      printf 'error: treehouse pool %s is inside %s %s; refusing to place a worker there\n' \
+        "$effective" "$label" "$boundary" >&2
+      return 1
+    fi
+  done
+}
+
 # Treehouse keys its default pool by directory name plus origin, so two homes
 # that clone one origin can be offered the same copy. A home handed another
 # clone's copy attempts a lease using a per-home folder under the user state
@@ -1627,10 +1875,14 @@ fm_treehouse_home_pool() {  # <fm-home>
 # bin/treehouse-git/git leads PATH and hands every git process the operator's
 # HOME back, so a fetch still finds the operator's git config and credential
 # helpers. A fetch that would prompt fails instead of waiting on a terminal.
+# Allocation refuses a resolved pool inside the home or clone before mkdir.
 fm_treehouse_home_pool_run() {  # <fm-home> <seconds> <treehouse-args...>
   local pool seconds=$2 git
   [ -n "${HOME:-}" ] || return 1
   pool=$(fm_treehouse_home_pool "$1") || return 1
+  if [ "${3:-}" = get ]; then
+    fm_treehouse_pool_check "$1" "$(pwd -P)" "$pool" || return 1
+  fi
   _fm_wake_require_timeout || return 1
   shift 2
   mkdir -p -- "$pool" || return 1

@@ -228,6 +228,7 @@ prepare_spawn_home() {  # <case> <id>
   git clone -q "$CASE_URL" "$case_dir/other/projects/widget"
   git clone -q "$CASE_URL" "$CASE_HOME/projects/widget"
   git config --file "$CASE_HOME/user-home/.gitconfig" fm.marker operator
+  printf 'treehouse.toml\n' >> "$CASE_HOME/projects/widget/.git/info/exclude"
   CASE_POOL=$(FM_TEST_XDG_STATE="$CASE_STATE" lib "$CASE_HOME" "$CASE_HOME/user-home" \
     fm_treehouse_home_pool "$CASE_HOME") || fail "the case's pool could not be resolved"
 }
@@ -635,6 +636,137 @@ test_shasum_only_path_names_the_pool_from_the_home() {
   pass "a path with only shasum still names the pool from the home path"
 }
 
+# The initial get must be refused before a terminal can allocate anything,
+# including when real-HOME config differs from the synthetic fallback HOME.
+test_spawn_checks_the_initial_pool_before_get() {
+  local variant id case_dir own pane_log tree_log root out status
+  for variant in clone-absolute clone-uppercase clone-multiline clone-home clone-relative user-config user-config-link default-link pool-link; do
+    id="pool-placement-$variant"
+    case_dir=$TMP_ROOT/$id
+    CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+    prepare_spawn_home "$case_dir" "$id"
+    own=$case_dir/safe-slot/1/widget
+    add_worktree "$CASE_HOME/projects/widget" "$own"
+    root=$CASE_HOME/state/unsafe-pool
+    case "$variant" in
+      clone-absolute) printf 'root = "%s"\n' "$root" > "$CASE_HOME/projects/widget/treehouse.toml" ;;
+      clone-uppercase) printf 'ROOT = "%s"\n' "$root" > "$CASE_HOME/projects/widget/treehouse.toml" ;;
+      clone-multiline)
+        printf 'notes = """\n[not-a-table]\n"""\nroot = "%s"\n' "$root" > "$CASE_HOME/projects/widget/treehouse.toml"
+        ;;
+      clone-home)
+        # Correct under operator HOME, outside the home under synthetic HOME.
+        # shellcheck disable=SC2016 # Treehouse expands operator HOME.
+        printf 'root = "$HOME/../state/unsafe-pool"\n' > "$CASE_HOME/projects/widget/treehouse.toml"
+        ;;
+      clone-relative)
+        root=$CASE_HOME/projects/widget/nested
+        printf 'root = "nested"\n' > "$CASE_HOME/projects/widget/treehouse.toml"
+        ;;
+      user-config|user-config-link)
+        mkdir -p "$CASE_HOME/user-home/.config/treehouse"
+        printf 'root = "%s"\n' "$root" > "$case_dir/user-config.toml"
+        if [ "$variant" = user-config-link ]; then
+          ln -s "$case_dir/user-config.toml" "$CASE_HOME/user-home/.config/treehouse/config.toml"
+        else
+          cp "$case_dir/user-config.toml" "$CASE_HOME/user-home/.config/treehouse/config.toml"
+        fi
+        ;;
+      pool-link)
+        mkdir -p "$root" "$CASE_HOME/user-home/.treehouse"
+        ln -s "$root" "$CASE_HOME/user-home/.treehouse/widget-$(pool_hash6 "$CASE_URL")"
+        ;;
+      default-link)
+        mkdir -p "$root"
+        ln -s "$root" "$CASE_HOME/user-home/.treehouse"
+        ;;
+    esac
+    pane_log=$case_dir/pane.log
+    tree_log=$case_dir/treehouse.log
+    : > "$pane_log"
+    : > "$tree_log"
+    status=0
+    out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+      run_spawn "$own" "$id") || status=$?
+    [ "$status" -ne 0 ] || fail "$variant: spawn accepted an unsafe initial pool"$'\n'"$out"
+    assert_contains "$out" 'refusing to place a worker there' "$variant: refusal reason missing"
+    if [ "$variant" = clone-multiline ]; then
+      assert_contains "$out" "$CASE_HOME/projects/widget/treehouse.toml" "$variant: unreadable root did not name its config"
+    else
+      assert_contains "$out" "$root" "$variant: refusal did not name the actual operator pool"
+    fi
+    assert_no_exact_line 'treehouse get' "$pane_log" "$variant: initial get preceded the refusal"
+    assert_no_grep 'args=get' "$tree_log" "$variant: allocation preceded the refusal"
+    [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "$variant: refusal published a task"
+    [ ! -e "$CASE_POOL" ] || fail "$variant: refusal created a fallback pool"
+    [ "$variant" = default-link ] || [ "$variant" = pool-link ] || [ ! -e "$root" ] || fail "$variant: refusal created the unsafe root"
+  done
+  pass "initial pool placement checks operator HOME, repository and user config, and links before get"
+}
+
+test_repository_config_and_safe_links_keep_initial_get_available() {
+  local variant id case_dir own pane_log tree_log root out status
+  for variant in no-root safe-root safe-link; do
+    id="pool-safe-$variant"
+    case_dir=$TMP_ROOT/$id
+    CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+    prepare_spawn_home "$case_dir" "$id"
+    own=$case_dir/safe-slot/1/widget
+    add_worktree "$CASE_HOME/projects/widget" "$own"
+    mkdir -p "$CASE_HOME/user-home/.config/treehouse"
+    printf 'root = "%s/state/unsafe"\n' "$CASE_HOME" > "$CASE_HOME/user-home/.config/treehouse/config.toml"
+    root=$CASE_HOME-extra
+    case "$variant" in
+      no-root) printf 'max_trees = 16\n' > "$CASE_HOME/projects/widget/treehouse.toml" ;;
+      safe-root) printf 'root = "%s"\n' "$root" > "$CASE_HOME/projects/widget/treehouse.toml" ;;
+      safe-link)
+        printf 'max_trees = 16\n' > "$CASE_HOME/projects/widget/treehouse.toml"
+        mkdir -p "$root"
+        ln -s "$root" "$CASE_HOME/user-home/.treehouse"
+        ;;
+    esac
+    pane_log=$case_dir/pane.log
+    tree_log=$case_dir/treehouse.log
+    : > "$pane_log"
+    : > "$tree_log"
+    status=0
+    out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_TREEHOUSE_LOG="$tree_log" \
+      run_spawn "$own" "$id") || status=$?
+    expect_code 0 "$status" "$variant: safe initial pool was refused"$'\n'"$out"
+    assert_exact_line 'treehouse get' "$pane_log" "$variant: initial get was not sent"
+  done
+  pass "repository config replaces user root and safe sibling roots and links remain available"
+}
+
+test_fallback_lease_checks_its_own_home_before_allocation() {
+  local root=$TMP_ROOT/lease-placement home user project synthetic out status=0 fake log
+  home=$root/home
+  user=$root/user
+  project=$root/project
+  fake=$root/fake
+  log=$root/treehouse.log
+  mkdir -p "$home" "$user" "$project" "$fake"
+  fm_git_init_commit "$project"
+  synthetic=$(lib "$home" "$user" fm_treehouse_home_pool "$home") || fail "cannot resolve fallback HOME"
+  mkdir -p "$synthetic" "$home/unsafe"
+  ln -s "$home/unsafe" "$synthetic/.treehouse"
+  cat > "$fake/treehouse" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_FAKE_TREEHOUSE_LOG:?}"
+SH
+  chmod +x "$fake/treehouse"
+  : > "$log"
+  out=$(cd "$project" && FM_FAKE_TREEHOUSE_LOG="$log" PATH="$fake:$PATH" \
+    lib "$home" "$user" fm_treehouse_home_pool_run "$home" 30 get --lease 2>&1) || status=$?
+  expect_code 1 "$status" "unsafe fallback pool was accepted"$'\n'"$out"
+  assert_contains "$out" 'inside Firstmate home' 'fallback refusal reason missing'
+  [ ! -s "$log" ] || fail "fallback treehouse allocation preceded refusal"
+  pass "fallback checks its synthetic HOME and links before invoking Treehouse"
+}
+
+test_spawn_checks_the_initial_pool_before_get
+test_repository_config_and_safe_links_keep_initial_get_available
+test_fallback_lease_checks_its_own_home_before_allocation
 test_two_clones_of_one_origin_do_not_treat_each_others_slot_as_their_own
 test_a_homes_own_pool_is_outside_the_home_and_the_clone_and_unique_per_home
 test_shasum_only_path_names_the_pool_from_the_home
