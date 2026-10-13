@@ -227,36 +227,45 @@ sweep_prunes() {
   done
 }
 
-measure_treehouse_root() {  # <root>
-  local root=$1 out kib rc=0
+measure_treehouse_root() {  # <resolved-root> <display-root>
+  local root=$1 display=$2 out kib rc=0
   [ -n "$root" ] || return 0
-  [ -d "$root" ] && [ ! -L "$root" ] || return 0
+  [ -d "$root" ] || return 0
   out=$(fm_run_timed "$PRUNE_SECS" du -sk "$root" 2>/dev/null) || rc=$?
   kib=$(printf '%s\n' "$out" | awk 'NR == 1 { print $1 }')
   case "$kib" in
     ''|*[!0-9]*)
-      append_finding "size of $root could not be measured (du exited $rc)"
+      append_finding "size of $display could not be measured (du exited $rc)"
       return 0
       ;;
   esac
   [ "$kib" -gt $((SIZE_LIMIT_GB * 1048576)) ] || return 0
-  append_finding "worktree copies use $(awk -v k="$kib" 'BEGIN { printf "%.1f", k / 1048576 }') GB under $root (limit $SIZE_LIMIT_GB GB)"
+  append_finding "worktree copies use $(awk -v k="$kib" 'BEGIN { printf "%.1f", k / 1048576 }') GB under $display (limit $SIZE_LIMIT_GB GB)"
 }
 
 sweep_size() {
-  local pool default=
+  local pool default= default_real= pool_root= pool_real=
   if [ -n "${HOME:-}" ]; then
     default=$HOME/.treehouse
-    measure_treehouse_root "$default"
+    default_real=$(CDPATH='' cd -- "$default" 2>/dev/null && pwd -P) || default_real=
   fi
   pool=$(fm_treehouse_home_pool "$FM_HOME" 2>/dev/null || true)
-  [ -n "$pool" ] || return 0
-  if [ -n "$default" ]; then
-    case "$pool/.treehouse/" in
-      "$default/"*) return 0 ;;
-    esac
+  if [ -n "$pool" ]; then
+    pool_root=$pool/.treehouse
+    pool_real=$(CDPATH='' cd -- "$pool_root" 2>/dev/null && pwd -P) || pool_real=
   fi
-  measure_treehouse_root "$pool/.treehouse"
+  if [ -n "$default_real" ] && [ -n "$pool_real" ]; then
+    case "$pool_real/" in
+      "$default_real/"*) pool_real= ;;
+    esac
+    if [ -n "$pool_real" ]; then
+      case "$default_real/" in
+        "$pool_real/"*) default_real= ;;
+      esac
+    fi
+  fi
+  [ -z "$default_real" ] || measure_treehouse_root "$default_real" "$default"
+  [ -z "$pool_real" ] || measure_treehouse_root "$pool_real" "$pool_root"
 }
 
 write_atomically() {  # <tmp> <destination>

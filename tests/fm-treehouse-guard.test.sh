@@ -407,9 +407,49 @@ SH
     "the nested per-home pool was measured again under its parent"
 }
 
+test_sweep_sizes_linked_and_nested_roots_once() {
+  local world home pool out
+  world=$(make_world linked-size)
+  home=$(make_home "$world" home alpha)
+  # shellcheck disable=SC2016 # $1 and $2 expand in the child shell, not here.
+  pool=$(env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" HOME="$world/user" \
+    XDG_STATE_HOME="$world/xdg-state" \
+    bash -c 'set -u; . "$1"; fm_treehouse_home_pool "$2"' \
+    _ "$ROOT/bin/fm-wake-lib.sh" "$home")
+  mkdir -p "$world/actual-pool" "$pool"
+  rmdir "$world/user/.treehouse"
+  ln -s "$world/actual-pool" "$world/user/.treehouse"
+  ln -s "$world/actual-pool" "$pool/.treehouse"
+  cat > "$world/fakebin/du" <<'SH'
+#!/usr/bin/env bash
+dir=${FAKE_TREEHOUSE_DIR:?}
+printf '%s\n' "${@: -1}" >> "$dir/du-log"
+printf '%s\t%s\n' "$((6 * 1048576))" "${@: -1}"
+SH
+  chmod +x "$world/fakebin/du"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "linked pool sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $world/user/.treehouse (limit 5 GB)" "$out" \
+    "linked default and per-home roots were not reported once"
+  assert_equals "$world/actual-pool" "$(cat "$world/fake/du-log")" \
+    "linked roots were not measured at their one physical directory"
+
+  rm "$world/user/.treehouse" "$pool/.treehouse"
+  mkdir -p "$pool/.treehouse/child"
+  ln -s "$pool/.treehouse/child" "$world/user/.treehouse"
+  : > "$world/fake/du-log"
+  out=$(XDG_STATE_HOME="$world/xdg-state" guard "$world" "$home" sweep 2>&1) \
+    || fail "linked nested pool sweep failed: $out"
+  assert_equals "treehouse-guard: worktree copies use 6.0 GB under $pool/.treehouse (limit 5 GB)" "$out" \
+    "linked child and parent roots were not reported once"
+  assert_equals "$pool/.treehouse" "$(cat "$world/fake/du-log")" \
+    "linked child was measured again under its parent"
+}
+
 test_prune_runs_only_the_safe_prune_from_the_project
 test_prune_also_prunes_a_present_per_home_pool
 test_sweep_sizes_a_present_per_home_pool_once
+test_sweep_sizes_linked_and_nested_roots_once
 test_prune_refuses_a_directory_that_is_not_a_clone_root
 test_prune_failure_warns_and_exits_nonzero
 test_prune_bound_is_reported_as_a_prune_that_did_not_finish
