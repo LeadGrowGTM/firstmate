@@ -177,8 +177,7 @@ cmd_apply() {
     tmux set-option -t "$sid" status-right-length 200 2>/dev/null || true
     tmux set-option -t "$sid" status-right '#{E:pane-border-format}' 2>/dev/null || true
   done < <(tmux list-sessions -F '#{session_id} #{session_group}' 2>/dev/null)
-  group_id=$(tmux display-message -p -t "$group" '#{session_id}' 2>/dev/null) || return 0
-  group_id=${group_id#\$}
+  group_id=${target_sid#\$}
   tmux set-hook -g "after-new-session[$((10000 + group_id))]" \
     "if-shell -F '#{==:#{session_group},$group}' 'set-option status-right-length 200; set-option status-right \"#{E:pane-border-format}\"'" 2>/dev/null || true
   return 0
@@ -194,15 +193,21 @@ fm_sb_usage_refresh() {
   out=$(fm_run_timed 10 quota-axi 2>/dev/null </dev/null) || return 1
   rows=$(printf '%s\n' "$out" | awk '
     /^quota\[[0-9]+\]\{provider,/ {
-      keyed = index($0, "provider,accountKey,") > 0; in_quota = 1; next
+      keyed = index($0, "provider,accountKey,") > 0; in_quota = 1; in_attention = 0; next
     }
+    /^attention\[[0-9]+\]\{provider,accountKey,/ { in_quota = 0; in_attention = 1; next }
     in_quota && !/^  / { in_quota = 0 }
+    in_attention && !/^  / { in_attention = 0 }
     in_quota && /^  / {
       sub(/^  /, ""); n = split($0, row, ","); scope = row[2 + keyed]; rem = row[3 + keyed]
       if (scope ~ /^".*"$/) scope = substr(scope, 2, length(scope) - 2)
       if (n < 3 + keyed || (scope != "all_models" && scope != "all_products" && scope !~ /^model:.+/ && scope !~ /^product:.+/)) next
       used = rem ~ /^[0-9]+(\.[0-9]+)?$/ && rem + 0 <= 100 ? sprintf("%.15g", 100 - rem) : "?"
       printf "%s\t%s\t%s\t%s\n", row[1], keyed ? row[2] : "*", used, scope
+    }
+    in_attention && /^  / {
+      sub(/^  /, ""); n = split($0, row, ",")
+      if (n >= 3 && row[1] != "" && row[2] != "") printf "%s\t%s\t?\tall_models\n", row[1], row[2]
     }
   ')
   [ -n "$rows" ] || return 1

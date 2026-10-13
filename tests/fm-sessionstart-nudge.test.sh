@@ -1094,15 +1094,16 @@ test_run_reports_a_failed_session_start_as_digest_text() {
   pass "run wrapper: a session start that cannot take the lock still opens the session and says so"
 }
 
-test_run_statusbar_uses_primary_or_recorded_fleet() {
+test_run_statusbar_uses_primary_or_detached_fleet() {
   local root="$TMP_ROOT/run-statusbar" real_tmux socket pane out
   command -v tmux >/dev/null 2>&1 || { echo 'skip: tmux not found'; return 0; }
   make_run_primary "$root"
   real_tmux=$(command -v tmux)
   socket="fm-sessionstart-status-$$"
+  : >"$root/empty.conf"
   cat >"$root/bin/tmux" <<SH
 #!/usr/bin/env bash
-exec "$real_tmux" -L "$socket" "\$@"
+exec "$real_tmux" -L "$socket" -f "$root/empty.conf" "\$@"
 SH
   chmod +x "$root/bin/tmux"
   PATH="$root/bin:$RUN_PATH" tmux new-session -d -s fleet -n primary 'sleep 600'
@@ -1161,11 +1162,15 @@ META
     || fail "relaunch kept a stale primary account"
   [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:fresh @fm_wt)" = run-statusbar ] \
     || fail "relaunch kept a stale primary worktree"
+  PATH="$root/bin:$RUN_PATH" tmux new-session -d -s firstmate -n detached 'sleep 600'
   PATH="$root/bin:$RUN_PATH" tmux set-option -t fleet status-right ''
+  PATH="$root/bin:$RUN_PATH" tmux set-option -t firstmate status-right ''
   out=$(unset TMUX_PANE; RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
   assert_not_contains "$out" 'READ-ONLY SESSION' "detached statusbar fixture lost its lock"
-  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" = '#{E:pane-border-format}' ] \
-    || fail "detached startup missed the recorded fleet session"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t firstmate status-right)" = '#{E:pane-border-format}' ] \
+    || fail "detached startup missed the firstmate session"
+  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" != '#{E:pane-border-format}' ] \
+    || fail "detached startup formatted an older recorded task session"
   [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t unrelated status-right)" != '#{E:pane-border-format}' ] \
     || fail "detached startup formatted an unrelated session"
   "$real_tmux" -L "$socket" kill-server
@@ -1194,7 +1199,7 @@ test_run_gate_and_scope_are_silent
 test_run_creates_missing_state_on_a_fresh_primary
 test_run_reports_a_state_dir_it_cannot_create
 test_run_reports_a_failed_session_start_as_digest_text
-test_run_statusbar_uses_primary_or_recorded_fleet
+test_run_statusbar_uses_primary_or_detached_fleet
 test_pi_startup_classifies_cli_continuations
 test_pi_sessionstart_generation_prerequisite
 test_pi_reload_releases_sessionstart_exit_listener

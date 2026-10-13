@@ -25,9 +25,10 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$WORK/bin" "$WORK/state"
+: >"$WORK/empty.conf"
 cat >"$WORK/bin/tmux" <<SH
 #!/usr/bin/env bash
-exec "$REAL_TMUX" -L "$SOCKET" "\$@"
+exec "$REAL_TMUX" -L "$SOCKET" -f "$WORK/empty.conf" "\$@"
 SH
 cat >"$WORK/bin/quota-axi" <<SH
 #!/usr/bin/env bash
@@ -53,6 +54,8 @@ quota[17]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runw
   claude,default,"model:claude-opus-5-5[1m]",90,0.8,through_reset,high,none,none
   claude,default,"model:claude-3-5-sonnet",9,0.8,through_reset,high,none,none
   claude,default,"product:special-product",18,0.8,through_reset,high,none,none
+attention[1]{provider,accountKey,scope,kind,detail,remedy}:
+  codex,openai-codex-attention,all,auth_required,login_required,none
 X
 SH
 chmod +x "$WORK/bin/tmux" "$WORK/bin/quota-axi"
@@ -71,7 +74,7 @@ render() {  # <session> <width> <expected>
     "$REAL_TMUX" -L "$OUTER" kill-server >/dev/null 2>&1 || true
     while "$REAL_TMUX" -L "$OUTER" has-session 2>/dev/null; do sleep 0.1; done
   fi
-  "$REAL_TMUX" -L "$OUTER" new-session -d -x "$2" -y 6 \
+  "$REAL_TMUX" -L "$OUTER" -f "$WORK/empty.conf" new-session -d -x "$2" -y 6 \
     "env -u TMUX '$REAL_TMUX' -L '$SOCKET' attach -t '$1'" || return 1
   while [ "$i" -lt 40 ]; do
     out=$("$REAL_TMUX" -L "$OUTER" capture-pane -p | grep -v '^[[:space:]]*$' | tail -3)
@@ -100,6 +103,14 @@ tmux new-session -d -t firstmate -s orca-later -x 150 -y 20
 [ "$(tmux show-options -wqv -t orca-later:fm-demo-task pane-border-status)" = bottom ] || fail "late view lost the detail line"
 [ "$(tmux show-options -qv -t orca-later status-right)" = '#{E:pane-border-format}' ] || fail "late view status-right missed the pane detail line"
 pass "apply preserves custom status and covers current and later grouped views"
+
+tmux new-session -d -s rename-base -n rename-task 'sleep 600'
+tmux new-session -d -t rename-base -s rename-view
+tmux rename-session -t rename-base renamed-base
+bash "$SB" apply renamed-base
+tmux new-session -d -t renamed-base -s renamed-later
+[ "$(tmux show-options -qv -t renamed-later status-right)" = '#{E:pane-border-format}' ] || fail "renamed group late view missed the detail line"
+pass "renamed groups still format later views"
 
 bash "$SB" usage firstmate:fm-demo-task >/dev/null
 i=0
@@ -271,6 +282,13 @@ bash "$SB" label firstmate:pi-unknown-account pi-unknown-account pi openai-codex
 awk -F '\t' '$1 == "codex" && $2 == "openai-codex-unknown" && $3 == "?" { found=1 } END { exit !found }' \
   "$WORK/state/statusbar-usage.txt" || fail "unknown exact account vanished from quota cache"
 pass "unknown exact account presence blocks another account's usage"
+
+tmux new-window -d -t firstmate: -n pi-attention-account "sleep 600"
+bash "$SB" label firstmate:pi-attention-account pi-attention-account pi openai-codex-attention/gpt-6-sol high /home/u/pi
+[ "$(bash "$SB" usage firstmate:pi-attention-account)" = 'u ?' ] || fail "attention-only account borrowed default quota"
+awk -F '\t' '$1 == "codex" && $2 == "openai-codex-attention" && $3 == "?" { found=1 } END { exit !found }' \
+  "$WORK/state/statusbar-usage.txt" || fail "attention-only account vanished from quota cache"
+pass "attention-only account presence blocks another account's usage"
 
 tmux new-window -d -t firstmate: -n primary "sleep 600"
 primary_pane=$(tmux display-message -p -t firstmate:primary '#{pane_id}')

@@ -723,16 +723,7 @@ if [ "$READ_ONLY" -eq 0 ]; then
     fi
     PRIMARY_FLEET_SESSION=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || PRIMARY_FLEET_SESSION=
   else
-    for PRIMARY_META in "$STATE"/*.meta; do
-      [ -f "$PRIMARY_META" ] || continue
-      PRIMARY_META_BACKEND=$(sed -n 's/^backend=//p' "$PRIMARY_META" | head -1)
-      [ "${PRIMARY_META_BACKEND:-tmux}" = tmux ] || continue
-      PRIMARY_META_WINDOW=$(sed -n 's/^window=//p' "$PRIMARY_META" | head -1)
-      case "$PRIMARY_META_WINDOW" in *:*) ;; *) continue ;; esac
-      PRIMARY_FLEET_SESSION=$(tmux display-message -p -t "$PRIMARY_META_WINDOW" '#{session_name}' 2>/dev/null) || PRIMARY_FLEET_SESSION=
-      [ -z "$PRIMARY_FLEET_SESSION" ] || break
-    done
-    if [ -z "$PRIMARY_FLEET_SESSION" ] && tmux has-session -t '=firstmate' 2>/dev/null; then
+    if tmux has-session -t '=firstmate' 2>/dev/null; then
       PRIMARY_FLEET_SESSION=firstmate
     fi
   fi
