@@ -1,0 +1,24 @@
+Real Firstmate scout launches
+live-auto-scout: claude --allow-dangerously-skip-permissions --permission-mode auto; task-channel --add-dir grants=4
+live-bypass-scout: claude --dangerously-skip-permissions; task-channel --add-dir grants=4
+live-strict-auto-scout: claude --permission-mode auto; task-channel --add-dir grants=4
+
+Claude CLI: default flag pair, Shift+Tab cycle
+⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+⏸ manual mode on · ← for agents
+⏵⏵ accept edits on (shift+tab to cycle) · ← for agents
+⏸ plan mode on (shift+tab to cycle) · ← for agents
+⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+
+Claude CLI: explicit auto, Shift+Tab cycle
+⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+⏸ manual mode on · ← for agents
+⏵⏵ accept edits on (shift+tab to cycle) · ← for agents
+⏸ plan mode on (shift+tab to cycle) · ← for agents
+⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+
+Claude CLI: explicit bypass
+⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+
+Adversarial config
+exit=1; token auto-allow-bypass refused; task metadata absent; no task window created

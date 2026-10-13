@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>Claude permission live capture</title><style>body{margin:0;padding:32px;background:#12151b;color:#e8e9ed;font:18px system-ui;max-width:1120px}h1{font-size:26px}h2{font-size:18px;color:#b3d8ff;margin-bottom:8px}section{margin:22px 0}pre{margin:0;padding:16px 20px;border:1px solid #3f4957;border-radius:8px;background:#20252e;color:#d9f0d0;font:16px/1.7 monospace;white-space:pre-wrap}</style><h1>Claude permission mode: live terminal capture</h1><p>Real Firstmate scout processes and Claude Code 2.1.296 UI, isolated tmux lab.</p><section><h2>Real Firstmate scout launches</h2><pre>live-auto-scout: claude --allow-dangerously-skip-permissions --permission-mode auto; task-channel --add-dir grants=4
+live-bypass-scout: claude --dangerously-skip-permissions; task-channel --add-dir grants=4
+live-strict-auto-scout: claude --permission-mode auto; task-channel --add-dir grants=4</pre></section><section><h2>Claude CLI: default flag pair, Shift+Tab cycle</h2><pre>⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+⏸ manual mode on · ← for agents
+⏵⏵ accept edits on (shift+tab to cycle) · ← for agents
+⏸ plan mode on (shift+tab to cycle) · ← for agents
+⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents</pre></section><section><h2>Claude CLI: explicit auto, Shift+Tab cycle</h2><pre>⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+⏸ manual mode on · ← for agents
+⏵⏵ accept edits on (shift+tab to cycle) · ← for agents
+⏸ plan mode on (shift+tab to cycle) · ← for agents
+⏵⏵ auto mode on (shift+tab to cycle) · ← for agents</pre></section><section><h2>Claude CLI: explicit bypass</h2><pre>⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents</pre></section><section><h2>Adversarial config</h2><pre>exit=1; token auto-allow-bypass refused; task metadata absent; no task window created</pre></section>
