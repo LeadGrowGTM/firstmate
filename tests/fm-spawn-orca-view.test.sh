@@ -109,12 +109,25 @@ SH
   done
 }
 
+install_identity_probe() {
+  local h
+  for h in codex claude; do
+    cat > "$1/$h" <<'SH'
+#!/bin/sh
+printf 'pane=%s tab=%s worktree=%s endpoint=%s env=%s version=%s\n' \
+  "${ORCA_PANE_KEY-unset}" "${ORCA_TAB_ID-unset}" "${ORCA_WORKTREE_ID-unset}" \
+  "${ORCA_AGENT_HOOK_ENDPOINT-unset}" "${ORCA_AGENT_HOOK_ENV-unset}" "${ORCA_AGENT_HOOK_VERSION-unset}"
+SH
+    chmod +x "$1/$h"
+  done
+}
+
 # The pane carries an inherited identity of some unrelated Orca terminal, as a
 # tmux server started inside an Orca terminal would hand every new window.
 run_launch() {  # <fakebin> <pane-exports> <launch>
   env -i HOME="$TMP_ROOT/pane-home" PATH="$1:$PATH" TERM=xterm TMUX=synthetic-pane \
-    ORCA_PANE_KEY=stale-tab:leaf ORCA_TAB_ID=stale-tab ORCA_WORKTREE_ID=stale-wt \
-    ORCA_AGENT_HOOK_ENDPOINT=/old/endpoint.env ORCA_AGENT_HOOK_ENV=old ORCA_AGENT_HOOK_VERSION=1 \
+    ORCA_PANE_KEY=tab-0:leaf ORCA_TAB_ID=tab-0 ORCA_WORKTREE_ID=wt-1 \
+    ORCA_AGENT_HOOK_ENDPOINT=/hooks/endpoint.env ORCA_AGENT_HOOK_ENV=production ORCA_AGENT_HOOK_VERSION=1 \
     ORCA_AGENT_HOOK_TOKEN=stale-token \
     /bin/sh -c "$2
 $3"
@@ -356,13 +369,13 @@ test_incomplete_identity_keeps_prior_tab() {
   assert_no_grep "terminal close --terminal term-0" "$VIEW_DIR/orca.log" \
     "the previous tab remains open"
   [ ! -s "$VIEW_DIR/killed" ] || fail "the prior tab's view session must remain"
-  install_env_probe "$FAKEBIN"
+  install_identity_probe "$FAKEBIN"
   launch=$(grep -E 'encode launch-brief|Firstmate operational input waiting' "$VIEW_DIR/literal" | tail -1)
   [ -n "$launch" ] || fail "the relaunch sent no replacement launch"
   seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$VIEW_DIR/keys")" "$launch") \
     || fail "the relaunch after incomplete identity failed to run"
-  assert_equals "pane=stale-tab:leaf token=stale-token" "$seen" \
-    "the relaunched agent keeps the previous tab's identity"
+  assert_equals "pane=tab-0:leaf tab=tab-0 worktree=wt-1 endpoint=/hooks/endpoint.env env=production version=1" "$seen" \
+    "the relaunched agent keeps all six identity fields of recorded term-0"
   pass "incomplete identity: the old tab, record, and agent identity survive relaunch"
 }
 

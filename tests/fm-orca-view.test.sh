@@ -60,17 +60,17 @@ case "$1 $2" in
         *) shift ;;
       esac
     done
-    n=$(grep -c 'terminal create' "$FM_FAKE_ORCA_LOG")
     seq=$(($(cat "$FM_FAKE_ORCA_LOG.seq" 2>/dev/null || echo 0) + 1))
     printf '%s\n' "$seq" > "$FM_FAKE_ORCA_LOG.seq"
-    tmux new-window -d -t "$FM_FAKE_ORCA_TAB_HOST:" -n "tab-$title-$seq" \
+    tab=$(tmux new-window -d -P -F '#{window_id}' -t "$FM_FAKE_ORCA_TAB_HOST:" -n "tab-$title-$seq" \
       env -u TMUX -u TMUX_PANE \
-      ORCA_PANE_KEY="tab-$n:leaf-$n" ORCA_TAB_ID="tab-$n" ORCA_WORKTREE_ID="wt-1" \
+      ORCA_PANE_KEY="tab-$seq:leaf-$seq" ORCA_TAB_ID="tab-$seq" ORCA_WORKTREE_ID="wt-1" \
       ORCA_AGENT_HOOK_ENDPOINT="/home/u/.orca-wsl/agent-hooks/x/endpoint.env" \
       ORCA_AGENT_HOOK_ENV=production ORCA_AGENT_HOOK_VERSION=1 \
       ORCA_AGENT_HOOK_PORT=4242 ORCA_AGENT_HOOK_TOKEN=not-for-the-pane \
-      TERM=xterm sh -c "$cmd; sleep 30"
-    printf '{"ok":true,"result":{"terminal":{"handle":"term-%s","tabId":"tab-%s"}}}\n' "$n" "$n"
+      TERM=xterm sh -c "$cmd; sleep 30")
+    printf 'term-%s\t%s\n' "$seq" "$tab" >> "$FM_FAKE_ORCA_LOG.handles"
+    printf '{"ok":true,"result":{"terminal":{"handle":"term-%s","tabId":"tab-%s"}}}\n' "$seq" "$seq"
     ;;
   "terminal close")
     shift 2
@@ -81,8 +81,17 @@ case "$1 $2" in
         *) shift ;;
       esac
     done
+    tab=$(awk -F '\t' -v handle="$handle" '$1 == handle { print $2; exit }' "$FM_FAKE_ORCA_LOG.handles" 2>/dev/null)
+    if [ -z "$tab" ]; then
+      printf '{"ok":false,"error":{"code":"unknown_terminal"}}\n'
+      exit 1
+    fi
     if [ "$handle" = "${FM_FAKE_ORCA_PINNED:-}" ]; then
       printf '{"ok":false,"error":{"code":"terminal_tab_pinned","message":"tab is pinned"}}\n'
+      exit 1
+    fi
+    if ! tmux kill-window -t "$tab" 2>/dev/null; then
+      printf '{"ok":false,"error":{"code":"unknown_terminal"}}\n'
       exit 1
     fi
     printf '{"ok":true,"result":{"closed":true,"ptyKilled":false}}\n'
@@ -103,6 +112,8 @@ run_view() {  # <args...>: off WSL unless the caller sets FM_WSL_INTEROP_DIR
     FM_WSL_INTEROP_DIR="${FM_WSL_INTEROP_DIR:-$TMP_ROOT/no-wsl}" \
     "$VIEW" "$@"
 }
+
+returned_handle() { printf '%s\n' "$1" | sed -n 's/^handle=//p'; }
 
 wait_for_session() {  # <name>
   local i=0
@@ -304,6 +315,7 @@ SH
   : > "$ORCA_LOG"
   out=$(FM_WSL_INTEROP_DIR="$wsl" FM_WSL_INTEROP_PROBE="$probe" \
     run_view open --target firstmate:fm-dev --view-session orca-wsl) || fail "WSL open failed: $out"
+  WSL_HANDLE=$(returned_handle "$out")
   assert_grep "WSL_INTEROP=$wsl/2_interop terminal create" "$ORCA_LOG" \
     "Orca is called through the lowest-numbered socket that answers"
   assert_grep '--shell wsl.exe' "$ORCA_LOG" "on WSL the tab runs the WSL shell"
@@ -314,13 +326,14 @@ SH
 # grouped viewer that sorts before the owning session lists the window first,
 # so the tab must still be named after the session that owns it.
 test_window_helper() {
-  local wsl="$TMP_ROOT/wsl-window" probe="$TMP_ROOT/probe-window" dead="$TMP_ROOT/probe-dead" out status n
+  local wsl="$TMP_ROOT/wsl-window" probe="$TMP_ROOT/probe-window" dead="$TMP_ROOT/probe-dead" out status n handle
   "$SHIM/tmux" new-session -d -t firstmate -s aaa-view
   assert_equals aaa-view "$("$SHIM/tmux" list-windows -a -F '#{window_id} #{session_name}' | awk -v id="$DEV_ID" '$1 == id { print $2; exit }')" \
     "the fixture lists the grouped viewer first"
   n=${DEV_ID#@}
   : > "$ORCA_LOG"
   out=$(run_view window "$DEV_ID") || fail "window failed: $out"
+  handle=$(returned_handle "$out")
   assert_contains "$out" "view_session=orca-w$n" "the view session is named after the window id"
   assert_contains "$out" "handle=term-" "the helper prints the tab's handle"
   assert_grep "terminal create --worktree path:$TMP_ROOT/code-root --title firstmate:fm-dev" "$ORCA_LOG" \
@@ -328,10 +341,11 @@ test_window_helper() {
   wait_for_window "orca-w$n" "$DEV_ID" || fail "the helper's view must show exactly that window"
   assert_equals "$DEV_ID" "$("$SHIM/tmux" show-options -v -t "=orca-w$n:" @fm_view_window)" \
     "the helper's view follows the window by id"
-  run_view close --handle term-0 --view-session "orca-w$n" >/dev/null 2>&1 || fail "the helper's tab did not close"
+  run_view close --handle "$handle" --view-session "orca-w$n" >/dev/null 2>&1 || fail "the helper's tab did not close"
   out=$(run_view window "$CLAUDE_ID" --title primary) || fail "window with a title failed: $out"
+  handle=$(returned_handle "$out")
   assert_grep '--title primary' "$ORCA_LOG" "--title names the tab"
-  run_view close --handle term-0 --view-session "orca-w${CLAUDE_ID#@}" >/dev/null 2>&1 || fail "the titled tab did not close"
+  run_view close --handle "$handle" --view-session "orca-w${CLAUDE_ID#@}" >/dev/null 2>&1 || fail "the titled tab did not close"
   expect_code 1 "$(run_view window @99999 >/dev/null 2>&1; echo $?)" "an unknown window id is refused"
   expect_code 2 "$(run_view window 5 >/dev/null 2>&1; echo $?)" "a bare index is not a window id"
   expect_code 2 "$(run_view window @5x >/dev/null 2>&1; echo $?)" "a malformed id is invalid use"
@@ -349,9 +363,10 @@ SH
   : > "$ORCA_LOG"
   out=$(WSL_INTEROP="$wsl/1_interop" FM_WSL_INTEROP_DIR="$wsl" FM_WSL_INTEROP_PROBE="$probe" \
     run_view window "$DEV_ID") || fail "window on WSL failed: $out"
+  handle=$(returned_handle "$out")
   assert_grep "WSL_INTEROP=$wsl/3_interop terminal create" "$ORCA_LOG" \
     "Orca is reached through the socket that answers, not the inherited one"
-  run_view close --handle term-0 --view-session "orca-w$n" >/dev/null 2>&1 || fail "the WSL tab did not close"
+  run_view close --handle "$handle" --view-session "orca-w$n" >/dev/null 2>&1 || fail "the WSL tab did not close"
   out=$(FM_WSL_INTEROP_DIR="$wsl" FM_WSL_INTEROP_PROBE="$dead" run_view window "$DEV_ID" 2>&1)
   status=$?
   expect_code 3 "$status" "no answering interop socket means Orca is unreachable"
@@ -366,24 +381,58 @@ SH
 }
 
 test_close() {
-  local out status windows
+  local out status windows handle pinned_handle
   wait_for_session orca-wsl || fail "fixture view session missing"
   : > "$ORCA_LOG"
-  out=$(run_view close --handle term-7 --view-session orca-wsl 2>&1) || fail "close failed: $out"
-  assert_grep "terminal close --terminal term-7 --tab --json" "$ORCA_LOG" "the tab is closed by its handle"
+  out=$(run_view close --handle "$WSL_HANDLE" --view-session orca-wsl 2>&1) || fail "close failed: $out"
+  assert_grep "terminal close --terminal $WSL_HANDLE --tab --json" "$ORCA_LOG" "the tab is closed by its handle"
   "$SHIM/tmux" has-session -t '=orca-wsl' 2>/dev/null && fail "close must remove the grouped view session it was given"
   "$SHIM/tmux" has-session -t '=firstmate' 2>/dev/null || fail "close must never remove the base session"
   windows=$("$SHIM/tmux" list-windows -t '=firstmate' | wc -l | tr -d ' ')
-  out=$(run_view close --handle term-8 --view-session firstmate 2>&1) || fail "close failed: $out"
+  out=$(run_view open --target firstmate:fm-dev --view-session orca-base-test) || fail "base test open failed: $out"
+  handle=$(returned_handle "$out")
+  out=$(run_view close --handle "$handle" --view-session firstmate 2>&1) || fail "close failed: $out"
   "$SHIM/tmux" has-session -t '=firstmate' 2>/dev/null || fail "a base session named as the view session must survive"
   assert_equals "$windows" "$("$SHIM/tmux" list-windows -t '=firstmate' | wc -l | tr -d ' ')" \
     "the base session keeps its windows"
-  out=$(FM_FAKE_ORCA_PINNED=term-9 run_view close --handle term-9 --view-session orca-dev 2>&1)
+  "$SHIM/tmux" kill-session -t '=orca-base-test'
+  out=$(run_view open --target firstmate:fm-dev --view-session orca-pin-test) || fail "pinned test open failed: $out"
+  pinned_handle=$(returned_handle "$out")
+  out=$(FM_FAKE_ORCA_PINNED="$pinned_handle" run_view close --handle "$pinned_handle" --view-session orca-pin-test 2>&1)
   status=$?
   expect_code 3 "$status" "a pinned tab is reported, not closed"
   assert_contains "$out" "pinned" "the note names the pinned tab"
-  "$SHIM/tmux" has-session -t '=orca-dev' 2>/dev/null || fail "a pinned tab keeps its view session"
-  pass "close: closes by handle, removes only a grouped view session, and leaves a pinned tab and its session open"
+  "$SHIM/tmux" has-session -t '=orca-pin-test' 2>/dev/null || fail "a pinned tab keeps its view session"
+  out=$(run_view close --handle term-unknown --view-session orca-pin-test 2>&1)
+  expect_code 3 "$?" "the fake rejects a handle no tab returned"
+  "$SHIM/tmux" has-session -t '=orca-pin-test' 2>/dev/null || fail "an unknown handle cannot close a view"
+  run_view close --handle "$pinned_handle" --view-session orca-pin-test >/dev/null 2>&1 || fail "the unpinned tab did not close"
+  pass "close: closes known handles, preserves base sessions, and refuses pinned or unknown handles"
+}
+
+wait_for_attached_count() {
+  local i=0
+  while [ "$i" -lt 100 ]; do
+    [ "$("$SHIM/tmux" display-message -p -t "=$1:" '#{session_attached}' 2>/dev/null)" = "$2" ] && return 0
+    sleep 0.05
+    i=$((i + 1))
+  done
+  return 1
+}
+
+test_close_keeps_shared_view() {
+  local first second first_handle second_handle
+  first=$(run_view open --target firstmate:fm-dev --view-session orca-shared) || fail "first shared tab did not open"
+  second=$(run_view open --target firstmate:fm-dev --view-session orca-shared) || fail "second shared tab did not open"
+  first_handle=$(returned_handle "$first")
+  second_handle=$(returned_handle "$second")
+  wait_for_attached_count orca-shared 2 || fail "both tabs did not attach to the shared view"
+  run_view close --handle "$first_handle" --view-session orca-shared >/dev/null 2>&1 || fail "first tab did not close"
+  "$SHIM/tmux" has-session -t '=orca-shared' 2>/dev/null || fail "closing one tab removed the shared view"
+  wait_for_attached_count orca-shared 1 || fail "the second tab did not stay attached"
+  run_view close --handle "$second_handle" --view-session orca-shared >/dev/null 2>&1 || fail "second tab did not close"
+  "$SHIM/tmux" has-session -t '=orca-shared' 2>/dev/null && fail "the view remained after its last tab closed"
+  pass "close: a shared view lives until its last attached tab closes"
 }
 
 # The view follows its agent's window by id. This is the incident shape: a
@@ -458,4 +507,5 @@ test_failed_open_restores_existing_view
 test_unavailable_orca_steps_aside
 test_wsl_uses_live_interop
 test_window_helper
+test_close_keeps_shared_view
 test_close
