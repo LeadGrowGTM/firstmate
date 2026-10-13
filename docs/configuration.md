@@ -1393,6 +1393,63 @@ The format and behavior are the same there, and a home without the file lists no
 
 Regression coverage is in [`tests/fm-brief.test.sh`](../tests/fm-brief.test.sh).
 
+## Recurring intake (config/schedules.json)
+
+The optional home-local, gitignored `config/schedules.json` declares enqueue-only recurring intent.
+It is not inherited, and an absent file or disabled entries enable no work.
+Nothing in a checkout automatically writes this file, arms a check, or enables a host timer.
+[`bin/fm-schedule-check.sh`](../bin/fm-schedule-check.sh) owns due calculation, occurrence identity, journal receipts, bounded execution, replay, and explicit arm/disarm commands.
+The existing authenticated watcher check cadence supplies the poll; no vendor scheduler or new daemon is needed.
+Python 3.9 or newer with IANA timezone data must be available in the watcher's environment.
+
+```json
+{
+  "version": 1,
+  "schedules": [
+    {
+      "id": "domain-freshness",
+      "enabled": false,
+      "home": "/absolute/owning/firstmate-home",
+      "project": "firstmate",
+      "delivery": "scout",
+      "intent": "Collect permitted domain freshness evidence for review",
+      "brief": "/absolute/owning/firstmate-home/data/domain-freshness-brief.md",
+      "cadence": {
+        "kind": "daily-local",
+        "at": "07:00",
+        "timezone": "America/Toronto"
+      }
+    }
+  ]
+}
+```
+
+This section owns the configuration format.
+The root requires exactly integer `version: 1` and `schedules`, an array of at most 100 entries.
+Each entry requires the fields shown, selecting exactly one absolute `brief` pointer or lowercase `task_type` slug.
+The check freezes a home-data brief's bytes or the existing task-type owner's rendered brief section as request input, and never executes input commands.
+An absolute `brief` must remain inside the effective home's data directory and name a regular single-link file of at most 64 KiB.
+Worker profiles are omitted from task-type snapshots so current routing still governs intake.
+`id` is a unique lowercase identifier of at most 63 characters using letters, digits and plain dashes, beginning with a letter or digit.
+`enabled` is an explicit boolean, `home` must exactly match the absolute effective `FM_HOME`, and `project` names the project to resolve through normal intake.
+`delivery` is the intended `no-mistakes`, `direct-PR`, `local-only`, or knowledge-only `scout` path, subject to the existing task lifecycle's authority.
+`intent` is the authorized recurring task description, not authority for additional external actions.
+The string fields are nonempty single lines of at most 4096 characters.
+Daily-local cadence requires exactly `kind`, valid 24-hour `at` (`HH:MM`), and an IANA `timezone`.
+An interval cadence instead requires exactly `{"kind":"interval","seconds":7200}`, with integer seconds from 60 through 31536000; interval slots use UTC epoch arithmetic.
+Unknown fields, duplicate ids, invalid timezone data, unsafe files, or malformed entries refuse the entire check before new publication.
+The configuration is bounded to 1 MiB and the journal to 16 MiB, including frozen brief snapshots; both must be regular single-link files.
+Commands, credentials, accounts, harnesses, worker models and vendor trigger ids are not accepted fields.
+The owning supervisor uses current routing and quota evidence at intake rather than freezing a worker subscription in the schedule.
+
+Due occurrences are filed or reused through [`bin/fm-tasks-axi.sh`](../bin/fm-tasks-axi.sh) as ordinary Queued items containing the frozen brief pointer and occurrence digest.
+The existing task lifecycle owns supervisor judgement, dispatch, capacity and completion; no new skill or always-loaded rule is needed.
+Disabling or disarming prevents further recurring intake and preserves already filed tasks under that lifecycle.
+An attempted task that disappears from the active backlog is retained pending for ordinary custody reconciliation, including a task completed and archived between polls, rather than recreated.
+Activation requires a separate approved home-local configuration and explicit check arming; this feature supplies no branch-write or operational-update authority.
+Enqueue-only intake does not implement worker failover, PR updates, or domain collection.
+Regression coverage is in [`tests/fm-schedule-check.test.sh`](../tests/fm-schedule-check.test.sh).
+
 ## Typed dispatch resolution (.env TYPESAFE_API_KEY)
 
 `bin/fm-dispatch-resolve.sh` resolves one concrete crewmate or scout profile from a written brief with typesafe.ai's System One model (Jev), so the rule match that firstmate otherwise reasons out in its own context becomes one short tool turn.
