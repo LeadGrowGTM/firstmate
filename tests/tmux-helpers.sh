@@ -10,6 +10,13 @@
 fm_test_tmux_cleanup() {
   [ -n "${FM_TEST_TMUX_ROOT:-}" ] || return 0
   case "$FM_TEST_TMUX_ROOT" in /tmp/fmt.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;; *) return 1 ;; esac
+  if [ -f "$FM_TEST_TMUX_ROOT/children" ]; then
+    local child_root
+    while IFS= read -r child_root; do
+      [ -n "$child_root" ] && [ "$child_root" != "$FM_TEST_TMUX_ROOT" ] || continue
+      FM_TEST_TMUX_ROOT="$child_root" fm_test_tmux_cleanup
+    done < "$FM_TEST_TMUX_ROOT/children"
+  fi
   if [ -n "${FM_TEST_TMUX_REAL:-}" ] && [ -d "$FM_TEST_TMUX_ROOT" ]; then
     local socket
     for socket in "$FM_TEST_TMUX_ROOT/s/tmux-$(id -u)"/*; do
@@ -115,6 +122,7 @@ while [ "$#" -gt 0 ]; do
   if [ "$opt" = -L ]; then
     [ -n "$value" ] && [ "$value" != default ] && [[ "$value" != */* ]] || refuse 'default or invalid named socket'
     [ ! -L "$dir/tmux-$(id -u)" ] && [ ! -L "$dir/tmux-$(id -u)/$value" ] || refuse 'unsafe named socket'
+    [ "$dir" = "$fixture_dir" ] || explicit_sockets+=("$dir/tmux-$(id -u)/$value")
   else
     [ -n "$value" ] || refuse 'missing socket selector'
     case "$value" in /*) socket_path=$value ;; *) socket_path="$(pwd -P)/$value" ;; esac

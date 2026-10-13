@@ -487,7 +487,7 @@ SH
 
 test_timed_suite_reaps_child_tmux() (
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip: tmux not installed'; exit 0; }
-  local dir="$TMP_ROOT/tmux-runner-timeout" repo mode rc root server_pid i status
+  local dir="$TMP_ROOT/tmux-runner-timeout" repo mode topology label rc root server_pid i status
   local -a jobs
   repo="$dir/repo"
   mkdir -p "$repo/bin" "$repo/tests"
@@ -498,6 +498,10 @@ test_timed_suite_reaps_child_tmux() (
   cat > "$repo/tests/fm-test-run.test.sh" <<'SH'
 #!/usr/bin/env bash
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh" || exit 1
+if [ "${FM_TEST_NESTED:-0}" = 1 ] && [ "${FM_TEST_LEAF:-0}" != 1 ]; then
+  FM_TEST_LEAF=1 bin/fm-test-run.sh --jobs 1 --per-script-timeout-secs 30 tests/fm-test-run.test.sh
+  exit $?
+fi
 printf '%s\n' "$FM_TEST_TMUX_ROOT" > "$FM_TEST_CHILD_ROOT_FILE"
 tmux new-session -d -s disposable 'exec sleep 600' || exit 1
 tmux display-message -p '#{pid}' > "$FM_TEST_CHILD_SERVER_PID_FILE"
@@ -505,6 +509,8 @@ mkdir -m 700 "$FM_TEST_TMUX_ROOT/recorded" || exit 1
 printf '%s\n' "$$" > "$FM_TEST_TMUX_ROOT/recorded/.fm-test-fixture"
 tmux -S "$FM_TEST_TMUX_ROOT/recorded/dedicated.sock" new-session -d -s explicit 'exec sleep 600' || exit 1
 tmux -S "$FM_TEST_TMUX_ROOT/recorded/dedicated.sock" display-message -p '#{pid}' >> "$FM_TEST_CHILD_SERVER_PID_FILE"
+TMUX_TMPDIR="$FM_TEST_TMUX_ROOT/recorded" tmux -L fm-lab new-session -d -s lab-named 'exec sleep 600' || exit 1
+TMUX_TMPDIR="$FM_TEST_TMUX_ROOT/recorded" tmux -L fm-lab display-message -p '#{pid}' >> "$FM_TEST_CHILD_SERVER_PID_FILE"
 trap '' TERM
 sleep 600
 SH
@@ -520,28 +526,32 @@ SH
   trap cleanup_timed_fixture EXIT
   for mode in serial captured; do
     if [ "$mode" = serial ]; then jobs=(--jobs 1); else jobs=(--jobs 2); fi
-    rc=0
-    ( cd "$repo" && FM_TEST_CHILD_ROOT_FILE="$dir/root.$mode" \
-      FM_TEST_CHILD_SERVER_PID_FILE="$dir/pid.$mode" \
-      bin/fm-test-run.sh "${jobs[@]}" --per-script-timeout-secs 2 \
-      tests/fm-test-run.test.sh ) > "$dir/$mode.out" 2>&1 || rc=$?
-    [ "$rc" -eq 1 ] || fail "$mode timed runner returned $rc: $(cat "$dir/$mode.out")"
-    assert_grep 'exit=124' "$dir/$mode.out" "$mode suite did not time out"
-    [ -s "$dir/root.$mode" ] && [ "$(wc -l < "$dir/pid.$mode")" -eq 2 ] \
-      || fail "$mode suite did not start both disposable servers"
-    root=$(cat "$dir/root.$mode")
-    [ ! -e "$root" ] || fail "$mode runner left the child socket root"
-    while IFS= read -r server_pid; do
-      for i in $(seq 1 50); do
-        status=$(ps -p "$server_pid" -o stat= 2>/dev/null || true)
-        status=${status//[[:space:]]/}
-        case "$status" in ''|Z*) break ;; esac
-        sleep 0.1
-      done
-      case "$status" in ''|Z*) ;; *) fail "$mode runner left server $server_pid running" ;; esac
-    done < "$dir/pid.$mode"
+    for topology in direct nested; do
+      label="$mode.$topology"
+      rc=0
+      ( cd "$repo" && FM_TEST_NESTED=$([ "$topology" = nested ] && printf 1 || printf 0) \
+        FM_TEST_CHILD_ROOT_FILE="$dir/root.$label" \
+        FM_TEST_CHILD_SERVER_PID_FILE="$dir/pid.$label" \
+        bin/fm-test-run.sh "${jobs[@]}" --per-script-timeout-secs 3 \
+        tests/fm-test-run.test.sh ) > "$dir/$label.out" 2>&1 || rc=$?
+      [ "$rc" -eq 1 ] || fail "$label timed runner returned $rc: $(cat "$dir/$label.out")"
+      assert_grep 'exit=124' "$dir/$label.out" "$label suite did not time out"
+      [ -s "$dir/root.$label" ] && [ "$(wc -l < "$dir/pid.$label")" -eq 3 ] \
+        || fail "$label suite did not start three disposable servers"
+      root=$(cat "$dir/root.$label")
+      [ ! -e "$root" ] || fail "$label runner left the child socket root"
+      while IFS= read -r server_pid; do
+        for i in $(seq 1 50); do
+          status=$(ps -p "$server_pid" -o stat= 2>/dev/null || true)
+          status=${status//[[:space:]]/}
+          case "$status" in ''|Z*) break ;; esac
+          sleep 0.1
+        done
+        case "$status" in ''|Z*) ;; *) fail "$label runner left server $server_pid running" ;; esac
+      done < "$dir/pid.$label"
+    done
   done
-  pass 'streamed and captured timeouts reap named and explicit child tmux servers'
+  pass 'streamed and captured timeouts reap nested named and explicit child tmux servers'
 )
 
 test_standalone_afk_avoids_operator_socket() (

@@ -2477,15 +2477,7 @@ run_script_bounded() (  # <script> <out> <stream> <id>
   FM_TEST_TMUX_CHILD_REGISTRY="$FM_TEST_TMUX_ROOT/children"
   : > "$FM_TEST_TMUX_CHILD_REGISTRY"
   export FM_TEST_TMUX_CHILD_REGISTRY
-  cleanup_bounded_tmux() {
-    local child_root
-    while IFS= read -r child_root; do
-      [ -n "$child_root" ] || continue
-      FM_TEST_TMUX_ROOT="$child_root" fm_test_tmux_cleanup
-    done < "$FM_TEST_TMUX_CHILD_REGISTRY"
-    fm_test_tmux_cleanup
-  }
-  trap cleanup_bounded_tmux EXIT
+  trap fm_test_tmux_cleanup EXIT
   local rc
   : "$id"
   set +e
