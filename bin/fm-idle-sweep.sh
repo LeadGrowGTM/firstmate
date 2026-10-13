@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run one opt-in idle batch inside the existing supervision heartbeat.
+# Run one idle batch inside the existing supervision heartbeat.
 # Usage: fm-idle-sweep.sh
 # docs/configuration.md owns the two per-home configuration schemas.
-# Only explicitly enrolled, reversible, prepared queued tasks may start.
+# Only reversible, prepared queued tasks may start.
 # Output and state/idle-sweep.status name the successful starts in one line.
 # Exit 0 includes safe no-ops; invalid config or failed evidence exits nonzero.
 # Spawn errors stop the batch without retrying a different backend or model.
@@ -19,26 +19,28 @@ case "${1:-}" in
   *) echo 'usage: fm-idle-sweep.sh' >&2; exit 2 ;;
 esac
 fm_targets_init
-[ -f "$CONFIG/idle-sweep.json" ] || exit 0
-jq -se 'length == 1 and (.[0] | type == "object" and (keys - ["enabled","steps"] | length == 0) and
-  (.enabled | type) == "boolean" and (.steps | type) == "array" and
-  ([.steps[].id] | length) == ([.steps[].id] | unique | length) and
-  all(.steps[]; type == "object" and (keys - ["id","target","mode","reversible"] | length == 0) and
+config='{"enabled":true,"steps":[]}'
+if [ -e "$CONFIG/idle-sweep.json" ]; then
+  jq -se 'length == 1 and (.[0] | type == "object" and (keys - ["enabled","steps"] | length == 0) and
+  (if has("enabled") then (.enabled | type) == "boolean" else true end) and
+  (if has("steps") then (.steps | type) == "array" else true end) and
+  ([(.steps // [])[].id] | length) == ([(.steps // [])[].id] | unique | length) and
+  all((.steps // [])[]; type == "object" and (keys - ["id","target","mode","reversible"] | length == 0) and
     (.id | type) == "string" and (.id | test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
     .reversible == true and
     (.target as $t | ["red_default_branches","open_prs","stale_backlog","backlog"] | index($t)) != null and
     (.mode as $m | ["no-mistakes","direct-PR","local-only","scout"] | index($m)) != null))
-' "$CONFIG/idle-sweep.json" >/dev/null || { echo 'fm-idle-sweep: invalid configuration' >&2; exit 2; }
-[ "$(jq -r .enabled "$CONFIG/idle-sweep.json")" = true ] || exit 0
-# Independently linted runtime owners, loaded only after opting in.
+  ' "$CONFIG/idle-sweep.json" >/dev/null || { echo 'fm-idle-sweep: invalid configuration' >&2; exit 2; }
+  config=$(jq -c '{enabled:(if has("enabled") then .enabled else true end),steps:(.steps // [])}' "$CONFIG/idle-sweep.json")
+fi
+[ "$(printf '%s' "$config" | jq -r .enabled)" = true ] || exit 0
+# Independently linted runtime owners, loaded only when running.
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/fm-classify-lib.sh"
-# shellcheck source=/dev/null
-. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-brief-heading-lib.sh
 . "$SCRIPT_DIR/fm-brief-heading-lib.sh"
 mkdir -p "$STATE"
@@ -81,18 +83,25 @@ quota_clear || exit 0
 targets=$(fm_targets_collect "$snapshot")
 # Red-branch evidence must be complete before a lower-priority task may start.
 printf '%s' "$targets" | jq -e '.targets[] | select(.id == "red_default_branches") | .gap != null' >/dev/null || exit 0
-candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" \
-  --slurpfile config "$CONFIG/idle-sweep.json" '
-  [$config[0].steps[] as $step |
-    $snapshot.backlog.records[] |
-    select(.structured and .id == $step.id and .state == "queued" and .hold_reason == null and
+candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" --argjson config "$config" '
+  [$snapshot.backlog.records[] |
+    select(.structured and (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
+      .state == "queued" and .hold_reason == null and
       .hold_kind == null and (.unresolved_blocker_ids | length) == 0 and
       (.kind == null or .kind == "task" or .kind == "ship" or .kind == "scout")) |
     . as $row |
+    ([$config.steps[] | select(.id == $row.id)][0] //
+      {id:$row.id,mode:null,target:
+        (if any($targets.repos[]; .project == $row.repo and .red_default_branches == 1) and
+            any($targets.targets[]; .id == "red_default_branches" and .gap != null and .gap > 0)
+         then "red_default_branches"
+         elif ($targets.stale_ids | index($row.id)) != null and
+            any($targets.targets[]; .id == "stale_backlog" and .gap != null and .gap > 0)
+         then "stale_backlog" else "backlog" end)}) as $step |
     select($step.target == "backlog" or any($targets.targets[]; .id == $step.target and .gap != null and .gap > 0)) |
     select($step.target != "red_default_branches" or any($targets.repos[]; .project == $row.repo and .red_default_branches == 1)) |
     select($step.target != "stale_backlog" or ($targets.stale_ids | index($row.id)) != null) |
-    $step + {repo:.repo,order:.order,rank:
+    $step + {repo:$row.repo,order:$row.order,row:$row,rank:
       (if $step.target == "red_default_branches" then 0 elif $step.target == "backlog" then 2 else 1 end)}]
   | sort_by(.rank,.order)
 ')
@@ -102,7 +111,7 @@ while IFS= read -r candidate; do
   [ "${#started[@]}" -lt 3 ] || break
   id=$(printf '%s' "$candidate" | jq -r .id)
   project=$(printf '%s' "$candidate" | jq -r '.repo // ""')
-  mode=$(printf '%s' "$candidate" | jq -r .mode)
+  mode=$(printf '%s' "$candidate" | jq -r '.mode // ""')
   # Local clone names cannot be paths or shell programs; no cross-home work.
   case "$project" in ''|.*|*[!A-Za-z0-9._-]*) continue ;; esac
   [ -d "$PROJECTS/$project" ] && [ ! -L "$PROJECTS/$project" ] || continue
@@ -110,15 +119,28 @@ while IFS= read -r candidate; do
   brief="$DATA/$id/brief.md"
   [ ! -L "$DATA/$id" ] || continue
   [ -f "$brief" ] && [ ! -L "$brief" ] || continue
+  quota_clear || break
+  if [ -e "$CONFIG/idle-sweep.json" ]; then
+    [ "$(jq -c '{enabled:(if has("enabled") then .enabled else true end),steps:(.steps // [])}' "$CONFIG/idle-sweep.json")" = "$config" ] || break
+  else
+    [ "$config" = '{"enabled":true,"steps":[]}' ] || break
+  fi
+  current=$(fm_targets_backlog) || { failed=1; break; }
+  printf '%s' "$current" | jq -e --argjson candidate "$candidate" \
+    'any(.backlog.records[]; .structured and .id == $candidate.id and . == $candidate.row)' >/dev/null || continue
   spec=$(fm_brief_task_heading_body "$brief" '## Firstmate spec')
   printf '%s\n' "$spec" | grep -Fxq 'Never merge, deploy, spend money, contact a client, answer a captain decision, or alter a captain-held item.' || continue
   printf '%s\n' "$spec" | grep -Fxq 'If the task needs one of those actions, report needs-decision to firstmate and stop.' || continue
-  [ -z "$(status_open_decisions "$STATE/$id.status")" ] || continue
-  # Re-read the backend immediately before dispatch: enrollment never overrides
-  # a later hold, block, or start made while the forge/quota reads were running.
-  quota_clear || break
-  fm_backlog_row_probe "$DATA" "$id" || { failed=1; break; }
-  [ "$FM_BACKLOG_ROW_STATE" = 'queued no no' ] && [ -z "$FM_BACKLOG_ROW_HOLD_KIND" ] || continue
+  if [ -z "$mode" ]; then
+    if [ "$(printf '%s' "$candidate" | jq -r '.row.kind // ""')" = scout ]; then
+      mode=scout
+    else
+      mode=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$brief" | head -n 1)
+    fi
+  fi
+  case "$mode" in no-mistakes|direct-PR|local-only|scout) ;; *) continue ;; esac
+  brief_mode=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$brief" | head -n 1)
+  [ "$mode" = scout ] || [ "$mode" = "$brief_mode" ] || continue
   flags=(--mode "$mode" --yolo off)
   if [ "$mode" = scout ]; then
     flags=(--scout)

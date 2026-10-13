@@ -165,7 +165,7 @@ This preference is local to each Firstmate home and is not part of secondmate in
 ## Idle sweep and standing targets
 
 The idle sweep runs inside the existing watcher's supervision heartbeat, across all primary harnesses, without another daemon.
-It is off by default and reads only this home's backlog, enrolled briefs, recorded worker endpoints, and project clones.
+It runs by default and reads only this home's backlog, prepared briefs, recorded worker endpoints, and project clones.
 Secondmate endpoints are supervisors and do not count as local workers; no child home is inspected.
 Runtime backends without the canonical recovery-grade agent classifier conservatively hold the sweep when they have a recorded worker.
 
@@ -188,7 +188,7 @@ Non-GitHub or unreadable clones make those metrics unknown instead of silently d
 Default-branch failures include failed commit statuses and completed unsuccessful check runs on the current head; pending checks alone are not red.
 The local backlog metric counts unfinished structured rows unchanged for at least `stale_days`, including held rows for visibility, without authorizing work on them.
 The initial implementation supports the local markdown backlog; another tasks-axi backend is refused explicitly.
-The enabled heartbeat records row content and its last observed change in `state/idle-sweep-backlog.json`.
+The heartbeat records row content and its last observed change in `state/idle-sweep-backlog.json`.
 The first observation establishes the age baseline; row creation dates are not used as evidence of last change.
 The evaluator reports unknown before a row is observed or after its content changes between observations.
 
@@ -197,7 +197,8 @@ Its `--json` output also lists per-project forge values and known stale row IDs.
 Missing forge or observation evidence remains unknown.
 Portable behavior fixtures live in `tests/fm-idle-sweep.test.sh`.
 
-`config/idle-sweep.json` owns enabling and enrollment of already prepared reversible next steps:
+An absent `config/idle-sweep.json` uses the default targets and considers every prepared queued task with a reversible brief and delivery contract.
+The file can switch the sweep off or override a named step's target and mode:
 
 ```json
 {
@@ -211,28 +212,29 @@ Portable behavior fixtures live in `tests/fm-idle-sweep.test.sh`.
 }
 ```
 
-To turn it on, prepare the named queued tasks and their normal briefs, review their authority and permissions, then write this file in the intended home with `enabled: true`.
-Enrollment asserts that the brief authorizes reversible work only; free-form backlog titles alone never confer that authority.
-Each enrolled brief must contain these exact lines in its Firstmate specification:
+Prepare queued tasks and their normal briefs with the right authority and permissions.
+Free-form backlog titles alone never confer reversible-work authority.
+Each prepared brief must contain these exact lines in its Firstmate specification:
 
 ```text
 Never merge, deploy, spend money, contact a client, answer a captain decision, or alter a captain-held item.
 If the task needs one of those actions, report needs-decision to firstmate and stop.
 ```
 
-Set `enabled: false` or remove the file to stop future automatic batches; existing workers continue normally.
-Each step requires a unique safe task ID, `reversible: true`, a target from the example, and a concrete mode of `no-mistakes`, `direct-PR`, `local-only`, or `scout` that agrees with its prepared brief.
-Unknown fields and malformed enrollment are refused.
+Set `enabled: false` to stop future automatic batches; existing workers continue normally.
+Each override requires a unique safe task ID, `reversible: true`, a target from the example, and a concrete mode of `no-mistakes`, `direct-PR`, `local-only`, or `scout` that agrees with its prepared brief.
+Unknown fields and malformed overrides are refused.
 The named backlog row supplies the local project clone and must be unheld, unblocked, queued ordinary work with no metadata record or open task decision.
-Target enrollment runs only while its gap is positive; red-branch work must name a red project and stale-backlog work must name a stale row.
+Targeted work runs only while its gap is positive; red-branch work must name a red project and stale-backlog work must name a stale row.
 An open-PR step should prepare a review or fix, since meeting that target may still require a captain-approved merge.
 
 The sweep starts a batch only when no ordinary worker is live and all effective Codex account windows report known, fresh remaining quota strictly above 15 percent.
-It rechecks the quota and backlog state before each start, selects at most three steps, and orders red-branch work before other target work, then ready backlog work in backlog order.
+It rechecks the quota, complete backlog row, brief boundary, and open decisions before each start, selects at most three steps, and orders red-branch work before other target work, then ready backlog work in backlog order.
 Unmeasured red-branch evidence holds the batch rather than allowing backlog work to outrank an unknown failure.
-Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the enrolled delivery mode, and yolo off; backend refusals stop the batch without a fallback.
+Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the prepared delivery mode, and yolo off; backend refusals stop the batch without a fallback.
 The sweep reads briefs without editing them and refuses work whose prepared brief lacks the reversible-work boundary above.
 Successful starts produce one named status line in `state/idle-sweep.status`; concurrent heartbeat invocations share a local lock, and existing task metadata prevents redispatch.
+The watcher bounds the entire heartbeat sweep to 120 seconds and surfaces a refusal if it stalls.
 A configuration or dispatch failure returns a normal `check: idle-sweep` wake to supervision.
 Script headers and help own the executable mechanics.
 

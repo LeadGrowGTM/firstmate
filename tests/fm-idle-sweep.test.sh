@@ -38,6 +38,12 @@ esac
 SH
 cat > "$TMP_ROOT/fakebin/quota-axi" <<'SH'
 #!/usr/bin/env bash
+if [ -n "${TEST_QUOTA_HOOK:-}" ]; then
+  calls=$(cat "$TEST_QUOTA_CALLS" 2>/dev/null || echo 0)
+  calls=$((calls + 1))
+  printf '%s\n' "$calls" > "$TEST_QUOTA_CALLS"
+  [ "$calls" -ne 2 ] || bash "$TEST_QUOTA_HOOK"
+fi
 jq -cn --argjson percent "$TEST_QUOTA" --argjson stale "${TEST_QUOTA_STALE:-false}" \
   --arg account "${TEST_QUOTA_ACCOUNT:-codex-home}" '{schemaVersion:6,providers:[{
   provider:"codex",accountKey:$account,state:{status:"fresh",stale:$stale},
@@ -83,10 +89,7 @@ cat > "$home/config/idle-sweep.json" <<'JSON'
 JSON
 sweep() { bash "$home/bin/fm-idle-sweep.sh" > "$TMP_ROOT/out"; }
 no_starts() { [ ! -s "$TEST_SPAWN_LOG" ] || fail "$1"; pass "$1"; }
-mv "$home/config/idle-sweep.json" "$TMP_ROOT/enrollment.json"
-sweep
-no_starts 'absent enrollment leaves the sweep off'
-cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
+cp "$home/config/idle-sweep.json" "$TMP_ROOT/enrollment.json"
 jq '.enabled=false' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
 sweep
 no_starts 'disabled enrollment leaves the sweep off'
@@ -95,6 +98,7 @@ cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 sweep
 no_starts 'orphan in-flight backlog work holds the idle batch'
 bash "$home/bin/fm-tasks-axi.sh" reopen flight >/dev/null
+bash "$home/bin/fm-tasks-axi.sh" hold flight --reason 'fixture parked' >/dev/null
 printf 'kind=crewmate\nwindow=fm-live\n' > "$home/state/live.meta"
 TEST_ENDPOINT=alive sweep
 no_starts 'no fire while a worker process is live'
@@ -105,7 +109,10 @@ jq '.steps |= map(select(.id=="ordinary"))' "$TMP_ROOT/enrollment.json" > "$home
 cp "$home/data/ordinary/brief.md" "$TMP_ROOT/ordinary-brief"
 printf "# Task\n## Captain's intent\nFix the fixture.\n## Firstmate spec\nNo boundary supplied.\n" > "$home/data/ordinary/brief.md"
 sweep
-no_starts 'unbounded prepared brief is not dispatched'
+if grep -q '^ordinary ' "$TEST_SPAWN_LOG"; then fail 'unbounded prepared brief was dispatched'; fi
+pass 'unbounded prepared brief is not dispatched'
+for id in ordinary held captain red extra extra2 extra3 flight; do rm -f "$home/state/$id.meta"; done
+: > "$TEST_SPAWN_LOG"
 cp "$TMP_ROOT/ordinary-brief" "$home/data/ordinary/brief.md"
 cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 TEST_QUOTA=14 sweep
@@ -137,6 +144,15 @@ printf '{"open_prs":10}\n' > "$home/config/targets.json"
 result=$(bash "$home/bin/fm-targets.sh" --json)
 printf '%s' "$result" | jq -e '.targets[] | select(.id=="open_prs") | .limit==10 and .gap==0' >/dev/null || fail 'partial target overrides'
 rm "$home/config/targets.json"
+rm "$home/config/idle-sweep.json"
+sweep
+[ "$(wc -l < "$TEST_SPAWN_LOG" | tr -d ' ')" = 3 ] || fail 'default sweep did not start prepared backlog work'
+[ "$(head -1 "$TEST_SPAWN_LOG" | cut -d ' ' -f1)" = ordinary ] || fail 'default sweep did not use backlog order'
+pass 'absent configuration starts prepared reversible backlog work'
+for id in ordinary held captain red extra extra2 extra3 flight; do rm -f "$home/state/$id.meta"; done
+: > "$TEST_SPAWN_LOG"
+: > "$home/state/idle-sweep.status"
+cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 printf 'needs-decision [at=1791902116] [key=fixture]: approval needed\n' > "$home/state/extra.status"
 captain_brief=$(cat "$home/data/captain/brief.md")
 ordinary_brief=$(cat "$home/data/ordinary/brief.md")
@@ -161,6 +177,34 @@ pass 'changed row invalidates previously observed stale age'
 jq '.steps[0].reversible=false' "$TMP_ROOT/enrollment.json" > "$home/config/idle-sweep.json"
 if sweep 2> "$TMP_ROOT/error"; then fail 'unsafe enrollment must be refused'; fi
 pass 'non-reversible enrollment is refused'
+cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
+for id in ordinary held captain extra extra2 extra3 flight; do
+  printf 'kind=crewmate\nwindow=fm-%s\n' "$id" > "$home/state/$id.meta"
+done
+rm -f "$home/state/red.meta"
+: > "$TEST_SPAWN_LOG"
+cp "$home/data/backlog.md" "$TMP_ROOT/backlog-before-race"
+cat > "$TMP_ROOT/change-row" <<'SH'
+#!/usr/bin/env bash
+perl -pi -e 's/repo: example/repo: other/ if /red -/' "$FM_HOME/data/backlog.md"
+SH
+export TEST_QUOTA_HOOK="$TMP_ROOT/change-row" TEST_QUOTA_CALLS="$TMP_ROOT/quota-calls"
+rm -f "$TEST_QUOTA_CALLS"
+sweep
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'moved project dispatched from stale target evidence'
+cmp -s "$home/data/backlog.md" "$TMP_ROOT/backlog-before-race" && fail 'row race fixture did not change the backlog'
+pass 'a project changed during quota read cannot dispatch from old target evidence'
+cp "$TMP_ROOT/backlog-before-race" "$home/data/backlog.md"
+cat > "$TMP_ROOT/change-brief" <<'SH'
+#!/usr/bin/env bash
+printf "# Task\n## Captain's intent\nFix the fixture.\n## Firstmate spec\nBoundary withdrawn.\n" > "$FM_HOME/data/red/brief.md"
+SH
+TEST_QUOTA_HOOK="$TMP_ROOT/change-brief"
+rm -f "$TEST_QUOTA_CALLS"
+sweep
+[ ! -s "$TEST_SPAWN_LOG" ] || fail 'brief with withdrawn boundary dispatched'
+pass 'a brief boundary withdrawn during quota read prevents dispatch'
+unset TEST_QUOTA_HOOK TEST_QUOTA_CALLS
 # Exercise the actual watcher heartbeat hook and its normal wake path without
 # launching a worker or touching a real terminal backend.
 # shellcheck source=tests/wake-helpers.sh

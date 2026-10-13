@@ -2,7 +2,7 @@
 # Firstmate watcher.
 # Classifies supervision wakes in bash. In normal mode it absorbs benign wakes
 # and keeps blocking; it queues and exits only for actionable wakes.
-# An opted-in home's heartbeat also runs fm-idle-sweep.sh before wake triage;
+# A home's heartbeat also runs fm-idle-sweep.sh before wake triage;
 # docs/configuration.md owns that per-home configuration.
 # The no-verb signal and stale path is absorb-only-on-positive-evidence: a wake
 # is absorbed only when the crew shows it is still working through an actively
@@ -187,6 +187,8 @@ WATCH_HOME_EXISTED=0
 . "$SCRIPT_DIR/fm-push-transition-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 # Only for the arm-time check on FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS below;
 # the per-cycle reconcile itself runs as a separate process.
 # shellcheck source=bin/fm-procevent-lib.sh
@@ -3279,9 +3281,9 @@ EOF
   hb=$(( HEARTBEAT * (1 << streak) ))
   [ "$hb" -gt "$HEARTBEAT_MAX" ] && hb=$HEARTBEAT_MAX
   if [ "$(age_of "$STATE/.last-heartbeat")" -ge "$hb" ]; then
-    # The optional sweep shares this heartbeat across primary harnesses and
+    # The sweep shares this heartbeat across primary harnesses and
     # runtime backends; its own evidence gates fail closed without a new daemon.
-    if ! bash "$SCRIPT_DIR/fm-idle-sweep.sh"; then
+    if ! fm_run_timed 120 bash "$SCRIPT_DIR/fm-idle-sweep.sh"; then
       triage_log "idle sweep refused; inspect its configuration or evidence"
       fm_wake_append check idle-sweep "check: idle-sweep refused; inspect configuration or dispatch evidence" || exit 1
       touch "$STATE/.last-heartbeat"
