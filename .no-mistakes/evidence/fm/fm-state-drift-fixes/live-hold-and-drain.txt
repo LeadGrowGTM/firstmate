@@ -1,0 +1,37 @@
+Captain hold with a raw reply id:
+release-call
+Parent channel after hold:
+needs-decision [key=captain-hold-release-call-1] [at=1791894758]: corr=0123456789abcdef captain hold release-call: Captain must choose the release
+Invalid reply id attempts:
+fm-captain-hold: --corr must be a 16-hex correlation id: corr=0123456789abcdef
+refused: corr=0123456789abcdef
+fm-captain-hold: --corr must be a raw lowercase correlation id: 0123456789ABCDEF
+refused: 0123456789ABCDEF
+Parent channel bad-call lines after refusals:
+(none)
+Wake drain over open PR decisions and malformed line:
+STATUS OUTCOME BACKSTOP (newest captain-facing task event has no covering branch outcome):
+held done [key=merged-ship]: merged https://github.com/o/r/pull/24
+ordinary done [key=merged-release]: merged https://github.com/o/r/pull/24.
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+held [key=captain-hold-ship-1] needs-decision: review https://github.com/o/r/pull/24
+  ^ PR https://github.com/o/r/pull/24 is merged; call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain's answer or evidence-backed reconcile close), never by resolving the key as moot
+many [key=many] needs-decision: review https://github.com/o/r/pull/24, then https://github.com/o/r/pull/25, then https://github.com/o/r/pull/24
+mate [key=captain-hold-release-call-1] needs-decision: corr=0123456789abcdef captain hold release-call: Captain must choose the release
+ordinary [key=release] needs-decision: review https://github.com/o/r/pull/24
+  ^ PR https://github.com/o/r/pull/24 is merged; if that settles it, close it: bin/fm-send.sh ordinary --resolve-key release 'PR https://github.com/o/r/pull/24 merged'
+percent [key=percent] needs-decision: review https://github.com/o/r/pull/24%20
+plus [key=plus] needs-decision: review https://github.com/o/r/pull/24+abc
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+OPEN DECISIONS: unparsed decision line /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TJS0GHBQ2T9DKP9SFKPG72/.fm-live.j6ybKn/parent/state/malformed.status:1, not read as open; rewrite it with [key=<slug>]: needs-decision key=unbracketed: choose
+Second wake drain (one-shot warning should be absent):
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+held [key=captain-hold-ship-1] needs-decision: review https://github.com/o/r/pull/24
+  ^ PR https://github.com/o/r/pull/24 is merged; call held for the captain: close only in its owning home via bin/fm-captain-hold.sh (captain's answer or evidence-backed reconcile close), never by resolving the key as moot
+many [key=many] needs-decision: review https://github.com/o/r/pull/24, then https://github.com/o/r/pull/25, then https://github.com/o/r/pull/24
+mate [key=captain-hold-release-call-1] needs-decision: corr=0123456789abcdef captain hold release-call: Captain must choose the release
+ordinary [key=release] needs-decision: review https://github.com/o/r/pull/24
+  ^ PR https://github.com/o/r/pull/24 is merged; if that settles it, close it: bin/fm-send.sh ordinary --resolve-key release 'PR https://github.com/o/r/pull/24 merged'
+percent [key=percent] needs-decision: review https://github.com/o/r/pull/24%20
+plus [key=plus] needs-decision: review https://github.com/o/r/pull/24+abc
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'

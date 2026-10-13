@@ -1,0 +1,11 @@
+First wake drain:
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=real] blocked: waiting on captain
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+OPEN DECISIONS: unparsed decision line /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TJS0GHBQ2T9DKP9SFKPG72/.fm-warning-live.wSTI9P/home/state/mate.status:1, not read as open; rewrite it with [key=<slug>]: needs-decision at=1: choose a path
+OPEN DECISIONS: unparsed decision line /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TJS0GHBQ2T9DKP9SFKPG72/.fm-warning-live.wSTI9P/home/state/mate.status:2, not read as open; rewrite it with [key=<slug>]: needs-decision [key=bad!]: choose a path
+OPEN DECISIONS: unparsed decision line /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TJS0GHBQ2T9DKP9SFKPG72/.fm-warning-live.wSTI9P/home/state/mate.status:3, not read as open; rewrite it with [key=<slug>]: blocked key=unbracketed: waiting
+Second wake drain:
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+mate [key=real] blocked: waiting on captain
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'

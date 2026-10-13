@@ -1,0 +1,26 @@
+Send a marked steer to a real private tmux pane:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TJS0GHBQ2T9DKP9SFKPG72/.fm-send-live.RbdqVB/parent
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+fm-send: advisory: domain has open blockers: codex-signin; if this steer clears one, close it: bin/fm-send.sh domain --resolve-key <key> '<what cleared it>'
+Status after advisory-only send:
+blocked [key=codex-signin]: codex is signed out
+blocked [key=quota]: out of quota
+resolved [key=quota]: quota reset
+needs-decision [key=pick]: pick a name
+Persisted inbox entries:
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TJS0GHBQ2T9DKP9SFKPG72/.fm-send-live.RbdqVB/parent/state/domain.inbox/001.msg
+Send with an explicit close:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4TJS0GHBQ2T9DKP9SFKPG72/.fm-send-live.RbdqVB/parent
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+Status after explicit close:
+blocked [key=codex-signin]: codex is signed out
+blocked [key=quota]: out of quota
+resolved [key=quota]: quota reset
+needs-decision [key=pick]: pick a name
+resolved [key=codex-signin] [at=1791894832]: answered: Codex is signed in again
