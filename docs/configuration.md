@@ -12,6 +12,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
+| Automatic reversible work and numeric goals | [Idle sweep and standing targets](#idle-sweep-and-standing-targets) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and [Claude Remote Control](#claude-remote-control-configclaude-remote-control) |
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity) and [worktree pool guard](#worktree-pool-guard) |
 | Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
@@ -160,6 +161,80 @@ The Pi extension reloads this preference on every Pi `session_start`, including 
 The Claude Code mod reloads it on every `session.start`, including same-process session replacement.
 It also loads the preference lazily before any row that can draw ahead of that event, including during `claude --continue` restoration.
 This preference is local to each Firstmate home and is not part of secondmate inherited configuration.
+
+## Idle sweep and standing targets
+
+The idle sweep runs inside the existing watcher's supervision heartbeat, across all primary harnesses, without another daemon.
+It is off by default and reads only this home's backlog, enrolled briefs, recorded worker endpoints, and project clones.
+Secondmate endpoints are supervisors and do not count as local workers; no child home is inspected.
+Runtime backends without the canonical recovery-grade agent classifier conservatively hold the sweep when they have a recorded worker.
+
+This section owns the `config/targets.json` schema for numeric limits per home.
+An absent file uses these defaults; a partial object overrides only the supplied fields:
+
+```json
+{
+  "open_prs": 4,
+  "red_default_branches": 0,
+  "stale_backlog": 0,
+  "stale_days": 14
+}
+```
+
+All limits are nonnegative integers; `stale_days` must be positive, and unknown fields are refused.
+`open_prs` is an inclusive maximum, so the default implements fewer than five open PRs.
+The forge metrics cover the authenticated GitHub user's open PRs and default-branch failures in the immediate local clones under this home's projects directory.
+Non-GitHub or unreadable clones make those metrics unknown instead of silently dropping them.
+Default-branch failures include failed commit statuses and completed unsuccessful check runs on the current head; pending checks alone are not red.
+The local backlog metric counts unfinished structured rows unchanged for at least `stale_days`, including held rows for visibility, without authorizing work on them.
+The initial implementation supports the local markdown backlog; another tasks-axi backend is refused explicitly.
+The enabled heartbeat records row content and its last observed change in `state/idle-sweep-backlog.json`.
+The first observation establishes the age baseline; row creation dates are not used as evidence of last change.
+The evaluator reports unknown before a row is observed or after its content changes between observations.
+
+`bin/fm-targets.sh` prints each target's current value, limit, and nonnegative gap without writing state or contacting other homes.
+Its `--json` output also lists per-project forge values and known stale row IDs.
+Missing forge or observation evidence remains unknown.
+Portable behavior fixtures live in `tests/fm-idle-sweep.test.sh`.
+
+`config/idle-sweep.json` owns enabling and enrollment of already prepared reversible next steps:
+
+```json
+{
+  "enabled": true,
+  "steps": [
+    {"id": "fix-ci", "target": "red_default_branches", "mode": "no-mistakes", "reversible": true},
+    {"id": "prepare-pr-review", "target": "open_prs", "mode": "scout", "reversible": true},
+    {"id": "refresh-old-task", "target": "stale_backlog", "mode": "scout", "reversible": true},
+    {"id": "next-feature", "target": "backlog", "mode": "no-mistakes", "reversible": true}
+  ]
+}
+```
+
+To turn it on, prepare the named queued tasks and their normal briefs, review their authority and permissions, then write this file in the intended home with `enabled: true`.
+Enrollment asserts that the brief authorizes reversible work only; free-form backlog titles alone never confer that authority.
+Each enrolled brief must contain these exact lines in its Firstmate specification:
+
+```text
+Never merge, deploy, spend money, contact a client, answer a captain decision, or alter a captain-held item.
+If the task needs one of those actions, report needs-decision to firstmate and stop.
+```
+
+Set `enabled: false` or remove the file to stop future automatic batches; existing workers continue normally.
+Each step requires a unique safe task ID, `reversible: true`, a target from the example, and a concrete mode of `no-mistakes`, `direct-PR`, `local-only`, or `scout` that agrees with its prepared brief.
+Unknown fields and malformed enrollment are refused.
+The named backlog row supplies the local project clone and must be unheld, unblocked, queued ordinary work with no metadata record or open task decision.
+Target enrollment runs only while its gap is positive; red-branch work must name a red project and stale-backlog work must name a stale row.
+An open-PR step should prepare a review or fix, since meeting that target may still require a captain-approved merge.
+
+The sweep starts a batch only when no ordinary worker is live and all effective Codex account windows report known, fresh remaining quota strictly above 15 percent.
+It rechecks the quota and backlog state before each start, selects at most three steps, and orders red-branch work before other target work, then ready backlog work in backlog order.
+Unmeasured red-branch evidence holds the batch rather than allowing backlog work to outrank an unknown failure.
+Dispatch uses the normal `bin/fm-spawn.sh` path with Codex `gpt-6.1-sol`, the enrolled delivery mode, and yolo off; backend refusals stop the batch without a fallback.
+The sweep reads briefs without editing them and refuses work whose prepared brief lacks the reversible-work boundary above.
+Successful starts produce one named status line in `state/idle-sweep.status`; concurrent heartbeat invocations share a local lock, and existing task metadata prevents redispatch.
+A configuration or dispatch failure returns a normal `check: idle-sweep` wake to supervision.
+Script headers and help own the executable mechanics.
 
 ## Pi supervision branch
 
