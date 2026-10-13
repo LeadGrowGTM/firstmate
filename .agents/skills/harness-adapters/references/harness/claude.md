@@ -24,9 +24,9 @@ Every claude spawn therefore pre-registers the directory its pane starts in befo
 A second, separate dialog - "Allow external CLAUDE.md file imports?" - renders whenever a loaded CLAUDE.md chain reaches outside the project tree, including a worker beneath a secondmate home's `CLAUDE.md` importing its `AGENTS.md`.
 `--setting-sources project,local` (the minimal worker tool surface) does not suppress it either, and it gates the pane exactly like the trust dialog: cursor on "No, disable external imports", no way to move the selection from firstmate's steering plane.
 
-`../../../bin/fm-claude-trust.sh` records `hasTrustDialogAccepted` for both the worktree and its primary checkout in `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, where a home's worker account pin decides `CLAUDE_CONFIG_DIR` (`../../../docs/configuration.md` "Worker account pin"), for a ship or scout spawn; a secondmate spawn registers only its own home entry, since a secondmate home has no separate primary-checkout entry to carry import consent forward from.
+`../../../bin/fm-claude-trust.sh` records `hasTrustDialogAccepted` for both the worktree and its primary checkout in `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, where a home's worker account pin decides `CLAUDE_CONFIG_DIR` (`../../../docs/configuration.md` "Worker account pin"), for a ship or scout spawn; a secondmate spawn registers trust only for its own home entry.
 For a ship or scout worker in a seeded secondmate home's in-repo `.treehouse` or `.worktrees/.treehouse` pool, the helper pre-approves external imports on the canonical project entry unless an explicit decline is already recorded.
-Other worktree launches register trust while leaving import approval to Claude's interactive decision.
+Other worktree launches register trust while leaving import approval to Claude's interactive decision unless an existing explicit decline makes registration refuse.
 Its header owns the scope, persisted flags, decline refusal, and home-mode behavior.
 This approval also applies to future interactive sessions in the canonical checkout because Claude reads the same project entry.
 

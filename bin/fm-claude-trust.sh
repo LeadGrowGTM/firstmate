@@ -34,9 +34,8 @@
 # reaches outside the project tree, including a worker nested beneath a
 # secondmate home's CLAUDE.md importing the home's AGENTS.md, and it is
 # gated the same fail-closed way as trust: cursor on "No, disable", no arrow
-# navigation from firstmate's steering plane. Only worktree mode reaches this
-# second dialog's flags: a secondmate home has no separate "project" entry to
-# carry consent forward from, so its registration stays trust-only.
+# navigation from firstmate's steering plane. Only an eligible worker in
+# worktree mode receives import approval; home registration stays trust-only.
 #
 # TWO PROJECT-CONFIG ENTRIES IN WORKTREE MODE, NOT ONE. Registering import flags
 # on the worktree entry alone leaves the external-imports dialog showing.
@@ -54,15 +53,14 @@
 # below. So the trust flag is registered on BOTH the worktree entry (for
 # trust's ancestor-walk fallback and defense in depth) and the project entry
 # (the trust check's first, canonical-shaped, look); the two external-imports
-# flags land only on the canonical project entry for a seeded secondmate home's
-# in-repo worker pool. The external-imports check reads only that entry.
-# Registering
-# the project entry is a write to the launching user's OWN Claude config
-# store, keyed by a project PATH the scope test below has already verified is
+# flags land only on the canonical project entry for an eligible worker in a
+# seeded secondmate home's in-repo pool. The external-imports check reads only
+# that entry. Registering the project entry writes to the launching user's OWN
+# Claude config store, keyed by a project PATH the scope test below verified is
 # real - not a write to the project's tracked content, so hard rule 1 does not
 # apply, same as the existing worktree-entry write.
 #
-# THAT SAME PROJECT ENTRY IS ALSO THE LAUNCHING HUMAN'S OWN INTERACTIVE
+# THAT SAME PROJECT ENTRY IS ALSO THE LAUNCHING ACCOUNT'S INTERACTIVE
 # CONFIG, though, so this registration must never overwrite a decision the
 # human already made there. If the project entry already carries
 # hasClaudeMdExternalIncludesApproved===false WITH
@@ -77,9 +75,9 @@
 # false before the dialog was ever shown, so that pair means "never asked" and
 # is treated like an absent flag.
 #
-# THE SCOPE TEST IS THE SAFETY PROPERTY, and it is STRUCTURAL rather than a
-# path policy. Each mode has its own, because the two directories have entirely
-# different shapes on disk.
+# WORKSPACE TRUST SCOPE IS STRUCTURAL rather than a path policy. Each mode has
+# its own test because the two directories have different shapes on disk.
+# Import approval has a narrower path and seed test described below.
 #
 # WORKTREE MODE. <worktree> must be a LINKED git worktree - its own git dir,
 # sharing <project>'s common dir - whose top level is exactly the resolved
@@ -97,8 +95,8 @@
 # requires elsewhere - and verified, never assumed: the candidate's own
 # resolved git dir must equal that common dir, the same primary-checkout
 # definition used throughout, or this refuses rather than guess. The
-# external-imports flags land on that resolved canonical
-# checkout, never on the linked-worktree argument itself.
+# Import approval requires <project> to be that canonical checkout, so this
+# linked-project case registers trust only.
 #
 # The worktree trust test is deliberately NOT a treehouse or orca path prefix.
 # Treehouse's root is configurable (--root, TREEHOUSE_ROOT, config, and a relative
@@ -426,15 +424,21 @@ fi
 #
 # In worktree mode trust lands on both the worktree and project entries, and
 # scoped import approval lands on the project entry in the same attempt.
-# A single rename either
-# records all of it or none of it - there is no state where the worktree entry
-# is fresh and the project entry stale, or the other way round. In
-# secondmate-home mode only the single home entry is written.
+# A single rename either records all of it or none of it - there is no state
+# where the worktree entry is fresh and the project entry stale, or vice versa.
+# In secondmate-home mode only the single home entry is written.
+#
+# Import approval requires a canonical project checkout in a seeded
+# secondmate home's projects/ directory and a linked worker under that
+# project's .treehouse/ or .worktrees/.treehouse/ pool. The home must have an
+# owned, regular, nonempty .fm-secondmate-home marker, AGENTS.md, and bin/.
+# Other worktrees receive no new import approval; an existing explicit decline
+# still refuses registration.
 #
 # Claude reads import approval only at the canonical project entry, so scoped
 # approval also affects later interactive sessions in that checkout. Preserve
 # an explicit prior decline by refusing the whole write, not reversing it.
-# Home modes and other worktree launches remain trust-only.
+# No import flags are added in home modes or other worktree launches.
 TRUST_FLAG='hasTrustDialogAccepted'
 IMPORT_FLAGS='["hasClaudeMdExternalIncludesApproved","hasClaudeMdExternalIncludesWarningShown"]'
 APPROVE_IMPORTS=false

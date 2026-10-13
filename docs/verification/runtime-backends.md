@@ -10,8 +10,9 @@ Exact task chronology, branch names, temporary homes, local paths, process ids, 
 
 Verified on 2026-10-13 on Linux with Claude Code `2.1.296 (Claude Code)`.
 `bin/fm-claude-trust.sh` owns the worker pre-registration contract, and the Claude harness reference owns operator recovery.
-The live guard launches the real interactive CLI in a linked worktree at a scratch secondmate home marked for seeding, under `projects/demo/.worktrees/.treehouse/worker`, with the home's `CLAUDE.md` importing its `AGENTS.md` outside the project.
-A trust-only control must render the external-import dialog and name that home file; after production pre-registration, a loopback Messages fixture must receive both the worker prompt and imported instructions, and Claude must render its response without the dialog.
+The live guard launches the real interactive CLI in linked worktrees at a scratch secondmate home marked for seeding, under both in-repo pool shapes, with the home's `CLAUDE.md` importing its `AGENTS.md` outside the project.
+A trust-only control must render the external-import dialog and name that home file; after production pre-registration, a loopback Messages fixture must receive both the worker prompt and imported instructions, and Claude must render its response without the dialog for both pool shapes.
+An unseeded pool and a linked worker outside the pool must keep the interactive dialog, while an explicit prior decline must make registration refuse without changing the config store.
 The fixture uses a synthetic API key and local response, accesses no operator credential store, and makes no remote model request.
 This proves the Claude launch and config behavior under tmux; it does not establish an unverified runtime's worktree shape.
 
@@ -25,11 +26,15 @@ Observed output:
 
 ```text
 ok - Claude 2.1.296 (Claude Code): nested home import reproduces the external-import dialog
+ok - Claude 2.1.296 (Claude Code): an unseeded pool retains the external-import dialog
 ok - Claude 2.1.296 (Claude Code): pre-registration clears the dialog and processes the prompt with home imports
-FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=12882
+ok - Claude 2.1.296 (Claude Code): .treehouse worker processes the prompt with home imports
+ok - Claude 2.1.296 (Claude Code): a worker outside the pool retains the external-import dialog
+ok - Claude 2.1.296 (Claude Code): an explicit prior decline blocks registration without changing the store
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=5646
 ```
 
-The portable regression `tests/fm-claude-trust.test.sh` covers both `.treehouse` and `.worktrees/.treehouse` pools under a seeded scratch secondmate home, the canonical project entry, preservation of an explicit decline, other project paths that remain undecided, and the actual spawn's registration call.
+The portable regression `tests/fm-claude-trust.test.sh` also covers the canonical project entry, preservation of an explicit decline, other project paths that remain undecided, and the actual spawn's registration call.
 
 ## Harness detection precedence
 

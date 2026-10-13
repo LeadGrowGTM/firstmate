@@ -118,6 +118,38 @@ launch() {
     || fail "Claude $VERSION: could not launch disposable worker"
 }
 screen() { tmux -L "$SOCKET" capture-pane -p -t worker -S -80 2>/dev/null || true; }
+stop_worker() {
+  local pid state
+  pid=$(tmux -L "$SOCKET" display-message -p -t worker '#{pane_pid}') \
+    || fail "Claude $VERSION: could not identify disposable worker"
+  tmux -L "$SOCKET" kill-session -t worker \
+    || fail "Claude $VERSION: could not stop disposable worker"
+  for _ in $(seq 1 100); do
+    state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+    [ -z "$state" ] && return 0
+    case "$state" in Z*) return 0 ;; esac
+    sleep 0.05
+  done
+  fail "Claude $VERSION: disposable worker did not exit after its tmux session stopped"
+}
+save_screen() {
+  local name=$1 source=$2
+  [ -n "${FM_CLAUDE_IMPORTS_EVIDENCE_DIR:-}" ] || return 0
+  mkdir -p "$FM_CLAUDE_IMPORTS_EVIDENCE_DIR"
+  python3 - "$source" "$FM_CLAUDE_IMPORTS_EVIDENCE_DIR/$name.html" <<'PY'
+import html
+import pathlib
+import sys
+
+screen = pathlib.Path(sys.argv[1]).read_text()
+pathlib.Path(sys.argv[2]).write_text(
+    '<!doctype html><meta charset="utf-8"><title>Claude worker TUI</title>'
+    '<style>body{background:#191919;color:#eee;margin:2em}'
+    'pre{font:15px/1.4 monospace;white-space:pre-wrap}</style>'
+    '<pre>' + html.escape(screen) + '</pre>\n'
+)
+PY
+}
 launch
 for _ in $(seq 1 200); do
   screen > "$LAB/control.txt"
@@ -127,9 +159,29 @@ done
 assert_grep 'Allow external CLAUDE.md file imports?' "$LAB/control.txt" "Claude $VERSION: control did not reproduce the import dialog"
 assert_grep "$LAB/home/AGENTS.md" "$LAB/control.txt" "Claude $VERSION: control did not name the external home import"
 assert_absent "$LAB/processed" "Claude $VERSION: control processed its prompt despite the dialog"
-# Kill the disposable session without Escape, which would persist a decline.
-tmux -L "$SOCKET" kill-session -t worker
+save_screen control "$LAB/control.txt"
+# Stop the disposable session without Escape, which would persist a decline.
+stop_worker
 pass "Claude $VERSION: nested home import reproduces the external-import dialog"
+
+# A worker in the same in-repo pool without a seeded secondmate home must
+# retain the interactive decision even after production registration.
+mv "$LAB/home/.fm-secondmate-home" "$LAB/seed-marker"
+CLAUDE_CONFIG_DIR="$CONFIG" bash "$ROOT/bin/fm-claude-trust.sh" "$WT" "$PROJ" >/dev/null \
+  || fail "Claude $VERSION: unseeded worker registration failed"
+launch
+for _ in $(seq 1 200); do
+  screen > "$LAB/unseeded.txt"
+  grep -Fq 'Allow external CLAUDE.md file imports?' "$LAB/unseeded.txt" && break
+  sleep 0.1
+done
+assert_grep 'Allow external CLAUDE.md file imports?' "$LAB/unseeded.txt" \
+  "Claude $VERSION: unseeded worker lost the interactive import decision"
+assert_absent "$LAB/processed" "Claude $VERSION: unseeded worker processed the prompt before a decision"
+save_screen unseeded "$LAB/unseeded.txt"
+stop_worker
+mv "$LAB/seed-marker" "$LAB/home/.fm-secondmate-home"
+pass "Claude $VERSION: an unseeded pool retains the external-import dialog"
 
 CLAUDE_CONFIG_DIR="$CONFIG" bash "$ROOT/bin/fm-claude-trust.sh" "$WT" "$PROJ" >/dev/null \
   || fail "Claude $VERSION: production worker pre-registration failed"
@@ -146,4 +198,106 @@ for _ in $(seq 1 300); do
 done
 assert_present "$LAB/processed" "Claude $VERSION: worker never processed its prompt and imported home instructions"
 assert_grep 'IMPORT_WORKER_PROCESSED' "$LAB/worker.txt" "Claude $VERSION: worker never rendered the loopback response"
+if [ -n "${FM_CLAUDE_IMPORTS_EVIDENCE_DIR:-}" ]; then
+  cp "$LAB/processed" "$FM_CLAUDE_IMPORTS_EVIDENCE_DIR/provider-processed.txt"
+fi
+if ! node - "$CONFIG/.claude.json" "$PROJ" "$WT" "${FM_CLAUDE_IMPORTS_EVIDENCE_DIR:-}" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [store, project, worktree, evidenceDir] = process.argv.slice(2);
+const entries = JSON.parse(fs.readFileSync(store, "utf8")).projects;
+const canonical = entries[project];
+const worker = entries[worktree];
+const flags = ["hasClaudeMdExternalIncludesApproved", "hasClaudeMdExternalIncludesWarningShown"];
+if (canonical?.hasTrustDialogAccepted !== true ||
+    !flags.every((flag) => canonical[flag] === true) ||
+    worker?.hasTrustDialogAccepted !== true ||
+    flags.some((flag) => worker[flag] === true)) process.exit(1);
+if (evidenceDir) fs.writeFileSync(path.join(evidenceDir, "consent-scope.json"),
+  JSON.stringify({canonicalProject: {
+    trust: canonical.hasTrustDialogAccepted,
+    importApproved: canonical.hasClaudeMdExternalIncludesApproved,
+    warningShown: canonical.hasClaudeMdExternalIncludesWarningShown,
+  }, workerWorktree: {
+    trust: worker.hasTrustDialogAccepted,
+    importApproved: worker.hasClaudeMdExternalIncludesApproved ?? null,
+    warningShown: worker.hasClaudeMdExternalIncludesWarningShown ?? null,
+  }}, null, 2) + "\n");
+NODE
+then
+  fail "Claude $VERSION: import approval was not scoped to the canonical project entry"
+fi
+save_screen seeded "$LAB/worker.txt"
 pass "Claude $VERSION: pre-registration clears the dialog and processes the prompt with home imports"
+
+# The other supported in-repo pool shape must reach the same real CLI result.
+stop_worker
+PROJ="$LAB/home/projects/demo-two"
+WT="$PROJ/.treehouse/worker"
+fm_git_worktree "$PROJ" "$WT" worker-two
+rm -f "$LAB/processed"
+CLAUDE_CONFIG_DIR="$CONFIG" bash "$ROOT/bin/fm-claude-trust.sh" "$WT" "$PROJ" >/dev/null \
+  || fail "Claude $VERSION: .treehouse worker pre-registration failed"
+launch
+for _ in $(seq 1 300); do
+  screen > "$LAB/treehouse.txt"
+  if grep -Fq 'Allow external CLAUDE.md file imports?' "$LAB/treehouse.txt"; then
+    fail "Claude $VERSION: .treehouse worker still parked on the external-import dialog"
+  fi
+  if [ -f "$LAB/processed" ] && grep -Fq 'IMPORT_WORKER_PROCESSED' "$LAB/treehouse.txt"; then
+    break
+  fi
+  sleep 0.1
+done
+assert_present "$LAB/processed" "Claude $VERSION: .treehouse worker never processed its prompt and home import"
+assert_grep 'IMPORT_WORKER_PROCESSED' "$LAB/treehouse.txt" "Claude $VERSION: .treehouse worker never rendered the response"
+save_screen treehouse "$LAB/treehouse.txt"
+pass "Claude $VERSION: .treehouse worker processes the prompt with home imports"
+
+# A linked worktree outside the seeded home's pool can also request an external
+# import, but registration must leave that request for the operator to answer.
+stop_worker
+PROJ="$LAB/home/projects/demo-three"
+WT="$LAB/outside-worker"
+fm_git_worktree "$PROJ" "$WT" outside-worker
+printf '@%s\n' "$LAB/home/AGENTS.md" > "$WT/CLAUDE.md"
+rm -f "$LAB/processed"
+CLAUDE_CONFIG_DIR="$CONFIG" bash "$ROOT/bin/fm-claude-trust.sh" "$WT" "$PROJ" >/dev/null \
+  || fail "Claude $VERSION: outside-pool worker registration failed"
+launch
+for _ in $(seq 1 200); do
+  screen > "$LAB/outside.txt"
+  grep -Fq 'Allow external CLAUDE.md file imports?' "$LAB/outside.txt" && break
+  sleep 0.1
+done
+save_screen outside "$LAB/outside.txt"
+assert_grep 'Allow external CLAUDE.md file imports?' "$LAB/outside.txt" \
+  "Claude $VERSION: worker outside the pool lost the interactive import decision"
+assert_absent "$LAB/processed" "Claude $VERSION: outside-pool worker processed the prompt before a decision"
+stop_worker
+pass "Claude $VERSION: a worker outside the pool retains the external-import dialog"
+
+# An explicit prior decline in the canonical entry must stop a later eligible
+# launch before its registration can reverse the operator's choice.
+PROJ="$LAB/home/projects/demo"
+WT="$PROJ/.worktrees/.treehouse/worker"
+node - "$CONFIG/.claude.json" "$PROJ" <<'NODE'
+const fs = require("node:fs");
+const [store, project] = process.argv.slice(2);
+const data = JSON.parse(fs.readFileSync(store, "utf8"));
+data.projects[project].hasClaudeMdExternalIncludesApproved = false;
+data.projects[project].hasClaudeMdExternalIncludesWarningShown = true;
+fs.writeFileSync(store, JSON.stringify(data, null, 2) + "\n");
+NODE
+cp "$CONFIG/.claude.json" "$LAB/before-decline.json"
+if CLAUDE_CONFIG_DIR="$CONFIG" bash "$ROOT/bin/fm-claude-trust.sh" "$WT" "$PROJ" > "$LAB/decline.txt" 2>&1; then
+  fail "Claude $VERSION: an explicit external-import decline was overridden"
+fi
+assert_grep 'declined external CLAUDE.md imports' "$LAB/decline.txt" \
+  "Claude $VERSION: decline refusal did not explain the existing decision"
+cmp -s "$LAB/before-decline.json" "$CONFIG/.claude.json" \
+  || fail "Claude $VERSION: decline refusal modified the config store"
+if [ -n "${FM_CLAUDE_IMPORTS_EVIDENCE_DIR:-}" ]; then
+  cp "$LAB/decline.txt" "$FM_CLAUDE_IMPORTS_EVIDENCE_DIR/decline.txt"
+fi
+pass "Claude $VERSION: an explicit prior decline blocks registration without changing the store"
