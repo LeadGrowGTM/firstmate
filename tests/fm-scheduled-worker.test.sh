@@ -39,10 +39,30 @@ set -u
 printf 'control %s\n' "$*" >> "$FM_HOME/calls"
 [ "$2" = relaunch ] || exit 2
 case " $* " in *' --note-file '*) : ;; *) exit 2 ;; esac
+id=$1
 note=${!#}
+expected=
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --expected-spawn-gen ]; then
+    expected=${2:-}
+    break
+  fi
+  shift
+done
+[ "$expected" = gen-1 ] || exit 2
 [ -f "$note" ] && [ "$(cat "$note")" = checkpoint ] || exit 2
-printf 'spawn_gen=gen-2\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\n' "$(cat "$FM_HOME/project")" > "$FM_HOME/state/$1.meta"
-jq -n --arg task "$1" '{version:1,task:$task,outcome:"live-worker",exit_code:0,spawn_gen:"gen-2"}' > "$FM_SPAWN_OUTCOME_FILE"
+if [ -f "$FM_HOME/race-generation" ]; then
+  printf 'spawn_gen=gen-2\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\n' "$(cat "$FM_HOME/project")" > "$FM_HOME/state/$id.meta"
+fi
+current=$(sed -n 's/^spawn_gen=//p' "$FM_HOME/state/$id.meta")
+if [ "$current" != "$expected" ]; then
+  printf 'control-refused %s\n' "$current" >> "$FM_HOME/calls"
+  jq -n --arg task "$id" '{version:1,task:$task,outcome:"unsafe-refusal",exit_code:1,reason:"generation-changed",launch_sent:false}' > "$FM_SPAWN_OUTCOME_FILE"
+  exit 1
+fi
+printf 'relaunch\n' >> "$FM_HOME/control-relaunches"
+printf 'spawn_gen=gen-2\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\n' "$(cat "$FM_HOME/project")" > "$FM_HOME/state/$id.meta"
+jq -n --arg task "$id" '{version:1,task:$task,outcome:"live-worker",exit_code:0,spawn_gen:"gen-2"}' > "$FM_SPAWN_OUTCOME_FILE"
 STUB
   chmod +x "$dir/bin/fm-spawn.sh" "$dir/bin/fm-control.sh"
   printf '%s\n' published > "$dir/home/result"
@@ -151,15 +171,35 @@ check_attempt_and_exhaustion() {
   selection "$dir" grok
   out=$(run_case "$dir" --exhaustion "$dir/proof.json" --note-file "$dir/note.txt"); rc=$?
   expect_code 0 "$rc" 'proven exhaustion relaunch'
-  assert_grep 'control job relaunch --harness grok --model grok-4.7 --effort medium --note-file' "$dir/home/calls" 'control did not receive selected continuation and note'
+  assert_grep 'control job relaunch --harness grok --model grok-4.7 --effort medium --expected-spawn-gen gen-1 --note-file' "$dir/home/calls" 'control did not receive selected continuation, generation and note'
+  assert_equals 1 "$(wc -l < "$dir/home/control-relaunches")" 'matching generation did not reach relaunch'
   assert_equals live-worker "$(phase "$dir")" 'continuation not live'
   out=$(run_case "$dir"); rc=$?; expect_code 0 "$rc" 'live replay'
   assert_equals 2 "$(count_calls "$dir")" 'live replay called owner'
   pass 'attempting barrier, current-generation exhaustion, checkpoint and live replay'
 }
 
+check_generation_change_at_control_admission() {
+  local dir out rc
+  dir=$(make_case generation-race)
+  out=$(run_case "$dir"); rc=$?; expect_code 0 "$rc" 'initial publication before generation race'
+  printf '%s\n' '{"kind":"usage-exhausted","spawn_gen":"gen-1","evidence":"current generation exhausted"}' > "$dir/proof.json"
+  printf 'checkpoint\n' > "$dir/note.txt"
+  : > "$dir/home/race-generation"
+  selection "$dir" grok
+  out=$(run_case "$dir" --exhaustion "$dir/proof.json" --note-file "$dir/note.txt"); rc=$?
+  expect_code 1 "$rc" "generation change at control admission must refuse: $out"
+  grep -E 'control job relaunch .*--expected-spawn-gen gen-1 --note-file' "$dir/home/calls" >/dev/null || fail 'wrapper did not forward the exhausted generation'
+  assert_grep 'control-refused gen-2' "$dir/home/calls" 'control did not observe G2 at admission'
+  assert_equals gen-2 "$(sed -n 's/^spawn_gen=//p' "$dir/home/state/job.meta")" 'G2 metadata was overwritten'
+  [ ! -e "$dir/home/control-relaunches" ] || fail 'control relaunched G2 after its generation changed'
+  assert_equals blocked "$(phase "$dir")" 'refused continuation did not block for reconciliation'
+  pass 'scheduled continuation forwards G1 and refuses when control admits G2'
+}
+
 check_authorization_and_selection
 check_capacity_and_reselect
 check_failure_barriers
 check_attempt_and_exhaustion
+check_generation_change_at_control_admission
 printf '# all fm-scheduled-worker tests passed\n'

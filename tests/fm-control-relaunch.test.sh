@@ -2756,6 +2756,79 @@ test_scheduled_control_receipts() {
   pass "control receipts bind live confirmation and preserve late-launch uncertainty"
 }
 
+test_scheduled_control_fences_the_expected_generation() {
+  local dir out rc id=rl-generation meta brief
+  dir=$(new_case generation "$id")
+  add_ship_task "$dir" "$id" claude
+  meta="$dir/home/state/$id.meta"
+  brief="$dir/home/data/$id/brief.md"
+  printf 'spawn_gen=gen-2\n' >> "$meta"
+  cp "$meta" "$dir/meta-before"
+  cp "$brief" "$dir/brief-before"
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen gen-1 --note 'stale checkpoint'); rc=$?
+  expect_code 1 "$rc" "stale exhaustion generation must refuse: $out"
+  [[ "$out" == *generation*changed* ]] || fail 'refusal must identify the changed incarnation'
+  cmp -s "$dir/meta-before" "$meta" || fail 'stale generation changed G2 metadata'
+  cmp -s "$dir/brief-before" "$brief" || fail 'stale generation appended a checkpoint to G2 instructions'
+  [ ! -e "$dir/home/state/$id.control-relaunch" ] || fail 'stale generation recorded a relaunch checkpoint'
+  [ ! -e "$dir/home/state/$id.control-relaunch.note" ] || fail 'stale generation recorded a progress note'
+  [ ! -s "$dir/fake/literal" ] || fail 'stale generation sent lifecycle input to G2'
+  [ ! -s "$dir/fake/keys" ] || fail 'stale generation sent keys to G2'
+  [ "$(cat "$dir/fake/command")" = claude ] || fail 'stale generation stopped G2'
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen '' --note 'empty generation'); rc=$?
+  expect_code 1 "$rc" "an empty expected generation must refuse: $out"
+  cmp -s "$dir/meta-before" "$meta" || fail 'empty generation changed G2 metadata'
+  [ ! -s "$dir/fake/literal" ] || fail 'empty generation sent lifecycle input'
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen gen-2 --note 'current checkpoint'); rc=$?
+  expect_code 0 "$rc" "matching generation should relaunch: $out"
+  assert_grep 'current checkpoint' "$brief" 'matching generation did not carry its checkpoint'
+  [ -s "$dir/fake/literal" ] || fail 'matching generation did not launch a replacement'
+  pass 'scheduled control fences stale and empty generations before mutation, and relaunches the matching one'
+}
+
+test_scheduled_control_rechecks_generation_after_lock_admission() {
+  local dir out rc id=rl-generation-lock-race meta brief lock_hook
+  dir=$(new_case generation-lock-race "$id")
+  add_ship_task "$dir" "$id" claude
+  meta="$dir/home/state/$id.meta"
+  brief="$dir/home/data/$id/brief.md"
+  printf 'spawn_gen=gen-1\n' >> "$meta"
+  cp "$brief" "$dir/brief-before"
+
+  # Change only the fixture metadata immediately before the lock symlink is
+  # created. This places the generation transition after admission begins.
+  lock_hook="$dir/fakebin/ln"
+  cat > "$lock_hook" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = -s ] && [ "${3:-}" = "$FM_HOME/state/.control-rl-generation-lock-race.lock" ] \
+  && [ ! -e "$FM_FAKE_DIR/lock-generation-flipped" ]; then
+  sed 's/^spawn_gen=.*/spawn_gen=gen-2/' \
+    "$FM_HOME/state/rl-generation-lock-race.meta" > "$FM_FAKE_DIR/meta.gen-2"
+  mv "$FM_FAKE_DIR/meta.gen-2" "$FM_HOME/state/rl-generation-lock-race.meta"
+  : > "$FM_FAKE_DIR/lock-generation-flipped"
+fi
+exec /usr/bin/ln "$@"
+SH
+  chmod +x "$lock_hook"
+
+  out=$(run_control "$dir" "$id" relaunch --expected-spawn-gen gen-1 --note 'race checkpoint'); rc=$?
+  expect_code 1 "$rc" "changed generation at lock admission must refuse: $out"
+  [ -e "$dir/fake/lock-generation-flipped" ] || fail 'lock-boundary generation hook did not fire'
+  [[ "$out" == *generation*changed* ]] || fail 'refusal must identify the changed incarnation'
+  grep -E '^spawn_gen=gen-2$' "$meta" >/dev/null || fail 'lock-boundary metadata change was not preserved'
+  cmp -s "$dir/brief-before" "$brief" || fail 'generation race appended a checkpoint to G2 instructions'
+  [ ! -e "$dir/home/state/$id.control-relaunch" ] || fail 'generation race recorded a relaunch checkpoint'
+  [ ! -e "$dir/home/state/$id.control-relaunch.note" ] || fail 'generation race recorded a progress note'
+  [ ! -s "$dir/fake/literal" ] || fail 'generation race sent lifecycle input to G2'
+  [ ! -s "$dir/fake/keys" ] || fail 'generation race sent keys to G2'
+  [ "$(cat "$dir/fake/command")" = claude ] || fail 'generation race stopped the original worker'
+  pass 'scheduled control rechecks generation after lock admission and preserves the live worker'
+}
+
 test_scheduled_control_preflight_keeps_worker_live() {
   local dir out rc receipt id=rl-preflight-missing
   dir=$(new_case preflight-missing "$id")
@@ -2809,6 +2882,8 @@ SH
 }
 
 test_scheduled_control_receipts
+test_scheduled_control_fences_the_expected_generation
+test_scheduled_control_rechecks_generation_after_lock_admission
 test_scheduled_control_preflight_keeps_worker_live
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock

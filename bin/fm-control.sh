@@ -6,6 +6,7 @@
 #        fm-control.sh <task-id> exit [--only-if-idle]
 #        fm-control.sh <task-id> relaunch [--harness <name>] [--model <name>]
 #                                         [--effort <level>] [--only-if-idle]
+#                                         [--expected-spawn-gen <generation>]
 #                                         (--note <text> | --note-file <path>)
 #
 # Why this exists, and how it differs from fm-send.sh. bin/fm-send.sh is the
@@ -97,6 +98,9 @@
 #              exactly idle there, the old agent is left untouched and the
 #              command exits 3, so a scheduled caller can tell a turn that
 #              started after its own idle read from a failure.
+#              --expected-spawn-gen fences incarnation-bound callers: after
+#              taking the task control lock, refuse a changed generation before
+#              recording a checkpoint or sending lifecycle input.
 #              Records a durable checkpoint and that note, exits the old agent,
 #              then delegates the launch to its single owner,
 #              bin/fm-spawn.sh --relaunch. A failure before publication keeps
@@ -279,6 +283,8 @@ EFFORT_SET=0
 NOTE=
 NOTE_SET=0
 ONLY_IF_IDLE=0
+EXPECTED_SPAWN_GEN=
+EXPECTED_SPAWN_GEN_SET=0
 control_want_value=
 for control_arg in "$@"; do
   if [ -n "$control_want_value" ]; then
@@ -289,6 +295,7 @@ for control_arg in "$@"; do
       harness) NEW_HARNESS=$control_arg; HARNESS_SET=1 ;;
       model) NEW_MODEL=$control_arg; MODEL_SET=1 ;;
       effort) NEW_EFFORT=$control_arg; EFFORT_SET=1 ;;
+      expected-spawn-gen) EXPECTED_SPAWN_GEN=$control_arg; EXPECTED_SPAWN_GEN_SET=1 ;;
       note) NOTE=$control_arg; NOTE_SET=1 ;;
       note_file)
         [ -f "$control_arg" ] || die "--note-file '$control_arg' is not a readable file"
@@ -306,6 +313,8 @@ for control_arg in "$@"; do
     --model=*) NEW_MODEL=${control_arg#--model=}; MODEL_SET=1 ;;
     --effort) control_want_value=effort ;;
     --effort=*) NEW_EFFORT=${control_arg#--effort=}; EFFORT_SET=1 ;;
+    --expected-spawn-gen) control_want_value=expected-spawn-gen ;;
+    --expected-spawn-gen=*) EXPECTED_SPAWN_GEN=${control_arg#--expected-spawn-gen=}; EXPECTED_SPAWN_GEN_SET=1 ;;
     --note) control_want_value=note ;;
     --note=*) NOTE=${control_arg#--note=}; NOTE_SET=1 ;;
     --note-file) control_want_value=note_file ;;
@@ -327,6 +336,7 @@ if [ -n "$FM_LAUNCH_OUTCOME_FILE" ] && [ "$VERB" != relaunch ]; then
   die "scheduled worker receipts apply only to guarded relaunch"
 fi
 if [ "$VERB" != relaunch ]; then
+  [ "$EXPECTED_SPAWN_GEN_SET" = 0 ] || die "--expected-spawn-gen applies to 'relaunch' only"
   [ "$HARNESS_SET" = 0 ] && [ "$MODEL_SET" = 0 ] && [ "$EFFORT_SET" = 0 ] && [ "$NOTE_SET" = 0 ] \
     || die "--harness, --model, --effort, and --note apply to 'relaunch' only"
   [ "$ONLY_IF_IDLE" = 0 ] || [ "$VERB" = exit ] \
@@ -335,6 +345,7 @@ fi
 [ "$HARNESS_SET" = 0 ] || [ -n "$NEW_HARNESS" ] || die "--harness requires a non-empty value"
 [ "$MODEL_SET" = 0 ] || [ -n "$NEW_MODEL" ] || die "--model requires a non-empty value"
 [ "$EFFORT_SET" = 0 ] || [ -n "$NEW_EFFORT" ] || die "--effort requires a non-empty value"
+[ "$EXPECTED_SPAWN_GEN_SET" = 0 ] || [ -n "$EXPECTED_SPAWN_GEN" ] || die "--expected-spawn-gen requires a non-empty value"
 case "$NEW_EFFORT" in
   ''|default|low|medium|high|xhigh|max|ultra) ;;
   *) die "--effort must be one of default, low, medium, high, xhigh, max, ultra" ;;
@@ -375,6 +386,10 @@ if [ ! -f "$META" ]; then
       ;;
   esac
   die "no task '$ID' in $STATE (fm-control resolves an exact task id only)"
+fi
+if [ "$EXPECTED_SPAWN_GEN_SET" = 1 ] \
+   && [ "$(fm_meta_get "$META" spawn_gen)" != "$EXPECTED_SPAWN_GEN" ]; then
+  die "task $ID worker generation changed; reconcile exhaustion evidence before relaunch"
 fi
 
 # A remotely placed secondmate records its endpoint on ANOTHER host, so every
