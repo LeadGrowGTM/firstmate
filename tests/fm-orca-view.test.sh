@@ -51,6 +51,9 @@ if [ -n "${FM_FAKE_ORCA_REMOVE_BASE:-}" ]; then
   printf '{"ok":false,"error":{"code":"runtime_unavailable"}}\n'
   exit 1
 fi
+if [ -n "${FM_FAKE_ORCA_ADD_HOOK:-}" ]; then
+  tmux set-hook -t "=$FM_FAKE_ORCA_ADD_HOOK:" 'session-window-changed[9]' 'run-shell true'
+fi
 if [ -n "${FM_FAKE_ORCA_FAIL:-}" ]; then
   printf '{"ok":false,"error":{"code":"runtime_unavailable"}}\n'
   exit 1
@@ -511,6 +514,66 @@ test_open_refuses_the_base_as_a_view() {
   pass "open: refuses the grouped base itself without installing tracking or moving its window"
 }
 
+test_open_preserves_borrowed_hooks() {
+  local out handle first_hook last_hook hooks target view=orca-borrowed
+  "$SHIM/tmux" new-session -d -t firstmate -s "$view"
+  "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[0]' 'run-shell true'
+  "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[7]' 'run-shell true'
+  first_hook=$("$SHIM/tmux" show-options -H -t "=$view:" 'session-window-changed[0]')
+  last_hook=$("$SHIM/tmux" show-options -H -t "=$view:" 'session-window-changed[7]')
+  out=$(run_view open --target firstmate:fm-dev --view-session "$view") || fail "borrowed open failed: $out"
+  handle=$(returned_handle "$out")
+  hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
+  assert_contains "$hooks" "$first_hook" "open preserves existing hook index 0"
+  assert_contains "$hooks" "$last_hook" "open preserves existing hook index 7"
+  assert_equals 3 "$(printf '%s\n' "$hooks" | wc -l | tr -d ' ')" "open appends exactly one hook"
+  out=$(FM_FAKE_ORCA_FAIL=1 FM_FAKE_ORCA_ADD_HOOK="$view" \
+    run_view open --target firstmate:fm-dev --view-session "$view" 2>&1)
+  expect_code 3 "$?" "a failed reopen reports failure"
+  hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
+  assert_contains "$hooks" "$first_hook" "rollback preserves the original hook at index 0"
+  assert_contains "$hooks" "$last_hook" "rollback preserves the original hook at index 7"
+  assert_contains "$hooks" 'session-window-changed[9]' "rollback preserves a hook added during the Orca call"
+  target=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t firstmate: -n borrowed-target)
+  out=$(run_view open --target "firstmate:$target" --view-session "$view") || fail "reopen failed: $out"
+  "$SHIM/tmux" kill-window -t "$target"
+  wait_for_no_session "$view" || fail "the borrowed view did not end"
+  run_view close --handle "$handle" >/dev/null 2>&1 || fail "borrowed tab did not close"
+  pass "open: appends its hook and rollback preserves existing and newly added borrowed hooks"
+}
+
+test_open_preserves_inherited_hooks() {
+  local base=inherited-base view=inherited-view target survivor out handle hooks i
+  "$SHIM/tmux" set-hook -g 'session-window-changed[0]' 'run-shell true'
+  "$SHIM/tmux" set-hook -g 'session-window-changed[7]' 'run-shell true'
+  hooks=$("$SHIM/tmux" show-options -gH session-window-changed)
+  "$SHIM/tmux" new-session -d -s "$base" -n target
+  target=$("$SHIM/tmux" display-message -p -t "=$base:" '#{window_id}')
+  survivor=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t "$base:" -n survivor 'sleep 120')
+  out=$(run_view open --target "$base:$target" --view-session "$view") || fail "inherited open failed: $out"
+  handle=$(returned_handle "$out")
+  assert_contains "$("$SHIM/tmux" show-options -AH -t "=$view:" session-window-changed)" 'session-window-changed[0] run-shell true' \
+    "open retains inherited hook index 0 while tracking"
+  assert_contains "$("$SHIM/tmux" show-options -AH -t "=$view:" session-window-changed)" 'session-window-changed[7] run-shell true' \
+    "open retains inherited hook index 7 while tracking"
+  "$SHIM/tmux" kill-session -t "=$base"
+  "$SHIM/tmux" kill-window -t "$target"
+  i=0
+  while [ "$i" -lt 100 ]; do
+    "$SHIM/tmux" show-options -v -t "=$view:" @fm_view_window >/dev/null 2>&1 || break
+    sleep 0.05
+    i=$((i + 1))
+  done
+  assert_equals "$survivor" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')" "untracking preserves the surviving window"
+  assert_equals '' "$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)" "untracking restores hook inheritance"
+  assert_contains "$("$SHIM/tmux" show-options -AH -t "=$view:" session-window-changed)" 'session-window-changed[7]' "inherited hook remains effective"
+  assert_equals "$hooks" "$("$SHIM/tmux" show-options -gH session-window-changed)" "global hooks remain unchanged"
+  run_view close --handle "$handle" --view-session "$view" >/dev/null 2>&1 || fail "inherited tab did not close"
+  "$SHIM/tmux" kill-session -t "=$view"
+  "$SHIM/tmux" set-hook -gu session-window-changed
+  pass "open: preserves inherited hooks and restores inheritance after untracking"
+}
+
 test_follow_keeps_windows_when_base_is_gone() {
   local replacement base view out handle target survivor pane_pid hooks i
   for replacement in absent recycled; do
@@ -677,6 +740,8 @@ test_switch_values
 test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
 test_open_refuses_the_base_as_a_view
+test_open_preserves_borrowed_hooks
+test_open_preserves_inherited_hooks
 test_open_refuses_a_foreign_view_session
 test_view_follows_the_agent_window
 test_identity_filters_input

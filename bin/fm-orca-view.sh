@@ -75,6 +75,9 @@
 #           window when the view shows another one, and removes the view
 #           session when that window no longer exists in it and its base still
 #           shares the windows. Otherwise it removes only its own tracking.
+# Tracking records its appended entry's marker in @fm_view_hook_id.
+# @fm_view_parent_hooks holds copied inherited entries so their local shadow
+# can be removed when untracking, unless another local entry has changed.
 #
 # Every Orca step stops at a one-line `note:` on stderr and exit 3 when Orca, its
 # command line, or the registered worktree is unavailable, so a caller can let
@@ -199,12 +202,53 @@ tmux_quote() {
 # track_view: point VIEW_SESSION at WINDOW_ID by id and install the hook that
 # keeps it there (header). Fails when the view session cannot show the window.
 track_view() {
-  local follow
+  local follow hook_id local_hooks inherited_hooks hook_line
   follow="$(sh_quote "$SCRIPT_DIR/fm-orca-view.sh") follow --view-session $(sh_quote "$VIEW_SESSION")"
   [ -z "$SOCKET" ] || follow="$follow --socket $(sh_quote "$SOCKET")"
-  tmux set-option -t "=$VIEW_SESSION:" @fm_view_window "$WINDOW_ID" &&
-    tmux set-hook -t "=$VIEW_SESSION:" session-window-changed "run-shell -b $(tmux_quote "$follow")" &&
-    tmux select-window -t "=$VIEW_SESSION:$WINDOW_ID"
+  tmux set-option -t "=$VIEW_SESSION:" @fm_view_window "$WINDOW_ID" || return 1
+  hook_id=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_hook_id 2>/dev/null) || hook_id=
+  if [ -z "$hook_id" ] || ! view_hook_name "$VIEW_SESSION" "$hook_id" >/dev/null; then
+    ADDED_HOOK="fm-orca-view-${BASHPID:-$$}"
+    local_hooks=$(tmux show-options -H -t "=$VIEW_SESSION:" session-window-changed) || return 1
+    if [ -z "$local_hooks" ]; then
+      inherited_hooks=$(view_hook_lines "$VIEW_SESSION" inherited) || return 1
+      tmux set-option -t "=$VIEW_SESSION:" @fm_view_parent_hooks "$inherited_hooks" || return 1
+      while IFS= read -r hook_line; do
+        [ -n "$hook_line" ] || continue
+        tmux set-hook -t "=$VIEW_SESSION:" "${hook_line%% *}" "${hook_line#* }" || return 1
+      done <<EOF
+$inherited_hooks
+EOF
+    fi
+    tmux set-hook -a -t "=$VIEW_SESSION:" session-window-changed \
+      "run-shell -b $(tmux_quote ": $ADDED_HOOK; $follow")" || return 1
+    tmux set-option -t "=$VIEW_SESSION:" @fm_view_hook_id "$ADDED_HOOK" || return 1
+  fi
+  tmux select-window -t "=$VIEW_SESSION:$WINDOW_ID"
+}
+
+view_hook_lines() {  # <view> [inherited]; normalize tmux's empty array display
+  local flag=-H hooks line name
+  [ "${2:-}" != inherited ] || flag=-AH
+  hooks=$(tmux show-options "$flag" -t "=$1:" session-window-changed 2>/dev/null) || return 1
+  case "$hooks" in '' | session-window-changed) return 0 ;; esac
+  while IFS= read -r line; do
+    name=${line%% *}
+    printf '%s %s\n' "${name%\*}" "${line#* }"
+  done <<EOF
+$hooks
+EOF
+}
+
+view_hook_name() {  # <view> <id>; match only this feature's identifiable entry
+  local line
+  [ -n "$2" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in *": $2;"*) printf '%s\n' "${line%% *}"; return 0 ;; esac
+  done <<EOF
+$(view_hook_lines "$1")
+EOF
+  return 1
 }
 
 # A group's name outlives its base, which can also be replaced by an unrelated
@@ -219,8 +263,21 @@ EOF
   [ "$base_group" = "$group" ]
 }
 
-untrack_view() {  # <view-session>; track_view installs hook index 0
-  tmux set-hook -u -t "=$1:" 'session-window-changed[0]' 2>/dev/null || true
+untrack_view() {  # <view-session> [added-id]; remove only the identifiable entry
+  local hook_id=${2:-} hook_name parent hooks
+  [ -n "$hook_id" ] || hook_id=$(tmux show-options -v -t "=$1:" @fm_view_hook_id 2>/dev/null) || hook_id=
+  if hook_name=$(view_hook_name "$1" "$hook_id"); then
+    tmux set-hook -u -t "=$1:" "$hook_name" 2>/dev/null || true
+  fi
+  if parent=$(tmux show-options -v -t "=$1:" @fm_view_parent_hooks 2>/dev/null); then
+    hooks=$(view_hook_lines "$1") || hooks=unknown
+    # Restore inheritance only if nobody added or changed a local entry.
+    if [ "$hooks" = "$parent" ]; then
+      tmux set-hook -u -t "=$1:" session-window-changed 2>/dev/null || true
+    fi
+  fi
+  tmux set-option -u -t "=$1:" @fm_view_hook_id 2>/dev/null || true
+  tmux set-option -u -t "=$1:" @fm_view_parent_hooks 2>/dev/null || true
   tmux set-option -u -t "=$1:" @fm_view_window 2>/dev/null || true
 }
 
@@ -279,7 +336,6 @@ cmd_command() {
 }
 
 open_failed() {
-  local hook_line
   if [ "$OWNED" = 1 ]; then
     if view_base_survives "$VIEW_SESSION"; then
       tmux kill-session -t "=$VIEW_SESSION" 2>/dev/null || true
@@ -287,25 +343,26 @@ open_failed() {
       untrack_view "$VIEW_SESSION"
     fi
   else
-    tmux set-hook -u -t "=$VIEW_SESSION:" session-window-changed || true
+    [ -z "$ADDED_HOOK" ] || untrack_view "$VIEW_SESSION" "$ADDED_HOOK"
     if [ "$PRIOR_OPTION_SET" = 1 ]; then
       tmux set-option -t "=$VIEW_SESSION:" @fm_view_window "$PRIOR_OPTION" || true
     else
       tmux set-option -u -t "=$VIEW_SESSION:" @fm_view_window || true
     fi
+    if [ "$PRIOR_HOOK_ID_SET" = 1 ]; then
+      tmux set-option -t "=$VIEW_SESSION:" @fm_view_hook_id "$PRIOR_HOOK_ID" || true
+    fi
+    if [ "$PRIOR_PARENT_SET" = 1 ]; then
+      tmux set-option -t "=$VIEW_SESSION:" @fm_view_parent_hooks "$PRIOR_PARENT" || true
+    fi
     tmux select-window -t "=$VIEW_SESSION:$PRIOR_WINDOW" 2>/dev/null || true
-    while IFS= read -r hook_line; do
-      [ -n "$hook_line" ] || continue
-      tmux set-hook -t "=$VIEW_SESSION:" "${hook_line%% *}" "${hook_line#* }" || true
-    done <<EOF
-$PRIOR_HOOK
-EOF
   fi
   note "$1"
 }
 
 cmd_open() {
-  local cmd out handle grouped group PRIOR_OPTION_SET=0 PRIOR_OPTION='' PRIOR_HOOK='' PRIOR_WINDOW=''
+  local cmd out handle grouped group PRIOR_OPTION_SET=0 PRIOR_OPTION='' PRIOR_WINDOW=''
+  local ADDED_HOOK='' PRIOR_HOOK_ID_SET=0 PRIOR_HOOK_ID='' PRIOR_PARENT_SET=0 PRIOR_PARENT=''
   parse_view_args "$@"
   resolve_target "$TARGET"
   [ "$VIEW_SESSION" != "$BASE_SESSION" ] || note "the base session cannot be used as its own view"
@@ -328,7 +385,12 @@ EOF
     if PRIOR_OPTION=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_window 2>/dev/null); then
       PRIOR_OPTION_SET=1
     fi
-    PRIOR_HOOK=$(tmux show-options -H -t "=$VIEW_SESSION:" session-window-changed 2>/dev/null) || PRIOR_HOOK=''
+    if PRIOR_HOOK_ID=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_hook_id 2>/dev/null); then
+      PRIOR_HOOK_ID_SET=1
+    fi
+    if PRIOR_PARENT=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_parent_hooks 2>/dev/null); then
+      PRIOR_PARENT_SET=1
+    fi
   fi
   track_view || open_failed "view session $VIEW_SESSION cannot show window $WINDOW_ID of $BASE_SESSION"
   [ -z "$IDFILE" ] || rm -f "$IDFILE" "$IDFILE.tmp"
