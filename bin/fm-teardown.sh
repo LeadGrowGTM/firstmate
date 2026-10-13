@@ -1197,6 +1197,22 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
+if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$PR_URL" ]; then
+  if ! fm_pr_url_parse "$PR_URL"; then
+    echo "REFUSED: recorded PR for $ID cannot be verified as merged; nothing was changed" >&2
+    exit 1
+  fi
+  pr_status_rc=0
+  case "$FM_PR_PROVIDER" in
+    github) fm_pr_github_read_record "$FM_PR_OWNER" "$FM_PR_REPO" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+    gitlab) fm_pr_gitlab_read_record "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+    gerrit) fm_pr_gerrit_read_record "$FM_PR_HOST" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+  esac
+  if [ "$pr_status_rc" -ne 0 ] || [ "$FM_PR_RECORD_MERGED" != true ]; then
+    echo "REFUSED: recorded PR $PR_URL is not confirmed merged; nothing was changed" >&2
+    exit 1
+  fi
+fi
 # tasktmp is recorded by fm-spawn for tasks that set up a per-task temp root
 # (/tmp/fm-<id>/); absent for tasks spawned before that change, so tolerate empty.
 TASK_TMP=$(grep '^tasktmp=' "$META" | cut -d= -f2- || true)
@@ -1953,7 +1969,7 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
@@ -1961,7 +1977,9 @@ validate_worktree_teardown_safety() {
     scout) [ "$ONLY_IF_STOPPED" = 1 ] || return 0 ;;
   esac
 
-  if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
+  untracked=normal
+  [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
+  if ! dirty_raw=$(git -C "$WT" status --porcelain "--untracked-files=$untracked" 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
     fi
@@ -1969,7 +1987,21 @@ validate_worktree_teardown_safety() {
     echo "Restore the git index state, or get the captain's explicit OK to discard, then --force." >&2
     return 1
   fi
-  dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' || true)
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? \.fm-(grok|kimi)-turnend$' || true)
+    if [ -f "$WT/.claude/settings.local.json" ] \
+      && [ ! -L "$WT/.claude/settings.local.json" ] \
+      && [ -r "$WT/.claude/settings.local.json" ] \
+      && ! fm_control_claude_settings_operator_owned "$WT"; then
+      dirty=$(printf '%s\n' "$dirty" | grep -vFx '?? .claude/settings.local.json' || true)
+    fi
+    if [ -L "$WT/.claude/settings.local.json" ] \
+      || fm_control_claude_settings_operator_owned "$WT"; then
+      dirty="${dirty:+$dirty$'\n'}?? .claude/settings.local.json"
+    fi
+  else
+    dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' || true)
+  fi
 
   if ! unpushed_raw=$(git -C "$WT" log --oneline HEAD --not --remotes -- 2>/dev/null); then
     if worktree_safety_blocked_by_lock "commits not on a remote"; then

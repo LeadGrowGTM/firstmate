@@ -30,7 +30,9 @@ case "$1" in
     [ ! -f "$FIXTURE/endpoint-error" ] || { echo 'unreadable inventory' >&2; exit 1; }
     [ ! -f "$FIXTURE/alive" ] || echo fm-task
     ;;
-  display-message) echo node ;;
+  display-message)
+    if [ -f "$FIXTURE/alive" ]; then echo codex; else echo node; fi
+    ;;
 esac
 FAKE
   cat > "$home/fakebin/treehouse" <<'FAKE'
@@ -58,6 +60,10 @@ exit 0
 FAKE
   cat > "$home/fakebin/gh-axi" <<'FAKE'
 #!/usr/bin/env bash
+if [ "$1" = pr ] && [ "$2" = view ] && [ -f "$FIXTURE/pr-state" ]; then
+  printf 'state: %s\n' "$(cat "$FIXTURE/pr-state")"
+  exit 0
+fi
 echo 'count: 0'
 FAKE
   cat > "$home/fakebin/gh" <<'FAKE'
@@ -127,7 +133,21 @@ test_changes_kept() {
   assert_contains "$out" 'commits beyond its base not landed' 'pushed unlanded refusal reported'
   assert_present "$home/state/task.meta" 'pushed unlanded record kept'
   assert_grep pushed-unlanded "$home/worker/file" 'pushed unlanded content kept'
-  pass 'sweep keeps dirty, unpushed, and pushed unlanded work'
+  home=$(make_home claude-work); add_worker "$home"
+  mkdir -p "$home/worker/.claude/commands"
+  echo valuable > "$home/worker/.claude/commands/custom.md"
+  out=$(sweep "$home")
+  assert_contains "$out" 'uncommitted changes' 'untracked Claude work refused'
+  assert_present "$home/state/task.meta" 'untracked Claude work record kept'
+  assert_grep valuable "$home/worker/.claude/commands/custom.md" 'untracked Claude work kept'
+  home=$(make_home claude-settings); add_worker "$home"
+  mkdir -p "$home/worker/.claude"
+  echo '{"operator":true}' > "$home/worker/.claude/settings.local.json"
+  out=$(sweep "$home")
+  assert_contains "$out" 'uncommitted changes' 'operator Claude settings refused'
+  assert_present "$home/state/task.meta" 'operator Claude settings record kept'
+  assert_present "$home/worker/.claude/settings.local.json" 'operator Claude settings kept'
+  pass 'sweep keeps dirty, unpushed, pushed, and untracked Claude work'
 }
 
 test_decisions_secondmates_and_unknown_kept() {
@@ -152,7 +172,33 @@ test_decisions_secondmates_and_unknown_kept() {
   out=$(sweep "$home")
   assert_equals '' "$out" 'present endpoint without stopped proof silent'
   assert_present "$home/state/task.meta" 'present endpoint record kept'
+  home=$(make_home idle); add_worker "$home"
+  touch "$home/alive"
+  printf 'harness=grok\n' >> "$home/state/task.meta"
+  out=$(sweep "$home")
+  assert_contains "$out" 'idle-left task' 'semantically idle worker reported'
+  assert_present "$home/state/task.meta" 'idle worker record kept'
+  assert_present "$home/worker" 'idle worker copy kept'
   pass 'sweep keeps open decisions, secondmates, and unreadable endpoints'
+}
+
+test_recorded_pr_kept_until_merged() {
+  local home out
+  home=$(make_home open-pr); add_worker "$home"
+  printf 'pr=https://github.com/example/repo/pull/7\n' >> "$home/state/task.meta"
+  echo OPEN > "$home/pr-state"
+  out=$(sweep "$home")
+  assert_contains "$out" 'not confirmed merged' 'open PR refusal reported'
+  assert_present "$home/state/task.meta" 'open PR record kept'
+  assert_present "$home/worker" 'open PR copy kept'
+  git -C "$home/projects/project" worktree remove "$home/worker"
+  out=$(sweep "$home")
+  assert_contains "$out" 'not confirmed merged' 'open PR refused without copy'
+  assert_present "$home/state/task.meta" 'open PR record kept without copy'
+  echo MERGED > "$home/pr-state"
+  out=$(sweep "$home")
+  assert_absent "$home/state/task.meta" 'merged PR record removed'
+  pass 'sweep preserves recorded open PRs with or without copies'
 }
 
 test_scout_gates_and_work_kept() {
@@ -322,25 +368,15 @@ test_default_daily_check_and_watcher() {
   pass 'automatic default-on daily gate runs detached and watcher reports once'
 }
 
-test_automatic_off_and_unsafe_records() {
+test_unsafe_records() {
   local home out rc=0
-  home=$(make_home disabled); add_worker "$home"
-  echo off > "$home/config/deadweight-sweep"
-  out=$(check "$home")
-  assert_equals '' "$out" 'configuration disables automatic check'
-  assert_absent "$home/state/.deadweight-sweep-launched" 'disabled check does not launch'
-  assert_present "$home/state/task.meta" 'disabled check keeps worker'
-  echo unexpected > "$home/config/deadweight-sweep"
-  out=$(check "$home") || rc=$?
-  assert_equals 1 "$rc" 'invalid configuration refuses cleanup'
-  assert_contains "$out" 'automatic cleanup refused' 'invalid configuration reported'
-  rm "$home/config/deadweight-sweep"
+  home=$(make_home unsafe); add_worker "$home"
   ln -s "$home/untouched" "$home/state/.deadweight-sweep-launched"
   rc=0; out=$(check "$home") || rc=$?
   assert_equals 1 "$rc" 'unsafe schedule destination refused'
   assert_absent "$home/untouched" 'schedule symlink target untouched'
   assert_present "$home/state/task.meta" 'unsafe schedule keeps worker'
-  pass 'automatic cleanup switches off explicitly and refuses unsafe schedule records'
+  pass 'automatic cleanup refuses unsafe schedule records'
 }
 
 test_detached_sweep_survives_watcher_timeout() {
@@ -361,6 +397,7 @@ test_detached_sweep_survives_watcher_timeout() {
 test_clean_stopped_and_idempotence
 test_changes_kept
 test_decisions_secondmates_and_unknown_kept
+test_recorded_pr_kept_until_merged
 test_scout_gates_and_work_kept
 test_stale_registration_and_live_copy
 test_pool_prune_count_and_failure
@@ -368,5 +405,5 @@ test_guard_cannot_force
 test_pipeline_and_captain_hold_kept
 
 test_default_daily_check_and_watcher
-test_automatic_off_and_unsafe_records
+test_unsafe_records
 test_detached_sweep_survives_watcher_timeout

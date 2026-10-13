@@ -12,8 +12,6 @@
 # The next poll prints the completed sweep's one-line result once. No check
 # shim, cron entry, or extra daemon needs arming. The normal supervision cycle
 # must be running; this script does not launch one or administer a live home.
-# Set config/deadweight-sweep to `off` to disable automatic cleanup in that
-# home. Missing configuration means on; other contents refuse automatic work.
 # Direct invocation still runs a sweep for an explicit home.
 # state/.deadweight-sweep-launched records the last automatic start time;
 # state/.deadweight-sweep-result holds the unreported result.
@@ -22,8 +20,8 @@
 # --only-if-stopped guard checks endpoint and captain-decision state under its
 # lifecycle lock; its ordinary landed-work, scout-completion, ownership, and
 # backlog gates own every removal. No --force or live idle-worker exit is used.
-# The separately armed idle-exit check can stop idle workers first. Backends
-# without a recovery-grade stopped classifier are retained conservatively.
+# Alive idle workers belong to the separately armed idle-exit check. Orca,
+# Zellij, and cmux have no recovery-grade stopped classifier and stay retained.
 # Missing legacy incarnation records are reported as ordinary refusals.
 #
 # For clone roots under this home's projects directory, prune stale git
@@ -61,6 +59,8 @@ fm_refuse_if_gate_agent
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-busy-lib.sh
+. "$SCRIPT_DIR/fm-busy-lib.sh"
 
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
@@ -93,15 +93,6 @@ queue_report() {
 }
 case "${1:-}" in
   check)
-    config="$FM_HOME/config/deadweight-sweep"
-    if [ -e "$config" ] || [ -L "$config" ]; then
-      [ -f "$config" ] && [ ! -L "$config" ] && [ -r "$config" ] \
-        && [ "$(cat "$config")" = off ] || {
-        queue_report 'swept: automatic cleanup refused: config/deadweight-sweep must contain off'
-        exit 1
-      }
-      exit 0
-    fi
     CHECK_LOCK="$STATE/.deadweight-check.lock"
     fm_lock_try_acquire "$CHECK_LOCK" || exit 0
     trap 'fm_lock_release "$CHECK_LOCK" || true' EXIT
@@ -209,10 +200,9 @@ for meta in "$STATE"/*.meta; do
         endpoint_state=$(fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET")
         case "$endpoint_state" in
           alive|unverified)
-            crew_state=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-              FM_CREW_STATE_NO_FORGE=1 "$SCRIPT_DIR/fm-crew-state.sh" "$id" 2>/dev/null || true)
-            case "$crew_state" in
-              'state: idle '*|'state: done '*) note "idle-left $id" ;;
+            busy_state=$(fm_busy_classify_meta "$meta" "$id" "$STATE" 2>/dev/null || true)
+            case "$busy_state" in
+              'idle '*) note "idle-left $id" ;;
             esac
             ;;
         esac

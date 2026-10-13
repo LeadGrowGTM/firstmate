@@ -1145,11 +1145,11 @@ Firstmate cannot see which part of a worker's life uses the resource, so the num
 
 Every home's normal supervision watcher runs a daily deadweight sweep by default.
 No check shim or separate scheduler needs arming.
-Set `config/deadweight-sweep` to `off` to disable automatic cleanup in that home; missing configuration means on.
 The sweep runs while the normal supervision cycle is active, starts at most once per day, and reports its result on the next slow-check poll.
 [`bin/fm-deadweight-sweep.sh`](../bin/fm-deadweight-sweep.sh) owns the schedule, state records, output, and safety gates.
 It uses teardown's landed-work and completion checks, preserves captain holds and secondmates, and delegates pool removal to treehouse's safe prune.
-Automatic teardown requires a proven dead or missing endpoint; alive idle workers and backends without reliable death proof remain in place and appear as `idle-left` in the one-line report when their state is idle or done.
+Automatic teardown requires a proven dead or missing endpoint.
+Alive idle workers and backends without reliable death proof remain in place and appear as `idle-left` in the one-line report when the semantic busy classifier confirms idle.
 
 ## Worktree pool guard
 

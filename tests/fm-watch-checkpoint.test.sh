@@ -12,8 +12,6 @@ make_home() {
   local name=$1 home
   home="$TMP_ROOT/$name"
   mkdir -p "$home/state" "$home/data" "$home/config"
-  # These cases isolate checkpoint behavior; maintenance has its own suite.
-  echo off > "$home/config/deadweight-sweep"
   printf '%s\n' "$home"
 }
 
