@@ -1835,7 +1835,7 @@ SH
 test_raw_secondmate_existing_settings_merge_skill_overrides() {
   local form rec id sm out status launch args_log raw arg settings count want
   want='{"it'"'"'s":"off","a\u0026b":"name-only"}'
-  for form in split equals; do
+  for form in split-before split-after equals-before equals-after; do
     id="profile-secondmate-skillov-existing-$form-z36"
     rec=$(make_spawn_case "profile-secondmate-skillov-existing-$form" claude "$id")
     read_case_record "$rec"
@@ -1849,8 +1849,10 @@ printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
 SH
     chmod +x "$FAKEBIN_DIR/claude"
     case "$form" in
-    split) raw="claude --settings '{\"theme\":\"dark\"}' --model haiku 'A positional prompt'" ;;
-    equals) raw="claude --model haiku 'A positional prompt' --settings='{\"theme\":\"dark\"}'" ;;
+    split-before) raw="claude --settings '{\"theme\":\"dark\"}' --model haiku 'A positional prompt'" ;;
+    split-after) raw="claude 'A positional prompt' --settings '{\"theme\":\"dark\"}'" ;;
+    equals-before) raw="claude --settings='{\"theme\":\"dark\"}' 'A positional prompt'" ;;
+    equals-after) raw="claude 'A positional prompt' --settings='{\"theme\":\"dark\"}'" ;;
     esac
 
     out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" "$raw" --secondmate)
@@ -1860,6 +1862,10 @@ SH
     args_log="$CASE_DIR/claude-args.log"
     FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
       || fail "raw secondmate Claude launch with existing $form settings failed"
+    awk '$0 == "--disallowedTools" { if (getline <= 0 || $0 != "Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs" || getline <= 0 || $0 !~ /^--settings(=|$)/) exit 1; found = 1 } END { if (!found) exit 1 }' "$args_log" \
+      || fail "raw Claude placed a positional prompt after variadic --disallowedTools for $form form"
+    grep -Fxq 'A positional prompt' "$args_log" \
+      || fail "raw Claude lost its positional prompt for $form form"
     count=0
     settings=
     while IFS= read -r arg; do

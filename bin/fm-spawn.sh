@@ -2446,7 +2446,7 @@ launch_template() {
 }
 
 raw_claude_settings_extract() {
-  local source=$1 length=${#1} i=0 start c next quote= word= expect=0
+  local source=$1 length=${#1} i=0 start settings_start c next quote= word= expect=0
   RAW_CLAUDE_SETTINGS_FOUND=0
   while (( i < length )); do
     c=${source:i:1}
@@ -2495,16 +2495,17 @@ raw_claude_settings_extract() {
       RAW_CLAUDE_SETTINGS_FOUND=1
       RAW_CLAUDE_SETTINGS_VALUE=$word
       RAW_CLAUDE_SETTINGS_LITERAL=${source:start:i-start}
-      RAW_CLAUDE_SETTINGS_COMMAND=${source:0:start}__CLAUDESETTINGS__${source:i}
+      RAW_CLAUDE_SETTINGS_COMMAND=${source:0:settings_start}--disallowedTools\ $CLAUDE_PUBLISHING_TOOLS\ ${source:settings_start:start-settings_start}__CLAUDESETTINGS__${source:i}
       return 0
     fi
     if [ "$word" = --settings ] && [ "${source:start:10}" = --settings ]; then
       expect=1
+      settings_start=$start
     elif [[ "$word" == --settings=* ]] && [ "${source:start:11}" = '--settings=' ]; then
       RAW_CLAUDE_SETTINGS_FOUND=1
       RAW_CLAUDE_SETTINGS_VALUE=${word#--settings=}
       RAW_CLAUDE_SETTINGS_LITERAL=${source:$((start + 11)):$((i - start - 11))}
-      RAW_CLAUDE_SETTINGS_COMMAND=${source:0:start}--settings=__CLAUDESETTINGS__${source:i}
+      RAW_CLAUDE_SETTINGS_COMMAND=${source:0:start}--disallowedTools\ $CLAUDE_PUBLISHING_TOOLS\ --settings=__CLAUDESETTINGS__${source:i}
       return 0
     fi
   done
@@ -2524,7 +2525,6 @@ case "$ARG3" in
         raw_prefix=${LAUNCH%"$raw_tail"}
         if raw_claude_settings_extract "$raw_tail"; then
           raw_tail=$RAW_CLAUDE_SETTINGS_COMMAND
-          raw_tail=${raw_tail/"$word"/"$word --disallowedTools $CLAUDE_PUBLISHING_TOOLS"}
         else
           raw_tail=${raw_tail/"$word"/"$word --disallowedTools $CLAUDE_PUBLISHING_TOOLS --settings __CLAUDESETTINGS__"}
         fi
