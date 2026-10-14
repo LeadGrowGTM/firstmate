@@ -575,7 +575,7 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < <request.json>
 ```
 
 The box generates its own normal worker brief and operational paths, allocates its own worktree, and calls the existing spawn command with merge authority off.
-The box-wide three-worker cap uses retained records and one live endpoint inventory from the configured tmux runtime; orphan windows remain counted after metadata rollback.
+The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 
@@ -596,7 +596,8 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
 
 The command uses ordinary remote teardown and its landed-work checks.
 It stops the approved box when both Boat task records and worker endpoints are gone, meeting R2 at the last teardown; the box's auto-stop timer is the backstop if teardown cannot complete.
-The sender refuses on unreadable spend state or a cap violation; after a definite spawn refusal, it stops a box resumed by this send only when a locked remote inventory confirms both counts are zero.
+The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.
+After a definite spawn refusal, it stops a box resumed by this send only when a locked remote inventory confirms both records and worker windows are absent.
 The sender leaves an uncertain remote launch untouched for same-task reconciliation.
 It adds no automatic worker retry, merge path, or supervision loop.
 
