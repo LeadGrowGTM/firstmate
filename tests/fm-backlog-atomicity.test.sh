@@ -36,6 +36,21 @@ SPAWN="$ROOT/bin/fm-spawn.sh"
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
 BOOTSTRAP="$ROOT/bin/fm-bootstrap.sh"
 TMP_ROOT=$(fm_test_tmproot fm-backlog-atomicity)
+BOAT_FIXTURE_INSTANCE=22222222-2222-4222-8222-222222222222
+
+boat_fixture_cat() {
+  local fakebin=$1 real_cat
+  real_cat=$(command -v cat)
+  cat > "$fakebin/cat" <<SH
+#!/usr/bin/env bash
+if [ "\$#" -eq 1 ] && [ "\$1" = /proc/sys/kernel/random/boot_id ]; then
+  printf '%s\n' '$BOAT_FIXTURE_INSTANCE'
+  exit 0
+fi
+exec '$real_cat' "\$@"
+SH
+  chmod +x "$fakebin/cat"
+}
 
 command -v tasks-axi >/dev/null 2>&1 || {
   printf 'ok - skipped (tasks-axi is not installed; the fused transitions are inert without it)\n'
@@ -1370,9 +1385,10 @@ SH
   fm_write_meta "$home/state/worker-two.meta" 'kind=ship'
   fm_write_meta "$home/state/worker-three.meta" 'kind=scout'
   printf 'fm-%s\nfm-worker-two\nfm-worker-three\n' "$id" > "$case_dir/windows"
+  boat_fixture_cat "$case_dir/fakebin"
   rc=0
   out=$(env -u TMUX -u TMUX_PANE FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FM_BACKEND=tmux \
-    PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn <<'JSON'
+    PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn "$BOAT_FIXTURE_INSTANCE" <<'JSON'
 {"id":"worker-four","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"A fourth task","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
 JSON
   ) || rc=$?
@@ -1416,6 +1432,7 @@ case "\${1:-}" in display-message) printf 'firstmate\n' ;; esac
 exit 0
 SH
     chmod +x "$fakebin/git" "$fakebin/tmux"
+    boat_fixture_cat "$fakebin"
     fm_fake_exit0 "$fakebin" treehouse gh gh-axi no-mistakes codex
     if [ "$name" = existing ]; then
       FM_HOME="$home" "$ROOT/bin/fm-tasks-axi.sh" add task-one 'Already queued' --kind ship --repo firstmate >/dev/null \
@@ -1426,7 +1443,7 @@ SH
       FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
       FM_CONFIG_OVERRIDE="$home/config" FM_PROJECTS_OVERRIDE="$home/projects" FM_BACKEND=tmux \
       FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" \
-      PATH="$fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn <<'JSON'
+      PATH="$fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn "$BOAT_FIXTURE_INSTANCE" <<'JSON'
 {"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Exercise intake","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
 JSON
     ) || rc=$?
