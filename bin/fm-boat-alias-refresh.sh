@@ -64,10 +64,12 @@
 # alias was removed; 1 a refusal or failure, including a restore that did not
 # finish in time; 2 invalid use.
 set -eu
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 SSH_DIR="$HOME/.ssh"
 CONFIG="$SSH_DIR/config"
-KEY="$SSH_DIR/ascii_box_ed25519"
+KEY="$HOME/.ssh/ascii_box_ed25519"
 BOAT_BIN=${FM_BOAT_BIN:-boat}
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
@@ -150,7 +152,7 @@ done
 [ -f "$KEY" ] || die "no Boat CLI key at $KEY; run 'boat ssh $ID true' once"
 KNOWN="$SSH_DIR/known_hosts_${ALIAS//-/_}"
 
-info=$("$BOAT_BIN" --no-update info "$ID" --json) || die "boat info failed for $ID"
+info=$(fm_run_timed 15 "$BOAT_BIN" --no-update info "$ID" --json) || die "boat info failed for $ID"
 printf '%s' "$info" | jq -e '.sandbox | type == "object"' >/dev/null 2>&1 ||
   die "boat info returned unexpected output for $ID"
 state=$(printf '%s' "$info" | jq -r '.sandbox.state // empty')
@@ -171,8 +173,9 @@ case "$port" in ''|*[!0-9]*) die "unexpected SSH port: $port" ;; esac
 case "$host" in *[!A-Za-z0-9.:-]*) die "unexpected SSH host: $host" ;; esac
 
 # The host key comes over the Boat API command channel, not over SSH.
-hostkey=$("$BOAT_BIN" --no-update exec "$ID" --json -- cat /etc/ssh/ssh_host_ed25519_key.pub |
-  jq -r 'select(.exitCode == 0) | .stdout' | awk 'NR == 1 { print $1, $2 }')
+hostkey_result=$(fm_run_timed 45 "$BOAT_BIN" --no-update exec "$ID" --json -- cat /etc/ssh/ssh_host_ed25519_key.pub) ||
+  die "could not read the sandbox host key through boat exec"
+hostkey=$(printf '%s' "$hostkey_result" | jq -r 'select(.exitCode == 0) | .stdout' | awk 'NR == 1 { print $1, $2 }')
 case "$hostkey" in 'ssh-ed25519 AAAA'*) ;; *) die "could not read the sandbox host key through boat exec" ;; esac
 
 old_fp=
@@ -224,7 +227,11 @@ start=$(date +%s)
 hydrated=$(printf '%s' "$info" | jq -r '.sandbox.hydrated')
 while [ "$hydrated" != true ] && [ $(( $(date +%s) - start )) -lt "$wait_max" ]; do
   sleep "$poll"
-  hydrated=$("$BOAT_BIN" --no-update info "$ID" --json | jq -r '.sandbox.hydrated' 2>/dev/null) || hydrated=
+  if next_info=$(fm_run_timed 15 "$BOAT_BIN" --no-update info "$ID" --json); then
+    hydrated=$(printf '%s' "$next_info" | jq -r '.sandbox.hydrated' 2>/dev/null) || hydrated=
+  else
+    hydrated=
+  fi
   [ -n "$hydrated" ] || hydrated=unknown
 done
 waited=$(( $(date +%s) - start ))

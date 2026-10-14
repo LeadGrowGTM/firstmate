@@ -66,6 +66,23 @@ export PATH
 . "$ROOT/bin/fm-backend.sh"
 fm_backend_source tmux || fail "fm_backend_source tmux failed"
 
+# A near-named session must never satisfy the default container or receive a
+# worker whose recorded session is firstmate. All calls use the private socket.
+tmux new-session -d -s firstmate-recovery -n recovery || fail "could not seed near-named session"
+got=$(TMUX='' TMUX_PANE='' fm_backend_tmux_container_ensure) || fail "could not ensure exact default session"
+[ "$got" = firstmate ] || fail "default container returned '$got'"
+tmux has-session -t '=firstmate' || fail "near-named session prevented exact default session creation"
+fm_backend_tmux_create_task "$got" fm-exact "$HOME" || fail "could not create exact-session worker"
+fm_backend_tmux_window_inventory '=firstmate' | grep -qx fm-exact || fail "capacity inventory missed the spawned worker"
+if tmux list-windows -t '=firstmate-recovery' -F '#{window_name}' | grep -qx fm-exact; then
+  fail "worker landed in the near-named session"
+fi
+tmux kill-session -t '=firstmate'
+if fm_backend_tmux_create_task firstmate fm-missing "$HOME" 2>/dev/null; then
+  fail "missing exact session fell back to the near-named session"
+fi
+pass "real tmux: default spawn and inventory share the exact session, with no prefix fallback"
+
 SESSION="smoke"
 WINDOW="fm-smoke1"
 TARGET="$SESSION:$WINDOW"

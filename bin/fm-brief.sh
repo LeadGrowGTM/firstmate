@@ -413,7 +413,17 @@ if [ "$TASK_TYPE_SET" -eq 1 ]; then
 fi
 
 BRIEF="$DATA/$ID/brief.md"
-[ -e "$BRIEF" ] && { echo "error: $BRIEF already exists" >&2; exit 1; }
+if [ -e "$BRIEF" ] || [ -L "$BRIEF" ]; then
+  [ "${FM_BOAT_REWRITE_BRIEF:-}" = boat-eng ] &&
+    [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
+    [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] &&
+    [ "$DATA" = "$FM_HOME/data" ] && [ "$STATE" = "$FM_HOME/state" ] &&
+    [ -f "$BRIEF" ] && [ ! -L "$BRIEF" ] && [ ! -L "$DATA/$ID" ] &&
+    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] || {
+    echo "error: $BRIEF already exists" >&2
+    exit 1
+  }
+fi
 mkdir -p "$DATA/$ID"
 
 ASK_USER_BLOCK=

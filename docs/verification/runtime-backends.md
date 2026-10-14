@@ -139,6 +139,21 @@ The run did not reach `opencode`, `pi`, `pi-signed`, `grok`, `kimi`, or `muse`, 
 
 ## tmux
 
+Verified on 2026-10-14 UTC on Linux with tmux 3.4 through a private named server.
+The existing smoke guard seeds only a near-named session, then exercises the production container and task-creation helpers and reads the resulting worker through the exact capacity inventory.
+It also removes the exact session and proves task creation refuses rather than targeting the remaining near-named session.
+Refresh command:
+
+```sh
+bash bin/fm-test-run.sh tests/fm-backend-tmux-smoke.test.sh
+```
+
+Observed output:
+
+```text
+ok - real tmux: default spawn and inventory share the exact session, with no prefix fallback
+```
+
 Foreground-process behavior was verified on 2026-07-07 with tmux 3.6a on macOS.
 
 ```sh

@@ -36,6 +36,21 @@ SPAWN="$ROOT/bin/fm-spawn.sh"
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
 BOOTSTRAP="$ROOT/bin/fm-bootstrap.sh"
 TMP_ROOT=$(fm_test_tmproot fm-backlog-atomicity)
+BOAT_FIXTURE_INSTANCE=22222222-2222-4222-8222-222222222222
+
+boat_fixture_cat() {
+  local fakebin=$1 real_cat
+  real_cat=$(command -v cat)
+  cat > "$fakebin/cat" <<SH
+#!/usr/bin/env bash
+if [ "\$#" -eq 1 ] && [ "\$1" = /proc/sys/kernel/random/boot_id ]; then
+  printf '%s\n' '$BOAT_FIXTURE_INSTANCE'
+  exit 0
+fi
+exec '$real_cat' "\$@"
+SH
+  chmod +x "$fakebin/cat"
+}
 
 command -v tasks-axi >/dev/null 2>&1 || {
   printf 'ok - skipped (tasks-axi is not installed; the fused transitions are inert without it)\n'
@@ -1343,6 +1358,100 @@ test_dispatch_leaves_no_record_when_the_transition_fails() {
   [ "$(row_state "$case_dir" "$id")" = queued ] \
     || fail "a failed dispatch left the backlog item in $(row_state "$case_dir" "$id")"
   pass "a failed backlog transition fails the dispatch loudly and leaves no record"
+}
+
+test_boat_postlaunch_endpoint_reserves_capacity() {
+  local case_dir home id out rc=0
+  id=boat-postlaunch-failure
+  case_dir=$(make_home boat-postlaunch-failure "$id")
+  home=$(home_of "$case_dir")
+  printf 'boat-eng\n' > "$home/.fm-secondmate-home"
+  printf 'tmux\n' > "$home/config/backend"
+  cat > "$case_dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+case "\$*" in *'#{pane_current_path}'*) printf '%s\n' '$case_dir/wt'; exit 0 ;; esac
+case "\${1:-}" in
+  list-windows) cat '$case_dir/windows'; exit 0 ;;
+  display-message) printf 'firstmate\n' ;;
+esac
+exit 0
+SH
+  : > "$case_dir/windows"
+  add_item "$case_dir" "$id"
+  break_verb "$case_dir" start
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "Boat spawn reported success after backlog failure"
+  assert_absent "$home/state/$id.meta" "ordinary failed-dispatch rollback changed"
+  fm_write_meta "$home/state/worker-two.meta" 'kind=ship'
+  fm_write_meta "$home/state/worker-three.meta" 'kind=scout'
+  printf 'fm-%s\nfm-worker-two\nfm-worker-three\n' "$id" > "$case_dir/windows"
+  boat_fixture_cat "$case_dir/fakebin"
+  rc=0
+  out=$(env -u TMUX -u TMUX_PANE FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FM_BACKEND=tmux \
+    PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn "$BOAT_FIXTURE_INSTANCE" <<'JSON'
+{"id":"worker-four","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"A fourth task","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
+JSON
+  ) || rc=$?
+  expect_code 75 "$rc" "orphaned Boat endpoint must occupy its worker slot: $out"
+  pass "Boat live endpoint inventory refuses a fourth worker after metadata rollback"
+}
+
+test_boat_intake_owns_the_provisioned_backlog() {
+  local name case_dir home proj fakebin out rc real_git
+  real_git=$(command -v git)
+  for name in missing existing; do
+    case_dir="$TMP_ROOT/boat-intake-$name"
+    home="$case_dir/home"
+    proj="$home/projects/firstmate"
+    fakebin=$(fm_fakebin "$case_dir")
+    mkdir -p "$home/"{bin,data,state,config,projects} "$case_dir/user-home"
+    printf 'Fixture home.\n' > "$home/AGENTS.md"
+    printf 'boat-eng\n' > "$home/.fm-secondmate-home"
+    printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$home/.tasks.toml"
+    printf 'tmux\n' > "$home/config/backend"
+    touch "$home/state/.last-watcher-beat"
+    printf 'schema=fm-remote-home-provision.v1\nid_b64=%s\ncharter_b64=%s\nproject_count=0\n' \
+      "$(printf boat-eng | base64 | tr -d '\n')" \
+      "$(printf 'Code-only fixture charter.\n' | base64 | tr -d '\n')" > "$case_dir/manifest"
+    FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" "$ROOT/bin/fm-remote-home-provision.sh" < "$case_dir/manifest" >/dev/null \
+      || fail 'remote fixture provisioning failed'
+    [ "$(row_state "$case_dir" task-one)" = '' ] || fail 'provisioning did not create an empty backlog'
+    fm_git_worktree "$proj" "$case_dir/wt" pooled
+    cat > "$fakebin/git" <<SH
+#!/usr/bin/env bash
+if [ "\$*" = '-C $proj remote get-url origin' ]; then
+  printf 'https://github.com/LeadGrowGTM/firstmate.git\n'
+  exit 0
+fi
+exec '$real_git' "\$@"
+SH
+    cat > "$fakebin/tmux" <<SH
+#!/usr/bin/env bash
+case "\$*" in *'#{pane_current_path}'*) printf '%s\n' '$case_dir/wt'; exit 0 ;; esac
+case "\${1:-}" in display-message) printf 'firstmate\n' ;; esac
+exit 0
+SH
+    chmod +x "$fakebin/git" "$fakebin/tmux"
+    boat_fixture_cat "$fakebin"
+    fm_fake_exit0 "$fakebin" treehouse gh gh-axi no-mistakes codex
+    if [ "$name" = existing ]; then
+      FM_HOME="$home" "$ROOT/bin/fm-tasks-axi.sh" add task-one 'Already queued' --kind ship --repo firstmate >/dev/null \
+        || fail 'could not seed an existing queued item'
+    fi
+    rc=0
+    out=$(env -u TMUX -u TMUX_PANE FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" HOME="$case_dir/user-home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_PROJECTS_OVERRIDE="$home/projects" FM_BACKEND=tmux \
+      FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" \
+      PATH="$fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn "$BOAT_FIXTURE_INSTANCE" <<'JSON'
+{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Exercise intake","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
+JSON
+    ) || rc=$?
+    expect_code 0 "$rc" "$name backlog intake through real spawn: $out"
+    assert_present "$home/state/task-one.meta" 'intake did not create a real spawn record'
+    [ "$(row_state "$case_dir" task-one)" = in_flight ] || fail 'real spawn did not own the backlog transition'
+  done
+  pass "Boat intake adds or reuses an item in the provisioned backlog before real spawn"
 }
 
 test_dispatch_reports_an_incomplete_record_rollback() {
@@ -3035,6 +3144,8 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
   pass "dispatching a persistent secondmate needs no backlog item"
 }
 
+test_boat_postlaunch_endpoint_reserves_capacity
+test_boat_intake_owns_the_provisioned_backlog
 test_backend_resolution_preserves_config_errors
 test_backend_resolution_preserves_precedence_and_defaults
 test_backlog_callers_refuse_unreadable_backend_config
