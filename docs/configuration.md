@@ -1251,14 +1251,15 @@ Per-machine Cursor `cli-config.json` attribution-off is not this contract: it do
 
 ## Skill overrides (config/skill-overrides.json)
 
-The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills a Claude second mate's session lists, without editing any Claude settings file.
+The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills a Claude second mate's session lists through per-launch settings.
 It must be valid JSON whose top-level `skillOverrides` property is an object; Claude Code validates the object's contents.
 Only the `skillOverrides` property is read; any other property is ignored.
 
 When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only the `skillOverrides` property to the launch's inline `--settings` JSON.
 An absent file changes nothing.
 A file that is unreadable, contains zero or multiple JSON documents, is not valid JSON, or lacks a `skillOverrides` object is skipped with a one-line note on stderr, and the launch proceeds without it.
-Ship and scout workers never receive it, nor does any non-Claude harness, and Firstmate never writes or edits the file, a `settings.local.json`, or any plugin or account setting.
+Ship and scout workers never receive it, nor does any non-Claude harness.
+Firstmate reads but never edits the override file; existing Claude launch wiring separately regenerates `.claude/settings.local.json` for control hooks.
 
 The file is per home because each second mate needs a different list, and it is not inherited from the primary home.
 [`fm-spawn.sh`](../bin/fm-spawn.sh) owns the delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
