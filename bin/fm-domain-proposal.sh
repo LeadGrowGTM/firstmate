@@ -48,7 +48,8 @@
 #   `approved` receipt and prints the application request: only the approved
 #   changes, each preconditioned on its observed original_digest, with an
 #   instruction to return a refreshed submit instead of overwriting a changed target.
-# receipt: records applied against an approved digest; repeating it is a no-op.
+# receipt: records applied against an approved digest; repeating it adds no receipt
+#   but retries closing an activation task left open by an interrupted first attempt.
 #   Applying version N retires every older approval still unapplied, listed in the
 #   receipt's superseded field. The activation task closes only when no approved
 #   digest remains outstanding and no newer proposal card is held.
