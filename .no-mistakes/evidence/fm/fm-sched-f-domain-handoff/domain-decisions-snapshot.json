@@ -1,0 +1,121 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "domain-live.epxtbm/main",
+  "generated": "2026-10-14T04:36:19Z",
+  "prs": "not_requested (run: /bearings include PRs)",
+  "contributions": {
+    "scope": "owned contributions per home",
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "complete": false,
+    "proven_clear": false,
+    "unmeasured_homes": 1,
+    "unreadable_records": 0,
+    "unmeasured": 0,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "captain_omitted": 0,
+    "captain": []
+  },
+  "in_flight": [],
+  "secondmates": [
+    {
+      "id": "media",
+      "state": "unknown",
+      "doing": "invalid home: secondmate home cannot be inside the firstmate repo",
+      "provenance": "unknown",
+      "freshness": "unknown",
+      "age_seconds": null,
+      "contradiction": false,
+      "reason": "invalid home: secondmate home cannot be inside the firstmate repo"
+    }
+  ],
+  "secondmate_reconcile": [],
+  "decisions_open": [
+    {
+      "id": "domain-proposal-media-1",
+      "key": "domain-proposal-media-1",
+      "verb": "captain-hold",
+      "summary": "Domain proposal: media cycle 1: Domain proposal media cycle 1 v1 digest 54478dc7a0340c26cb…",
+      "owner": "(main)"
+    }
+  ],
+  "landed": [],
+  "gates": [],
+  "reports": [],
+  "recorded_prs": [],
+  "decision_layout": [
+    {
+      "id": "domain-proposal-media-1",
+      "title": "Domain proposal: media cycle 1",
+      "repo": null,
+      "reason": "Domain proposal media cycle 1 v1 digest 54478dc7a0340c26cbdd15392a0858275a1c12d45e6d4634c9cf781482868dc0; approval applies only that digest",
+      "priority": null,
+      "origin": null,
+      "hold_set": "2026-10-14T04:36:18Z",
+      "bucket": "live",
+      "until": null,
+      "about": "Domain proposal for media v1: Evidence changed; update media guidance",
+      "decide": "Apply exactly the before/after changes in the report (version digest 54478dc7a0340c26cbdd15392a0858275a1c12d45e6d4634c9cf781482868dc0)?",
+      "options": [
+        {
+          "value": "approve-54478dc7a0340c26cbdd15392a0858275a1c12d45e6d4634c9cf781482868dc0",
+          "hint": "A newer version needs its own approval.",
+          "label": "Approve exactly this version"
+        },
+        {
+          "value": "reject",
+          "label": "Reject; keep everything inactive"
+        }
+      ],
+      "recommended": "approve-54478dc7a0340c26cbdd15392a0858275a1c12d45e6d4634c9cf781482868dc0",
+      "report": "/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WAA91MN175PE316HHKHK7M/.test-tmp/domain-live.epxtbm/main/data/domain-freshness/proposals/media/1/v1.md",
+      "pr_url": null,
+      "stale_reason": null,
+      "owner": "(main)",
+      "key": "domain-proposal-media-1"
+    }
+  ],
+  "decision_layout_unavailable": [
+    {
+      "owner": "media",
+      "reason": "Detailed decision inventory unavailable; inspect owner home"
+    }
+  ],
+  "omitted": [
+    {
+      "surface": "backlog item bodies",
+      "reveal": "--fields bodies"
+    },
+    {
+      "surface": "task paths",
+      "reveal": "--fields paths"
+    },
+    {
+      "surface": "watch/steer actions",
+      "reveal": "--fields actions"
+    },
+    {
+      "surface": "healthy endpoint detail",
+      "reveal": "--fields endpoints"
+    },
+    {
+      "surface": "full scout-report inventory",
+      "reveal": "--all-reports"
+    },
+    {
+      "surface": "secondmate home(s) with unreadable structured state: 1",
+      "reveal": "inspect the listed secondmate home ledgers"
+    },
+    {
+      "surface": "live PR discovery + checks",
+      "reveal": "--include-prs"
+    }
+  ]
+}
