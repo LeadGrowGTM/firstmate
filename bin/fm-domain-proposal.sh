@@ -4,7 +4,7 @@
 # Usage: FM_HOME=<main-home> fm-domain-proposal.sh request <mate> <bundle-id>
 #        FM_HOME=<main-home> fm-domain-proposal.sh submit <mate> <proposal.json>
 #        FM_HOME=<main-home> fm-domain-proposal.sh confirm <mate> --digest <sha256>
-#                            --decision-file <captain-words> [--cycle <n>]
+#                            --decision-file <captain-words>
 #        FM_HOME=<main-home> fm-domain-proposal.sh approve <mate> [<cycle>]
 #        FM_HOME=<main-home> fm-domain-proposal.sh receipt <mate> applied
 #                            --digest <sha256> [--cycle <n>] [--evidence <one line>]
@@ -140,7 +140,9 @@ task_body() {  # <task-id>
   # TOON quotes multiline bodies, but single-line notes may be bare text.
   case "$body" in
     ''|-) return 0 ;;
-    \"*) body=$(printf '%s' "$body" | jq -r '.' 2>/dev/null) || return 1 ;;
+    \"*)
+      printf '%s' "$body" | jq -e 'index("\u0000") == null' >/dev/null 2>&1 || return 1
+      body=$(printf '%s' "$body" | jq -r '.' 2>/dev/null) || return 1 ;;
   esac
   printf '%s' "$body"
 }
@@ -153,8 +155,9 @@ task_answer() {  # <task-id> <latest-digest>; prints mode TAB complete decision 
     'Domain proposal confirmation: '*)
       record=${first#'Domain proposal confirmation: '}
       printf '%s' "$record" | jq -er --arg digest "$2" '
-        (if .digest == $digest then "answered" else "stale-binding" end)
-        + "\t" + (.answer | gsub("^\\s+|\\s+$"; ""))' \
+        if (.answer | index("\u0000")) != null then error("NUL in proposal confirmation")
+        else (if .digest == $digest then "answered" else "stale-binding" end)
+          + "\t" + (.answer | gsub("^\\s+|\\s+$"; "")) end' \
         || fail "invalid proposal confirmation on $1"
       return 0 ;;
   esac
@@ -173,7 +176,7 @@ pending_digest() {  # <task-id>; the latest queued confirmation's digest, or not
   printf '%s\n' "${body%%$'\n'*}" | sed -n 's/^Domain proposal pending approval: v[0-9][0-9]* digest \([a-f0-9]\{64\}\)$/\1/p'
 }
 proposal_pending() {  # <task-id>
-  [ -n "$(pending_digest "$1")" ] || task_open "$1"
+  [ -n "$(pending_digest "$1")" ]
 }
 refuse_legacy_hold() {  # <task-id>
   local code=0
@@ -397,7 +400,7 @@ submit)
   printf 'pending-confirmation: %s v%s digest %s report %s\n' "$TASK" "$VERSION" "$DIGEST" "$DIR/v$VERSION.md"
   ;;
 confirm)
-  [ "$#" -ge 1 ] || fail 'usage: confirm <mate> --digest <sha256> --decision-file <path> [--cycle <n>]'
+  [ "$#" -ge 1 ] || fail 'usage: confirm <mate> --digest <sha256> --decision-file <path>'
   MATE=$1
   shift
   slug mate "$MATE"
@@ -406,7 +409,6 @@ confirm)
   while [ "$#" -gt 0 ]; do
     [ "$#" -ge 2 ] || fail "missing value for $1"
     case "$1" in
-      --cycle) CYCLE=$2 ;;
       --digest) DIGEST=$2 ;;
       --decision-file) DECISION_FILE=$2 ;;
       *) fail "unknown option $1" ;;
@@ -426,7 +428,7 @@ confirm)
     || fail 'confirmation requires a nonempty captain decision file'
   [ "$(wc -c < "$DECISION_FILE")" -le 8192 ] || fail 'captain decision exceeds 8192 bytes'
   RECORD=$(jq -cn --arg digest "$DIGEST" --rawfile answer "$DECISION_FILE" \
-    '{digest:$digest,answer:$answer} | select(.answer | test("\\S"))')
+    '{digest:$digest,answer:$answer} | select((.answer | index("\u0000")) == null and (.answer | test("\\S")))')
   [ -n "$RECORD" ] || fail 'captain decision must contain non-whitespace words'
   TASK="domain-proposal-$MATE-$CYCLE"
   refuse_legacy_hold "$TASK"

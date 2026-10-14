@@ -48,7 +48,7 @@ answer() {  # <task> <text>
   dir="$HOME_DIR/data/domain-freshness/proposals/media/$cycle"
   version=$(find "$dir" -maxdepth 1 -name 'v[0-9]*.json' | sed 's|.*/v||; s|\.json$||' | sort -n | tail -1)
   digest=$(jq -r .digest "$dir/v$version.json")
-  tool confirm media --cycle "$cycle" --digest "$digest" --decision-file "$TMP_ROOT/answer" >/dev/null
+  tool confirm media --digest "$digest" --decision-file "$TMP_ROOT/answer" >/dev/null
 }
 show_task() {
   PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" \
@@ -129,6 +129,8 @@ tool confirm media --decision-file "$TMP_ROOT/confirm-words" >/dev/null 2>&1
 expect_code 1 "$?" 'confirmation requires an explicit digest'
 tool confirm media --digest "${D1:0:12}" --decision-file "$TMP_ROOT/confirm-words" >/dev/null 2>&1
 expect_code 1 "$?" 'confirmation refuses a digest prefix'
+tool confirm media --cycle 1 --digest "$D1" --decision-file "$TMP_ROOT/confirm-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation refuses an older-cycle selector'
 tool confirm media --digest "$D1" --decision-file "$TMP_ROOT/missing-words" >/dev/null 2>&1
 expect_code 1 "$?" 'confirmation requires existing captain words'
 printf ' \n\t\n' > "$TMP_ROOT/blank-words"
@@ -137,6 +139,9 @@ expect_code 1 "$?" 'confirmation refuses blank captain words'
 head -c 8193 /dev/zero | tr '\0' x > "$TMP_ROOT/too-many-words"
 tool confirm media --digest "$D1" --decision-file "$TMP_ROOT/too-many-words" >/dev/null 2>&1
 expect_code 1 "$?" 'confirmation bounds captain words'
+printf 'approve-%s\0' "$D1" > "$TMP_ROOT/nul-words"
+tool confirm media --digest "$D1" --decision-file "$TMP_ROOT/nul-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation refuses NUL in complete approval words'
 assert_equals "$before" "$(show_task "$TASK")" 'refused confirmation changed the pending task'
 pass 'invalid confirmation inputs preserve queued pending approval'
 
@@ -197,6 +202,20 @@ expect_code 3 "$rc" 'approval of an older digest authorizes nothing'
 assert_contains "$out" 'stale' 'stale approval is named'
 [ ! -s "$DIR/receipts.jsonl" ] || [ ! -e "$DIR/receipts.jsonl" ] || fail 'stale approval wrote a receipt'
 pass 'a newer version updates one queued confirmation task and an older digest approval is refused'
+
+show_task "$TASK" | sed -n 's/^  body: //p' | head -1 | jq -r '.' > "$TMP_ROOT/original-body"
+stored_record=$(jq -cn --arg digest "$D2" '{digest:$digest,answer:("approve-" + $digest + "\u0000")}')
+printf 'Domain proposal confirmation: %s\n\n%s\n' "$stored_record" "$(cat "$TMP_ROOT/original-body")" > "$TMP_ROOT/nul-body"
+PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" \
+  FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
+  bash "$ROOT/bin/fm-tasks-axi.sh" update "$TASK" --body-file "$TMP_ROOT/nul-body" >/dev/null || fail 'could not stage malformed stored answer'
+out=$(tool approve media 2>&1); rc=$?
+[ "$rc" -ne 0 ] || fail 'stored NUL answer authorized approval'
+[ ! -e "$DIR/receipts.jsonl" ] || fail 'stored NUL answer wrote an approval receipt'
+PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" \
+  FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
+  bash "$ROOT/bin/fm-tasks-axi.sh" update "$TASK" --body-file "$TMP_ROOT/original-body" >/dev/null || fail 'could not restore original answer'
+pass 'a malformed stored complete answer cannot authorize approval'
 
 out=$(tool request media "$BUNDLE"); assert_contains "$out" 'cycle 2' 'answered cycle starts a new cycle'
 proposal 'cycle2 text' > "$TMP_ROOT/p3.json"
