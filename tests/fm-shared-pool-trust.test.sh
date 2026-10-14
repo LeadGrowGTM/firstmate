@@ -822,7 +822,7 @@ test_initial_get_checks_returned_worktree() {
 
 test_pool_preflight_refuses_initial_get() {
   local variant id case_dir pane_log tree_log pool allocated lease out status
-  for variant in user-config linked-default repo-config repo-relative; do
+  for variant in user-config linked-default repo-config repo-relative linked-parent; do
     id="pool-preflight-initial-$variant"
     case_dir=$TMP_ROOT/$id
     CASE_URL=$(make_same_origin_clones "$case_dir/origin")
@@ -844,6 +844,12 @@ test_pool_preflight_refuses_initial_get() {
         ;;
       repo-relative)
         printf 'root = "."\n' > "$CASE_HOME/projects/widget/treehouse.toml"
+        ;;
+      linked-parent)
+        mkdir -p "$case_dir/external/child" "$CASE_USER_HOME/.config/treehouse"
+        ln -s "$case_dir/external/child" "$CASE_HOME/link"
+        printf 'root = "%s/link/../unsafe-pool"\n' "$CASE_HOME" \
+          > "$CASE_USER_HOME/.config/treehouse/config.toml"
         ;;
     esac
     pane_log=$case_dir/pane.log
@@ -960,11 +966,19 @@ test_pool_preflight_names_missing_python() {
 }
 
 test_pool_preflight_refuses_fallback_get() {
-  local id=pool-preflight-fallback case_dir=$TMP_ROOT/pool-preflight-fallback
+  local variant=${1:-state-root}
+  local id=pool-preflight-fallback-$variant case_dir=$TMP_ROOT/pool-preflight-fallback-$variant
   local foreign pane_log tree_log initial_lease out status=0
   CASE_URL=$(make_same_origin_clones "$case_dir/origin")
   prepare_spawn_home "$case_dir" "$id"
-  CASE_STATE=$CASE_HOME/state/unsafe-pool
+  if [ "$variant" = linked-parent ]; then
+    mkdir -p "$case_dir/external/child" "$CASE_POOL/.config/treehouse"
+    ln -s "$case_dir/external/child" "$CASE_HOME/link"
+    printf 'root = "%s/link/../unsafe-pool"\n' "$CASE_HOME" \
+      > "$CASE_POOL/.config/treehouse/config.toml"
+  else
+    CASE_STATE=$CASE_HOME/state/unsafe-pool
+  fi
   foreign=$case_dir/shared-pool/1/widget
   pane_log=$case_dir/pane.log
   tree_log=$case_dir/treehouse.log
@@ -985,7 +999,7 @@ test_pool_preflight_refuses_fallback_get() {
   assert_no_exact_line "args=get --lease --lease-holder $id" "$tree_log" \
     "fallback get was called for an unsafe pool"
   [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "fallback refusal published a task"
-  pass "fallback pool preflight refuses before leasing"
+  pass "fallback pool preflight refuses before leasing ($variant)"
 }
 
 test_pool_preflight_uses_operator_git_for_fallback_hash() {
@@ -1128,6 +1142,7 @@ test_initial_pane_environment_controls_preflight
 test_pool_preflight_names_required_toml_parser
 test_pool_preflight_names_missing_python
 test_pool_preflight_refuses_fallback_get
+test_pool_preflight_refuses_fallback_get linked-parent
 test_pool_preflight_uses_operator_git_for_fallback_hash
 test_fake_treehouse_return_requires_submission_and_completion
 test_fallback_lease_checks_returned_worktree

@@ -1669,7 +1669,7 @@ try:
     else:
         base = user
     name = f"{project.name}-{sys.argv[2]}"
-    print((base / ".treehouse" / name).resolve())
+    print(Path(os.path.normpath(base / ".treehouse" / name)).resolve())
 except (OSError, RuntimeError, ValueError, ImportError) as error:
     print(f"error: could not resolve Treehouse pool before allocation: {error}", file=sys.stderr)
     sys.exit(1)
