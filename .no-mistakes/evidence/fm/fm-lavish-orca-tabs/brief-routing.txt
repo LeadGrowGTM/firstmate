@@ -1,0 +1,6 @@
+scaffolded: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W2AQDW78PXSVW5R2NG9SMV/gate-brief-lab.pv4PId/data/brief-orca-routing/brief.md (ship, mode=local-only; replace {TASK} and {FIRSTMATE_SPEC})
+
+Generated brief routing:
+30-   Present visual, report, or review pages through lavish-axi or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs.
+31:   Open Lavish pages through FM_HOME="/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W2AQDW78PXSVW5R2NG9SMV/gate-brief-lab.pv4PId" bash "/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W2AQDW78PXSVW5R2NG9SMV/bin/fm-lavish-open.sh" <artifact.html> without asking the captain first; route captain decisions through the existing decision path instead of opening a worker decision board.
+32-   Report files on disk, plain-text bootstrap diagnostics, scout text reports when Lavish is unavailable, and chat text remain available.
