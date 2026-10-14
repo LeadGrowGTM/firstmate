@@ -1241,9 +1241,10 @@ Its header owns the exact treehouse flags, exit codes, record files, and time bo
 
 ### Prune after cleanup
 
-After a cleanup returns a copy to a pool, Firstmate asks Treehouse to safe prune the project's configured pool and, when a per-home slot is detected, attempts a second prune.
-A failed or timed-out prune prints one warning and never fails the cleanup, which has already finished.
-A pool that another launch or cleanup is using at that moment is skipped silently and can be reclaimed by a later cleanup or daily sweep while it remains in the guard's selected location.
+After ordinary cleanup returns a copy to a pool, Firstmate asks Treehouse to safe prune the project's configured pool and, when a per-home slot is detected, attempts a second prune.
+Automatic deadweight teardown defers pool pruning to its sweep, which skips a project's pool while a retained ship or scout task in this home still has a copy there.
+A failed or timed-out prune prints one warning and never fails ordinary cleanup, which has already finished.
+A pool that another launch or cleanup is using at that moment is skipped silently and can be reclaimed by a later cleanup or sweep while it remains in the guard's selected location.
 Because a returned copy whose work has landed is exactly what treehouse prunes, the next launch on that project usually creates a fresh copy instead of reusing a returned one.
 
 ### Optional daily treehouse pool sweep
@@ -1287,7 +1288,7 @@ An abort before worker launch returns its own clone's lease from the recorded pr
 Leases containing work, leases whose safety checks fail, and leases used by a launched worker stay in place for teardown, even if the worker endpoint closes.
 The attempted `get --lease` may already have marked that foreign copy leased, so the refusal leaves its Treehouse state for the pool owner to inspect.
 Git still refuses to remove a worktree from a clone that does not own it, so a shared pool is not cleared by the other home.
-The daily sweep's extra per-home prune and size checks use the pool path computed in its own environment.
+The optional pool sweep's extra per-home prune and size checks use the pool path computed in its own environment.
 
 ### Pool-selection limits
 
@@ -1300,7 +1301,7 @@ If a launch sets `XDG_STATE_HOME` only for that command and the armed watcher ru
 ### Copies outside the guard
 
 Secondmate home copies and a retired secondmate's child copies are outside this guard.
-Retiring a secondmate returns its home copy, and the copies of its child tasks, to their pools without pruning those pools, and the daily sweep does not reach the pool behind secondmate homes.
+Retiring a secondmate returns its home copy, and the copies of its child tasks, to their pools without pruning those pools, and the optional pool sweep does not reach the pool behind secondmate homes.
 Such a copy counts against that pool's cap until treehouse's safe prune is run for that pool by hand.
 Run `treehouse prune --yes` from the root of the clone that owns that pool, which is the Firstmate repository root for secondmate home copies.
 `treehouse prune` without `--yes` shows what would be removed first.

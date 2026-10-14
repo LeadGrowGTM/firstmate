@@ -5,8 +5,9 @@
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
 # clone for PR-based ship tasks.
-# A copy returned to a treehouse pool then has that one project's pool pruned
-# through bin/fm-treehouse-guard.sh, which only warns when it does not run.
+# Ordinary teardown prunes a returned copy's project pool through
+# bin/fm-treehouse-guard.sh, which only warns when it does not run.
+# Automatic deadweight teardown leaves pool pruning to the sweep.
 # An endpoint whose close could not do its job REFUSES before any record naming
 # it is removed: those records are the only thing that names what survived, so
 # reporting such a close as a completed cleanup strands the endpoint instead of

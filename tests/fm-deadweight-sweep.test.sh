@@ -865,15 +865,21 @@ test_unsafe_records() {
 }
 
 test_detached_sweep_survives_watcher_timeout() {
-  local home rc=0
+  local home rc=0 i=0
   home=$(make_home timeout)
   touch "$home/slow-prune"
   env PATH="$home/fakebin:$PATH" FM_HOME="$home" FIXTURE="$home" \
     FM_TEARDOWN_GUARD_DONE=1 FM_POLL=1 FM_CHECK_INTERVAL=1 FM_CHECK_TIMEOUT=1 \
     "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 3 > "$home/checkpoint-out" 2>&1 || rc=$?
   assert_equals 124 "$rc" 'quiet watcher checkpoint times out'
-  assert_absent "$home/state/.watch.lock/pid" 'timed-out watcher releases its lock'
   wait_sweep_finished "$home"
+  # The timeout can reap its foreground process before the watcher's EXIT
+  # cleanup has released the lock. Wait for that bounded cleanup to settle.
+  while [ -e "$home/state/.watch.lock/pid" ] && [ "$i" -lt 150 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  assert_absent "$home/state/.watch.lock/pid" 'timed-out watcher releases its lock'
   assert_absent "$home/state/.deadweight-sweep-result" 'empty detached sweep publishes nothing'
   assert_equals 1 "$(wc -l < "$home/treehouse-calls" | tr -d ' ')" 'detached safe prune completes once'
   assert_equals '' "$(check "$home")" 'empty maintenance result stays silent'
