@@ -1105,7 +1105,7 @@ The address selects the existing shared server; it does not authorize starting o
 
 ## Lavish page browser (config/lavish-orca-worktree)
 
-Lavish pages open through [`bin/fm-lavish-open.sh`](../bin/fm-lavish-open.sh), which opens them in Orca.
+Lavish pages open through [`bin/fm-lavish-open.sh`](../bin/fm-lavish-open.sh), which sends live session URLs to Orca.
 Orca tabs default to the captain's firstmate project at `id:33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate`.
 The optional `config/lavish-orca-worktree` overrides that destination with another `id:<repo-id>::C:\...` Windows worktree selector; path selectors and WSL paths are refused.
 If `orca-ide` is unavailable, the opener prints the page URL and a note for manual opening without launching a browser.
