@@ -559,7 +559,7 @@ The check reads Boat and reports; it never stops a sandbox.
 
 ## Code-only Boat overflow
 
-An explicitly Boat-selected ship or scout can use [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) through the existing `boat-eng` remote route.
+An explicitly Boat-selected ship or scout can use [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) through a purpose-built `boat-eng` remote route.
 Firstmate still labels and selects work at intake; the sender does not evaluate routing policy or choose a model profile.
 The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, refusal behavior, and transport recovery commands in their headers and `--help`.
 
@@ -595,7 +595,8 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
 ```
 
 The command uses ordinary remote teardown and its landed-work checks.
-It stops the approved box when both Boat task records and worker endpoints are gone, meeting R2 at the last teardown; the box's auto-stop timer is the backstop if teardown cannot complete.
+It stops the approved box when both Boat task records and worker endpoints are gone.
+There is no twenty-minute idle monitor: if teardown does not complete, the box runs until its auto-stop timer expires.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.
 After a definite spawn refusal, it stops a box resumed by this send only when a locked remote inventory confirms both records and worker windows are absent.
 The sender leaves an uncertain remote launch untouched for same-task reconciliation.
