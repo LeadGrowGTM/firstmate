@@ -178,6 +178,20 @@ pending_digest() {  # <task-id>; the latest queued confirmation's digest, or not
 proposal_pending() {  # <task-id>
   [ -n "$(pending_digest "$1")" ]
 }
+confirmation_close_pending() {
+  [ "$2" != "done" ] || return 1
+  local body first digest
+  body=$(task_body "$1") || fail "cannot read proposal task $1"
+  first=${body%%$'\n'*}
+  case "$first" in
+    'Domain proposal confirmation: '*)
+      digest=$(printf '%s' "${first#'Domain proposal confirmation: '}" | jq -er '.digest | select(type == "string" and test("^[a-f0-9]{64}$"))') \
+        || fail "invalid proposal confirmation on $1" ;;
+    *) return 1 ;;
+  esac
+  [ ! -f "$3/receipts.jsonl" ] \
+    || ! jq -es --arg d "$digest" 'any(.[]; .state == "approved" and .digest == $d)' "$3/receipts.jsonl" >/dev/null
+}
 refuse_legacy_hold() {  # <task-id>
   local code=0
   task_open "$1" || code=$?
@@ -245,6 +259,9 @@ request)
     else
       TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
       has_outstanding_approval "$DIR/receipts.jsonl" && fail "activation is pending for $TASK"
+      if confirmation_close_pending "$TASK" "$TASK_STATE" "$DIR"; then
+        fail "confirmation close is pending for $TASK; retry confirm"
+      fi
       if [ "$TASK_STATE" = "done" ]; then
         VERSION=$(latest_version "$DIR")
         if [ -n "$VERSION" ]; then
@@ -352,6 +369,12 @@ submit)
   if [ -f "$DIR/receipts.jsonl" ] && jq -es 'any(.[]; .state == "approved")' "$DIR/receipts.jsonl" >/dev/null; then APPROVED=1; fi
   APPROVED_THIS=0
   if [ -f "$DIR/receipts.jsonl" ] && jq -es --arg d "$DIGEST" 'any(.[]; .state == "approved" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then APPROVED_THIS=1; fi
+  if confirmation_close_pending "$TASK" "$TASK_STATE" "$DIR"; then
+    [ -n "$VERSION" ] && [ "$(jq -r '.digest' "$DIR/v$VERSION.json")" = "$DIGEST" ] \
+      || fail "confirmation close is pending for $TASK; retry confirm"
+    printf 'unchanged: %s v%s digest %s\n' "$TASK" "$VERSION" "$DIGEST"
+    exit 0
+  fi
   if [ -n "$VERSION" ]; then
     if [ "$(jq -r '.digest' "$DIR/v$VERSION.json")" = "$DIGEST" ]; then
       if [ "$(jq '.proposal.changes | length' "$DIR/v$VERSION.json")" -eq 0 ]; then
@@ -458,6 +481,10 @@ approve)
   DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
   [ "$(jq -r '.proposal.bundle_id' "$DIR/v$VERSION.json")" = "$(jq -r '.latest_bundle_id' "$DIR/request.json")" ] \
     || fail "latest proposal does not cover the latest requested bundle for $MATE"
+  TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
+  if confirmation_close_pending "$TASK" "$TASK_STATE" "$DIR"; then
+    fail "confirmation close is pending for $TASK; retry confirm"
+  fi
   ANSWER=$(task_answer "$TASK" "$DIGEST")
   if [ -z "$ANSWER" ]; then
     printf 'pending: %s v%s has no recorded captain answer\n' "$TASK" "$VERSION" >&2
@@ -480,7 +507,6 @@ approve)
   if [ -f "$DIR/receipts.jsonl" ] && jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then
     fail "digest $DIGEST is already applied"
   fi
-  TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
   if [ "$TASK_STATE" = "done" ]; then
     bash "$SCRIPT_DIR/fm-tasks-axi.sh" reopen "$TASK" >/dev/null || fail "cannot reopen activation task $TASK"
   fi

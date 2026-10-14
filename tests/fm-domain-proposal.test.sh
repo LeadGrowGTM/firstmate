@@ -189,6 +189,24 @@ chmod +x "$FAKEBIN/tasks-axi"
 answer "$TASK" "approve-$D1" >/dev/null 2>&1
 expect_code 1 "$?" 'failed confirmation close is reported'
 assert_contains "$(show_task "$TASK")" 'Domain proposal confirmation:' 'actual words were not recorded before the failed close'
+before=$(show_task "$TASK")
+tool approve media >/dev/null 2>&1
+expect_code 1 "$?" 'approval waits for the exact confirmation close retry'
+[ ! -e "$DIR/receipts.jsonl" ] || fail 'unfinished confirmation wrote an approval receipt'
+out=$(tool submit media "$TMP_ROOT/p2.json") || fail 'identical proposal resubmission failed after confirmation close failure'
+assert_contains "$out" 'unchanged' 'identical resubmission did not preserve recorded confirmation'
+assert_equals "$before" "$(show_task "$TASK")" 'resubmission replaced the recorded confirmation'
+proposal 'different while confirmation close is pending' > "$TMP_ROOT/interrupted.json"
+tool submit media "$TMP_ROOT/interrupted.json" >/dev/null 2>&1
+expect_code 1 "$?" 'a different proposal cannot replace a recorded confirmation before close retry'
+[ ! -e "$DIR/v3.json" ] || fail 'interrupted confirmation published a new version'
+tool request media "$BUNDLE2" >/dev/null 2>&1
+expect_code 1 "$?" 'new evidence cannot invalidate a recorded confirmation before close retry'
+jq -e --arg b "$BUNDLE" '.latest_bundle_id == $b' "$DIR/request.json" >/dev/null \
+  || fail 'new evidence changed the bundle during a pending confirmation close'
+assert_equals "$before" "$(show_task "$TASK")" 'failed close paths changed the recorded answer'
+answer "$TASK" reject >/dev/null 2>&1
+expect_code 1 "$?" 'changed words cannot replace a recorded answer before close retry'
 rm "$FAKEBIN/tasks-axi"
 answer "$TASK" "approve-$D1"
 before=$(show_task "$TASK")
@@ -217,7 +235,8 @@ PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" \
   bash "$ROOT/bin/fm-tasks-axi.sh" update "$TASK" --body-file "$TMP_ROOT/original-body" >/dev/null || fail 'could not restore original answer'
 pass 'a malformed stored complete answer cannot authorize approval'
 
-out=$(tool request media "$BUNDLE"); assert_contains "$out" 'cycle 2' 'answered cycle starts a new cycle'
+out=$(tool request media "$BUNDLE2"); assert_contains "$out" 'cycle 2' 'answered cycle accepts new evidence after exact close retry'
+tool request media "$BUNDLE" >/dev/null || fail 'cycle 2 could not update its latest bundle'
 proposal 'cycle2 text' > "$TMP_ROOT/p3.json"
 tool submit media "$TMP_ROOT/p3.json" >/dev/null || fail 'submit cycle 2 failed'
 D3=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/2/v1.json")
