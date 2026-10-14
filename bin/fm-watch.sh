@@ -2795,6 +2795,11 @@ while :; do
   # never run until the fleet went quiet. Checks are due only every
   # CHECK_INTERVAL, so most cycles skip this block and fall straight through.
   if [ "$(age_of "$STATE/.last-check")" -ge "$CHECK_INTERVAL" ]; then
+    # Built-in daily maintenance needs no per-home check shim. Its quick
+    # gate detaches the sweep so this check's timeout cannot stop a prune.
+    FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      run_check_capture "$SCRIPT_DIR/fm-deadweight-sweep.sh" check || exit 1
+    sweep_report=$FM_CHECK_RESULT
     rejected_checks=
     contribution_check_output=
     for c in "$STATE"/*.check.sh; do
@@ -2919,6 +2924,9 @@ EOF
     touch "$STATE/.last-check"
     if [ -n "$contribution_check_output" ]; then
       wake "$contribution_check_output"
+    fi
+    if [ -n "$sweep_report" ]; then
+      wake "check: deadweight-sweep: $sweep_report"
     fi
   fi
 

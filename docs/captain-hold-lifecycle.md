@@ -144,7 +144,7 @@ So the backlog row a finished task's cleanup is about to close is routinely the 
 
 ### Retaining the row on exit 0
 
-On 0 only the close changes.
+On 0, ordinary teardown changes only the close; the automatic deadweight sweep retains the task before cleanup.
 After cleanup, and still under the task's own lock, teardown does three things:
 
 - It records one `Deliverable of the finished work: ...` line at the end of the task body.

@@ -5,8 +5,9 @@
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
 # clone for PR-based ship tasks.
-# A copy returned to a treehouse pool then has that one project's pool pruned
-# through bin/fm-treehouse-guard.sh, which only warns when it does not run.
+# Ordinary teardown prunes a returned copy's project pool through
+# bin/fm-treehouse-guard.sh, which only warns when it does not run.
+# Automatic deadweight teardown leaves pool pruning to the sweep.
 # An endpoint whose close could not do its job REFUSES before any record naming
 # it is removed: those records are the only thing that names what survived, so
 # reporting such a close as a completed cleanup strands the endpoint instead of
@@ -181,7 +182,16 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record]
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped]
+#   --only-if-stopped is the automatic sweep guard: under the lifecycle and
+#   metadata locks, accept only a positively dead or missing worker endpoint,
+#   with no open status decision or captain hold. Secondmates, remote records,
+#   live agents, and inconclusive endpoint reads exit 3 without cleanup.
+#   Active or gated pipelines are also retained. Scout copies additionally
+#   pass the ordinary dirty/landed checks instead of the scratch exemption.
+#   A copy with any tracked path flagged assume-unchanged or skip-worktree is
+#   refused, since status cannot show edits hidden behind those flags.
+#   It cannot be combined with --force. All ordinary safety gates still apply.
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
 #   when the captain has explicitly said to discard the work.
@@ -392,11 +402,13 @@ fi
 ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
+ONLY_IF_STOPPED=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
+    --only-if-stopped) ONLY_IF_STOPPED=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -404,6 +416,10 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+[ "$ONLY_IF_STOPPED" = 0 ] || [ -z "$FORCE" ] || {
+  echo "error: --only-if-stopped cannot discard work with --force" >&2
+  exit 2
+}
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -540,6 +556,38 @@ fm_backlog_record_present "$META" "task record" "$STATE" || {
 }
 TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
+if [ "$ONLY_IF_STOPPED" = 1 ]; then
+  case "$TEARDOWN_META_KIND" in ship|scout) ;; *) exit 3 ;; esac
+  [ -z "$(fm_meta_get "$META" remote_host)" ] || exit 3
+  if [ -e "$STATE/$ID.status" ] || [ -L "$STATE/$ID.status" ]; then
+    [ -f "$STATE/$ID.status" ] && [ -r "$STATE/$ID.status" ] \
+      && [ ! -L "$STATE/$ID.status" ] || exit 3
+    [ -z "$(status_open_decisions "$STATE/$ID.status" "$TEARDOWN_META_KIND")" ] || exit 3
+  fi
+  SWEEP_HOLD_STATUS=0
+  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+    FM_CONFIG_OVERRIDE="$CONFIG" "$SCRIPT_DIR/fm-captain-hold.sh" open "$ID" >/dev/null \
+    || SWEEP_HOLD_STATUS=$?
+  case "$SWEEP_HOLD_STATUS" in
+    0) exit 3 ;;
+    1) ;;
+    *) echo "REFUSED: cannot read captain hold for $ID; nothing was changed" >&2; exit 1 ;;
+  esac
+  fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
+  case "$(fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET")" in
+    dead|missing) ;;
+    *) exit 3 ;;
+  esac
+  # A stopped agent can still own an executing or gated pipeline in another
+  # checkout. Preserve its records and continuation instead of orphaning it.
+  SWEEP_CREW_STATE=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+    FM_CONFIG_OVERRIDE="$CONFIG" FM_CREW_STATE_NO_FORGE=1 \
+    "$SCRIPT_DIR/fm-crew-state.sh" "$ID") || exit 1
+  case "$SWEEP_CREW_STATE" in
+    'state: working '*|'state: parked '*|'state: paused '*|'state: blocked '*) exit 3 ;;
+    'state: unknown '*'source: run-step'*) exit 3 ;;
+  esac
+fi
 # Retiring a persistent secondmate is main's alone in both postures; the kind
 # is read under the metadata lock (role partition: bin/fm-lease-lib.sh).
 [ "$TEARDOWN_META_KIND" != secondmate ] || fm_lease_forbid_branch "secondmate retirement (fm-teardown)"
@@ -1152,6 +1200,22 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
+if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$PR_URL" ]; then
+  if ! fm_pr_url_parse "$PR_URL"; then
+    echo "REFUSED: recorded PR for $ID cannot be verified as merged; nothing was changed" >&2
+    exit 1
+  fi
+  pr_status_rc=0
+  case "$FM_PR_PROVIDER" in
+    github) fm_pr_github_read_record "$FM_PR_OWNER" "$FM_PR_REPO" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+    gitlab) fm_pr_gitlab_read_record "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+    gerrit) fm_pr_gerrit_read_record "$FM_PR_HOST" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+  esac
+  if [ "$pr_status_rc" -ne 0 ] || [ "$FM_PR_RECORD_MERGED" != true ]; then
+    echo "REFUSED: recorded PR $PR_URL is not confirmed merged; nothing was changed" >&2
+    exit 1
+  fi
+fi
 # tasktmp is recorded by fm-spawn for tasks that set up a per-task temp root
 # (/tmp/fm-<id>/); absent for tasks spawned before that change, so tolerate empty.
 TASK_TMP=$(grep '^tasktmp=' "$META" | cut -d= -f2- || true)
@@ -1599,7 +1663,7 @@ pr_is_merged() {
 # "added". Returns non-zero when inconclusive (no default ref, or a merge conflict),
 # so the caller refuses rather than guesses.
 content_in_default() {
-  local name=${BASE_BRANCH:-} ref default_tree merged_tree
+  local name=${1:-${BASE_BRANCH:-}} ref default_tree merged_tree
   [ -n "$name" ] || name=$(default_branch) || return 1
   if git -C "$WT" remote get-url origin >/dev/null 2>&1; then
     git -C "$WT" fetch --quiet origin "+refs/heads/$name:refs/remotes/origin/$name" >/dev/null 2>&1 || return 1
@@ -1818,6 +1882,9 @@ teardown_treehouse_return() {
   local dir=$1 cd_dir=$2 label=$3 post_cleanup_check=${4:-}
   local out lock attempt=0 max_retries lock_desc
 
+  if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$post_cleanup_check" ]; then
+    "$post_cleanup_check" || return 1
+  fi
   # Capture stdout+stderr so non-lock failures stay visible and lock failures can
   # be matched by signature even when the lock file is already gone mid-check.
   if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
@@ -1845,6 +1912,9 @@ teardown_treehouse_return() {
     echo "teardown: $label return failed with transient git lock ($lock_desc); waiting ${TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS}s and retrying ($attempt/${max_retries})" >&2
     sleep "$TREEHOUSE_RETURN_LOCK_RETRY_WAIT_SECS"
 
+    if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$post_cleanup_check" ]; then
+      "$post_cleanup_check" || return 1
+    fi
     if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
       [ -n "$out" ] && printf '%s\n' "$out"
       echo "teardown: $label return succeeded on retry; lock cleared on its own" >&2
@@ -1893,7 +1963,7 @@ teardown_treehouse_return() {
 report_worktree_dirt() {
   # Use the same porcelain snapshot and exemptions as the refusal predicate.
   printf '%s\n' "$1" | awk '
-    /^\?\? / { if (++untracked <= 10) paths = paths "  " substr($0, 4) "\n"; next }
+    /^(\?\?|!!)/ { if (++untracked <= 10) paths = paths "  " substr($0, 4) "\n"; next }
     NF { tracked = 1 }
     END {
       if (tracked) print "uncommitted changes present (includes tracked edits)"
@@ -1908,14 +1978,76 @@ report_worktree_dirt() {
 }
 
 validate_worktree_teardown_safety() {
-  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch
+  local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch base base_ref untracked pointer token suffix line state_real flagged occupied entry path item tracked_wiring
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   case "$KIND" in
-    secondmate|scout) return 0 ;;
+    secondmate) return 0 ;;
+    scout) [ "$ONLY_IF_STOPPED" = 1 ] || return 0 ;;
   esac
 
-  if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
+  untracked=normal
+  [ "$ONLY_IF_STOPPED" != 1 ] || untracked=all
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    for path in .claude .opencode .opencode/plugins; do
+      if [ -L "$WT/$path" ]; then
+        echo "REFUSED: worktree $WT has symlinked wiring directory $path; needs a human look." >&2
+        return 1
+      fi
+    done
+    if ! tracked_wiring=$(git -C "$WT" ls-files --cached -- \
+      .claude/settings.local.json .opencode/plugins/fm-turn-end.js \
+      .opencode/plugins/fm-busy-state.js .fm-grok-turnend .fm-kimi-turnend 2>/dev/null); then
+      echo "REFUSED: cannot inspect worktree $WT for tracked wiring." >&2
+      return 1
+    fi
+    if [ -n "$tracked_wiring" ]; then
+      echo "REFUSED: worktree $WT has tracked wiring at $tracked_wiring; needs a human look." >&2
+      return 1
+    fi
+    if ! occupied=$(
+      set -o pipefail
+      git -C "$WT" ls-files -s -z 2>/dev/null | {
+        occupied=0
+        while IFS= read -r -d '' entry; do
+          [ "${entry%% *}" = 160000 ] || continue
+          path=${entry#*$'\t'}
+          if [ -e "$WT/$path" ] || [ -L "$WT/$path" ]; then
+            if [ -L "$WT/$path" ] || [ ! -d "$WT/$path" ]; then
+              occupied=1
+            else
+              for item in "$WT/$path"/* "$WT/$path"/.[!.]* "$WT/$path"/..?*; do
+                if [ -e "$item" ] || [ -L "$item" ]; then occupied=1; fi
+              done
+            fi
+          fi
+        done
+        printf '%s\n' "$occupied"
+      }
+    ); then
+      echo "REFUSED: cannot inspect gitlinks in worktree $WT; needs a human look." >&2
+      return 1
+    fi
+    if [ "$occupied" = 1 ]; then
+      echo "REFUSED: worktree $WT has an occupied submodule path; needs a human look." >&2
+      return 1
+    fi
+    if ! dirty_raw=$(git -C "$WT" status --porcelain --untracked-files=all --ignored 2>/dev/null); then
+      echo "REFUSED: cannot inspect worktree $WT for uncommitted changes." >&2
+      return 1
+    fi
+    # Status hides edits to tracked paths flagged assume-unchanged (lowercase
+    # tag) or skip-worktree (S), so refuse rather than trust it.
+    if ! flagged=$(git -C "$WT" ls-files -v 2>/dev/null); then
+      echo "REFUSED: cannot inspect worktree $WT for flagged tracked paths." >&2
+      return 1
+    fi
+    # A here-string, not a pipe, so pipefail cannot turn an early match false.
+    if grep -qE '^([a-z]|S) ' <<< "$flagged"; then
+      echo "REFUSED: worktree $WT has tracked paths flagged assume-unchanged or skip-worktree; needs a human look." >&2
+      return 1
+    fi
+  elif ! dirty_raw=$(git -C "$WT" status --porcelain "--untracked-files=$untracked" 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
     fi
@@ -1923,7 +2055,53 @@ validate_worktree_teardown_safety() {
     echo "Restore the git index state, or get the captain's explicit OK to discard, then --force." >&2
     return 1
   fi
-  dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' || true)
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    state_real=$(cd "$STATE" && pwd -P) || return 1
+    dirty=
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      case "$line" in
+        '?? .fm-grok-turnend'|'!! .fm-grok-turnend') suffix=grok ; pointer=.fm-grok-turnend ;;
+        '?? .fm-kimi-turnend'|'!! .fm-kimi-turnend') suffix=kimi ; pointer=.fm-kimi-turnend ;;
+        '?? .claude/settings.local.json'|'!! .claude/settings.local.json')
+          # Spawn adds the statusLine only when no account or project one exists.
+          if [ -n "$BUSY_GEN" ] \
+            && [ -f "$WT/.claude/settings.local.json" ] && [ ! -L "$WT/.claude/settings.local.json" ] \
+            && { cmp -s "$WT/.claude/settings.local.json" \
+                <(fm_control_render_claude_settings "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" 1) \
+              || cmp -s "$WT/.claude/settings.local.json" \
+                <(fm_control_render_claude_settings "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" 1 \
+                  "$(fm_control_wiring_shell_quote "$SCRIPT_DIR/fm-statusbar.sh") claude-line --task $(fm_control_wiring_shell_quote "$ID")"); }; then
+            continue
+          fi
+          dirty="${dirty:+$dirty$'\n'}$line"
+          continue
+          ;;
+        '?? .opencode/plugins/fm-busy-state.js'|'!! .opencode/plugins/fm-busy-state.js')
+          if [ -n "$BUSY_GEN" ] \
+            && [ -f "$WT/.opencode/plugins/fm-busy-state.js" ] && [ ! -L "$WT/.opencode/plugins/fm-busy-state.js" ] \
+            && cmp -s "$WT/.opencode/plugins/fm-busy-state.js" \
+              <(fm_control_render_opencode_plugin "$FM_ROOT" "$state_real" "$ID" "$BUSY_GEN" true); then
+            continue
+          fi
+          dirty="${dirty:+$dirty$'\n'}$line"
+          continue
+          ;;
+        *) dirty="${dirty:+$dirty$'\n'}$line"; continue ;;
+      esac
+      token=$(cat "$STATE/$ID.$suffix-turnend-token" 2>/dev/null || true)
+      if [ -f "$STATE/$ID.$suffix-turnend-token" ] \
+        && [ ! -L "$STATE/$ID.$suffix-turnend-token" ] \
+        && [ -f "$WT/$pointer" ] && [ ! -L "$WT/$pointer" ] \
+        && [[ "$token" = fm.???????????? ]] \
+        && cmp -s "$WT/$pointer" <(printf 'token=%s\n' "$token"); then
+        continue
+      fi
+      dirty="${dirty:+$dirty$'\n'}$line"
+    done <<< "$dirty_raw"
+  else
+    dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' || true)
+  fi
 
   if ! unpushed_raw=$(git -C "$WT" log --oneline HEAD --not --remotes -- 2>/dev/null); then
     if worktree_safety_blocked_by_lock "commits not on a remote"; then
@@ -1970,6 +2148,52 @@ validate_worktree_teardown_safety() {
       echo "Push the branch, land its PR, or get the captain's explicit OK to discard, then --force." >&2
       return 1
     fi
+  fi
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    DEFAULT=$(default_branch) || {
+      echo "REFUSED: cannot determine default branch for $PROJ." >&2; return 1
+    }
+    base=${BASE_BRANCH:-$DEFAULT}
+    base_ref="refs/heads/$base"
+    if git -C "$WT" remote get-url origin >/dev/null 2>&1; then
+      git -C "$WT" fetch --quiet origin "+refs/heads/$base:refs/remotes/origin/$base" >/dev/null 2>&1 || {
+        echo "REFUSED: cannot verify base branch $base for $WT." >&2; return 1
+      }
+      base_ref="refs/remotes/origin/$base"
+    fi
+    if ! git -C "$WT" merge-base --is-ancestor HEAD "$base_ref" 2>/dev/null \
+      && ! content_in_default "$DEFAULT"; then
+      echo "REFUSED: worktree $WT has commits beyond its base not landed on $DEFAULT." >&2
+      return 1
+    fi
+  fi
+}
+
+validate_missing_worktree_branch_for_sweep() {
+  local branch default remote_state=0
+  [ "$ONLY_IF_STOPPED" = 1 ] && [ ! -d "$WT" ] || return 0
+  branch=$(fm_meta_get "$META" branch)
+  if [ -z "$branch" ] || ! git check-ref-format --branch "$branch" >/dev/null 2>&1 \
+    || ! git -C "$PROJ" remote get-url origin >/dev/null 2>&1; then
+    echo "REFUSED: missing worktree for $ID has no verifiable recorded remote branch." >&2
+    return 1
+  fi
+  git -C "$PROJ" ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1 || remote_state=$?
+  case "$remote_state" in
+    2) return 0 ;;
+    0) ;;
+    *) echo "REFUSED: cannot verify remote branch $branch for missing worktree $WT." >&2; return 1 ;;
+  esac
+  default=$(default_branch) || {
+    echo "REFUSED: cannot determine default branch for missing worktree $WT." >&2; return 1
+  }
+  if ! git -C "$PROJ" fetch --quiet origin \
+    "+refs/heads/$branch:refs/remotes/origin/$branch" \
+    "+refs/heads/$default:refs/remotes/origin/$default" >/dev/null 2>&1 \
+    || ! git -C "$PROJ" merge-base --is-ancestor \
+      "refs/remotes/origin/$branch" "refs/remotes/origin/$default" 2>/dev/null; then
+    echo "REFUSED: remote branch $branch for missing worktree $WT is not confirmed merged." >&2
+    return 1
   fi
 }
 
@@ -3451,6 +3675,7 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
   ORCA_PATH_MATCH_VERIFIED=1
 fi
 
+validate_missing_worktree_branch_for_sweep || exit 1
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   if validate_worktree_teardown_safety; then
     :
@@ -3589,11 +3814,17 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
     ORCA_PATH_MATCH_VERIFIED=1
   fi
   if [ -d "$WT" ]; then
+    if [ "$ONLY_IF_STOPPED" = 1 ]; then
+      validate_worktree_teardown_safety || exit 1
+    fi
     branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
     if [ "$branch" != "HEAD" ]; then
       if git -C "$WT" checkout --detach -q 2>/dev/null; then
         git -C "$WT" branch -D "$branch" >/dev/null 2>&1 || true
       fi
+    fi
+    if [ "$ONLY_IF_STOPPED" = 1 ]; then
+      validate_worktree_teardown_safety || exit 1
     fi
     rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
       "$WT/.opencode/plugins/fm-busy-state.js" \
@@ -3607,6 +3838,9 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
 elif [ "$KIND" != secondmate ] && ! teardown_owns_worktree; then
   :
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    validate_worktree_teardown_safety || exit 1
+  fi
   branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
   if [ "$branch" != "HEAD" ]; then
     if git -C "$WT" checkout --detach -q 2>/dev/null; then
@@ -3614,6 +3848,9 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
     fi
   fi
   # Remove our hook file so a reused pool worktree cannot fire signals for a dead task.
+  if [ "$ONLY_IF_STOPPED" = 1 ]; then
+    validate_worktree_teardown_safety || exit 1
+  fi
   rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
     "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
   # Kills remaining processes in the worktree (including the agent), resets, returns
@@ -3621,7 +3858,8 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # the project. teardown_treehouse_return tolerates transient and stale git locks
   # left by a killed crew process; see the script header for retry and stale-lock proof.
   post_lock_cleanup_check=
-  if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
+  if [ "$ONLY_IF_STOPPED" = 1 ] \
+    || { [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; }; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
@@ -3865,7 +4103,7 @@ fi
 # the copy is back in it and the clone is refreshed. bin/fm-treehouse-guard.sh
 # owns the flags and what it declines to prune, and prints its own warning; the
 # cleanup has already succeeded, so a prune that did not run never fails it.
-if [ "$TREEHOUSE_COPY_RETURNED" = 1 ]; then
+if [ "$TREEHOUSE_COPY_RETURNED" = 1 ] && [ "$ONLY_IF_STOPPED" != 1 ]; then
   if [ "$TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
     FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune --locked "$PROJ" || true
   else
