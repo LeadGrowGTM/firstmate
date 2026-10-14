@@ -68,7 +68,7 @@ Treat `data/captain.md` as the domain-local record of captain preferences, optio
 - Do not reimplement it by separately running its lock, bootstrap, initial wake-drain, or deferred-network components.
 - Run-tier harness surfaces run this command for you at session open while the rest only nudge it, so confirm the digest is present in this session and run it yourself when it is not; `docs/sessionstart-nudge.md` owns adapter tiers, source routing, and compatibility.
 
-Read the complete digest once and trust it as this turn's startup and recovery input; do not separately re-read the inputs it just printed.
+Read the complete digest once and trust it as this turn's startup and recovery input; do not separately re-read the inputs it just printed unless a targeted workflow must inspect before writing.
 
 If the session lock cannot be acquired and verified, report its exact diagnostic and remain read-only; another active session is only one possible cause.
 A lock-refused session must not spawn, steer, merge, drain the wake queue, repair supervision, repair a checkout, or perform any other fleet mutation.
@@ -87,7 +87,7 @@ Load `session-start-recovery` when the digest reports unfinished checks, actiona
 When dispatch profiles exist, consult them at every crewmate or scout intake and pass the resolved concrete profile required by `fm-spawn`.
 Routing precedence is an explicit per-task captain override, then the best-fit configured rule, then the configured default, then the static crewmate harness.
 Firstmate alone resolves a matched profile array: load `quota-array-dispatch` before choosing among one, and never omit a candidate, guess, or fall back silently.
-Run `bin/fm-dispatch-resolve.sh` directly on the written brief in the same turn, with no preflight, and on `clear` pass its `profile:` line to `fm-spawn` unless you state a reason to override; `ambiguous`, `escalate`, `error`, and off all mean that skill's intake, unchanged (contract: `docs/configuration.md` "Typed dispatch resolution").
+Run `bin/fm-dispatch-resolve.sh` directly on the written brief in the same turn, with no preflight, and on `clear` pass its `profile:` line to `fm-spawn` unless you state a reason to override; `ambiguous`, `escalate`, `error`, and off return to ordinary dispatch intake, loading `quota-array-dispatch` only if that intake selects a profile array (contract: `docs/configuration.md` "Typed dispatch resolution").
 The generic effort fallback is owned by `harness-adapters` and never selects max without explicit captain preference.
 
 `secondmate-provisioning` owns secondmate harness pins and inherited local material, while `harness-adapters` owns the harness consequences.
@@ -316,7 +316,7 @@ Re-evaluate queued work after every teardown and heartbeat, and also after a rec
 Use compatible `tasks-axi` when the configured backend selects it, always through `bin/fm-tasks-axi.sh` so the call reaches this home's backlog from any directory, and the documented manual path otherwise; keep only the configured recent Done entries.
 `secondmate-provisioning` and `bin/fm-backlog-handoff.sh` own cross-home handoff safety.
 
-Keep backlog notes current under the `stow` skill's note-hygiene rules.
+Keep backlog notes current; load `stow` before editing them to apply its note-hygiene rules.
 
 ## 11. Crewmate briefs
 
