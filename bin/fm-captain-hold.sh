@@ -304,7 +304,7 @@ captain_hold_cleanup() {
 trap captain_hold_cleanup EXIT
 
 CAPTAIN_CALL_CATEGORIES=(
-  'spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved, and the mate decides and records it'
+  'spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved: decide, record the decision and reason, and proceed without a captain hold'
   'live-client - a live client send or campaign change'
   'deploy-publish - a deploy or publish'
   'legal-public - legal wording or a public claim'

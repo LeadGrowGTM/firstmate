@@ -5258,7 +5258,7 @@ write_category_refusal() {  # <path>
   cat > "$1" <<'EOF'
 fm-captain-hold: captain calls require exactly one allowed --category.
 Allowed categories:
-  spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved, and the mate decides and records it
+  spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved: decide, record the decision and reason, and proceed without a captain hold
   live-client - a live client send or campaign change
   deploy-publish - a deploy or publish
   legal-public - legal wording or a public claim
@@ -5280,6 +5280,23 @@ assert_category_refusal() {  # <expected-stderr> <command...>
   [ "$rc" -eq 2 ] || fail "category refusal returned $rc instead of 2: $*"
   [ ! -s "$TMP_ROOT/category.out" ] || fail "category refusal wrote stdout"
   diff -u "$expected" "$TMP_ROOT/category.err" || fail "category refusal differed from its public contract"
+}
+
+test_established_budget_spend_is_mate_judgment() {
+  local home help expected guidance
+  home=$(make_home established-budget-spend)
+  expected="$TMP_ROOT/established-budget-refusal.err"
+  write_category_refusal "$expected"
+  guidance='spend within an already-established budget is auto-approved: decide, record the decision and reason, and proceed without a captain hold'
+  help=$(run_captain "$home" --help) || fail "category help failed for established-budget spend"
+  assert_contains "$help" 'spend - new spend or spend beyond an established budget' \
+    "help did not limit captain spend calls to new or over-budget spend"
+  assert_contains "$help" "$guidance" "help did not give the mate the established-budget decision"
+  assert_category_refusal "$expected" run_captain "$home" hold budget-spend \
+    --category ' spend' --reason 'Already within the approved budget'
+  assert_contains "$(cat "$TMP_ROOT/category.err")" "$guidance" \
+    "hold refusal did not give the mate the established-budget decision"
+  pass "public help and hold refusal assign established-budget spend to the mate without a captain hold"
 }
 
 test_categories_accept_through_public_interfaces() {
@@ -5365,6 +5382,7 @@ SH
   pass "invalid categories and uncategorized shim calls refuse exactly before locks, backlog, backend, or parent events"
 }
 
+test_established_budget_spend_is_mate_judgment
 test_categories_accept_through_public_interfaces
 test_invalid_categories_refuse_before_any_home_or_backend_mutation
 test_hold_options_share_atomic_reason
