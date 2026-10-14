@@ -26,7 +26,8 @@ make_home() {  # <name>
   # inside a command substitution, so an array append here never reaches the
   # caller and every listener this suite started used to survive the run.
   fm_test_track_procevent_home "$home" "$home/procevent-claims"
-  mkdir -p "$home/state" "$home/data" "$home/lavish-state"
+  mkdir -p "$home/state" "$home/data" "$home/lavish-state" "$home/config"
+  printf 'system\n' > "$home/config/lavish-browser"
   fakebin=$(fm_fakebin "$home")
   cat > "$fakebin/lavish-axi" <<'SH'
 #!/usr/bin/env bash

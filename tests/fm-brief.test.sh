@@ -992,7 +992,7 @@ test_ship_and_scout_route_surfaces_through_lavish_or_html() {
     brief="$home/data/$id/brief.md"
     assert_grep 'Present visual, report, or review pages through lavish-axi or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs.' "$brief" \
       "$kind brief did not route visual or review pages away from claude.ai"
-    assert_grep 'Open lavish-axi pages directly without asking the captain first; route captain decisions through the existing decision path instead of opening a worker decision board.' "$brief" \
+    assert_grep 'fm-lavish-open.sh" <artifact.html> without asking the captain first; route captain decisions through the existing decision path instead of opening a worker decision board.' "$brief" \
       "$kind brief did not distinguish direct review pages from captain decisions"
     assert_grep 'Report files on disk, plain-text bootstrap diagnostics, scout text reports when Lavish is unavailable, and chat text remain available.' "$brief" \
       "$kind brief did not preserve plain reports and chat text"
@@ -1004,7 +1004,7 @@ test_ship_and_scout_route_surfaces_through_lavish_or_html() {
 # including older builds that use the legacy reply path.
 test_scout_lavish_line_follows_presentation_floor() {
   local base label version expect case_dir fakebin brief n=0
-  local hosting='open it directly in lavish-axi without asking the captain first'
+  local hosting='If your deliverable is a visual, report, or review page, open it through FM_HOME='
   local text_only='deliver your findings as a text report without Lavish'
   base=$(fm_test_base_path_sans "${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}" lavish-axi)
   while IFS='^' read -r label version expect; do

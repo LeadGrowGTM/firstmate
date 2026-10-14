@@ -49,7 +49,7 @@ This repo is a shared template, while `.env`, `data/`, `state/`, `config/`, `pro
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
 Never add an agent name as a commit co-author.
 Use `gh-axi` for GitHub and `chrome-devtools-axi` for browser work; consult current help rather than memorizing flags.
-Present visual, report, or review pages through compatible `lavish-axi` or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs, which `bin/fm-spawn.sh` disables for standard and direct or leading-assignment raw Claude launches.
+Present visual, report, or review pages through compatible Lavish using `bin/fm-lavish-open.sh` or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs, which `bin/fm-spawn.sh` disables for standard and direct or leading-assignment raw Claude launches.
 Env-wrapped and compound raw Claude commands are outside that launch-time denial.
 Report files on disk, plain-text bootstrap diagnostics, scout text reports when Lavish is unavailable, and chat text remain available.
 
@@ -359,7 +359,7 @@ Reach the captain immediately for:
 - For a captain-requested completion, or any wake that needs the captain's review, approval, merge, or design pick, give a captain-facing outcome that states what finished and never reply `Captain, shipshape.`; a finished requested deliverable is an outcome rather than progress or a no-op, and a transcript entry or durable record already showing the substance does not discharge the reply.
 - Ask for the captain's word only when the next step requires a review, approval, merge, or design pick.
 - Batch non-urgent updates into the next natural reply.
-- Open `lavish-axi` visual, report, and review pages directly without asking first; route captain decisions through the existing decision path instead of a worker-opened board, with plain chat for a simple yes-or-no decision.
+- Open Lavish visual, report, and review pages through `bin/fm-lavish-open.sh` without asking first; route captain decisions through the existing decision path instead of a worker-opened board, with plain chat for a simple yes-or-no decision.
 - Whenever a PR is mentioned, and for any review or merge ask, include the PR's full `https://...` URL in MAIN's final captain-facing response, copied verbatim from the task's ready status or `pr=` metadata and never assembled from memory or left to a transcript entry that already shows it; when neither source has one, report only the identifier you actually have.
 - Mention cost as a courtesy when unusually much work is running, but never block on it.
 

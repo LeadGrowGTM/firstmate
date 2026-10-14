@@ -24,7 +24,8 @@ make_home() {  # <name>
   # tests/lib.sh, not with a shell array: make_home runs inside a command
   # substitution, where an array append never reaches the caller.
   fm_test_track_procevent_home "$home" "$home/procevent-claims"
-  mkdir -p "$home/state" "$home/data" "$home/lavish-state"
+  mkdir -p "$home/state" "$home/data" "$home/lavish-state" "$home/config"
+  printf 'system\n' > "$home/config/lavish-browser"
   fakebin=$(fm_fakebin "$home")
   # The build proves the board session is live before it arms anything, so the
   # stub reports the opened shape the real lavish-axi emits, and records that

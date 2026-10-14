@@ -1103,6 +1103,16 @@ When the file is absent, worker launches do not add a board address and retain t
 Malformed or unreadable values refuse the launch before the worker starts.
 The address selects the existing shared server; it does not authorize starting or stopping the server, and the Lavish startup crash remains a vendor-tool concern.
 
+## Lavish page browser (config/lavish-browser, config/lavish-orca-worktree)
+
+Lavish pages open through [`bin/fm-lavish-open.sh`](../bin/fm-lavish-open.sh), which owns the browser selection and opening mechanics.
+The optional `config/lavish-browser` selects `auto`, `orca`, or `system`; absent means `auto`, choosing Orca when `orca-ide` is available and the existing system browser otherwise.
+Orca requires `config/lavish-orca-worktree` to name the explicit destination project selector, so pages never infer a worker's WSL checkout or the active project.
+For example, use the project's `id:<repo-id>::C:\Users\<user>\firstmate` selector from Orca.
+An invalid choice, missing selector, or failed Orca open reports an error rather than opening the system browser.
+Both files are local, gitignored, and inherited into secondmate homes through the primary-authoritative configuration contract.
+Browser selection only presents the page; it grants no authority to drive logged-in sites.
+
 ## Home brief include (config/brief-include.md)
 
 The optional local, gitignored `config/brief-include.md` adds standing worker instructions to every ship and scout brief.
