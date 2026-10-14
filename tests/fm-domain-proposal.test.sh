@@ -405,6 +405,26 @@ jq -se --arg d "$S1" 'any(.[]; .state == "applied" and (.superseded | index($d) 
   "$HOME_DIR/data/domain-freshness/proposals/media/15/receipts.jsonl" >/dev/null || fail 'latest application did not retire the earlier approval'
 pass 'a cycle refuses reuse of an earlier proposal digest'
 
+tool request media "$BUNDLE2" >/dev/null || fail 'multiline-answer request failed'
+proposal 'conditional answer' "$BUNDLE2" > "$TMP_ROOT/conditional.json"
+tool submit media "$TMP_ROOT/conditional.json" >/dev/null || fail 'multiline-answer submission failed'
+C1=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/16/v1.json")
+printf -v conditional_answer 'approve-%s\n\nOnly after another review' "$C1"
+answer domain-proposal-media-16 "$conditional_answer"
+out=$(tool approve media 2>&1); rc=$?
+expect_code 4 "$rc" 'a multiline conditional answer cannot approve a version'
+assert_contains "$out" 'not-approved' 'conditional answer needs a decision'
+[ ! -s "$HOME_DIR/data/domain-freshness/proposals/media/16/receipts.jsonl" ] \
+  || fail 'conditional answer wrote an approval receipt'
+out=$(tool request media "$BUNDLE2") || fail 'conditional answer blocked a new cycle'
+assert_contains "$out" 'cycle 17' 'conditional answer was treated as exact approval at the new-cycle check'
+proposal 'whitespace answer' "$BUNDLE2" > "$TMP_ROOT/whitespace.json"
+tool submit media "$TMP_ROOT/whitespace.json" >/dev/null || fail 'whitespace-answer submission failed'
+C2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/17/v1.json")
+answer domain-proposal-media-17 "  approve-$C2  "
+tool approve media >/dev/null || fail 'surrounding whitespace prevented an exact approval'
+pass 'only the complete trimmed captain answer authorizes application'
+
 mkdir -p "$TMP_ROOT/mate/state"
 printf 'media\n' > "$TMP_ROOT/mate/.fm-secondmate-home"
 FM_HOME="$TMP_ROOT/mate" bash "$TOOL" request media "$BUNDLE" >/dev/null 2>&1; expect_code 1 "$?" 'a non-main home is refused'

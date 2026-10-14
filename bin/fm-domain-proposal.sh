@@ -122,13 +122,18 @@ task_state() {
   show=$(bash "$SCRIPT_DIR/fm-tasks-axi.sh" show "$1" --full 2>/dev/null) || return 2
   printf '%s\n' "$show" | sed -n 's/^  state: //p' | head -1
 }
-task_answer() {  # <task-id>; prints mode TAB first decision line, or nothing
+task_answer() {  # <task-id>; prints mode TAB complete decision text, or nothing
   local show body
   show=$(bash "$SCRIPT_DIR/fm-tasks-axi.sh" show "$1" --full 2>/dev/null) || return 0
   body=$(printf '%s\n' "$show" | sed -n 's/^  body: //p' | head -1 | jq -r '.' 2>/dev/null) || return 0
-  printf '%s\n' "$body" | awk '
-    /^Resolution mode: / && !mode { mode = substr($0, 18) }
-    /^Captain decision:$/ && !seen { seen = 1; getline; print mode "\t" $0; exit }'
+  printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -0777 -ne '
+    if (/Decision digest: ([a-f0-9]{64})\nResolution mode: ([^\n]+)\n\nCaptain decision:\n(.*?)(?=\n\nResolution recorded by fm-(?:captain|decision)-hold\.|\z)/s) {
+      my ($digest, $mode, $decision) = ($1, $2, $3);
+      if (sha256_hex($decision) eq $digest) {
+        $decision =~ s/\A\s+|\s+\z//g;
+        print "$mode\t$decision";
+      }
+    }'
 }
 card_digest() {  # <task-id>; the version digest the open card was held for, or nothing
   local show
@@ -364,8 +369,13 @@ approve)
   case "$TEXT" in
     reject) printf 'rejected: %s stays inactive\n' "$TASK" >&2; exit 4 ;;
     "approve-$DIGEST") ;;
-    approve-*) printf 'stale: answer %s does not match latest version v%s digest %s\n' "$TEXT" "$VERSION" "$DIGEST" >&2; exit 3 ;;
-    *) printf 'not-approved: %s answer is not an approval value\n' "$TASK" >&2; exit 4 ;;
+    *)
+      if [[ "$TEXT" =~ ^approve-[a-f0-9]+$ ]]; then
+        printf 'stale: answer %s does not match latest version v%s digest %s\n' "$TEXT" "$VERSION" "$DIGEST" >&2
+        exit 3
+      fi
+      printf 'not-approved: %s answer needs a decision\n' "$TASK" >&2
+      exit 4 ;;
   esac
   if [ -f "$DIR/receipts.jsonl" ] && jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then
     fail "digest $DIGEST is already applied"
