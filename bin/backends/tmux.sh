@@ -193,6 +193,72 @@ fm_backend_tmux_window_inventory() {  # <session-target>
   return 1
 }
 
+# fm_backend_tmux_socket_path: the socket path of the tmux server that holds
+# <target>, as that server itself reports it. Recorded at spawn as the task's
+# `tmux_socket=` so a later absence proof can compare the answering server's
+# age with the recorded endpoint. Empty on any tmux error.
+fm_backend_tmux_socket_path() {  # <target>
+  tmux display-message -p -t "$1" '#{socket_path}' 2>/dev/null
+}
+
+fm_backend_tmux_server_on_socket() {  # <socket>
+  local socket=$1 answer
+  if [ ! -e "$socket" ] && [ ! -L "$socket" ]; then
+    printf 'absent'
+    return 0
+  fi
+  if answer=$(LC_ALL=C tmux -S "$socket" display-message -p '#{pid} #{start_time}' 2>&1); then
+    if [[ $answer =~ ^[0-9]+\ [0-9]+$ ]]; then
+      printf 'answer %s' "$answer"
+    else
+      printf 'unreadable'
+    fi
+    return 0
+  fi
+  case "$answer" in
+    *"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)") printf 'absent' ;;
+    *) printf 'unreadable' ;;
+  esac
+}
+
+# fm_backend_tmux_socket_candidates: every socket a tmux server addressed
+# without an explicit -S path could be listening on for this user, one per
+# line - the entries of the per-user socket directory tmux itself derives from
+# TMUX_TMPDIR (default /tmp), plus the directory of the socket an inherited
+# $TMUX names. Returns 1 when a candidate directory exists but cannot be
+# listed, because a socket hidden in it could be a live server.
+fm_backend_tmux_socket_candidates() {
+  local uid dir sock seen=
+  uid=$(id -u) || return 1
+  for dir in "${TMUX_TMPDIR:-/tmp}/tmux-$uid" ${TMUX:+"$(dirname -- "${TMUX%%,*}")"}; do
+    case "$seen" in *"|$dir|"*) continue ;; esac
+    seen="$seen|$dir|"
+    [ -e "$dir" ] || [ -L "$dir" ] || continue
+    [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || { printf '%s\n' "$dir"; return 1; }
+    for sock in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+      [ -S "$sock" ] && printf '%s\n' "$sock"
+    done
+  done
+  return 0
+}
+
+fm_backend_tmux_processes() {
+  local processes uid
+  uid=$(id -u) || return 1
+  processes=$(LC_ALL=C ps -u "$uid" -o pid= -o stat= -o comm= -o args=) || return 1
+  awk '
+    $1 ~ /^[0-9]+$/ && $2 !~ /^Z/ {
+      pid=$1
+      line=$0
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", line)
+      if (line ~ /^tmux: server([[:space:]]|$)/ || line ~ /^[^[:space:]]+[[:space:]]+tmux: server([[:space:]]|$)/)
+        print "server " pid
+      else if (line ~ /^([^[:space:]]*\/)?tmux[^[:space:]]*([[:space:]]|$)/ || line ~ /^[^[:space:]]+[[:space:]]+([^[:space:]]*\/)?tmux[^[:space:]]*([[:space:]]|$)/)
+        print "tmux " pid
+    }
+  ' <<< "$processes"
+}
+
 # fm_backend_tmux_kill: remove one explicitly named task window.
 # Empty, omitted, and malformed targets return nonzero before invoking tmux so
 # tmux can never interpret an empty target as the caller's current window.
