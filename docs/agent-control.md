@@ -117,6 +117,7 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
 - **tmux proves server death.** A tmux task records `tmux_socket=`, the socket path its server reported at spawn.
   That socket must either have no answering server, or answer with a server whose `#{start_time}` is strictly newer than the epoch in the task's `spawn_gen=`.
   For a legacy record without `tmux_socket=`, this condition must hold for every socket in the per-user directory under `TMUX_TMPDIR` (default `/tmp`) and the directory an inherited `$TMUX` names.
+  If the recorded socket answers, or any candidate socket answers for a legacy record, an unparseable `spawn_gen=` leaves absence unproven.
   The proof also checks every live tmux server process owned by the user: each must match the `#{pid}` of an answering socket, including the recorded socket and all candidate-directory sockets.
   A live server with an unlinked socket, a server that is too old, or a server process that cannot be reconciled with the socket reads refuses recovery.
   When no socket answers, any tmux process still visible also blocks recovery.
@@ -179,8 +180,8 @@ The worktree and the task's records are unaffected either way.
 - An ambiguous or unreadable endpoint state refuses.
   Only a positively classified state acts.
 - `exit`'s composer-empty check, above, is itself a fail-closed boundary that `relaunch` inherits by stopping the old agent through `exit`.
-- `fm-spawn --relaunch` independently refuses unless the endpoint is positively agent-free - either a `dead` endpoint that survives, or a Herdr endpoint proven gone by the absence proof above - so a replacement can never join a live agent.
-  An `alive`, `ambiguous`, or `unreadable` verdict all refuse, and so does any endpoint whose absence is not provable, which on tmux is every `missing`; absence is claimed only from positive evidence of it.
+- `fm-spawn --relaunch` independently refuses unless the endpoint is positively agent-free - either a `dead` endpoint that survives, or a Herdr or tmux endpoint proven gone by the absence proof above - so a replacement can never join a live agent.
+  An `alive`, `ambiguous`, or `unreadable` verdict all refuse, as does a `missing` endpoint whose absence cannot be proven; absence is claimed only from positive evidence of it.
   It also requires the shell to be in the recorded worktree: every backend but Orca (which owns its own task worktree with no current-path probe) gets one explicit `cd` to the recorded path, then a pre-launch path read that refuses before any harness starts unless it confirms the endpoint is sitting in the recorded copy.
 
 ## Capability matrix
@@ -210,5 +211,5 @@ The portable regression [`tests/fm-scheduled-worker.test.sh`](../tests/fm-schedu
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for its verified-harness lane (adapters outside the lane pin their control mechanics in their own harness suites), the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
-- `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, the `--only-if-idle` refusal, checkpoint refusals, rollback after a failed launch, and the endpoint-absence proof both verbs share - the Herdr reclaim of a destroyed endpoint, and tmux refusing one it cannot prove absent.
+- `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, the `--only-if-idle` refusal, checkpoint refusals, rollback after a failed launch, and the endpoint-absence proof both verbs share - Herdr reclaim of a destroyed endpoint, tmux reclaim after server death, and refusal when tmux absence remains unproven.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.
