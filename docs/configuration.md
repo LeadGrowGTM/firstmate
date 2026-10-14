@@ -1261,14 +1261,20 @@ Per-machine Cursor `cli-config.json` attribution-off is not this contract: it do
 
 ## Skill overrides (config/skill-overrides.json)
 
-The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills a Claude second mate's session lists through per-launch settings.
-It must be valid JSON whose top-level `skillOverrides` property is an object; Claude Code validates the object's contents.
-Only the `skillOverrides` property is read; any other property is ignored.
+The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills, plugins, and subagents a Claude second mate's session lists through per-launch settings.
+It must be valid JSON with at least one of these top-level properties; Claude Code validates the contents:
 
-When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only the `skillOverrides` property to the launch's inline `--settings` JSON.
+- `skillOverrides`: an object of skill name to visibility.
+- `enabledPlugins`: an object of plugin id to boolean, such as `{"charlesdr-dev-loop@charlesdr-dev-loop": false}`.
+- `permissions.deny`: an array of strings, such as `["Agent(harness-checker)"]`, which hides the named subagent from the Agent tool.
+
+Only those three are read; any other property, including other `permissions` keys, is ignored.
+
+When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only those properties to the launch's inline `--settings` JSON.
+`skillOverrides` replaces any existing value, while `enabledPlugins` and `permissions.deny` merge into the settings' existing ones, with the file's plugin values winning.
 Raw Claude commands with a leading assignment containing quoted spaces are not recognized as Claude launches and do not receive the override; use the standard Claude launch template for those sessions.
 An absent file changes nothing.
-A file that is unreadable, contains zero or multiple JSON documents, is not valid JSON, or lacks a `skillOverrides` object is skipped with a one-line note on stderr, and the launch proceeds without it.
+A file that is unreadable, contains zero or multiple JSON documents, is not valid JSON, has none of the three properties, or has one of them with the wrong type is skipped whole with a one-line note on stderr, and the launch proceeds without it.
 Ship and scout workers never receive it, nor does any non-Claude harness.
 Firstmate reads but never edits the override file; existing Claude launch wiring separately regenerates `.claude/settings.local.json` for control hooks.
 

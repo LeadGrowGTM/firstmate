@@ -1779,6 +1779,95 @@ test_secondmate_skill_overrides_valid_file_rides_the_settings() {
   pass "a valid skill-overrides.json rides the secondmate launch settings and is left untouched"
 }
 
+test_secondmate_launch_override_keys_ride_the_settings() {
+  local rec id sm out status launch settings n=0 body
+  id=profile-secondmate-launchov-z38
+  rec=$(make_spawn_case profile-secondmate-launchov claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  mkdir -p "$sm/config"
+  # Each key alone, then all three; unrelated permissions keys are not forwarded.
+  while IFS='|' read -r body want; do
+    n=$((n + 1))
+    printf '%s\n' "$body" > "$sm/config/skill-overrides.json"
+    : > "$LAUNCH_LOG"
+    out=$(FM_TEST_CLAUDE_CONFIG_DIR="$CASE_DIR/claude-work" \
+      run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+    status=$?
+    expect_code 0 "$status" "secondmate spawn with override file $n should succeed"$'\n'"$out"
+    assert_not_contains "$out" "skipped $sm/config/skill-overrides.json" "override file $n was skipped: $body"
+    launch=$(cat "$LAUNCH_LOG")
+    settings=$(claude_settings_json_arg "$launch")
+    printf '%s' "$settings" | jq -e --argjson want "$want" \
+      '.feedbackDrafts == "off" and (. | del(.feedbackDrafts, .attribution)) == $want' >/dev/null \
+      || fail "override file $n launch settings differ from $want: $settings"
+  done <<'EOF'
+{"skillOverrides":{"kun":"off"}}|{"skillOverrides":{"kun":"off"}}
+{"enabledPlugins":{"a@b":false}}|{"enabledPlugins":{"a@b":false}}
+{"permissions":{"deny":["Agent(harness-checker)"],"allow":["Bash"]}}|{"permissions":{"deny":["Agent(harness-checker)"]}}
+{"skillOverrides":{"kun":"off"},"enabledPlugins":{"a@b":false},"permissions":{"deny":["Agent(doc-router)"]}}|{"skillOverrides":{"kun":"off"},"enabledPlugins":{"a@b":false},"permissions":{"deny":["Agent(doc-router)"]}}
+EOF
+  pass "skillOverrides, enabledPlugins and permissions.deny each ride the secondmate launch settings"
+}
+
+test_secondmate_launch_override_wrong_types_are_skipped() {
+  local rec id sm out status launch bad
+  id=profile-secondmate-launchov-bad-z39
+  rec=$(make_spawn_case profile-secondmate-launchov-bad claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  mkdir -p "$sm/config"
+  for bad in '{"enabledPlugins":["a@b"]}' '{"enabledPlugins":{"a@b":"no"}}' '{"permissions":["Agent(x)"]}' \
+    '{"permissions":{"deny":"Agent(x)"}}' '{"permissions":{"deny":[1]}}' '{"permissions":{"allow":["Bash"]}}' \
+    '{"skillOverrides":{"kun":"off"},"enabledPlugins":"a@b"}' '{"ignored":true}'; do
+    printf '%s\n' "$bad" > "$sm/config/skill-overrides.json"
+    : > "$LAUNCH_LOG"
+    out=$(FM_TEST_CLAUDE_CONFIG_DIR="$CASE_DIR/claude-work" \
+      run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+    status=$?
+    expect_code 0 "$status" "override file ($bad) must not block the launch"$'\n'"$out"
+    assert_contains "$out" "skipped $sm/config/skill-overrides.json" "override file ($bad) was skipped without a note"
+    launch=$(cat "$LAUNCH_LOG")
+    claude_settings_json_arg "$launch" | jq -e 'has("skillOverrides") or has("enabledPlugins") or has("permissions") | not' >/dev/null \
+      || fail "override file ($bad) leaked into the launch settings"
+  done
+  pass "override files with wrong types or no recognized key are skipped with a note"
+}
+
+test_raw_secondmate_existing_permissions_merge_deny() {
+  local rec id sm out status launch args_log settings
+  id=profile-secondmate-launchov-raw-z40
+  rec=$(make_spawn_case profile-secondmate-launchov-raw claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  mkdir -p "$sm/config"
+  printf '%s\n' '{"enabledPlugins":{"a@b":false},"permissions":{"deny":["Agent(doc-router)","Agent(x)"]}}' > "$sm/config/skill-overrides.json"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" \
+    "claude --settings '{\"theme\":\"dark\",\"enabledPlugins\":{\"c@d\":true},\"permissions\":{\"allow\":[\"Bash\"],\"deny\":[\"Agent(x)\",\"Read\"]}}' 'A positional prompt'" --secondmate)
+  status=$?
+  expect_code 0 "$status" "raw secondmate spawn with existing permissions should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  args_log="$CASE_DIR/claude-args.log"
+  FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+    || fail "raw secondmate Claude launch with existing permissions failed"
+  settings=$(awk 'prev { print; exit } $0 == "--settings" { prev = 1 }' "$args_log")
+  printf '%s' "$settings" | jq -e '.theme == "dark"
+    and .enabledPlugins == {"c@d": true, "a@b": false}
+    and .permissions.allow == ["Bash"]
+    and (.permissions.deny | sort) == ["Agent(doc-router)", "Agent(x)", "Read"]' >/dev/null \
+    || fail "raw Claude did not merge enabledPlugins and permissions.deny into existing settings: $settings"
+  pass "raw secondmate merges enabledPlugins and permissions.deny into existing settings"
+}
+
 test_secondmate_skill_overrides_malformed_file_is_skipped_with_a_note() {
   local rec id sm out status launch bad
   id=profile-secondmate-skillov-bad-z33
@@ -2639,6 +2728,9 @@ test_claude_secondmate_launch_carries_the_attribution_policy
 test_secondmate_skill_overrides_absent_file_leaves_launch_unchanged
 test_secondmate_skill_overrides_valid_file_rides_the_settings
 test_secondmate_skill_overrides_malformed_file_is_skipped_with_a_note
+test_secondmate_launch_override_keys_ride_the_settings
+test_secondmate_launch_override_wrong_types_are_skipped
+test_raw_secondmate_existing_permissions_merge_deny
 test_raw_secondmate_skill_overrides_reach_claude
 test_raw_secondmate_existing_settings_merge_skill_overrides
 test_raw_ship_existing_settings_keeps_launch_arguments
