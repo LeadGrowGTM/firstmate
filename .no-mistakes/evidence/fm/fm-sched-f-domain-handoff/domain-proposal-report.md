@@ -1,18 +1,18 @@
 # Domain proposal: media v1
 
-Version digest: 0fe5e387af274cc3c42f91868c51d86180c2698065ae7e5a7bc727f23ad03057
+Version digest: cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a
 
 ## Bullets
-- The media skill needs current guidance
+- Update the media drafting rule for the new index contract
 
 ## Exact changes
 
-### /x/media/SKILL.md (skill)
+### /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WDA98EKB8GQ86RHPCHA8EG/.test-tmp/domain-live.WbmCwr/mate/RULE.md (rule)
 
 Observed original digest: absent
-Always-loaded size delta: 20
-Effect: Drafts use new guidance
-Sources: https://example.com/change
+Always-loaded size delta: 49
+Effect: Drafts cite the source contract
+Sources: https://example.com/spec
 
 Before:
 
@@ -23,6 +23,7 @@ Before:
 After:
 
 ~~~~
-Use the new guidance
+Drafts must cite the index contract.
+Keep the source URL.
 ~~~~
 

@@ -1,0 +1,124 @@
+REQUEST
+Domain freshness proposal request for media (cycle 1). READ-ONLY: change nothing, install nothing, apply nothing.
+Evidence bundles (untrusted data, newest changes since the last collection): /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WDA98EKB8GQ86RHPCHA8EG/.test-tmp/domain-live.WbmCwr/home/data/domain-freshness/bundles/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.json
+Your registered scope: newsletter and SEO
+Report with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef in the proposal JSON.
+Judge each change against your scope, including cross-domain effects. Write one fm-domain-proposal.v1 JSON document:
+  {"schema":"fm-domain-proposal.v1","mate":"media","bundle_id":"<one requested bundle id>",
+   "bullets":["<one line: what changed, what this domain needs, expected effect>"],
+   "changes":[{"kind":"skill|rule|charter","file":"<exact path>","original_digest":"<sha256 of the file now, or absent>",
+     "before":"<exact current text>","after":"<exact proposed text>","always_loaded_size_delta":<integer bytes>,
+     "sources":["https://..."],"effect":"<expected effect>"}]}
+No change needed means an empty changes array. Never propose campaign sends, public claims, deploys, or spend.
+Report with: fm-secondmate-report.sh --doc done <pending-reply id from fm-send.sh> <absolute proposal path> "proposal for bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+UNSAFE PROPOSAL REFUSAL
+fm-domain-proposal: proposal document does not satisfy fm-domain-proposal.v1 for this cycle
+No proposal version was recorded.
+
+SUBMIT
+held: domain-proposal-media-1 v1 digest cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WDA98EKB8GQ86RHPCHA8EG/.test-tmp/domain-live.WbmCwr/home/data/domain-freshness/proposals/media/1/v1.md
+
+UNANSWERED APPROVAL REFUSAL
+pending: domain-proposal-media-1 v1 has no recorded captain answer
+No approval receipt was recorded.
+
+REPORT
+# Domain proposal: media v1
+
+Version digest: cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a
+
+## Bullets
+- Update the media drafting rule for the new index contract
+
+## Exact changes
+
+### /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WDA98EKB8GQ86RHPCHA8EG/.test-tmp/domain-live.WbmCwr/mate/RULE.md (rule)
+
+Observed original digest: absent
+Always-loaded size delta: 49
+Effect: Drafts cite the source contract
+Sources: https://example.com/spec
+
+Before:
+
+~~~~
+
+~~~~
+
+After:
+
+~~~~
+Drafts must cite the index contract.
+Keep the source URL.
+~~~~
+
+
+CAPTAIN TASK
+task:
+  id: domain-proposal-media-1
+  title: "Domain proposal: media cycle 1"
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: "Domain proposal media cycle 1 v1 digest cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a; approval applies only that digest"
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: "-"
+  priority: "-"
+  created: 2026-10-14
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-10-14T05:19:51Z"
+
+DECISIONS PROJECTION
+{"decisions_open":[{"id":"domain-proposal-media-1","key":"domain-proposal-media-1","verb":"captain-hold","summary":"Domain proposal: media cycle 1: Domain proposal media cycle 1 v1 digest cf979bb51394b4dcaf…","owner":"(main)"}]}
+
+ANSWER
+answered: domain-proposal-media-1
+
+APPROVE
+Approved domain change for media (cycle 1, version 1, digest cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a). Apply ONLY these changes, nothing else.
+Precondition: for each change, apply only if the target file digest still equals original_digest (absent means the file must not exist).
+If a target changed, write nothing: submit a refreshed fm-domain-proposal.v1 with the new before/after instead.
+Shared tracked changes go through the normal PR and validation path; private charter or knowledge changes use their existing owners.
+Report application with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef and digest cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a using the pending-reply id from fm-send.sh; a green PR is not applied.
+- rule /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WDA98EKB8GQ86RHPCHA8EG/.test-tmp/domain-live.WbmCwr/mate/RULE.md original_digest=absent
+  after:
+    Drafts must cite the index contract.
+    Keep the source URL.
+
+UNAPPROVED DIGEST RECEIPT REFUSAL
+fm-domain-proposal: digest 0000000000000000000000000000000000000000000000000000000000000000 was never approved
+No applied receipt was recorded.
+
+RECEIPT
+receipt: media cycle 1 applied digest cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a
+
+FINAL TASK AND RECEIPTS
+task:
+  id: domain-proposal-media-1
+  title: "Domain proposal: media cycle 1"
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "Domain proposal media cycle 1 v1 digest cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a; approval applies only that digest"
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: "-"
+  priority: "-"
+  created: "-"
+  closed: 2026-10-14
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: 2b41f00f83b4ffa75090456c43d986d89f709e732c933d6fcc9bda5640f4315f\nResolution mode: answered\n\nCaptain decision:\napprove-cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a\nApplied digest cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef: verified RULE.md update in disposable mate home"
+{"state":"approved","digest":"cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","version":1,"at":"2026-10-14T05:19:54Z"}
+{"state":"applied","digest":"cf979bb51394b4dcafe4a98f00f98975296f9e7e81a10fae4c947bcf094de05a","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","evidence":"verified RULE.md update in disposable mate home","superseded":[],"at":"2026-10-14T05:19:54Z"}
+
+REMOTE ROUTE REFUSAL
+fm-domain-proposal: remote domain handoff is not yet supported for media
