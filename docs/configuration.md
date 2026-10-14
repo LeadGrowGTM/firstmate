@@ -1523,7 +1523,10 @@ The `enabled` flag gates `collect` only; explicit `inventory` reads a declared l
 If Python is unavailable, the command fails closed because it cannot safely identify a valid disabled JSON configuration.
 Machine-specific inventory paths are local choices and must not be inherited across hosts.
 [`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
-Daily intake and domain proposal delivery are separate integrations; this collector neither schedules work nor changes installations or operational instructions.
+Daily intake is a separate integration; this collector neither schedules work nor changes installations or operational instructions.
+[`bin/fm-domain-proposal.sh`](../bin/fm-domain-proposal.sh) provides manual main-home handoff for currently registered local mates using a collected bundle; remote handoff is unsupported.
+One ordinary task per proposal cycle appears on the existing decisions board while held for captain approval.
+The script header and `--help` own the request, proposal, approval, and receipt protocol; the command does not schedule or apply changes.
 
 This section owns the version 1 configuration schema:
 
