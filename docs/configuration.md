@@ -1252,12 +1252,12 @@ Per-machine Cursor `cli-config.json` attribution-off is not this contract: it do
 ## Skill overrides (config/skill-overrides.json)
 
 The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills a Claude second mate's session lists, without editing any Claude settings file.
-It must be valid JSON whose top-level `skillOverrides` property is an object mapping skill names to a string value such as `off` or `name-only`, as Claude Code's `skillOverrides` setting defines.
+It must be valid JSON whose top-level `skillOverrides` property is an object; Claude Code validates the object's contents.
 Only the `skillOverrides` property is read; any other property is ignored.
 
 When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only the `skillOverrides` property to the launch's inline `--settings` JSON.
 An absent file changes nothing.
-A file that is unreadable, is not valid JSON, lacks a `skillOverrides` object, or holds a non-string value is skipped with a one-line note on stderr, and the launch proceeds without it.
+A file that is unreadable, contains zero or multiple JSON documents, is not valid JSON, or lacks a `skillOverrides` object is skipped with a one-line note on stderr, and the launch proceeds without it.
 Ship and scout workers never receive it, nor does any non-Claude harness, and Firstmate never writes or edits the file, a `settings.local.json`, or any plugin or account setting.
 
 The file is per home because each second mate needs a different list, and it is not inherited from the primary home.
