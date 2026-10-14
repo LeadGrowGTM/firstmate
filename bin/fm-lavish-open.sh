@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# fm-lavish-open.sh - present a Lavish artifact in the home's selected browser.
-# Usage: fm-lavish-open.sh <artifact.html> [--reopen] [--no-gate]
-# config/lavish-browser: auto (default), orca, or system.
-# auto uses Orca when orca-ide is on PATH, otherwise Lavish's system opener.
-# config/lavish-orca-worktree: required explicit Orca worktree selector when
-# using Orca; no active/current or inferred WSL worktree is ever selected.
+# fm-lavish-open.sh - present a Lavish artifact in Orca.
+# Usage: fm-lavish-open.sh <artifact.html> [--reopen]
+# config/lavish-browser: auto (default) or orca.
+# config/lavish-orca-worktree: optional Windows worktree id override.
 # Orca mode establishes the session with --no-open and opens only live URLs.
 # A failed Orca open is an error, never a fallback to the system browser.
 # Output preserves Lavish's session fields; Orca's receipt goes to stderr.
@@ -20,7 +18,7 @@ fi
 artifact=$1
 shift
 for arg in "$@"; do
-  case "$arg" in --reopen|--no-gate) ;; *) fail "unsupported option: $arg" ;; esac
+  case "$arg" in --reopen) ;; *) fail "unsupported option: $arg" ;; esac
 done
 read_config() {
   local path="$FM_HOME/config/$1"
@@ -32,25 +30,26 @@ read_config() {
 browser=$(read_config lavish-browser)
 browser=${browser:-auto}
 case "$browser" in
-  auto) if command -v orca-ide >/dev/null 2>&1; then browser=orca; else browser=system; fi ;;
-  orca|system) ;;
-  *) fail 'config/lavish-browser must contain auto, orca, or system' ;;
+  auto|orca) ;;
+  *) fail 'config/lavish-browser must contain auto or orca' ;;
 esac
-if [ "$browser" = system ]; then
-  exec lavish-axi "$artifact" "$@"
+if [ -e "$FM_HOME/config/lavish-orca-worktree" ] || [ -L "$FM_HOME/config/lavish-orca-worktree" ]; then
+  worktree=$(read_config lavish-orca-worktree)
+else
+  worktree='id:33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate'
 fi
-command -v orca-ide >/dev/null 2>&1 || fail 'orca-ide is unavailable'
-worktree=$(read_config lavish-orca-worktree)
-case "$worktree" in
-  id:?*::?*|identity:?*|path:?*|name:?*|branch:?*|issue:?*) ;;
-  *) fail 'config/lavish-orca-worktree must contain an explicit Orca worktree selector' ;;
-esac
-case "$worktree" in *$'\n'*|*$'\r'*) fail 'config/lavish-orca-worktree must contain one line' ;; esac
+windows_worktree='^id:[^:[:space:]]+::[A-Za-z]:\\[^[:cntrl:]]+$'
+[[ "$worktree" =~ $windows_worktree ]] || fail 'config/lavish-orca-worktree must contain a Windows worktree id'
 out=$(lavish-axi "$artifact" --no-open "$@") || fail 'cannot establish the Lavish session'
 printf '%s\n' "$out"
 status=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*status:[[:space:]]*//p' | head -1 | tr -d '"')
 case "$status" in opened|resumed|open) ;; *) exit 0 ;; esac
 url=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*url:[[:space:]]*//p' | head -1 | tr -d '"')
 case "$url" in http://?*|https://?*) ;; *) fail 'Lavish did not return a page URL' ;; esac
+if ! command -v orca-ide >/dev/null 2>&1; then
+  printf '%s\n' "$url"
+  printf 'fm-lavish-open: Orca is unavailable; open this URL manually.\n' >&2
+  exit 0
+fi
 orca-ide tab create --worktree "$worktree" --url "$url" --json >&2 \
   || fail 'cannot open the Lavish page in Orca'

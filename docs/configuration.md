@@ -1106,10 +1106,11 @@ The address selects the existing shared server; it does not authorize starting o
 ## Lavish page browser (config/lavish-browser, config/lavish-orca-worktree)
 
 Lavish pages open through [`bin/fm-lavish-open.sh`](../bin/fm-lavish-open.sh), which owns the browser selection and opening mechanics.
-The optional `config/lavish-browser` selects `auto`, `orca`, or `system`; absent means `auto`, choosing Orca when `orca-ide` is available and the existing system browser otherwise.
-Orca requires `config/lavish-orca-worktree` to name the explicit destination project selector, so pages never infer a worker's WSL checkout or the active project.
-For example, use the project's `id:<repo-id>::C:\Users\<user>\firstmate` selector from Orca.
-An invalid choice, missing selector, or failed Orca open reports an error rather than opening the system browser.
+The optional `config/lavish-browser` accepts `auto` or `orca`; absent means `auto`, and both open pages in Orca.
+Orca tabs default to the captain's firstmate project at `id:33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate`.
+The optional `config/lavish-orca-worktree` overrides that destination with another `id:<repo-id>::C:\...` Windows worktree selector; path selectors and WSL paths are refused.
+If `orca-ide` is unavailable, the opener prints the page URL and a note for manual opening without launching a browser.
+An invalid choice or failed Orca open reports an error.
 Both files are local, gitignored, and inherited into secondmate homes through the primary-authoritative configuration contract.
 Browser selection only presents the page; it grants no authority to drive logged-in sites.
 
