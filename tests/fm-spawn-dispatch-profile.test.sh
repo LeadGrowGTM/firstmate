@@ -1832,6 +1832,56 @@ SH
   pass "raw secondmate Claude receives the complete skillOverrides object"
 }
 
+test_raw_secondmate_existing_settings_merge_skill_overrides() {
+  local form rec id sm out status launch args_log raw arg settings count want
+  want='{"it'"'"'s":"off","a\u0026b":"name-only"}'
+  for form in split equals; do
+    id="profile-secondmate-skillov-existing-$form-z36"
+    rec=$(make_spawn_case "profile-secondmate-skillov-existing-$form" claude "$id")
+    read_case_record "$rec"
+    sm="$CASE_DIR/secondmate-home"
+    make_seeded_secondmate_home "$sm" "$id"
+    mkdir -p "$sm/config"
+    printf '{"skillOverrides":%s}\n' "$want" > "$sm/config/skill-overrides.json"
+    cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+    chmod +x "$FAKEBIN_DIR/claude"
+    case "$form" in
+    split) raw="claude --settings '{\"theme\":\"dark\"}' --model haiku 'A positional prompt'" ;;
+    equals) raw="claude --model haiku 'A positional prompt' --settings='{\"theme\":\"dark\"}'" ;;
+    esac
+
+    out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" "$raw" --secondmate)
+    status=$?
+    expect_code 0 "$status" "raw secondmate spawn with existing $form settings should succeed"$'\n'"$out"
+    launch=$(cat "$LAUNCH_LOG")
+    args_log="$CASE_DIR/claude-args.log"
+    FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+      || fail "raw secondmate Claude launch with existing $form settings failed"
+    count=0
+    settings=
+    while IFS= read -r arg; do
+      case "$arg" in
+      --settings)
+        IFS= read -r settings || fail "raw Claude --settings lacks its value"
+        count=$((count + 1))
+        ;;
+      --settings=*)
+        settings=${arg#--settings=}
+        count=$((count + 1))
+        ;;
+      esac
+    done < "$args_log"
+    [ "$count" -eq 1 ] || fail "raw Claude received $count --settings arguments for $form form"
+    printf '%s' "$settings" | jq -e --argjson want "$want" \
+      '.theme == "dark" and .skillOverrides == $want' >/dev/null \
+      || fail "raw Claude did not merge skill overrides into existing $form settings: $settings"
+  done
+  pass "raw secondmate merges skill overrides into one existing settings argument"
+}
+
 test_skill_overrides_never_reach_workers() {
   local rec id out status launch
   id=profile-worker-skillov-z34
@@ -2558,6 +2608,7 @@ test_secondmate_skill_overrides_absent_file_leaves_launch_unchanged
 test_secondmate_skill_overrides_valid_file_rides_the_settings
 test_secondmate_skill_overrides_malformed_file_is_skipped_with_a_note
 test_raw_secondmate_skill_overrides_reach_claude
+test_raw_secondmate_existing_settings_merge_skill_overrides
 test_skill_overrides_never_reach_workers
 test_active_dispatch_profile_does_not_block_secondmate_launch
 test_opt_in_production_launch_receipts
