@@ -1,0 +1,11 @@
+switch absent: off
+switch with trailing blank line: warning: config/orca-view-tabs holds 'on'; accepted values are on and off, so Orca view tabs stay off
+off
+open output:
+handle=fixture-term-1
+view_session=fmview-main
+target=@0 tracked=@0 selected=@0 hand_opened_before=@0 hand_opened_after=@0
+after follow selected=@0
+orphan view untracked; sessions: fmview-main orca-main primary 
+Orca fixture request:
+terminal create --worktree 33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate --title primary --command tmux -S '/tmp/fml.wNpuK3/tmux-1000/fm-lab' attach-session -t '=fmview-main'; tmux -S '/tmp/fml.wNpuK3/tmux-1000/fm-lab' show-options -v -t '=fmview-main' @fm_view_window >/dev/null 2>&1 || printf '%s\n' 'The agent window this tab showed is gone, so its view detached; this tab can be closed.' --json
