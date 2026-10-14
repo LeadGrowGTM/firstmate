@@ -2446,7 +2446,7 @@ launch_template() {
 }
 
 raw_claude_settings_extract() {
-  local source=$1 length=${#1} i=0 start settings_start c next quote= word= expect=0
+  local source=$1 length=${#1} i=0 start settings_start c next quote='' word='' expect=0
   while (( i < length )); do
     c=${source:i:1}
     if [[ "$c" == [[:space:]] ]]; then
@@ -2468,7 +2468,7 @@ raw_claude_settings_extract() {
           (( i < length )) || return 1
           next=${source:i:1}
           case "$next" in
-          '"'|'$'|'`'|'\') word+=$next ;;
+          '"'|'$'|'`'|"\\") word+=$next ;;
           *) word+="\\$next" ;;
           esac
         else
