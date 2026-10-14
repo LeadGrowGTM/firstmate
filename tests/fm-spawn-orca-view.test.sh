@@ -60,8 +60,15 @@ case "$*" in
         view=${view%%:*}
         group=${FM_FAKE_BASE_SESSION:-firstmate}
         [ ! -e "$D/group-$view" ] || group=$(cat "$D/group-$view")
-        printf '1\t%s\n' "$group" ;;
-      *) printf '0\t\n' ;;
+        case "$*" in
+          *'#{session_group}'*) printf '1\t%s\n' "$group" ;;
+          *) printf '1\n' ;;
+        esac ;;
+      *)
+        case "$*" in
+          *'#{session_group}'*) printf '0\t\n' ;;
+          *) printf '0\n' ;;
+        esac ;;
     esac
     exit 0 ;;
   *'#{session_group}'*)
@@ -551,19 +558,21 @@ test_derived_view_name_collision() {
     assert_present "$VIEW_DIR/session-$candidate" "the foreign $candidate view survives"
   done
 
-  mkdir -p "$TMP_ROOT/derived-exhausted/view"
+  mkdir -p "$TMP_ROOT/derived-retained/view"
   for candidate in fmview-dev fmview-dev-s-beta fmview-dev-s-beta-{1..5}; do
-    : > "$TMP_ROOT/derived-exhausted/view/session-$candidate"
-    printf 'firstmate\n' > "$TMP_ROOT/derived-exhausted/view/group-$candidate"
+    : > "$TMP_ROOT/derived-retained/view/session-$candidate"
+    printf 'firstmate\n' > "$TMP_ROOT/derived-retained/view/group-$candidate"
   done
-  spawn_secondmate derived-exhausted dev on '' '' beta
-  expect_code 0 "$STATUS" "exhausted view names should not fail the agent spawn: $OUT"
-  assert_equals "" "$(meta dev orca_view_handle)" "no foreign tab is recorded"
-  assert_equals 1 "$(printf '%s\n' "$OUT" | grep -cF 'note: no available Orca view session name for dev in beta')" \
-    "exhaustion reports one note"
-  assert_no_grep 'terminal create' "$VIEW_DIR/orca.log" \
-    "Orca receives no create when every candidate belongs to another base"
-  pass "derived name collisions use numbered views or step aside after a bounded search"
+  spawn_secondmate derived-retained dev on '' '' beta
+  expect_code 0 "$STATUS" "retained view names should not prevent the agent spawn: $OUT"
+  assert_equals fmview-dev-s-beta-6 "$(meta dev orca_view_session)" \
+    "a fresh tab gets the next free name after six retained views"
+  assert_present "$VIEW_DIR/session-fmview-dev-s-beta-6" \
+    "the new view exists alongside the retained views"
+  for candidate in fmview-dev fmview-dev-s-beta fmview-dev-s-beta-{1..5}; do
+    assert_present "$VIEW_DIR/session-$candidate" "the retained $candidate view survives"
+  done
+  pass "derived name collisions use the next available numbered view without disturbing retained views"
 }
 
 test_same_group_view_name_alias() {

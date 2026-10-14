@@ -169,7 +169,7 @@ EOF
 $(tmux display-message -p -t "=$session:" $'#{session_grouped}\t#{session_group}' 2>/dev/null)
 EOF
   if [ "$grouped" = 1 ] && [ -n "$group" ] && [ "$group" != "$session" ] &&
-    tmux has-session -t "=$group" 2>/dev/null; then
+    tmux list-windows -t "=$group" -F '#{window_id}' 2>/dev/null | grep -Fxq "$WINDOW_ID"; then
     BASE_SESSION=$group
   fi
   BASE_ID=$(tmux display-message -p -t "=$BASE_SESSION:" '#{session_id}' 2>/dev/null)
@@ -322,7 +322,7 @@ orca_call() {
 }
 
 cmd_open() {
-  local cmd out handle tab_id grouped group tracked project candidate suffix
+  local cmd out handle tab_id grouped tracked project suffix
   parse_view_args "$@"
   resolve_target "$TARGET"
   [ "$VIEW_SESSION" != "$BASE_SESSION" ] || note "the base session cannot be used as its own view"
@@ -333,24 +333,19 @@ cmd_open() {
     tmux new-session -d -t "$BASE_ID" -s "$VIEW_SESSION" ||
       note "tmux did not create view session $VIEW_SESSION"
   else
-    IFS=$'\t' read -r grouped group <<EOF
-$(tmux display-message -p -t "=$VIEW_SESSION:" $'#{session_grouped}\t#{session_group}' 2>/dev/null)
-EOF
-    [ "$grouped" = 1 ] && [ "$group" = "$BASE_SESSION" ] ||
+    grouped=$(tmux display-message -p -t "=$VIEW_SESSION:" '#{session_grouped}' 2>/dev/null) || grouped=
+    [ "$grouped" = 1 ] &&
+      tmux list-windows -t "=$VIEW_SESSION" -F '#{window_id}' 2>/dev/null | grep -Fxq "$WINDOW_ID" ||
       note "view session $VIEW_SESSION belongs to another tmux base session"
     tracked=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_window 2>/dev/null) || tracked=
     if [ -z "$tracked" ]; then
       # An existing untracked group may belong to a hand-opened tab.
       # Allocate our own session without selecting or installing hooks on it.
-      candidate=
-      for suffix in {1..100}; do
-        if ! tmux has-session -t "=$VIEW_SESSION-fmview-$suffix" 2>/dev/null; then
-          candidate="$VIEW_SESSION-fmview-$suffix"
-          break
-        fi
+      suffix=1
+      while tmux has-session -t "=$VIEW_SESSION-fmview-$suffix" 2>/dev/null; do
+        suffix=$((suffix + 1))
       done
-      [ -n "$candidate" ] || note "no available owned view session name for $VIEW_SESSION"
-      VIEW_SESSION=$candidate
+      VIEW_SESSION="$VIEW_SESSION-fmview-$suffix"
       tmux new-session -d -t "$BASE_ID" -s "$VIEW_SESSION" ||
         note "tmux did not create view session $VIEW_SESSION"
     else

@@ -5384,12 +5384,15 @@ if [ "$ORCA_VIEW_ENABLED" = on ]; then
       *) ORCA_VIEW_DERIVED="fmview-$ID-s-$SES" ;;
     esac
     ORCA_VIEW_NAME=
-    for ORCA_VIEW_SUFFIX in '' 1 2 3 4 5; do
-      ORCA_VIEW_CANDIDATE="$ORCA_VIEW_DERIVED${ORCA_VIEW_SUFFIX:+-$ORCA_VIEW_SUFFIX}"
+    ORCA_VIEW_SUFFIX=0
+    while :; do
+      ORCA_VIEW_CANDIDATE=$ORCA_VIEW_DERIVED
+      [ "$ORCA_VIEW_SUFFIX" -eq 0 ] || ORCA_VIEW_CANDIDATE="$ORCA_VIEW_DERIVED-$ORCA_VIEW_SUFFIX"
       if orca_view_name_usable "$ORCA_VIEW_CANDIDATE"; then
         ORCA_VIEW_NAME=$ORCA_VIEW_CANDIDATE
         break
       fi
+      ORCA_VIEW_SUFFIX=$((ORCA_VIEW_SUFFIX + 1))
     done
   fi
   if [ -z "$ORCA_VIEW_NAME" ]; then

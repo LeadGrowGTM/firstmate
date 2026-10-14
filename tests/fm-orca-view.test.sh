@@ -415,25 +415,25 @@ test_open_refuses_the_base_as_a_view() {
 
 test_open_preserves_borrowed_hooks() {
   local out first_hook last_hook hooks target view=orca-borrowed
+  target=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t firstmate: -n borrowed-target)
   "$SHIM/tmux" new-session -d -t firstmate -s "$view"
   "$SHIM/tmux" set-option -t "=$view:" @fm_view_window "$target"
   "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[0]' 'run-shell true'
   "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[7]' 'run-shell true'
   first_hook=$("$SHIM/tmux" show-options -H -t "=$view:" 'session-window-changed[0]')
   last_hook=$("$SHIM/tmux" show-options -H -t "=$view:" 'session-window-changed[7]')
-  out=$(run_view open --target firstmate:fm-dev --view-session "$view") || fail "borrowed open failed: $out"
+  out=$(run_view open --target "firstmate:$target" --view-session "$view") || fail "borrowed open failed: $out"
   hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
   assert_contains "$hooks" "$first_hook" "open preserves existing hook index 0"
   assert_contains "$hooks" "$last_hook" "open preserves existing hook index 7"
   assert_equals 3 "$(printf '%s\n' "$hooks" | wc -l | tr -d ' ')" "open appends exactly one hook"
   out=$(FM_FAKE_ORCA_FAIL=1 FM_FAKE_ORCA_ADD_HOOK="$view" \
-    run_view open --target firstmate:fm-dev --view-session "$view" 2>&1)
+    run_view open --target "firstmate:$target" --view-session "$view" 2>&1)
   expect_code 3 "$?" "a failed reopen reports failure"
   hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
   assert_contains "$hooks" "$first_hook" "a refused reopen preserves the original hook at index 0"
   assert_contains "$hooks" "$last_hook" "a refused reopen preserves the original hook at index 7"
   assert_contains "$hooks" 'session-window-changed[9]' "a refused reopen preserves a hook added during the Orca call"
-  target=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t firstmate: -n borrowed-target)
   out=$(run_view open --target "firstmate:$target" --view-session "$view") || fail "reopen failed: $out"
   "$SHIM/tmux" kill-window -t "$target"
   wait_for_attached_count "$view" 0 || fail "the borrowed view did not detach"
@@ -501,6 +501,12 @@ test_follow_keeps_windows_when_base_is_gone() {
     hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
     assert_not_contains "$hooks" 'session-window-changed[0]' "the follow hook removes its own tracking hook"
     assert_contains "$hooks" 'session-window-changed[7]' "the follow hook preserves unrelated hooks"
+    out=$(run_view window "$survivor") || fail "the surviving window could not get a new view after its base was $replacement: $out"
+    wait_for_window "$(printf '%s\n' "$out" | sed -n 's/^view_session=//p')" "$survivor" ||
+      fail "the replacement view does not show the surviving window"
+    out=$(run_view window "$survivor") || fail "a second view open failed after the base was $replacement: $out"
+    wait_for_window "$(printf '%s\n' "$out" | sed -n 's/^view_session=//p')" "$survivor" ||
+      fail "the reopened view does not show the surviving window"
     "$SHIM/tmux" kill-session -t "=$view"
     [ "$replacement" != recycled ] || "$SHIM/tmux" kill-session -t "=$base"
   done
@@ -615,6 +621,21 @@ test_public_open_leaves_untracked_views_untouched() {
   pass "public open and window preserve untracked grouped views and allocate distinct owned sessions"
 }
 
+test_public_open_keeps_allocating_after_retained_views() {
+  local view=orca-retained i out
+  "$SHIM/tmux" new-session -d -t firstmate -s "$view"
+  for i in {1..100}; do
+    "$SHIM/tmux" new-session -d -t firstmate -s "$view-fmview-$i"
+  done
+  out=$(run_view open --target "firstmate:$DEV_ID" --view-session "$view") ||
+    fail "retained views prevented another public tab: $out"
+  assert_contains "$out" "view_session=$view-fmview-101" \
+    "a public tab gets the next free name after retained views"
+  assert_equals '' "$("$SHIM/tmux" show-options -v -t "=$view:" @fm_view_window 2>/dev/null)" \
+    "the original hand-opened view remains untracked"
+  pass "public open keeps finding an unused view session after prior views are retained"
+}
+
 test_identity_is_unique_and_matches_the_fresh_tab() {
   local prefix="$TMP_ROOT/repeated.identity" first second old_file fresh_file fresh_tab ident f _
   first=$(run_view open --target "firstmate:$DEV_ID" --view-session orca-identity-race --identity-file "$prefix") || fail "first identity open failed"
@@ -642,6 +663,7 @@ test_identity_is_unique_and_matches_the_fresh_tab() {
 test_switch_values
 test_open_views_the_window_and_writes_identity
 test_public_open_leaves_untracked_views_untouched
+test_public_open_keeps_allocating_after_retained_views
 test_identity_is_unique_and_matches_the_fresh_tab
 test_command_never_names_claude
 test_home_local_orca_project
