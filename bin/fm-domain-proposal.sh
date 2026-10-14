@@ -254,17 +254,18 @@ submit)
   [ "$(jq -r '.bundle_id // empty' "$CANON_FILE")" = "$BUNDLE" ] \
     || fail "bundle_id is not the latest requested bundle for $MATE"
   jq -e --arg mate "$MATE" --arg bundle "$BUNDLE" '
-    def line: type == "string" and length > 0 and (test("[\r\n]") | not);
-    def https: type == "string" and test("^https://[^ ]+$")
-      and (explode | all(. >= 32 and (. < 127 or . > 159) and . != 8232 and . != 8233));
+    def display($multiline): type == "string" and (explode | all((. >= 32 and . != 127) or ($multiline and (. == 10 or . == 9))));
+    def line: display(false) and length > 0;
+    def https: display(false) and test("^https://[^ ]+$")
+      and (explode | all((. < 128 or . > 159) and . != 8232 and . != 8233));
     .schema == "fm-domain-proposal.v1" and .mate == $mate
     and .bundle_id == $bundle
     and (.bullets | type == "array" and length > 0 and all(line))
     and (.changes | type == "array" and length <= 50 and all(
       (.kind | IN("skill","rule","charter"))
       and (.file | line) and (.original_digest | type == "string" and test("^([a-f0-9]{64}|absent)$"))
-      and (.before | type == "string" and (index("\r") == null))
-      and (.after | type == "string" and (index("\r") == null)) and .before != .after
+      and (.before | display(true))
+      and (.after | display(true)) and .before != .after
       and (.always_loaded_size_delta | type == "number" and . == floor)
       and (.sources | type == "array" and length > 0 and all(https)) and (.effect | line)))
     and ((.changes | map(.file) | length) == (.changes | map(.file) | unique | length))' \

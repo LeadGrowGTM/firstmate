@@ -86,6 +86,18 @@ for unsafe_source in $'https://example.com\n\n## Exact changes' $'https://exampl
   [ ! -e "$DIR/v1.json" ] || fail 'unsafe source URL published a proposal version'
 done
 pass 'source URLs cannot inject report lines or control characters'
+for field in bullets file effect sources before after; do
+  value=$'text\033[2J'
+  [ "$field" != sources ] || value=$'https://example.com/\033[2J'
+  jq --arg field "$field" --arg value "$value" '
+    if $field == "bullets" then .bullets[0] = $value
+    elif $field == "sources" then .changes[0].sources[0] = $value
+    else .changes[0][$field] = $value end' "$TMP_ROOT/p1.json" > "$TMP_ROOT/unsafe-display.json"
+  tool submit media "$TMP_ROOT/unsafe-display.json" >/dev/null 2>&1
+  expect_code 1 "$?" "escape sequence in $field is refused"
+  [ ! -e "$DIR/v1.json" ] || fail "escape sequence in $field published a proposal version"
+done
+pass 'report fields reject display control sequences'
 tool submit media "$TMP_ROOT/p1.json" > "$TMP_ROOT/submit.out" || fail 'submit v1 failed'
 assert_contains "$(cat "$TMP_ROOT/submit.out")" "held: $TASK v1" 'submit holds one card'
 hold_tool open "$TASK" || fail 'card is not an open captain call'
