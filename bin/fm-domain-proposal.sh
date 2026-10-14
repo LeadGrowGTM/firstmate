@@ -153,7 +153,7 @@ request)
     else
       TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
       has_outstanding_approval "$DIR/receipts.jsonl" && fail "activation is pending for $TASK"
-      if [ "$TASK_STATE" = done ]; then
+      if [ "$TASK_STATE" = "done" ]; then
         VERSION=$(latest_version "$DIR")
         if [ -n "$VERSION" ]; then
           DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
@@ -179,11 +179,13 @@ request)
       || fail "cannot create proposal task $TASK"
   else
     TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
-    [ "$TASK_STATE" != done ] || fail "proposal task $TASK is closed"
+    [ "$TASK_STATE" != "done" ] || fail "proposal task $TASK is closed"
   fi
   if [ -f "$DIR/request.json" ]; then
+    # shellcheck disable=SC2016 # jq variables are expanded by jq.
     atomic "$DIR/request.json" jq -c --arg b "$BUNDLE" '.bundles |= ((. + [$b]) | unique) | .latest_bundle_id = $b' "$DIR/request.json"
   else
+    # shellcheck disable=SC2016 # jq variables are expanded by jq.
     atomic "$DIR/request.json" jq -cn --arg mate "$MATE" --argjson cycle "$CYCLE" --arg b "$BUNDLE" \
       '{schema:"fm-domain-proposal-request.v1",mate:$mate,cycle:$cycle,bundles:[$b],latest_bundle_id:$b}'
   fi
@@ -237,7 +239,7 @@ submit)
   CANON=$(cat "$CANON_FILE")
   DIGEST=$(printf '%s' "$CANON" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)
   VERSION=$(latest_version "$DIR")
-  if [ "$TASK_STATE" = done ]; then
+  if [ "$TASK_STATE" = "done" ]; then
     if [ -n "$VERSION" ] && [ "$(jq -r '.digest' "$DIR/v$VERSION.json")" = "$DIGEST" ] \
       && [ "$(jq '.proposal.changes | length' "$DIR/v$VERSION.json")" -eq 0 ]; then
       printf 'no-change: %s v%s recorded, no card\n' "$TASK" "$VERSION"
@@ -250,7 +252,7 @@ submit)
   if [ -n "$VERSION" ]; then
     if [ "$(jq -r '.digest' "$DIR/v$VERSION.json")" = "$DIGEST" ]; then
       if [ "$(jq '.proposal.changes | length' "$DIR/v$VERSION.json")" -eq 0 ]; then
-        bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "$TASK" --note "Domain proposal withdrawn at v$VERSION digest $DIGEST; no changes requested" >/dev/null \
+        bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "$TASK" --note "Domain proposal withdrawn at v$VERSION digest $DIGEST; no changes requested" >/dev/null \
           || fail "could not close withdrawn proposal task $TASK"
         printf 'no-change: %s v%s recorded, no card\n' "$TASK" "$VERSION"
         exit 0
@@ -269,14 +271,16 @@ submit)
   else
     VERSION=1
   fi
+  # shellcheck disable=SC2016 # jq variables are expanded by jq.
   atomic "$DIR/v$VERSION.json" jq -n -c --argjson version "$VERSION" --arg digest "$DIGEST" --slurpfile proposal "$CANON_FILE" \
     '{version:$version,digest:$digest,proposal:$proposal[0]}'
   if [ "$(printf '%s' "$CANON" | jq '.changes | length')" -eq 0 ]; then
-    bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "$TASK" --note "Domain proposal withdrawn at v$VERSION digest $DIGEST; no changes requested" >/dev/null \
+    bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "$TASK" --note "Domain proposal withdrawn at v$VERSION digest $DIGEST; no changes requested" >/dev/null \
       || fail "could not close withdrawn proposal task $TASK"
     printf 'no-change: %s v%s recorded, no card\n' "$TASK" "$VERSION"
     exit 0
   fi
+  # shellcheck disable=SC2016 # jq variables are expanded by jq.
   atomic "$DIR/v$VERSION.md" jq -r --arg mate "$MATE" --argjson v "$VERSION" --arg digest "$DIGEST" '
     def fence($s): ([($s | scan("(?m)^ {0,3}~{3,}") | sub("^ {0,3}"; "")) | length] | max // 3) as $n | "~" * ($n + 1);
     "# Domain proposal: \($mate) v\($v)\n\nVersion digest: \($digest)\n\n## Bullets\n"
@@ -330,7 +334,7 @@ approve)
     fail "digest $DIGEST is already applied"
   fi
   TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
-  if [ "$TASK_STATE" = done ]; then
+  if [ "$TASK_STATE" = "done" ]; then
     bash "$SCRIPT_DIR/fm-tasks-axi.sh" reopen "$TASK" >/dev/null || fail "cannot reopen activation task $TASK"
   fi
   touch "$DIR/receipts.jsonl"
@@ -379,7 +383,7 @@ receipt)
   LATEST_DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
   if jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then
     if [ "$DIGEST" = "$LATEST_DIGEST" ]; then
-      bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST bundle_id $BUNDLE" >/dev/null \
+      bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST bundle_id $BUNDLE" >/dev/null \
         || fail "could not close activation task for $MATE cycle $CYCLE"
     fi
     printf 'recorded: %s %s already has an applied receipt\n' "$MATE" "$DIGEST"
@@ -389,7 +393,7 @@ receipt)
   jq -cn --arg digest "$DIGEST" --arg bundle "$BUNDLE" --arg evidence "$EVIDENCE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{state:"applied",digest:$digest,bundle_id:$bundle,evidence:$evidence,at:$at}' >> "$DIR/receipts.jsonl"
   if [ "$DIGEST" = "$LATEST_DIGEST" ]; then
-    bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST bundle_id $BUNDLE: $EVIDENCE" >/dev/null \
+    bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST bundle_id $BUNDLE: $EVIDENCE" >/dev/null \
       || fail "application receipt recorded but could not close activation task for $MATE cycle $CYCLE"
   fi
   printf 'receipt: %s cycle %s %s digest %s\n' "$MATE" "$CYCLE" "$STATE_NAME" "$DIGEST"
