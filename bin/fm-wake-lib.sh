@@ -1628,6 +1628,10 @@ fm_treehouse_pool_check() {  # <fm-home> <project> <treehouse-home>
   home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
   project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
   [ -n "${3:-}" ] || return 1
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'error: python3 with tomllib is required to verify the treehouse pool location\n' >&2
+    return 1
+  fi
   git=$(type -P git) || return 1
   origin=$("$git" -C "$project" remote get-url origin 2>/dev/null) || origin=$project
   hash=$(printf '%s' "$origin" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:6])') || return 1

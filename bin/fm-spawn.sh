@@ -4618,8 +4618,8 @@ spawn_wait_left_path() {  # <path>
   local path=$1 real seen _
   real=$(real_path_or_raw "$path")
   for _ in $(seq 1 60); do
-    seen=$(spawn_current_path "$WT_TARGET" || true)
-    if [ -n "$seen" ] && [ "$(real_path_or_raw "$seen")" != "$real" ]; then
+    if seen=$(spawn_current_path "$WT_TARGET") && [ -n "$seen" ] &&
+      ! _fm_treehouse_path_inside "$(real_path_or_raw "$seen")" "$real"; then
       return 0
     fi
     sleep 1

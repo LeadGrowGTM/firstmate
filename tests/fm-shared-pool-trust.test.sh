@@ -55,6 +55,7 @@ case "$*" in
   *"#{pane_current_path}"*)
     if [ -n "${FM_FAKE_CWD_FAIL_AFTER_EXIT:-}" ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ] \
       && [ -f "$FM_FAKE_EXIT_FLAG" ]; then
+      [ -z "${FM_FAKE_CWD_FAILED_OUTPUT:-}" ] || printf '%s\n' "$FM_FAKE_CWD_FAILED_OUTPUT"
       exit 1
     fi
     if [ -n "${FM_FAKE_PANE_AFTER_EXIT:-}" ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ] \
@@ -126,6 +127,7 @@ case "${1:-}" in
             rm -f "$pending.literal"
             if [ "$command" = exit ] && [ -n "${FM_FAKE_EXIT_FLAG:-}" ]; then
               : > "$FM_FAKE_EXIT_FLAG"
+              [ -z "${FM_FAKE_PANE_AFTER_EXIT:-}" ] || mkdir -p "$FM_FAKE_PANE_AFTER_EXIT"
               if [ -n "${FM_FAKE_TREEHOUSE_INITIAL_LEASE:-}" ] \
                 && [ -z "${FM_FAKE_CWD_FAIL_AFTER_EXIT:-}" ] \
                 && [ -z "${FM_FAKE_TREEHOUSE_DELAY_RETURN:-}" ]; then
@@ -730,8 +732,8 @@ test_shasum_only_path_names_the_pool_from_the_home() {
 }
 
 test_initial_get_checks_returned_worktree() {
-  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd hold_return complete_on_sleep override_root out status
-  for variant in inside outside unconfirmed pending; do
+  local variant id case_dir allocated reported pane_log tree_log lease fail_cwd failed_output after_exit hold_return complete_on_sleep override_root out status
+  for variant in inside outside unconfirmed failed-output subdirectory pending; do
     id="pool-placement-initial-$variant"
     case_dir=$TMP_ROOT/$id
     CASE_URL=$(make_same_origin_clones "$case_dir/origin")
@@ -750,7 +752,11 @@ test_initial_get_checks_returned_worktree() {
     tree_log=$case_dir/treehouse.log
     lease=$case_dir/initial-lease
     fail_cwd=
-    [ "$variant" != unconfirmed ] || fail_cwd=1
+    case "$variant" in unconfirmed|failed-output) fail_cwd=1 ;; esac
+    failed_output=
+    [ "$variant" != failed-output ] || failed_output=$CASE_HOME/projects/widget
+    after_exit=$CASE_HOME/projects/widget
+    [ "$variant" != subdirectory ] || after_exit=$allocated/subdirectory
     hold_return=
     [ "$variant" != pending ] || hold_return=1
     complete_on_sleep=
@@ -764,9 +770,10 @@ test_initial_get_checks_returned_worktree() {
       FM_FAKE_TREEHOUSE_INITIAL_PATH="$allocated" \
       FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
       FM_FAKE_TREEHOUSE_INITIAL_LEASE="$lease" FM_FAKE_CWD_FAIL_AFTER_EXIT="$fail_cwd" \
+      FM_FAKE_CWD_FAILED_OUTPUT="$failed_output" \
       FM_FAKE_TREEHOUSE_DELAY_RETURN=1 FM_FAKE_TREEHOUSE_HOLD_RETURN="$hold_return" \
       FM_FAKE_TREEHOUSE_COMPLETE_ON_SLEEP="$complete_on_sleep" \
-      FM_FAKE_PANE_AFTER_EXIT="$CASE_HOME/projects/widget" FM_FAKE_EXIT_FLAG="$case_dir/exited" \
+      FM_FAKE_PANE_AFTER_EXIT="$after_exit" FM_FAKE_EXIT_FLAG="$case_dir/exited" \
       run_spawn "$reported" "$id") || status=$?
     assert_grep ' && treehouse get' "$pane_log" \
       "$variant: initial get did not follow an in-pane pool check"
@@ -782,7 +789,7 @@ test_initial_get_checks_returned_worktree() {
         "$variant: no separate return completion was submitted"
       [ ! -e "$lease" ] || fail "inside: fake Treehouse lease remained active"
       [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "inside: refusal published a task"
-    elif [ "$variant" = unconfirmed ]; then
+    elif [ "$variant" = unconfirmed ] || [ "$variant" = failed-output ] || [ "$variant" = subdirectory ]; then
       [ "$status" -ne 0 ] || fail "unconfirmed: spawn accepted the allocated worktree"$'\n'"$out"
       assert_contains "$out" "worktree '$reported' was not confirmed returned" \
         "unconfirmed: missing return warning"
@@ -927,6 +934,29 @@ PY
     || fail "get allocated a copy without a verified TOML pool"
   [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "parser refusal published a task"
   pass "configured pool refusal names the required TOML parser"
+}
+
+test_pool_preflight_names_missing_python() {
+  local id=pool-preflight-no-python case_dir=$TMP_ROOT/pool-preflight-no-python
+  local minimal command bash_bin out status=0 refusal
+  CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+  prepare_spawn_home "$case_dir" "$id"
+  minimal=$case_dir/minimal-path
+  mkdir -p "$minimal"
+  bash_bin=$(type -P bash)
+  for command in dirname uname mkdir git; do
+    ln -s "$(type -P "$command")" "$minimal/$command"
+  done
+  refusal=$case_dir/refusal
+  out=$(HOME="$CASE_USER_HOME" PATH="$minimal" "$bash_bin" \
+    "$ROOT/bin/fm-treehouse-pool-check.sh" "$CASE_HOME" "$CASE_HOME/projects/widget" \
+    "$refusal" 2>&1) || status=$?
+  [ "$status" -ne 0 ] || fail "pool check passed without python3"
+  assert_contains "$out" 'python3 with tomllib is required to verify the treehouse pool location' \
+    "missing interpreter refusal did not name the requirement"
+  assert_grep 'python3 with tomllib is required to verify the treehouse pool location' "$refusal" \
+    "missing interpreter refusal was not reported to spawn"
+  pass "pool refusal names the requirement when python3 is unavailable"
 }
 
 test_pool_preflight_refuses_fallback_get() {
@@ -1096,6 +1126,7 @@ test_initial_get_checks_returned_worktree
 test_pool_preflight_refuses_initial_get
 test_initial_pane_environment_controls_preflight
 test_pool_preflight_names_required_toml_parser
+test_pool_preflight_names_missing_python
 test_pool_preflight_refuses_fallback_get
 test_pool_preflight_uses_operator_git_for_fallback_hash
 test_fake_treehouse_return_requires_submission_and_completion
