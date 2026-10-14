@@ -208,6 +208,15 @@ fi
 exit 0
 SH
   chmod +x "$fb/sleep"
+  cat > "$fb/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] &&
+  [ "${6:-}" = stat= ] && [ "${8:-}" = comm= ] && [ "${10:-}" = args= ]; then
+  exit 0
+fi
+exec /bin/ps "$@"
+SH
+  chmod +x "$fb/ps"
   printf '%s\n' "$fb"
 }
 
@@ -215,6 +224,8 @@ SH
 new_case() {
   local dir="$TMP_ROOT/$1-$RANDOM"
   mkdir -p "$dir/home/state" "$dir/home/data" "$dir/fake"
+  mkdir -m 700 "$dir/tmux-root"
+  printf '%s\n' "$$" > "$dir/.fm-test-fixture"
   : > "$dir/fake/literal"
   : > "$dir/fake/keys"
   printf 'zsh' > "$dir/fake/command"
@@ -254,7 +265,8 @@ add_task() {
 # the stubbed provider on PATH. Echoes combined output; returns its exit code.
 run_control() {
   local dir=$1; shift
-  env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+  env -u TMUX PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    TMUX_TMPDIR="$dir/tmux-root" \
     FM_CONTROL_POLL=0.01 FM_CONTROL_SETTLE_WAIT=0.05 \
     FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \

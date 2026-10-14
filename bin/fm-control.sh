@@ -703,7 +703,8 @@ do_exit() {
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
       # - and report what that proof actually established, never more.
-      absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" "$(fm_meta_get "$META" tmux_socket)")
+      absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" \
+        "$(fm_meta_get "$META" tmux_socket)" "$(fm_meta_get "$META" spawn_gen)")
       case "${absence%%$'\t'*}" in
         gone)
           # Proven gone, so the agent that lived in it went with it: exit's

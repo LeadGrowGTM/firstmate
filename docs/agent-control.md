@@ -114,11 +114,13 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
   `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; only a second `missing` proves the pane itself did not survive ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
   That server start is a real side effect, and the parenthetical above does not cover it: when the recorded session's server no longer exists at all, the probe stands a fresh empty one up in order to ask, and nothing afterwards uses it.
   So in that state `exit` - which otherwise reads as a read-only inspection - leaves an idle herdr server behind.
-- **tmux proves it on the endpoint's own server.** An inventory describes only the tmux server it was read through, so a window missing from the server the *current process* addresses could still be alive on another one.
-  The proof therefore reads the server the window lived on, through that server's own socket.
-  A tmux task records `tmux_socket=`, the socket path its server reported at spawn; the window is gone when no server answers on that socket or the one that does no longer holds it - including a new server started on the same path, because a window never outlives its server.
-  A legacy record without `tmux_socket=` is proven gone only when every socket this user could have addressed without an explicit `-S` path - each one in the per-user directory under `TMUX_TMPDIR` (default `/tmp`), plus the directory an inherited `$TMUX` names - is dead or lacks the window.
-  A server that still holds the window, and a socket or directory that cannot be read, refuses: an unreachable server may be alive and is never treated as absent.
+- **tmux proves server death.** A tmux task records `tmux_socket=`, the socket path its server reported at spawn.
+  That socket must either have no answering server, or answer with a server whose `#{start_time}` is strictly newer than the epoch in the task's `spawn_gen=`.
+  For a legacy record without `tmux_socket=`, this condition must hold for every socket in the per-user directory under `TMUX_TMPDIR` (default `/tmp`) and the directory an inherited `$TMUX` names.
+  The proof also checks every live tmux server process owned by the user: each must match the `#{pid}` of an answering socket, including the recorded socket and all candidate-directory sockets.
+  A live server with an unlinked socket, a server that is too old, or a server process that cannot be reconciled with the socket reads refuses recovery.
+  When no socket answers, any tmux process still visible also blocks recovery.
+  A renamed session or moved window on a live server is never proof of server death.
   The re-created window opens in the recovering process's tmux container session, and the republished record carries the new window and its socket.
   Until that record is published the new window is the relaunch's own, so a refused attempt closes it rather than leaving it to collide with a retry.
 

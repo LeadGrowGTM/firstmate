@@ -304,8 +304,8 @@ fm_control_backend_state_verified() {  # <backend>
 # fm_control_endpoint_absence_verdict: the ONE owner of the per-backend proof
 # that an endpoint reading `missing` is actually GONE rather than merely
 # unreachable from this seat. Call it only for a `missing` raw state. A tmux
-# caller passes the record's `tmux_socket=` value as <tmux-socket>, empty for a
-# legacy record that predates it; every other backend ignores it.
+# caller passes the record's `tmux_socket=` and `spawn_gen=` values; every other
+# backend ignores them.
 #
 # Prints "<verdict>\t<reason>" - always exactly one TAB, so a caller splits
 # unambiguously with ${raw%%$'\t'*} and ${raw#*$'\t'}. The reason is empty
@@ -333,28 +333,16 @@ fm_control_backend_state_verified() {  # <backend>
 #     passes `--session <session>`, so the recheck starts and reads the session
 #     the RECORD names, through that session's own socket. The answer is about
 #     the task's endpoint and nothing else.
-#   tmux CAN prove it from the endpoint's SERVER. A window lives on exactly one
-#     tmux server, and a server-wide inventory describes only the server it was
-#     read through - so a `missing` read through this process's server proves
-#     nothing about a window on another one. The proof therefore reads the
-#     server the endpoint lived on, through its own socket:
-#       - A record carrying `tmux_socket=` (written at spawn from the server's
-#         own #{socket_path}) names that server exactly. When no server answers
-#         on that socket, or the one that does lacks the recorded window, the
-#         window is gone - including when a NEW server has since started on
-#         the same path, because a window never outlives its server.
-#       - A legacy record without it is proven gone only when EVERY server this
-#         user could have addressed without an explicit -S path - each socket
-#         in the per-user directory under TMUX_TMPDIR (default /tmp), plus the
-#         directory an inherited $TMUX names - is dead or lacks the window.
-#     A server that answers and still holds the window, and any socket or
-#     directory that cannot be read, stays `unproven`: an unreachable server
-#     may be alive, and is never treated as absent.
+#   tmux CAN prove it only when every relevant socket is silent or answers
+#     with a server newer than the recorded endpoint, and every live tmux
+#     server process is accounted for by an answering socket.
 #
 # Both control-plane callers share this one implementation so the proof cannot
 # drift into two answers for the same endpoint.
-fm_control_endpoint_absence_verdict() {  # <backend> <target> [<tmux-socket>]
-  local backend=${1-} target=${2-} socket=${3-} session window sock candidates
+fm_control_endpoint_absence_verdict() {  # <backend> <target> [<tmux-socket>] [<spawn-gen>]
+  local backend=${1-} target=${2-} socket=${3-} spawn_gen=${4-}
+  local sock candidates probe kind pid started epoch process_inventory process_type process_pid found i
+  local -a answering_pids=() answering_sockets=() server_pids=() tmux_pids=()
   fm_backend_source "$backend" \
     || { printf 'unproven\tbackend %s could not be loaded to prove anything about that endpoint' "'$backend'"; return 0; }
   case "$backend" in
@@ -364,36 +352,74 @@ fm_control_endpoint_absence_verdict() {  # <backend> <target> [<tmux-socket>]
         *:*) ;;
         *) printf 'unproven\ttmux target %s is not an exact session:window address' "'$target'"; return 0 ;;
       esac
-      session=${target%%:*}
-      window=${target#*:}
-      if [ -n "$socket" ]; then
-        case "$(fm_backend_tmux_window_on_socket "$socket" "$session" "$window")" in
-          lacks) printf 'gone\t' ;;
-          holds) printf 'unproven\tthe tmux server on the recorded socket %s still holds that window, so the endpoint was not destroyed; it is only out of reach of the tmux server this process addresses' "$socket" ;;
-          *) printf 'unproven\tthe tmux server on the recorded socket %s could not be read, so whether it still holds that window is unknown' "$socket" ;;
-        esac
-        return 0
-      fi
       candidates=$(fm_backend_tmux_socket_candidates) || {
-        printf 'unproven\tthe record carries no tmux socket identity, and a tmux socket directory could not be listed, so a live server holding that window cannot be ruled out'
+        printf 'unproven\ttmux socket directory %s could not be listed' "${candidates##*$'\n'}"
         return 0
       }
+      [ -z "$socket" ] || candidates=$(printf '%s\n%s' "$socket" "$candidates")
+      if [[ $spawn_gen =~ ^s([0-9]{1,12})\.[0-9]+\.[0-9]+$ ]]; then
+        epoch=${BASH_REMATCH[1]}
+      else
+        epoch=
+      fi
       while IFS= read -r sock; do
         [ -n "$sock" ] || continue
-        case "$(fm_backend_tmux_window_on_socket "$sock" "$session" "$window")" in
-          lacks) ;;
-          holds)
-            printf 'unproven\tthe record carries no tmux socket identity, and the live tmux server on %s holds a window with that address, so the endpoint may still be alive out of reach of the tmux server this process addresses' "$sock"
-            return 0
+        probe=$(fm_backend_tmux_server_on_socket "$sock")
+        read -r kind pid started <<< "$probe"
+        case "$kind" in
+          absent) continue ;;
+          answer)
+            answering_pids+=("$pid")
+            answering_sockets+=("$sock")
+            if { [ -z "$socket" ] || [ "$sock" = "$socket" ]; } &&
+              { [ -z "$epoch" ] || (( 10#$started <= 10#$epoch )); }; then
+              printf 'unproven\ttmux server %s on socket %s is not proven newer than spawn_gen %s' "$pid" "$sock" "$spawn_gen"
+              return 0
+            fi
             ;;
           *)
-            printf 'unproven\tthe record carries no tmux socket identity, and the tmux server on %s could not be read, so it may still hold that window' "$sock"
+            printf 'unproven\ttmux socket %s could not be read' "$sock"
             return 0
             ;;
         esac
       done <<EOF
 $candidates
 EOF
+      process_inventory=$(fm_backend_tmux_processes) || {
+        printf 'unproven\ttmux process enumeration for uid %s failed' "$(id -u)"
+        return 0
+      }
+      while read -r process_type process_pid; do
+        [ -n "$process_type" ] || continue
+        case "$process_type" in
+          server) server_pids+=("$process_pid") ;;
+          tmux) tmux_pids+=("$process_pid") ;;
+        esac
+      done <<< "$process_inventory"
+      for process_pid in "${server_pids[@]}"; do
+        found=0
+        for pid in "${answering_pids[@]}"; do
+          [ "$pid" != "$process_pid" ] || { found=1; break; }
+        done
+        if [ "$found" = 0 ]; then
+          printf 'unproven\ttmux server process %s has no answering socket' "$process_pid"
+          return 0
+        fi
+      done
+      for i in "${!answering_pids[@]}"; do
+        found=0
+        for process_pid in "${server_pids[@]}"; do
+          [ "$process_pid" != "${answering_pids[$i]}" ] || { found=1; break; }
+        done
+        if [ "$found" = 0 ]; then
+          printf 'unproven\ttmux socket %s answers as server %s, but process enumeration cannot see it' "${answering_sockets[$i]}" "${answering_pids[$i]}"
+          return 0
+        fi
+      done
+      if [ "${#answering_pids[@]}" -eq 0 ] && [ "${#tmux_pids[@]}" -gt 0 ]; then
+        printf 'unproven\ttmux process %s exists while no socket answers' "${tmux_pids[0]}"
+        return 0
+      fi
       printf 'gone\t'
       ;;
     herdr)

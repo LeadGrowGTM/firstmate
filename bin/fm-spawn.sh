@@ -72,10 +72,8 @@
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
 #   merely unreachable from here: HERDR must still read the recorded pane as
-#   gone once that session's server is running again, and TMUX must find the
-#   window absent from the server it lived on, read through that server's own
-#   socket (the record's tmux_socket=, or for a legacy record every socket this
-#   user could have addressed). A re-created tmux window opens in this process's
+#   gone once that session's server is running again, and TMUX must prove its
+#   server died through socket age and process attribution. A re-created tmux window opens in this process's
 #   container session, and the republished record carries its new socket. An
 #   endpoint that turns out to have survived, or that cannot be proven absent,
 #   refuses. The worktree is reused untouched either way; a
@@ -1959,10 +1957,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   #           survived the restart and is adopted after all; `alive` means the
   #           agent came back and refuses; only a second `missing` proves the
   #           pane itself did not survive.
-  #   tmux  - the window is read on the server it LIVED on, through that
-  #           server's own socket, never inferred from the server this process
-  #           happens to address. Only a dead server or one that lacks the
-  #           window proves it gone; a live server still holding it refuses.
+  #   tmux  - the server's death is proven from socket age and process
+  #           attribution, never from a missing session or window.
   # Every transient or self-contradicting read stays `unreadable`/`ambiguous`
   # and refuses as it always did (bin/fm-backend.sh's fm_backend_agent_state
   # owns that vocabulary). The proof itself lives in one place for the whole
@@ -1971,7 +1967,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
   if [ "$RELAUNCH_STATE" = missing ]; then
     RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET" \
-      "$(fm_meta_get "$RELAUNCH_META" tmux_socket)")
+      "$(fm_meta_get "$RELAUNCH_META" tmux_socket)" "$(fm_meta_get "$RELAUNCH_META" spawn_gen)")
     case "${RELAUNCH_ABSENCE%%$'\t'*}" in
       gone) RELAUNCH_STATE=missing ;;
       dead) RELAUNCH_STATE=dead ;;
@@ -3986,7 +3982,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh window for the same task, opened directly in the
     # recorded worktree, in this process's tmux container session - the
-    # recorded window's server is dead or no longer holds it
+    # recorded window's server is proven dead
     # (fm_control_endpoint_absence_verdict owns that proof). The record
     # published below writes window= and tmux_socket= from it, which is the
     # whole rebind - the task id, brief, worktree, armed poll and status log are

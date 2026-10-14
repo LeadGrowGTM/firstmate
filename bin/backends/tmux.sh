@@ -194,44 +194,29 @@ fm_backend_tmux_window_inventory() {  # <session-target>
 }
 
 # fm_backend_tmux_socket_path: the socket path of the tmux server that holds
-# <target>, as that server itself reports it. This is the endpoint's server
-# identity, recorded at spawn as the task's `tmux_socket=` so a later absence
-# proof reads the server the endpoint lived on rather than whichever server the
-# recovering process happens to address. Empty on any tmux error.
+# <target>, as that server itself reports it. Recorded at spawn as the task's
+# `tmux_socket=` so a later absence proof can compare the answering server's
+# age with the recorded endpoint. Empty on any tmux error.
 fm_backend_tmux_socket_path() {  # <target>
   tmux display-message -p -t "$1" '#{socket_path}' 2>/dev/null
 }
 
-# fm_backend_tmux_window_on_socket: whether the tmux server listening on
-# <socket> holds window <window> of session <session>, read through that socket
-# alone. Prints exactly one verdict:
-#   lacks      - proven not there: the socket file is gone, no server answers
-#                on it, its session is absent, or a readable inventory of that
-#                session omits the window.
-#   holds      - the server on that socket still has the window.
-#   unreadable - the read could not be made, and proves nothing either way.
-# fm_backend_tmux_window_inventory owns the read classification; this only
-# pins every one of its tmux calls to <socket>.
-fm_backend_tmux_window_on_socket() {  # <socket> <session> <window>
-  local socket=$1 session=$2 window=$3 windows inventory_status
+fm_backend_tmux_server_on_socket() {  # <socket>
+  local socket=$1 answer
   if [ ! -e "$socket" ] && [ ! -L "$socket" ]; then
-    printf 'lacks'
+    printf 'absent'
     return 0
   fi
-  windows=$(
-    tmux() { command tmux -S "$socket" "$@"; }
-    fm_backend_tmux_window_inventory "=$session"
-  )
-  inventory_status=$?
-  case "$inventory_status" in
-    0)
-      if printf '%s\n' "$windows" | grep -Fqx -- "$window"; then
-        printf 'holds'
-      else
-        printf 'lacks'
-      fi
-      ;;
-    2) printf 'lacks' ;;
+  if answer=$(LC_ALL=C tmux -S "$socket" display-message -p '#{pid} #{start_time}' 2>&1); then
+    if [[ $answer =~ ^[0-9]+\ [0-9]+$ ]]; then
+      printf 'answer %s' "$answer"
+    else
+      printf 'unreadable'
+    fi
+    return 0
+  fi
+  case "$answer" in
+    *"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)") printf 'absent' ;;
     *) printf 'unreadable' ;;
   esac
 }
@@ -249,12 +234,29 @@ fm_backend_tmux_socket_candidates() {
     case "$seen" in *"|$dir|"*) continue ;; esac
     seen="$seen|$dir|"
     [ -e "$dir" ] || [ -L "$dir" ] || continue
-    [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || return 1
+    [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || { printf '%s\n' "$dir"; return 1; }
     for sock in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
       [ -S "$sock" ] && printf '%s\n' "$sock"
     done
   done
   return 0
+}
+
+fm_backend_tmux_processes() {
+  local processes uid
+  uid=$(id -u) || return 1
+  processes=$(LC_ALL=C ps -u "$uid" -o pid= -o stat= -o comm= -o args=) || return 1
+  awk '
+    $1 ~ /^[0-9]+$/ && $2 !~ /^Z/ {
+      pid=$1
+      line=$0
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", line)
+      if (line ~ /^tmux: server([[:space:]]|$)/ || line ~ /^[^[:space:]]+[[:space:]]+tmux: server([[:space:]]|$)/)
+        print "server " pid
+      else if (line ~ /^([^[:space:]]*\/)?tmux[^[:space:]]*([[:space:]]|$)/ || line ~ /^[^[:space:]]+[[:space:]]+([^[:space:]]*\/)?tmux[^[:space:]]*([[:space:]]|$)/)
+        print "tmux " pid
+    }
+  ' <<< "$processes"
 }
 
 # fm_backend_tmux_kill: remove one explicitly named task window.
