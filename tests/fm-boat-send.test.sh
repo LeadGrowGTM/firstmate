@@ -55,7 +55,15 @@ printf 'boat %s\n' "$*" >> "$FIXTURES/calls"
 [ "${1:-}" = --no-update ] || exit 97
 shift
 case "$*" in
-  'limits --json'|'list --all --json') file=$1 ;;
+  'limits --json')
+    file=limits
+    if [ -e "$FIXTURES/independent-resume" ]; then
+      : > "$FIXTURES/resumed"
+      printf '33333333-3333-4333-8333-333333333333\n' > "$FIXTURES/boot-id"
+      printf 'independent-resume during limits read\n' >> "$FIXTURES/calls"
+    fi
+    ;;
+  'list --all --json') file=list ;;
   'info bx_ahnbu3qr --json')
     file=info
     [ ! -e "$FIXTURES/resumed" ] || file=ready
@@ -208,7 +216,7 @@ seed_receipt() { printf 'bx_ahnbu3qr %s\n' "$(cat "$FIXTURES/boot-id")" > "$LOCA
 
 assert_pre_resume_refusal() {
   expect_code 1 "$CODE" "$1 refusal"
-  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" "$1 did not request stop"
+  assert_no_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" "$1 stopped a box before its own resume"
   assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" "$1 resumed before refusing"
   assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" "$1 reached remote transport"
 }
@@ -725,6 +733,28 @@ test_same_id_orphan_retry() {
   pass 'same-ID orphan retry refuses before either worker brief can change'
 }
 
+test_independent_resume_before_refusal() {
+  local variant
+  for variant in failed-read exhausted-budget; do
+    new_case "independent-resume-$variant"
+    : > "$FIXTURES/independent-resume"
+    if [ "$variant" = failed-read ]; then
+      : > "$FIXTURES/limits.fail"
+    else
+      set_json limits '.creditUsedSeconds = 2000000'
+    fi
+    send_task
+    expect_code 1 "$CODE" "$variant refuses after independent resume"
+    assert_grep 'independent-resume during limits read' "$FIXTURES/calls" 'independent transition was not exercised'
+    assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'refused invocation resumed a box'
+    assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'refusal stopped independently resumed box'
+    assert_present "$FIXTURES/resumed" 'independently resumed box did not remain running'
+    assert_no_grep 'on ' "$FIXTURES/calls" 'refused invocation reached remote transport'
+  done
+  pass 'pre-resume safety refusals preserve an independently resumed box'
+}
+
+test_independent_resume_before_refusal
 test_same_id_orphan_retry
 test_existing_backlog_row
 test_confirmed_prelaunch_refusal_stop

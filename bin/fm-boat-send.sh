@@ -30,6 +30,8 @@
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
 # A definite spawn refusal stops a box this send resumed only after the
 # remote worker lock confirms that no task records or endpoints remain.
+# Pre-resume refusals never request a stop; stop authority follows only this
+# invocation's successful resume, not an earlier stopped-state observation.
 # Status, steering, and reports use existing fm-on.sh commands against boat-eng;
 # no PC worker endpoint or worktree is allocated. Last-task teardown stops the
 # box; its auto-stop timer is the hard upper bound if teardown cannot complete.
@@ -119,7 +121,6 @@ read_boat() {
 read_boat info "$BOX"
 STATE=$(jq -r '.sandbox.state // empty' "$TMP/info")
 if [ "$STATE" = stopped ]; then
-  STOP_ON_REFUSAL=1
   rm -f -- "$NO_ENV_RECEIPT"
 fi
 read_boat limits
@@ -149,6 +150,7 @@ TTL=$(jq -nr --slurpfile l "$TMP/limits" --slurpfile b "$TMP/list" \
 case "$STATE" in
   stopped)
     fm_run_timed 120 "$BOAT_BIN" --no-update resume "$BOX" --no-env --ttl "$TTL" --json > "$TMP/resume" || stop_refuse 'Boat resume failed'
+    STOP_ON_REFUSAL=1
     read_boat info "$BOX"
     ;;
   ready|idle|running) ;;
