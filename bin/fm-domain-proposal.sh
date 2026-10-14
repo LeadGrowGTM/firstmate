@@ -290,6 +290,11 @@ submit)
         VERSION=$((VERSION - 1))
       fi
     else
+      for prior in "$DIR"/v[0-9]*.json; do
+        [ -f "$prior" ] || continue
+        [ "$(jq -r '.digest' "$prior")" != "$DIGEST" ] \
+          || fail 'proposal digest matches an earlier version; change it or start a new cycle'
+      done
       task_open "$TASK" || [ "$APPROVED" -eq 1 ] || fail "cycle $CYCLE of $MATE is no longer awaiting a proposal"
     fi
     VERSION=$((VERSION + 1))

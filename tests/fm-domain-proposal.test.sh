@@ -364,6 +364,27 @@ shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR
 assert_contains "$shown" 'state: done' 'final approval receipt did not close the activation task'
 pass 'first and repeat receipts preserve each outstanding approval'
 
+tool request media "$BUNDLE2" >/dev/null || fail 'repeated-digest request failed'
+proposal 'first digest content' "$BUNDLE2" > "$TMP_ROOT/digest-first.json"
+tool submit media "$TMP_ROOT/digest-first.json" >/dev/null || fail 'first digest submission failed'
+S1=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/15/v1.json")
+answer domain-proposal-media-15 "approve-$S1"
+tool approve media >/dev/null || fail 'first digest approval failed'
+proposal 'second digest content' "$BUNDLE2" > "$TMP_ROOT/digest-second.json"
+tool submit media "$TMP_ROOT/digest-second.json" >/dev/null || fail 'second digest submission failed'
+S2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/15/v2.json")
+answer domain-proposal-media-15 "approve-$S2"
+tool approve media >/dev/null || fail 'second digest approval failed'
+out=$(tool submit media "$TMP_ROOT/digest-first.json" 2>&1); rc=$?
+expect_code 1 "$rc" 'an earlier digest cannot become a new version'
+assert_contains "$out" 'change it or start a new cycle' 'repeated-digest refusal offers a next step'
+[[ "$out" != *$'\n'* ]] || fail 'repeated-digest refusal was not one line'
+[ ! -e "$HOME_DIR/data/domain-freshness/proposals/media/15/v3.json" ] || fail 'repeated digest created a version'
+tool receipt media applied --digest "$S2" --evidence 'second digest applied' >/dev/null || fail 'latest digest receipt failed'
+jq -se --arg d "$S1" 'any(.[]; .state == "applied" and (.superseded | index($d) != null))' \
+  "$HOME_DIR/data/domain-freshness/proposals/media/15/receipts.jsonl" >/dev/null || fail 'latest application did not retire the earlier approval'
+pass 'a cycle refuses reuse of an earlier proposal digest'
+
 mkdir -p "$TMP_ROOT/mate/state"
 printf 'media\n' > "$TMP_ROOT/mate/.fm-secondmate-home"
 FM_HOME="$TMP_ROOT/mate" bash "$TOOL" request media "$BUNDLE" >/dev/null 2>&1; expect_code 1 "$?" 'a non-main home is refused'
