@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # fm-lavish-open.sh - present a Lavish artifact in Orca.
 # Usage: fm-lavish-open.sh <artifact.html> [--reopen]
-# config/lavish-browser: auto (default) or orca.
 # config/lavish-orca-worktree: optional Windows worktree id override.
-# Orca mode establishes the session with --no-open and opens only live URLs.
+# Establishes the session with --no-open and opens only live URLs.
 # A failed Orca open is an error, never a fallback to the system browser.
 # Output preserves Lavish's session fields; Orca's receipt goes to stderr.
 set -eu
@@ -27,12 +26,6 @@ read_config() {
     cat "$path"
   fi
 }
-browser=$(read_config lavish-browser)
-browser=${browser:-auto}
-case "$browser" in
-  auto|orca) ;;
-  *) fail 'config/lavish-browser must contain auto or orca' ;;
-esac
 if [ -e "$FM_HOME/config/lavish-orca-worktree" ] || [ -L "$FM_HOME/config/lavish-orca-worktree" ]; then
   worktree=$(read_config lavish-orca-worktree)
 else

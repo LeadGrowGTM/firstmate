@@ -26,8 +26,8 @@ opener="$ROOT/bin/fm-lavish-open.sh"
 default_selector='id:33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate'
 selector='id:example::C:\Users\example\firstmate'
 bash "$opener" 'file with spaces.html' --reopen >/dev/null
-assert_contains "$(cat "$OPEN_LOG")" '<--no-open>' 'auto suppresses the default browser'
-assert_contains "$(cat "$OPEN_LOG")" "<--worktree> <$default_selector>" 'captain Windows worktree is the default'
+assert_contains "$(cat "$OPEN_LOG")" '<--no-open>' 'opener suppresses the default browser'
+assert_contains "$(cat "$OPEN_LOG")" "<--worktree> <$default_selector>" 'single-backslash captain Windows worktree is the default'
 assert_contains "$(cat "$OPEN_LOG")" '<--reopen>' 'reopen is forwarded'
 : > "$OPEN_LOG"
 FAKE_STATUS=user-ended bash "$opener" test.html >/dev/null
@@ -37,10 +37,6 @@ printf '%s\n' "$selector" > "$FM_HOME/config/lavish-orca-worktree"
 bash "$opener" test.html >/dev/null
 assert_contains "$(cat "$OPEN_LOG")" "<--worktree> <$selector>" 'Windows worktree override is one argument'
 : > "$OPEN_LOG"
-printf 'system\n' > "$FM_HOME/config/lavish-browser"
-if bash "$opener" test.html >/dev/null 2>&1; then fail 'system browser mode must fail'; fi
-[ ! -s "$OPEN_LOG" ] || fail 'system browser mode must not open anything'
-printf 'orca\n' > "$FM_HOME/config/lavish-browser"
 : > "$FM_HOME/config/lavish-orca-worktree"
 if bash "$opener" test.html >/dev/null 2>&1; then fail 'empty worktree override must fail'; fi
 printf 'active\n' > "$FM_HOME/config/lavish-orca-worktree"
@@ -58,9 +54,7 @@ assert_contains "$(cat "$OPEN_LOG")" '<--no-open>' 'Orca failure still suppresse
 : > "$OPEN_LOG"
 if bash "$opener" test.html --no-gate >/dev/null 2>&1; then fail 'unsupported gate bypass must fail'; fi
 [ ! -s "$OPEN_LOG" ] || fail 'unsupported option must not establish a session'
-printf 'invalid\n' > "$FM_HOME/config/lavish-browser"
-if bash "$opener" test.html >/dev/null 2>&1; then fail 'invalid browser must fail'; fi
-rm "$FM_HOME/config/lavish-browser" "$LAB/bin/orca-ide"
+rm "$LAB/bin/orca-ide"
 : > "$OPEN_LOG"
 mkdir -p "$LAB/portable"
 for tool in bash dirname cat sed head tr; do ln -s "$(command -v "$tool")" "$LAB/portable/$tool"; done
