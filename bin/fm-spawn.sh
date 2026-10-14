@@ -5741,21 +5741,42 @@ if [ "$HARNESS" = claude ]; then
     fi
   fi
   if [ "$KIND" = secondmate ] && [ -f "$WT/config/skill-overrides.json" ]; then
-    if so_json=$(jq -ces \
-      'if length == 1 and (.[0].skillOverrides | type) == "object" then .[0].skillOverrides else error("skillOverrides must be an object") end' \
+    # Pick the launch-settings keys the file may carry; a present key of the wrong
+    # type, or a file with none of them, is skipped whole.
+    if so_json=$(jq -ces '
+      def need_object: if type == "object" then . else error("not an object") end;
+      if length != 1 or (.[0] | type) != "object" then error("not one object") else .[0] as $f
+        | ((if $f | has("skillOverrides") then {skillOverrides: ($f.skillOverrides | need_object)} else {} end)
+          + (if $f | has("enabledPlugins")
+              then {enabledPlugins: ($f.enabledPlugins | need_object | if all(.[]; type == "boolean") then . else error("enabledPlugins values must be booleans") end)}
+              else {} end)
+          + (if $f | has("permissions")
+              then ($f.permissions | need_object | if has("deny")
+                  then (if (.deny | type) == "array" and all(.deny[]; type == "string") then {permissions: {deny: .deny}} else error("permissions.deny must be an array of strings") end)
+                  else {} end)
+              else {} end)) as $o
+        | if ($o | length) == 0 then error("no recognized key") else $o end
+      end' \
       "$WT/config/skill-overrides.json" 2>/dev/null); then
       if [ "$RAW_LAUNCH" = 1 ] && raw_claude_settings_extract "$ARG3"; then
         LAUNCH=$RAW_CLAUDE_SETTINGS_COMMAND
         CLAUDE_SETTINGS=$RAW_CLAUDE_SETTINGS_VALUE
       fi
-      merged_settings=$(jq -cn --argjson settings "$CLAUDE_SETTINGS" --argjson overrides "$so_json" \
-        'if ($settings | type) == "object" then $settings + {skillOverrides: $overrides} else error("settings must be an object") end' 2>/dev/null) || {
-        echo "error: raw Claude --settings must be a JSON object to merge skillOverrides" >&2
+      # skillOverrides replaces; enabledPlugins and permissions.deny merge into any existing ones.
+      merged_settings=$(jq -cn --argjson settings "$CLAUDE_SETTINGS" --argjson o "$so_json" '
+        def need_object: if type == "object" then . else error("not an object") end;
+        def need_array: if type == "array" then . else error("not an array") end;
+        if ($settings | type) != "object" then error("settings must be an object") else $settings end
+        | if $o | has("skillOverrides") then .skillOverrides = $o.skillOverrides else . end
+        | if $o | has("enabledPlugins") then .enabledPlugins = ((.enabledPlugins // {} | need_object) + $o.enabledPlugins) else . end
+        | if $o | has("permissions") then .permissions = ((.permissions // {} | need_object)
+            | .deny = (((.deny // []) | need_array) + $o.permissions.deny | unique)) else . end' 2>/dev/null) || {
+        echo "error: raw Claude --settings must be a JSON object with object enabledPlugins and permissions and array permissions.deny to merge $WT/config/skill-overrides.json" >&2
         exit 1
       }
       CLAUDE_SETTINGS=$merged_settings
     else
-      echo "note: skipped $WT/config/skill-overrides.json: not valid JSON with a top-level skillOverrides object" >&2
+      echo "note: skipped $WT/config/skill-overrides.json: not valid JSON with a top-level skillOverrides object, enabledPlugins object, or permissions.deny array" >&2
     fi
   fi
   LAUNCH=${LAUNCH/__CLAUDESETTINGS__/"$(shell_quote "$CLAUDE_SETTINGS")"}

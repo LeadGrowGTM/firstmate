@@ -1259,20 +1259,27 @@ When stripping is enabled, the hooks directory is read-only, so a hook manager r
 The flag is a home-wide attribution choice, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract and a secondmate's own workers keep AI trailers too.
 Per-machine Cursor `cli-config.json` attribution-off is not this contract: it does not travel with Firstmate, defaults back to on when unset, and only feeds the CLI's request to the server, so it suppresses the trailer rather than preventing it.
 
-## Skill overrides (config/skill-overrides.json)
+## Claude second-mate launch overrides (config/skill-overrides.json)
 
-The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills a Claude second mate's session lists through per-launch settings.
-It must be valid JSON whose top-level `skillOverrides` property is an object; Claude Code validates the object's contents.
-Only the `skillOverrides` property is read; any other property is ignored.
+The optional local, gitignored `config/skill-overrides.json` controls skill, plugin, and subagent availability for a Claude second mate through per-launch settings.
+It must contain one JSON object with at least one of these recognized settings:
 
-When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only the `skillOverrides` property to the launch's inline `--settings` JSON.
+- `skillOverrides`: an object of skill name to visibility.
+- `enabledPlugins`: an object of plugin ID to boolean, such as `{"charlesdr-dev-loop@charlesdr-dev-loop": false}`.
+- `permissions.deny`: an array of strings, such as `["Agent(harness-checker)"]`, which hides the named subagent from the Agent tool.
+
+Firstmate checks these types and requires every `enabledPlugins` value to be a boolean and every `permissions.deny` entry to be a string; Claude Code interprets the settings' contents.
+Only those three settings are forwarded; other properties, including other `permissions` keys, are ignored.
+
+When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only those properties to the launch's inline `--settings` JSON.
+`skillOverrides` replaces any existing value, while `enabledPlugins` and `permissions.deny` merge into the settings' existing ones, with the file's plugin values winning.
 Raw Claude commands with a leading assignment containing quoted spaces are not recognized as Claude launches and do not receive the override; use the standard Claude launch template for those sessions.
 An absent file changes nothing.
-A file that is unreadable, contains zero or multiple JSON documents, is not valid JSON, or lacks a `skillOverrides` object is skipped with a one-line note on stderr, and the launch proceeds without it.
+A file that is unreadable, contains zero or multiple JSON documents, is not valid JSON, has none of the three properties, or has one of them with the wrong type is skipped whole with a one-line note on stderr, and the launch proceeds without it.
 Ship and scout workers never receive it, nor does any non-Claude harness.
 Firstmate reads but never edits the override file; existing Claude launch wiring separately regenerates `.claude/settings.local.json` for control hooks.
 
-The file is per home because each second mate needs a different list, and it is not inherited from the primary home.
+The file is per home because each second mate can use different settings, and it is not inherited from the primary home.
 [`fm-spawn.sh`](../bin/fm-spawn.sh) owns the delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
 
 ## Project capacity (config/project-capacity)
