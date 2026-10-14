@@ -2535,6 +2535,12 @@ EOF
     .decision_layout | any(.key == "choice" and .reason == "Choose east"
       and .about == "New route" and [.options[].value] == ["east"])
   ' >/dev/null || fail "rehold did not replace options: $json"
+  run_captain "$home" hold choice --reason 'Choose later' --until 2099-01-01 >/dev/null || fail "deferred rehold failed"
+  json=$(run_bearings "$home" --fields decisions) || fail "could not project the deferred hold"
+  printf '%s' "$json" | jq -e '
+    .decision_layout | any(.key == "choice" and .reason == "Choose later"
+      and .about == "New route" and [.options[].value] == ["east"])
+  ' >/dev/null || fail "deferred rehold lost current options: $json"
   run_captain "$home" hold choice --reason 'Choose freely' >/dev/null || fail "rehold without options failed"
   json=$(run_bearings "$home" --fields decisions) || fail "could not project the option-free hold"
   printf '%s' "$json" | jq -e '

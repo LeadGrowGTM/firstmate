@@ -65,7 +65,8 @@
 # and options [{value,label,hint?}]; values are unique privacy-safe slugs (at most
 # 128 characters), excluding reconcile, and labels are nonempty. Optional
 # recommended names an option value; report is a path string and pr_url is HTTPS.
-# Re-holding replaces both reason and copy; release clears both.
+# Re-holding replaces reason and copy; a dated re-hold without a new copy keeps
+# the current copy, while an undated option-free re-hold clears it.
 # migrate-options imports an array (or {decisions:[...]}) of legacy entries with
 # key, title and that copy. Missing option values become option-1, option-2, etc.;
 # a recommended label is converted to its unique value. Optional origin and repo
@@ -985,7 +986,7 @@ command_hold() {
   local import_only=$1
   shift
   local id=${1:-} title='' reason='' repo='' origin='' until='' corr='' corr_given=0 show state existing_title body='' hold_kind hold_set occurrence
-  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' hold_status=0 options_file='' copy=''
+  local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' hold_status=0 options_file='' copy='' snapshot
   [ "$#" -ge 1 ] || { usage >&2; exit 2; }
   shift
   while [ "$#" -gt 0 ]; do
@@ -1004,7 +1005,6 @@ command_hold() {
   validate_slug task-id "$id"
   [ -z "$options_file" ] || copy=$(decision_copy "$options_file")
   [ -n "$reason" ] || fail "reason must not be empty"
-  # bin/fm-hold-reason-lib.sh owns the storage constraint and reversible encoding.
   if [ -n "$copy" ]; then
     stored_reason=$(fm_hold_reason_encode "$reason" "$copy") || fail "could not encode the hold reason"
   else
@@ -1042,6 +1042,15 @@ command_hold() {
       || fail "task $id is already closed; a new captain call needs its own task"
     existing_hold_kind=$(show_field_value "$show" hold_kind)
     existing_held=$(show_field_value "$show" held)
+    if [ -n "$until" ] && [ -z "$options_file" ] && [ "$existing_hold_kind" = captain ]; then
+      snapshot=$(jq -nc --arg hold_reason "$(show_field_value "$show" hold_reason)" \
+        '{records:[{hold_reason:$hold_reason}]}') || fail "could not read the current hold copy"
+      snapshot=$(fm_hold_reason_decode_stream json <<< "$snapshot") || fail "could not decode the current hold copy"
+      copy=$(jq -c '.records[0].decision // empty' <<< "$snapshot") || fail "could not read the current hold copy"
+      if [ -n "$copy" ]; then
+        stored_reason=$(fm_hold_reason_encode "$reason" "$copy") || fail "could not encode the hold reason"
+      fi
+    fi
     if [ "$existing_hold_kind" = captain ] && [ "$existing_held" = yes ]; then
       preserve_hold_set=1
     fi
