@@ -24,8 +24,13 @@ make_home() {  # <name>
   # tests/lib.sh, not with a shell array: make_home runs inside a command
   # substitution, where an array append never reaches the caller.
   fm_test_track_procevent_home "$home" "$home/procevent-claims"
-  mkdir -p "$home/state" "$home/data" "$home/lavish-state"
+  mkdir -p "$home/state" "$home/data" "$home/lavish-state" "$home/config"
   fakebin=$(fm_fakebin "$home")
+  cat > "$fakebin/orca-ide" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" = tab && "${2:-}" = create && "${3:-}" = --worktree && \
+   "${5:-}" = --url && "${6:-}" = http://127.0.0.1:* && "${7:-}" = --json ]]
+SH
   # The build proves the board session is live before it arms anything, so the
   # stub reports the opened shape the real lavish-axi emits, and records that
   # session in this home's own store. The listener resolves its server from that
@@ -54,12 +59,12 @@ case "${1-}" in
     jq -n --arg file "$real" \
       '{sessions:{"0123456789abcdef":{file:$file,url:"http://127.0.0.1:4387/session/0123456789abcdef"}}}' \
       > "$LAVISH_AXI_STATE_DIR/state.json"
-    printf 'session:\n  status: opened\n'
+    printf 'session:\n  url: "http://127.0.0.1:4387/session/0123456789abcdef"\n  status: opened\n'
     ;;
 esac
 exit 0
 SH
-  chmod +x "$fakebin/lavish-axi"
+  chmod +x "$fakebin/lavish-axi" "$fakebin/orca-ide"
   printf '%s\n' "$home"
 }
 

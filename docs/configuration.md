@@ -1155,6 +1155,16 @@ When the file is absent, worker launches do not add a board address and retain t
 Malformed or unreadable values refuse the launch before the worker starts.
 The address selects the existing shared server; it does not authorize starting or stopping the server, and the Lavish startup crash remains a vendor-tool concern.
 
+## Lavish page browser (config/lavish-orca-worktree)
+
+Lavish pages open through [`bin/fm-lavish-open.sh`](../bin/fm-lavish-open.sh), which sends live session URLs to Orca.
+Orca tabs default to the captain's firstmate project at `id:33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate`.
+The optional `config/lavish-orca-worktree` overrides that destination with another `id:<repo-id>::C:\...` Windows worktree selector; path selectors and WSL paths are refused.
+If `orca-ide` is unavailable, the opener prints the page URL and a note for manual opening without launching a browser.
+An invalid destination or failed Orca open reports an error.
+The override file is local, gitignored, and inherited into secondmate homes through the primary-authoritative configuration contract.
+Opening a page grants no authority to drive logged-in sites.
+
 ## Home brief include (config/brief-include.md)
 
 The optional local, gitignored `config/brief-include.md` adds standing worker instructions to every ship and scout brief.
@@ -2591,7 +2601,7 @@ A long-polling external process is registered as a *source* through its adapter,
 
 **Open the Lavish artifact first**
 
-Before arming any Lavish source, open its artifact with `lavish-axi` so the saved session identifies the board's server; reply and poll attempts derive their host and port from that session and refuse missing or invalid session evidence before posting or consuming a staged worker reply.
+Before arming any Lavish source, open its artifact with `bin/fm-lavish-open.sh` so the saved session identifies the board's server; reply and poll attempts derive their host and port from that session and refuse missing or invalid session evidence before posting or consuming a staged worker reply.
 
 **Retry interrupted Lavish polls**
 
