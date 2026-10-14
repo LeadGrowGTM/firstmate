@@ -1525,6 +1525,7 @@ Machine-specific inventory paths are local choices and must not be inherited acr
 [`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
 Daily intake is a separate integration; this collector neither schedules work nor changes installations or operational instructions.
 [`bin/fm-domain-proposal.sh`](../bin/fm-domain-proposal.sh) is the manual main-home handoff for local mates that consumes a collected bundle and owns the proposal records under `data/domain-freshness/proposals/`, the digest-bound approval rule, and application receipts; request checks the current `data/secondmates.md` route and scope, and remote domain handoff is not yet supported.
+Each proposal reply names the latest requested bundle; `fm-send.sh` owns the separate pending-reply transport ID.
 Each mate's proposal cycle has one ordinary task from request through application: it is held for the captain when a change is proposed, then closed after an applied receipt or withdrawal. The existing decisions board shows the held task; no second board or decision store exists, and nothing is scheduled or enabled by it.
 
 This section owns the version 1 configuration schema:

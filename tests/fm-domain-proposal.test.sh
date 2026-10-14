@@ -14,6 +14,7 @@ TASKS_AXI_BIN=$(command -v tasks-axi)
 TOOL="$ROOT/bin/fm-domain-proposal.sh"
 HOME_DIR="$TMP_ROOT/home"
 BUNDLE=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+BUNDLE2=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
 mkdir -p "$HOME_DIR/data/domain-freshness/bundles" "$HOME_DIR/state" "$HOME_DIR/config" "$HOME_DIR/projects"
 cp "$ROOT/.tasks.toml" "$HOME_DIR/.tasks.toml"
 printf '## In flight\n\n## Queued\n\n## Done\n' > "$HOME_DIR/data/backlog.md"
@@ -23,6 +24,7 @@ fm_fake_exit0 "$FAKEBIN" tmux treehouse no-mistakes gh gh-axi
 jq -n '{schema:"fm-domain-evidence.v1",collected_at:"2026-10-13T12:00:00Z",complete:true,registry_coverage:"complete",
   domains:[{id:"media",home:"/x/media",scope:"stale bundle scope",host:""}],coverage:[],evidence:[]}' \
   > "$HOME_DIR/data/domain-freshness/bundles/$BUNDLE.json"
+cp "$HOME_DIR/data/domain-freshness/bundles/$BUNDLE.json" "$HOME_DIR/data/domain-freshness/bundles/$BUNDLE2.json"
 
 tool() {
   PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" \
@@ -67,39 +69,38 @@ out=$(tool request media "$BUNDLE")
 assert_contains "$out" 'READ-ONLY' 'request text forbids applying'
 assert_contains "$out" "$BUNDLE.json" 'request text names the bundle'
 assert_contains "$out" 'Your registered scope: newsletter and SEO' 'request uses current registered scope'
-CORR=$(jq -r .corr "$DIR/request.json")
-assert_contains "$out" "$CORR" 'request text carries its durable correlation id'
-assert_contains "$(tool status media)" 'requested, no proposal' 'request created a proposal cycle'
+assert_contains "$out" "Report with bundle_id $BUNDLE" 'request binds its reply to the bundle'
+jq -e --arg b "$BUNDLE" '.latest_bundle_id == $b and (.bundles == [$b]) and (has("corr") | not)' "$DIR/request.json" >/dev/null \
+  || fail 'request did not record its latest bundle'
 hold_tool open "$TASK" --distinguish-absent >/dev/null 2>&1; expect_code 1 "$?" 'request task exists before its hold'
 pass 'request validates the bundle and prints a read-only marked request'
 
 proposal 'v1 text' > "$TMP_ROOT/p1.json"
 printf '{"schema":"wrong"}\n' > "$TMP_ROOT/stream.json"
 cat "$TMP_ROOT/p1.json" >> "$TMP_ROOT/stream.json"
-tool submit media "$TMP_ROOT/stream.json" --corr "$CORR" >/dev/null 2>&1; expect_code 1 "$?" 'a stream with a valid final value is refused'
+tool submit media "$TMP_ROOT/stream.json" >/dev/null 2>&1; expect_code 1 "$?" 'a stream with a valid final value is refused'
 [ ! -e "$DIR/v1.json" ] || fail 'invalid JSON stream published a proposal version'
-tool submit media "$TMP_ROOT/p1.json" --corr "$CORR" > "$TMP_ROOT/submit.out" || fail 'submit v1 failed'
+tool submit media "$TMP_ROOT/p1.json" > "$TMP_ROOT/submit.out" || fail 'submit v1 failed'
 assert_contains "$(cat "$TMP_ROOT/submit.out")" "held: $TASK v1" 'submit holds one card'
 hold_tool open "$TASK" || fail 'card is not an open captain call'
 assert_present "$DIR/v1.md" 'exact before/after rendering exists'
 assert_grep 'v1 text' "$DIR/v1.md" 'rendering carries the after text'
 D1=$(jq -r .digest "$DIR/v1.json")
-out=$(tool submit media "$TMP_ROOT/p1.json" --corr "$CORR"); assert_contains "$out" 'unchanged' 'identical resubmission is idempotent'
+out=$(tool submit media "$TMP_ROOT/p1.json"); assert_contains "$out" 'unchanged' 'identical resubmission is idempotent'
 [ ! -e "$DIR/v2.json" ] || fail 'idempotent resubmission wrote a version'
 pass 'submit opens one card and an identical resubmission is a no-op'
 
 printf '{"schema":"fm-domain-proposal.v1","mate":"media","bundle_id":"%s","bullets":["x"],"changes":[{"kind":"skill","file":"f","original_digest":"nothex","before":"a","after":"b","always_loaded_size_delta":0,"sources":["https://e.x"],"effect":"e"}]}' \
   "$BUNDLE" > "$TMP_ROOT/bad.json"
-tool submit media "$TMP_ROOT/bad.json" --corr "$CORR" >/dev/null 2>&1; expect_code 1 "$?" 'invalid digest is refused'
+tool submit media "$TMP_ROOT/bad.json" >/dev/null 2>&1; expect_code 1 "$?" 'invalid digest is refused'
 proposal 'x' otherbundle > "$TMP_ROOT/bad2.json"
-tool submit media "$TMP_ROOT/bad2.json" --corr "$CORR" >/dev/null 2>&1; expect_code 1 "$?" 'unrequested bundle is refused'
-tool submit media "$TMP_ROOT/p1.json" --corr 0123456789abcdef >/dev/null 2>&1; expect_code 1 "$?" 'wrong correlation is refused'
-tool submit media "$TMP_ROOT/p1.json" >/dev/null 2>&1; expect_code 1 "$?" 'missing correlation is refused'
+tool submit media "$TMP_ROOT/bad2.json" >/dev/null 2>&1; expect_code 1 "$?" 'unrequested bundle is refused'
+tool submit media "$TMP_ROOT/p1.json" --corr 0123456789abcdef >/dev/null 2>&1; expect_code 1 "$?" 'obsolete correlation option is refused'
 pass 'submit refuses malformed or unrequested proposals'
 
 tool approve media >/dev/null 2>&1; expect_code 2 "$?" 'approve before an answer'
 proposal $'v2 text\n~~~~\n ~~~~~\n   ~~~~~~\nfinish' > "$TMP_ROOT/p2.json"
-tool submit media "$TMP_ROOT/p2.json" --corr "$CORR" >/dev/null || fail 'submit v2 failed'
+tool submit media "$TMP_ROOT/p2.json" >/dev/null || fail 'submit v2 failed'
 grep -xF '~~~~~~~' "$DIR/v2.md" >/dev/null || fail 'indented closing fence did not get a safe delimiter'
 assert_grep '   ~~~~~~' "$DIR/v2.md" 'indented proposed text was not preserved'
 D2=$(jq -r .digest "$DIR/v2.json")
@@ -114,9 +115,8 @@ assert_contains "$out" 'stale' 'stale approval is named'
 pass 'a newer version re-holds one card and an older digest approval is refused'
 
 out=$(tool request media "$BUNDLE"); assert_contains "$out" 'cycle 2' 'answered cycle starts a new cycle'
-CORR=$(jq -r .corr "$HOME_DIR/data/domain-freshness/proposals/media/2/request.json")
 proposal 'cycle2 text' > "$TMP_ROOT/p3.json"
-tool submit media "$TMP_ROOT/p3.json" --corr "$CORR" >/dev/null || fail 'submit cycle 2 failed'
+tool submit media "$TMP_ROOT/p3.json" >/dev/null || fail 'submit cycle 2 failed'
 D3=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/2/v1.json")
 answer domain-proposal-media-2 "approve-$(printf %s "$D3" | cut -c1-12)"
 out=$(tool request media "$BUNDLE" 2>&1); rc=$?
@@ -132,26 +132,25 @@ tool request media "$BUNDLE" >/dev/null 2>&1; expect_code 1 "$?" 'approved activ
 tool receipt media applied --evidence 'file written' >/dev/null || fail 'applied receipt failed'
 tool receipt media applied >/dev/null || fail 'repeated receipt is not idempotent'
 tool receipt media validated >/dev/null 2>&1; expect_code 1 "$?" 'extra receipt state is refused'
-out=$(tool status media)
-assert_contains "$out" 'receipt=applied' 'status shows the application receipt'
-jq -es --arg corr "$CORR" 'all(.[]; .corr == $corr)' "$HOME_DIR/data/domain-freshness/proposals/media/2/receipts.jsonl" >/dev/null \
-  || fail 'receipts did not retain request correlation'
+jq -es --arg b "$BUNDLE" --arg d "$D3" 'all(.[]; .bundle_id == $b and .digest == $d and (has("corr") | not))' \
+  "$HOME_DIR/data/domain-freshness/proposals/media/2/receipts.jsonl" >/dev/null \
+  || fail 'receipts did not retain the approved bundle and digest'
 tool receipt media applied --digest "$D1" >/dev/null 2>&1; expect_code 1 "$?" 'receipt for an unapproved digest is refused'
 pass 'approval stays current until its digest-bound application closes the task'
 
 proposal 'rejected text' > "$TMP_ROOT/p4.json"
 tool request media "$BUNDLE" >/dev/null
-CORR=$(jq -r .corr "$HOME_DIR/data/domain-freshness/proposals/media/3/request.json")
-tool submit media "$TMP_ROOT/p4.json" --corr "$CORR" >/dev/null || fail 'submit cycle 3 failed'
+tool submit media "$TMP_ROOT/p4.json" >/dev/null || fail 'submit cycle 3 failed'
 answer domain-proposal-media-3 reject
 tool approve media >/dev/null 2>&1; expect_code 4 "$?" 'rejection authorizes nothing'
 pass 'a rejected proposal stays inactive'
 
 jq -n --arg b "$BUNDLE" '{schema:"fm-domain-proposal.v1",mate:"media",bundle_id:$b,bullets:["No action needed"],changes:[]}' > "$TMP_ROOT/p5.json"
 tool request media "$BUNDLE" >/dev/null
-CORR=$(jq -r .corr "$HOME_DIR/data/domain-freshness/proposals/media/4/request.json")
-out=$(tool submit media "$TMP_ROOT/p5.json" --corr "$CORR"); assert_contains "$out" 'no-change' 'no change opens no card'
-assert_contains "$(tool status media)" 'answer=no-change' 'withdrawal is visible'
+out=$(tool submit media "$TMP_ROOT/p5.json"); assert_contains "$out" 'no-change' 'no change opens no card'
+out=$(tool submit media "$TMP_ROOT/p5.json"); assert_contains "$out" 'no-change' 'closed zero-change replay is idempotent'
+[ ! -e "$HOME_DIR/data/domain-freshness/proposals/media/4/v2.json" ] || fail 'zero-change replay wrote a new version'
+tool submit media "$TMP_ROOT/p4.json" >/dev/null 2>&1; expect_code 1 "$?" 'a different closed-cycle proposal is refused'
 assert_contains "$(tool receipt media applied 2>&1)" 'no approved receipt' 'withdrawal does not approve application'
 pass 'a no-change proposal records a version and opens no card'
 
@@ -167,9 +166,8 @@ printf '%s\n' '- media - Media mate (home: /x/media; scope: newsletter and SEO; 
 pass 'current registration controls local handoff and scope'
 
 tool request media "$BUNDLE" >/dev/null
-CORR=$(jq -r .corr "$HOME_DIR/data/domain-freshness/proposals/media/5/request.json")
 proposal 'withdraw this' > "$TMP_ROOT/withdraw.json"
-tool submit media "$TMP_ROOT/withdraw.json" --corr "$CORR" >/dev/null || fail 'withdrawal setup failed'
+tool submit media "$TMP_ROOT/withdraw.json" >/dev/null || fail 'withdrawal setup failed'
 cat > "$FAKEBIN/tasks-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "$1" = done ] && [ -f "$FM_HOME/state/fail-domain-done-once" ]; then
@@ -180,8 +178,8 @@ exec "$REAL_TASKS_AXI" "$@"
 SH
 chmod +x "$FAKEBIN/tasks-axi"
 : > "$HOME_DIR/state/fail-domain-done-once"
-tool submit media "$TMP_ROOT/p5.json" --corr "$CORR" >/dev/null 2>&1; expect_code 1 "$?" 'failed withdrawal close is reported'
-tool submit media "$TMP_ROOT/p5.json" --corr "$CORR" >/dev/null || fail 'withdrawal failed'
+tool submit media "$TMP_ROOT/p5.json" >/dev/null 2>&1; expect_code 1 "$?" 'failed withdrawal close is reported'
+tool submit media "$TMP_ROOT/p5.json" >/dev/null || fail 'withdrawal failed'
 rm "$FAKEBIN/tasks-axi"
 out=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-5 --full)
 assert_contains "$out" 'state: done' 'withdrawal did not close held task'
@@ -189,26 +187,24 @@ assert_contains "$out" 'withdrawn' 'withdrawal evidence was not recorded'
 pass 'zero-change revision closes the held task with evidence'
 
 tool request media "$BUNDLE" >/dev/null
-CORR=$(jq -r .corr "$HOME_DIR/data/domain-freshness/proposals/media/6/request.json")
 head -c 150000 /dev/zero | tr '\0' x > "$TMP_ROOT/large.txt"
 jq -n --rawfile after "$TMP_ROOT/large.txt" --arg b "$BUNDLE" '{schema:"fm-domain-proposal.v1",mate:"media",bundle_id:$b,
   bullets:["Large exact change"],changes:[{kind:"rule",file:"/x/media/RULE.md",original_digest:"absent",before:"",after:$after,
   always_loaded_size_delta:0,sources:["https://github.com/example/repo/pull/1"],effect:"rule updated"}]}' > "$TMP_ROOT/large.json"
-tool submit media "$TMP_ROOT/large.json" --corr "$CORR" >/dev/null || fail 'large proposal was not accepted'
+tool submit media "$TMP_ROOT/large.json" >/dev/null || fail 'large proposal was not accepted'
 jq -e '.proposal.changes[0].after | length == 150000' "$HOME_DIR/data/domain-freshness/proposals/media/6/v1.json" >/dev/null \
   || fail 'large proposal version was truncated'
 pass 'large proposals persist a complete version and report'
 
 answer domain-proposal-media-6 reject
 tool request media "$BUNDLE" >/dev/null
-CORR=$(jq -r .corr "$HOME_DIR/data/domain-freshness/proposals/media/7/request.json")
 proposal 'approved first version' > "$TMP_ROOT/approved-first.json"
-tool submit media "$TMP_ROOT/approved-first.json" --corr "$CORR" >/dev/null || fail 'first version setup failed'
+tool submit media "$TMP_ROOT/approved-first.json" >/dev/null || fail 'first version setup failed'
 D7=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/7/v1.json")
 answer domain-proposal-media-7 "approve-$(printf %s "$D7" | cut -c1-12)"
 tool approve media >/dev/null || fail 'first version approval failed'
 proposal 'pending second version' > "$TMP_ROOT/pending-second.json"
-tool submit media "$TMP_ROOT/pending-second.json" --corr "$CORR" >/dev/null || fail 'second version submission failed'
+tool submit media "$TMP_ROOT/pending-second.json" >/dev/null || fail 'second version submission failed'
 hold_tool open domain-proposal-media-7 || fail 'second version is not held'
 tool receipt media applied --digest "$D7" --evidence 'first version applied' >/dev/null || fail 'first receipt failed'
 hold_tool open domain-proposal-media-7 || fail 'first receipt closed the newer pending version'
@@ -216,7 +212,38 @@ tool receipt media applied --digest "$D7" >/dev/null || fail 'repeat first recei
 hold_tool open domain-proposal-media-7 || fail 'repeat receipt closed the newer pending version'
 pass 'older application receipts preserve a newer captain hold'
 
+out=$(tool request media "$BUNDLE2") || fail 'request remained blocked by an applied historical approval'
+assert_contains "$out" 'cycle 7' 'new evidence should remain on the open cycle'
+jq -e --arg b "$BUNDLE2" '.latest_bundle_id == $b' "$HOME_DIR/data/domain-freshness/proposals/media/7/request.json" >/dev/null \
+  || fail 'new bundle was not recorded as latest'
+out=$(tool submit media "$TMP_ROOT/pending-second.json" 2>&1); rc=$?
+expect_code 1 "$rc" 'delayed proposal for older bundle is refused'
+assert_contains "$out" 'not the latest requested bundle' 'stale bundle refusal is clear'
+proposal 'current bundle proposal' "$BUNDLE2" > "$TMP_ROOT/current-bundle.json"
+tool submit media "$TMP_ROOT/current-bundle.json" >/dev/null || fail 'current bundle proposal failed'
+hold_tool open domain-proposal-media-7 || fail 'current bundle did not keep the one held task'
+answer domain-proposal-media-7 reject
+pass 'latest requested bundle binds proposal replies on the same cycle'
+
+tool request media "$BUNDLE" >/dev/null || fail 'new cycle after applied approval failed'
+proposal 'approved but outstanding' > "$TMP_ROOT/outstanding.json"
+tool submit media "$TMP_ROOT/outstanding.json" >/dev/null || fail 'outstanding approval setup failed'
+D8=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/8/v1.json")
+answer domain-proposal-media-8 "approve-$(printf %s "$D8" | cut -c1-12)"
+tool approve media >/dev/null || fail 'outstanding approval failed'
+proposal 'later rejected version' > "$TMP_ROOT/later-rejected.json"
+tool submit media "$TMP_ROOT/later-rejected.json" >/dev/null || fail 'later version submission failed'
+answer domain-proposal-media-8 reject
+out=$(tool request media "$BUNDLE2" 2>&1); rc=$?
+expect_code 1 "$rc" 'unapplied earlier approval blocks a new cycle'
+assert_contains "$out" 'activation is pending' 'outstanding earlier approval is disclosed'
+[ ! -d "$HOME_DIR/data/domain-freshness/proposals/media/9" ] || fail 'outstanding approval allowed a new cycle'
+tool receipt media applied --digest "$D8" --evidence 'earlier approved version applied' >/dev/null || fail 'outstanding receipt failed'
+out=$(tool request media "$BUNDLE2") || fail 'applied earlier approval failed to unblock a new cycle'
+assert_contains "$out" 'cycle 9' 'new cycle did not start after all approvals were applied'
+pass 'new-cycle gate checks every approved digest for application'
+
 mkdir -p "$TMP_ROOT/mate/state"
 printf 'media\n' > "$TMP_ROOT/mate/.fm-secondmate-home"
-FM_HOME="$TMP_ROOT/mate" bash "$TOOL" status media >/dev/null 2>&1; expect_code 1 "$?" 'a non-main home is refused'
+FM_HOME="$TMP_ROOT/mate" bash "$TOOL" request media "$BUNDLE" >/dev/null 2>&1; expect_code 1 "$?" 'a non-main home is refused'
 pass 'secondmate homes cannot own proposals'
