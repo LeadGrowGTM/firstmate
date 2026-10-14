@@ -5400,7 +5400,9 @@ if [ "$ORCA_VIEW_ENABLED" = on ]; then
       --title "$ID" --identity-file "$ORCA_VIEW_IDENTITY_FILE"); then
       ORCA_VIEW_HANDLE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^handle=//p')
       ORCA_VIEW_SESSION=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session=//p')
-      if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE"); then
+      ORCA_VIEW_IDENTITY_FILE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^identity_file=//p')
+      ORCA_VIEW_TAB_ID=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^tab_id=//p')
+      if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE" --tab-id "$ORCA_VIEW_TAB_ID"); then
         ORCA_VIEW_HANDLE=
         ORCA_VIEW_SESSION=
         ORCA_VIEW_IDENTITY_FILE=

@@ -139,7 +139,7 @@ case "$1 $2" in
         ORCA_AGENT_HOOK_VERSION=1 ORCA_AGENT_HOOK_TOKEN=never-forwarded \
         sh -c "$cmd" >/dev/null 2>&1
     fi
-    printf '{"ok":true,"result":{"terminal":{"handle":"term-%s"}}}\n' "$n" ;;
+    printf '{"ok":true,"result":{"terminal":{"handle":"term-%s","tabId":"tab-%s"}}}\n' "$n" "$n" ;;
   *) printf '{"ok":false}\n'; exit 1 ;;
 esac
 SH

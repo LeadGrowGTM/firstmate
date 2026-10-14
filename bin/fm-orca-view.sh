@@ -5,14 +5,16 @@
 #   fm-orca-view.sh enabled <config-dir>
 #   fm-orca-view.sh open --target <session:window> --view-session <name> [--title <text>] [--identity-file <path>]
 #   fm-orca-view.sh window <@N> [--title <text>]
-#   fm-orca-view.sh identity --file <path>
+#   fm-orca-view.sh identity --file <path> --tab-id <id>
 #   fm-orca-view.sh follow --view-session <name> [--socket <path>]
 #
 # Orca shows only its own terminals, so a tmux window becomes visible there when
 # an Orca terminal attaches to it. The tab attaches a grouped tmux view session
 # (`tmux new-session -t <base> -s <view>`), so every tab can show a different
 # window without moving any other viewer, and an existing view session of that
-# name is reused rather than duplicated. tmux keeps owning the agent's lifetime:
+# name is reused only when it carries this feature's tracking marker.
+# An untracked collision gets a distinct view name without changing the old one.
+# tmux keeps owning the agent's lifetime:
 # closing the tab, or Orca restarting, never stops the agent.
 #
 # The view session follows its agent's window by the window's stable tmux id
@@ -34,7 +36,9 @@
 #           and prints handle=<terminal-handle>
 #           with its view_session=<name>. Failed opens leave the view session
 #           in place. With --identity-file the tab first writes its own Orca
-#           terminal identity there, readable with `identity`.
+#           terminal identity to a unique file beside that path and prints
+#           identity_file=<path> and tab_id=<id> from the fresh terminal reply.
+#           Pass those values to `identity`; the requested path is only a prefix.
 # window    is the helper any home (the primary or a second mate) calls to
 #           pop open an Orca tab on one tmux window of its own tmux server,
 #           named by that window's stable id @N (`tmux display-message -p
@@ -45,7 +49,8 @@
 #           same two lines and the tab follows the window the same way.
 #           An unknown or malformed id is exit 1 or 2, and an unreachable
 #           Orca is exit 3 with a note saying why, as for every Orca step.
-# identity  waits up to 15 seconds for that file, then prints one
+# identity  waits up to 15 seconds for that unique file, checks its
+#           ORCA_TAB_ID against --tab-id from the fresh handle, then prints one
 #           `export NAME='value' ...` line carrying the tab's identity -
 #           ORCA_PANE_KEY, ORCA_TAB_ID, ORCA_WORKTREE_ID, the hook endpoint
 #           file path ORCA_AGENT_HOOK_ENDPOINT, ORCA_AGENT_HOOK_ENV, and
@@ -317,13 +322,12 @@ orca_call() {
 }
 
 cmd_open() {
-  local cmd out handle grouped group project
+  local cmd out handle tab_id grouped group tracked project candidate suffix
   parse_view_args "$@"
   resolve_target "$TARGET"
   [ "$VIEW_SESSION" != "$BASE_SESSION" ] || note "the base session cannot be used as its own view"
   command -v jq >/dev/null 2>&1 || note "jq is not installed, so Orca's reply cannot be read"
   project=$(orca_project) || return 3
-  cmd=$(view_command "$IDFILE")
   orca_env
   if ! tmux has-session -t "=$VIEW_SESSION" 2>/dev/null; then
     tmux new-session -d -t "$BASE_ID" -s "$VIEW_SESSION" ||
@@ -334,15 +338,42 @@ $(tmux display-message -p -t "=$VIEW_SESSION:" $'#{session_grouped}\t#{session_g
 EOF
     [ "$grouped" = 1 ] && [ "$group" = "$BASE_SESSION" ] ||
       note "view session $VIEW_SESSION belongs to another tmux base session"
+    tracked=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_window 2>/dev/null) || tracked=
+    if [ -z "$tracked" ]; then
+      # An existing untracked group may belong to a hand-opened tab.
+      # Allocate our own session without selecting or installing hooks on it.
+      candidate=
+      for suffix in {1..100}; do
+        if ! tmux has-session -t "=$VIEW_SESSION-fmview-$suffix" 2>/dev/null; then
+          candidate="$VIEW_SESSION-fmview-$suffix"
+          break
+        fi
+      done
+      [ -n "$candidate" ] || note "no available owned view session name for $VIEW_SESSION"
+      VIEW_SESSION=$candidate
+      tmux new-session -d -t "$BASE_ID" -s "$VIEW_SESSION" ||
+        note "tmux did not create view session $VIEW_SESSION"
+    else
+      [ "$tracked" = "$WINDOW_ID" ] ||
+        note "view session $VIEW_SESSION already tracks another tmux window"
+    fi
   fi
   track_view || note "view session $VIEW_SESSION cannot show window $WINDOW_ID of $BASE_SESSION"
-  [ -z "$IDFILE" ] || rm -f "$IDFILE" "$IDFILE.tmp"
+  if [ -n "$IDFILE" ]; then
+    IDFILE=$(mktemp "$IDFILE.XXXXXXXXXX") || note "cannot allocate a unique Orca identity handoff"
+  fi
+  cmd=$(view_command "$IDFILE")
   set -- terminal create --worktree "$project" --title "$TITLE" --command "$cmd" --json
   ! on_wsl || set -- "$@" --shell wsl.exe
   out=$(orca_call "$@") || note "Orca is unreachable or refused the view tab: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
   handle=$(printf '%s' "$out" | jq -r 'select(.ok == true) | .result.terminal.handle // empty' 2>/dev/null)
   [ -n "$handle" ] || note "Orca did not return a terminal handle: $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
   printf 'handle=%s\nview_session=%s\n' "$handle" "$VIEW_SESSION"
+  if [ -n "$IDFILE" ]; then
+    tab_id=$(printf '%s' "$out" | jq -r 'select(.ok == true) | .result.terminal.tabId // empty' 2>/dev/null)
+    [ -n "$tab_id" ] || note "Orca did not return the fresh terminal's tab identity"
+    printf 'identity_file=%s\ntab_id=%s\n' "$IDFILE" "$tab_id"
+  fi
 }
 
 cmd_window() {
@@ -401,14 +432,16 @@ cmd_follow() {
 }
 
 cmd_identity() {
-  local file='' deadline line name value out='' seen=' '
+  local file='' tab_id='' deadline line name value out='' seen=' ' error=''
   while [ $# -gt 0 ]; do
     case "$1" in
     --file) file=${2:-}; shift 2 || die_usage "--file needs a value" ;;
+    --tab-id) tab_id=${2:-}; shift 2 || die_usage "--tab-id needs a value" ;;
     *) die_usage "unknown argument: $1" ;;
     esac
   done
   [ -n "$file" ] || die_usage "--file is required"
+  [ -n "$tab_id" ] || die_usage "--tab-id from the fresh terminal reply is required"
   deadline=$(($(date +%s) + 15))
   while [ ! -s "$file" ]; do
     [ "$(date +%s)" -lt "$deadline" ] || note "the Orca view tab did not report its identity within 15s"
@@ -419,10 +452,16 @@ cmd_identity() {
     value=${line#*=}
     case " $IDENTITY_NAMES " in *" $name "*) ;; *) continue ;; esac
     case "$value" in '' | *[[:cntrl:]]*) continue ;; esac
+    case "$seen" in *" $name "*) error="the Orca identity repeats $name"; break ;; esac
+    if [ "$name" = ORCA_TAB_ID ] && [ "$value" != "$tab_id" ]; then
+      error="the Orca identity does not belong to the fresh terminal handle"
+      break
+    fi
     out="$out $name=$(sh_quote "$value")"
     seen="$seen$name "
   done <"$file"
   rm -f "$file"
+  [ -z "$error" ] || note "$error"
   for name in $IDENTITY_NAMES; do
     case "$seen" in *" $name "*) ;; *) note "the Orca view tab's identity has no $name" ;; esac
   done

@@ -189,7 +189,8 @@ test_open_views_the_window_and_writes_identity() {
   assert_equals "$DEV_ID" "$sel" "the view session shows exactly the target window"
   assert_equals "$CLAUDE_ID" "$("$SHIM/tmux" display-message -p -t '=firstmate:' '#{window_id}')" \
     "the base session's own current window is untouched"
-  ident=$(run_view identity --file "$idfile") || fail "identity was not reported"
+  idfile=$(printf '%s\n' "$out" | sed -n 's/^identity_file=//p')
+  ident=$(run_view identity --file "$idfile" --tab-id tab-1) || fail "identity was not reported"
   assert_absent "$idfile" "the identity file is removed once read"
   assert_not_contains "$ident" "TOKEN" "no hook token is carried into the pane"
   assert_not_contains "$ident" "PORT" "no hook port is carried into the pane"
@@ -257,8 +258,8 @@ test_identity_filters_input() {
     printf 'ORCA_AGENT_HOOK_TOKEN=secret\n'
     printf 'PATH=/evil\n'
   } > "$f"
-  ident=$(run_view identity --file "$f") || fail "identity refused valid input"
-  expect_code 2 "$(run_view identity --file "$f" --wait 0 >/dev/null 2>&1; echo $?)" \
+  ident=$(run_view identity --file "$f" --tab-id "it's") || fail "identity refused valid input"
+  expect_code 2 "$(run_view identity --file "$f" --tab-id "it's" --wait 0 >/dev/null 2>&1; echo $?)" \
     "identity refuses the removed wait override"
   assert_not_contains "$ident" "secret" "a token is never exported"
   assert_not_contains "$ident" "PATH" "only Orca identity names are exported"
@@ -275,7 +276,7 @@ test_identity_filters_input() {
         [ "$name" != "$missing" ] || value=
         printf '%s=%s\n' "$name" "$value" >> "$f"
       done
-      expect_code 3 "$(run_view identity --file "$f" >/dev/null 2>&1; echo $?)" \
+      expect_code 3 "$(run_view identity --file "$f" --tab-id valid >/dev/null 2>&1; echo $?)" \
         "$missing $mode must not yield a partial identity"
     done
   done
@@ -284,9 +285,9 @@ test_identity_filters_input() {
     printf 'ORCA_AGENT_HOOK_ENDPOINT=/e\nORCA_AGENT_HOOK_ENV=production\n'
     printf 'ORCA_AGENT_HOOK_VERSION=bad\033[2J\n'
   } > "$f"
-  expect_code 3 "$(run_view identity --file "$f" >/dev/null 2>&1; echo $?)" \
+  expect_code 3 "$(run_view identity --file "$f" --tab-id tab >/dev/null 2>&1; echo $?)" \
     "a control byte makes the six-field identity incomplete"
-  expect_code 3 "$(run_view identity --file "$TMP_ROOT/never" >/dev/null 2>&1; echo $?)" \
+  expect_code 3 "$(run_view identity --file "$TMP_ROOT/never" --tab-id tab >/dev/null 2>&1; echo $?)" \
     "an identity that never arrives steps aside"
   pass "identity: exports only six nonempty safe fields and refuses missing or incomplete delivery"
 }
@@ -415,6 +416,7 @@ test_open_refuses_the_base_as_a_view() {
 test_open_preserves_borrowed_hooks() {
   local out first_hook last_hook hooks target view=orca-borrowed
   "$SHIM/tmux" new-session -d -t firstmate -s "$view"
+  "$SHIM/tmux" set-option -t "=$view:" @fm_view_window "$target"
   "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[0]' 'run-shell true'
   "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[7]' 'run-shell true'
   first_hook=$("$SHIM/tmux" show-options -H -t "=$view:" 'session-window-changed[0]')
@@ -507,7 +509,7 @@ test_follow_keeps_windows_when_base_is_gone() {
 
 
 # The view follows its agent's window by id. This is the incident shape: a
-# hand-made view session left on window 0 (another agent) is reused by an open,
+# tracked view session left on window 0 (another agent) is reused by an open,
 # as a relaunch does, and must come back to the agent's window; then the
 # agent's window closes, and the view must end and say so rather than fall
 # back to another agent's window.
@@ -527,6 +529,7 @@ test_view_follows_the_agent_window() {
   "$SHIM/tmux" new-window -d -t firstmate: -n fm-alex
   alex_id=$("$SHIM/tmux" display-message -p -t '=firstmate:fm-alex' '#{window_id}')
   "$SHIM/tmux" new-session -d -t firstmate -s orca-alex
+  "$SHIM/tmux" set-option -t "=orca-alex:" @fm_view_window "$alex_id"
   "$SHIM/tmux" select-window -t "=orca-alex:$CLAUDE_ID"
   : > "$ORCA_LOG"
   out=$(run_view open --target firstmate:fm-alex --view-session orca-alex --title alex) \
@@ -555,7 +558,7 @@ test_view_follows_the_agent_window() {
   new_id=$("$SHIM/tmux" display-message -p -t '=firstmate:fm-alex' '#{window_id}')
   out=$(run_view open --target firstmate:fm-alex --view-session orca-alex --title alex) \
     || fail "open after the restart failed: $out"
-  wait_for_window orca-alex "$new_id" || fail "the new view must show the agent's new window"
+  wait_for_window "$(printf '%s\n' "$out" | sed -n 's/^view_session=//p')" "$new_id" || fail "the new view must show the agent's new window"
   pass "view follows its agent's window by id: a relaunch re-selects it, a move snaps back, and a closed window detaches the view with a message"
 }
 
@@ -585,8 +588,61 @@ SH
   pass "zero and invalid Orca and WSL timeouts fall back to bounded defaults"
 }
 
+test_public_open_leaves_untracked_views_untouched() {
+  local view target out hooks selected created mode
+  for mode in open window; do
+    target=$("$SHIM/tmux" new-window -dP -F '#{window_id}' -t firstmate: -n "hand-$mode")
+    view="orca-w${target#@}"
+    "$SHIM/tmux" new-session -d -t firstmate -s "$view"
+    "$SHIM/tmux" select-window -t "=$view:$CLAUDE_ID"
+    "$SHIM/tmux" set-hook -t "=$view:" 'session-window-changed[7]' 'run-shell true'
+    hooks=$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)
+    selected=$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')
+    if [ "$mode" = window ]; then
+      out=$(run_view window "$target") || fail "window did not allocate its own view"
+    else
+      out=$(run_view open --target "firstmate:$target" --view-session "$view") || fail "open did not allocate its own view"
+    fi
+    created=$(printf '%s\n' "$out" | sed -n 's/^view_session=//p')
+    [ "$created" != "$view" ] || fail "the public $mode adopted a hand-opened view"
+    wait_for_window "$created" "$target" || fail "the allocated view shows another window"
+    assert_equals "$selected" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')" "the hand-opened selection is unchanged"
+    assert_equals "$hooks" "$("$SHIM/tmux" show-options -H -t "=$view:" session-window-changed)" "the hand-opened hooks are unchanged"
+    expect_code 1 "$("$SHIM/tmux" show-options -v -t "=$view:" @fm_view_window >/dev/null 2>&1; echo $?)" "the hand-opened view remains untracked"
+    run_view follow --view-session "$view" || fail "follow should ignore the untracked view"
+    assert_equals "$selected" "$("$SHIM/tmux" display-message -p -t "=$view:" '#{window_id}')" "follow leaves the hand-opened view alone"
+  done
+  pass "public open and window preserve untracked grouped views and allocate distinct owned sessions"
+}
+
+test_identity_is_unique_and_matches_the_fresh_tab() {
+  local prefix="$TMP_ROOT/repeated.identity" first second old_file fresh_file fresh_tab ident f _
+  first=$(run_view open --target "firstmate:$DEV_ID" --view-session orca-identity-race --identity-file "$prefix") || fail "first identity open failed"
+  second=$(run_view open --target "firstmate:$DEV_ID" --view-session orca-identity-race --identity-file "$prefix") || fail "fresh identity open failed"
+  old_file=$(printf '%s\n' "$first" | sed -n 's/^identity_file=//p')
+  fresh_file=$(printf '%s\n' "$second" | sed -n 's/^identity_file=//p')
+  fresh_tab=$(printf '%s\n' "$second" | sed -n 's/^tab_id=//p')
+  [ -n "$old_file" ] && [ -n "$fresh_file" ] && [ "$old_file" != "$fresh_file" ] || fail "successive openings share an identity path"
+  # Wait for both asynchronous terminal commands, then simulate a late old writer.
+  for f in "$old_file" "$fresh_file"; do
+    for _ in {1..100}; do [ ! -s "$f" ] || break; sleep 0.05; done
+    [ -s "$f" ] || fail "the terminal never delivered $f"
+  done
+  cp "$fresh_file" "$TMP_ROOT/fresh-copy"
+  cp "$old_file" "$fresh_file"
+  expect_code 3 "$(run_view identity --file "$fresh_file" --tab-id "$fresh_tab" >/dev/null 2>&1; echo $?)" "old-tab identity cannot be accepted for the fresh handle"
+  cp "$TMP_ROOT/fresh-copy" "$fresh_file"
+  ident=$(run_view identity --file "$fresh_file" --tab-id "$fresh_tab") || fail "the correlated identity was rejected"
+  assert_contains "$ident" "ORCA_TAB_ID='$fresh_tab'" "the fresh handle's tab identity is forwarded"
+  assert_present "$old_file" "consuming the fresh identity does not consume an old opening's path"
+  rm -f "$old_file"
+  pass "each opening has a unique identity path and only its fresh terminal's tab identity is accepted"
+}
+
 test_switch_values
 test_open_views_the_window_and_writes_identity
+test_public_open_leaves_untracked_views_untouched
+test_identity_is_unique_and_matches_the_fresh_tab
 test_command_never_names_claude
 test_home_local_orca_project
 test_open_refuses_the_base_as_a_view

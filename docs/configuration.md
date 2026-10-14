@@ -851,6 +851,7 @@ The view session tracks the window by its stable tmux window id, never by index 
 When the secondmate's window itself is gone, the view detaches and removes its tracking instead of displaying another agent's window.
 The base session itself is never accepted as a view or given view tracking.
 The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate as working, waiting on you, or done on that tab.
+Each opening uses a unique identity handoff and accepts only the tab identity returned for its fresh terminal handle.
 Waiting covers a permission prompt and a question the agent asks.
 Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
 A secondmate relaunch, including a subscription switchover, opens a fresh tab and leaves the previous tab open.
@@ -875,7 +876,7 @@ Sessions launched before the switch was turned on carry no Orca identity, so Orc
 They get one at their next relaunch, and nothing here stops or interrupts a running session.
 For the secondmates, turn the switch on in the home that spawned them, then run [`bin/fm-session-refresh.sh`](session-refresh.md) with their ids from that home.
 It relaunches each one only after it reads idle twice, one at a time, and leaves a busy one for a later run; each relaunch opens a fresh tab and forwards its identity.
-For the primary, open its tab with `bin/fm-orca-view.sh open --target <session>:<window> --view-session fmview-main --identity-file <home>/state/fmview-main.identity`, then save the identity with `bin/fm-orca-view.sh identity --file <home>/state/fmview-main.identity > <home>/state/fmview-main.env`.
+For the primary, open its tab with `bin/fm-orca-view.sh open --target <session>:<window> --view-session fmview-main --identity-file <home>/state/fmview-main.identity`, then save the identity with `bin/fm-orca-view.sh identity --file <identity_file returned by open> --tab-id <tab_id returned by open> > <home>/state/fmview-main.env`.
 At the primary's next restart, at a moment it is idle, run `. <home>/state/fmview-main.env` in its window's shell before starting it again.
 
 ## Harness support
