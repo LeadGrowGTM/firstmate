@@ -1,0 +1,21 @@
+initial_window=claude,fm-labrecover, initial_socket=/tmp/fml.pHJ02j/tmux-0/fm-lab
+renamed_relaunch_rc=1 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH
+error: task labrecover's endpoint primary:fm-labrecover reads 'missing', but tmux server 54 on socket /tmp/fml.pHJ02j/tmux-0/fm-lab is not proven newer than spawn_gen s1792017785.1.14986; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of labrecover failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+dead_server_exit_rc=0 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH
+endpoint-gone labrecover harness=codex backend=tmux endpoint=primary:fm-labrecover worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH/work
+same_socket_relaunch_rc=0 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH/data/labrecover/launch-brief.md records no ship branch; defaulting to legacy branch fm/labrecover
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH/data/labrecover/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode direct-PR - confirm its definition of done matches
+notice: labrecover ships mode=direct-PR while the standing posture for demo is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched labrecover harness=codex from=codex model=default effort=default backend=tmux endpoint=primary:fm-labrecover worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.9RVVhH/work
+rebound_window=primary:fm-labrecover rebound_socket=/tmp/fml.pHJ02j/tmux-0/fm-lab new_window_count=1 dirty_content=uncommitted lab work head_preserved=yes
+live_lab_result=pass

@@ -1,0 +1,23 @@
+other_live_server_exit_rc=1 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g
+error: task labboundary's endpoint old:fm-labboundary reads 'missing', but tmux server 61 on socket /tmp/fml.6LocXT/tmux-0/fm-lab-secondary is not proven newer than spawn_gen s1792017906.1.27212; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+unlinked_live_server_exit_rc=1 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g
+error: task labboundary's endpoint old:fm-labboundary reads 'missing', but tmux server process 61 has no answering socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+legacy_older_candidate_exit_rc=1 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g
+error: task labboundary's endpoint old:fm-labboundary reads 'missing', but tmux server 54 on socket /tmp/fml.6LocXT/tmux-0/fm-lab is not proven newer than spawn_gen s1792017906.1.27212; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+legacy_newer_server_exit_rc=0 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g
+endpoint-gone labboundary harness=codex backend=tmux endpoint=old:fm-labboundary worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g/work
+legacy_newer_server_relaunch_rc=0 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g/data/labboundary/launch-brief.md records no ship branch; defaulting to legacy branch fm/labboundary
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g/data/labboundary/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode direct-PR - confirm its definition of done matches
+notice: labboundary ships mode=direct-PR while the standing posture for demo is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched labboundary harness=codex from=codex model=default effort=default backend=tmux endpoint=primary:fm-labboundary worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.CJEK6g/work
+legacy_rebound_window=primary:fm-labboundary legacy_rebound_socket=/tmp/fml.6LocXT/tmux-0/fm-lab window_count=1 dirty_content=retain this uncommitted file head_preserved=yes
+live_boundary_result=pass

@@ -1,0 +1,6 @@
+old_server=3447888 old_window=claude,fm-labrecover, old_worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.tQRuHr/work
+renamed_relaunch_rc=1 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.tQRuHr
+error: task labrecover's endpoint primary:fm-labrecover reads 'missing', but tmux server 3447888 on socket /tmp/fml.3Vf1GK/tmux-1000/fm-lab is not proven newer than spawn_gen s1792017751.3447821.9344; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of labrecover failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+dead_server_exit_rc=1 output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4Y871PXKEW4NFXT6GCWYG7G/fm-lab.tQRuHr
+error: task labrecover's endpoint primary:fm-labrecover reads 'missing', but tmux server process 2196204 has no answering socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
