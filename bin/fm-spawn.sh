@@ -4588,11 +4588,12 @@ agy_spawn_fail() {  # <detail>
 # it is, and the wait continues. On failure SPAWN_WT_LAST_SEEN and
 # SPAWN_WT_LAST_REASON name the last path and why it was rejected.
 spawn_wait_isolated_worktree() {
-  local candidate="" p p_real _
+  local refusal_file=${1:-} candidate="" p p_real _
   WT=
   SPAWN_WT_LAST_SEEN=
   SPAWN_WT_LAST_REASON="the pane reported no path"
   for _ in $(seq 1 60); do
+    [ -z "$refusal_file" ] || [ ! -s "$refusal_file" ] || return 1
     p=$(spawn_current_path "$WT_TARGET" || true)
     [ -z "$p" ] || SPAWN_WT_LAST_SEEN=$p
     if [ -n "$p" ] && spawn_worktree_isolated "$p"; then
@@ -4617,8 +4618,8 @@ spawn_wait_left_path() {  # <path>
   local path=$1 real seen _
   real=$(real_path_or_raw "$path")
   for _ in $(seq 1 60); do
-    seen=$(spawn_current_path "$WT_TARGET" || true)
-    if [ -z "$seen" ] || [ "$(real_path_or_raw "$seen")" != "$real" ]; then
+    if seen=$(spawn_current_path "$WT_TARGET") && [ -n "$seen" ] &&
+      ! _fm_treehouse_path_inside "$(real_path_or_raw "$seen")" "$real"; then
       return 0
     fi
     sleep 1
@@ -4626,8 +4627,32 @@ spawn_wait_left_path() {  # <path>
   return 1
 }
 
+spawn_wait_treehouse_returned() {  # <path>
+  local path status line listed _
+  path=$(real_path_or_raw "$1")
+  for _ in $(seq 1 10); do
+    status=$(cd "$PROJ_ABS" && fm_run_timed 2 env NO_COLOR=1 treehouse status 2>/dev/null) || status=
+    while IFS= read -r line; do
+      if [[ $line =~ ^[^[:space:]]+[[:space:]]{2,}available[[:space:]]{2,}(.+)$ ]]; then
+        listed=${BASH_REMATCH[1]}
+        case "$listed" in
+          '~') listed=$HOME ;;
+          \~/*) listed=$HOME${listed#\~} ;;
+        esac
+        if [ "$(real_path_or_raw "$listed")" = "$path" ]; then
+          return 0
+        fi
+      fi
+    done <<< "$status"
+    sleep 0.5
+  done
+  return 1
+}
+
 spawn_lease_clone_worktree() {
-  local errfile leased rc=0
+  local errfile leased pool rc=0
+  pool=$(fm_treehouse_home_pool "$FM_HOME") || return 1
+  fm_treehouse_pool_check "$FM_HOME" "$PROJ_ABS" "$pool" || return 1
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
     {
@@ -4654,6 +4679,7 @@ spawn_lease_clone_worktree() {
     return 1
   fi
   SPAWN_PRIVATE_LEASE_PATH=$leased
+  fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$leased"
 }
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
@@ -4692,9 +4718,27 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  spawn_send_text_line "$WT_TARGET" 'treehouse get'
-  if ! spawn_wait_isolated_worktree; then
+  pool_refusal_file=$(umask 077; mktemp "$STATE/.fm-treehouse-pool.XXXXXX") || exit 1
+  if ! spawn_send_text_line "$WT_TARGET" "bash $(shell_quote "$SCRIPT_DIR/fm-treehouse-pool-check.sh") $(shell_quote "$FM_HOME") $(shell_quote "$PROJ_ABS") $(shell_quote "$pool_refusal_file") && treehouse get"; then
+    rm -f -- "$pool_refusal_file"
+    exit 1
+  fi
+  if ! spawn_wait_isolated_worktree "$pool_refusal_file"; then
+    if [ -s "$pool_refusal_file" ]; then
+      cat "$pool_refusal_file" >&2
+      rm -f -- "$pool_refusal_file"
+      exit 1
+    fi
+    rm -f -- "$pool_refusal_file"
     echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2
+    exit 1
+  fi
+  rm -f -- "$pool_refusal_file"
+  if ! fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$WT"; then
+    if ! spawn_send_text_line "$WT_TARGET" 'exit' ||
+      ! spawn_wait_left_path "$WT" || ! spawn_wait_treehouse_returned "$WT"; then
+      echo "error: Treehouse worktree '$WT' was not confirmed returned; leave it for treehouse prune and inspect window $T" >&2
+    fi
     exit 1
   fi
   validate_spawn_worktree "treehouse get" "$T"

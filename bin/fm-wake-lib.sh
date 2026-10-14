@@ -1589,6 +1589,105 @@ fm_treehouse_same_clone() {  # <project-dir> <worktree>
   [ "$project_common" = "$slot_common" ]
 }
 
+# True when path is root or a directory under it. A shared string prefix with
+# no slash boundary is not inside: /tmp/crew-extra is not inside /tmp/crew.
+_fm_treehouse_path_inside() {  # <path> <root>
+  local path=$1 root=$2
+  [ -n "$path" ] && [ -n "$root" ] || return 1
+  [ "$root" = / ] && return 0
+  [ "$path" = "$root" ] && return 0
+  case "$path" in
+    "$root"/*) return 0 ;;
+  esac
+  return 1
+}
+
+fm_treehouse_worktree_check() {  # <fm-home> <project> <worktree>
+  local home project worktree boundary label
+  home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
+  project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
+  worktree=$(CDPATH='' cd -- "$3" && pwd -P) || {
+    printf 'error: could not resolve allocated worktree %s; refusing to place a worker there\n' "$3" >&2
+    return 1
+  }
+  for label in 'Firstmate home' 'project clone'; do
+    case "$label" in
+      'Firstmate home') boundary=$home ;;
+      *) boundary=$project ;;
+    esac
+    if _fm_treehouse_path_inside "$worktree" "$boundary"; then
+      printf 'error: allocated worktree %s is inside %s %s; refusing to place a worker there\n' \
+        "$worktree" "$label" "$boundary" >&2
+      return 1
+    fi
+  done
+}
+
+fm_treehouse_pool_check() {  # <fm-home> <project> <treehouse-home>
+  local home project git origin hash pool boundary label
+  home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
+  project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
+  [ -n "${3:-}" ] || return 1
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'error: python3 with tomllib is required to verify the treehouse pool location\n' >&2
+    return 1
+  fi
+  git=$(type -P git) || return 1
+  origin=$("$git" -C "$project" remote get-url origin 2>/dev/null) || origin=$project
+  hash=$(printf '%s' "$origin" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:6])') || return 1
+  [ "${#hash}" -eq 6 ] || return 1
+  pool=$(HOME=$3 python3 - "$project" "$hash" <<'PY'
+import os
+from pathlib import Path
+import sys
+
+try:
+    project = Path(sys.argv[1])
+    user = Path(os.environ["HOME"])
+    repo_config = project / "treehouse.toml"
+    user_config = user / ".config/treehouse/config.toml"
+    config = repo_config if repo_config.exists() else user_config
+    root = ""
+    if config.exists():
+        try:
+            import tomllib
+        except ImportError:
+            raise RuntimeError("python3 with tomllib is required to verify the treehouse pool location")
+        values = tomllib.loads(config.read_text(encoding="utf-8"))
+        roots = [value for key, value in values.items() if key.lower() == "root"]
+        if len(roots) > 1 or (roots and not isinstance(roots[0], str)):
+            raise ValueError(f"ambiguous or non-string root in {config}")
+        if roots:
+            root = roots[0]
+    if root:
+        expanded = os.path.expandvars(root)
+        if "$" in expanded:
+            raise ValueError(f"could not expand root in {config}")
+        base = Path(expanded)
+        if not base.is_absolute():
+            base = project / base
+    else:
+        base = user
+    name = f"{project.name}-{sys.argv[2]}"
+    print(Path(os.path.normpath(base / ".treehouse" / name)).resolve())
+except (OSError, RuntimeError, ValueError, ImportError) as error:
+    print(f"error: could not resolve Treehouse pool before allocation: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+  ) || return 1
+  for label in 'Firstmate home' 'project clone'; do
+    case "$label" in
+      'Firstmate home') boundary=$home ;;
+      *) boundary=$project ;;
+    esac
+    if _fm_treehouse_path_inside "$pool" "$boundary"; then
+      printf 'error: treehouse pool %s is inside %s %s; refusing allocation\n' \
+        "$pool" "$label" "$boundary" >&2
+      return 1
+    fi
+  done
+}
+
 # Treehouse keys its default pool by directory name plus origin, so two homes
 # that clone one origin can be offered the same copy. A home handed another
 # clone's copy attempts a lease using a per-home folder under the user state

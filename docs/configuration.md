@@ -1273,7 +1273,7 @@ A reported finding is a recommendation, not cleanup authority.
   The size checks are read-only measurements taken with `du`.
 
 Treehouse still keys its default pool by directory name plus origin, so two clones with the same name and origin are offered one pool.
-A fresh launch asks Treehouse for a copy first and keeps it only when it is a worktree of the spawning clone.
+After the [pool placement check](#pool-selection-limits), a fresh launch asks Treehouse for a copy and keeps it only when it is a worktree of the spawning clone.
 When treehouse hands it another clone's idle copy, the launch leaves that copy at once and attempts to lease a worktree of its own clone using this home's per-home pool folder.
 The per-home pool folder is named under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/`; a clone-local `treehouse.toml` root can select a different Treehouse location.
 `<home>` is the home's folder name and `<hash>` is the first six hex digits of the sha256 of the home's physical path, so two homes with one folder name stay apart.
@@ -1293,8 +1293,14 @@ The optional pool sweep's extra per-home prune and size checks use the pool path
 
 ### Pool-selection limits
 
-The guard does not retain the pool root selected by an earlier launch.
-Firstmate does not validate the resolved pool location before launch, so a clone-local root or a linked `.treehouse` folder can put a pool inside a Firstmate home or the project clone.
+Before the initial `treehouse get`, Firstmate resolves the pool inside the pane using that pane's HOME and configuration.
+Before a fallback lease, it resolves the pool using the lease HOME.
+It refuses either allocation when the resolved pool is inside the spawning home or project clone.
+Every pool placement check requires `python3`; when a repository or user Treehouse TOML config exists, `python3` with `tomllib` is required to verify the treehouse pool location.
+A spawn is refused when the applicable requirement is unavailable.
+After either allocation, Firstmate resolves the worktree and refuses to launch a worker there if it is inside either boundary; [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns both path checks.
+For a refused initial interactive copy, Firstmate confirms that the pane left it and that plain `treehouse status` reports that exact copy available; otherwise the spawn reports an unconfirmed return for Treehouse prune.
+An untouched same-clone fallback lease is returned by the existing abort cleanup.
 If a clone-local `treehouse.toml` root is added after a per-home pool already exists, the guard's extra per-home prune follows the new root and can prune that configured pool twice while leaving the earlier pool unpruned.
 The per-home size check still measures the computed folder and can miss an external configured root.
 If a launch sets `XDG_STATE_HOME` only for that command and the armed watcher runs without it, the watcher computes a different per-home folder and misses the launch's pool during prune and size checks.
