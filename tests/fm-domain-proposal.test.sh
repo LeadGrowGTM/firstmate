@@ -105,10 +105,11 @@ tool submit media "$TMP_ROOT/p1.json" --corr 0123456789abcdef >/dev/null 2>&1; e
 pass 'submit refuses malformed or unrequested proposals'
 
 tool approve media >/dev/null 2>&1; expect_code 2 "$?" 'approve before an answer'
-proposal $'v2 text\n~~~~\n ~~~~~\n   ~~~~~~\nfinish' > "$TMP_ROOT/p2.json"
+proposal $'v2 text\r~~~~\r\n ~~~~~\n   ~~~~~~\nfinish' > "$TMP_ROOT/p2.json"
 tool submit media "$TMP_ROOT/p2.json" >/dev/null || fail 'submit v2 failed'
 grep -xF '~~~~~~~' "$DIR/v2.md" >/dev/null || fail 'indented closing fence did not get a safe delimiter'
 assert_grep '   ~~~~~~' "$DIR/v2.md" 'indented proposed text was not preserved'
+if grep -q $'\r' "$DIR/v2.md"; then fail 'bare carriage returns survived into the report'; fi
 D2=$(jq -r .digest "$DIR/v2.json")
 assert_not_equals "$D1" "$D2" 'versions have distinct digests'
 hold_tool open "$TASK" || fail 'v2 re-hold closed the card'

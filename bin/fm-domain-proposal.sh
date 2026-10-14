@@ -312,12 +312,13 @@ submit)
   fi
   # shellcheck disable=SC2016 # jq variables are expanded by jq.
   atomic "$DIR/v$VERSION.md" jq -r --arg mate "$MATE" --argjson v "$VERSION" --arg digest "$DIGEST" '
+    def nl: gsub("\r\n?"; "\n");
     def fence($s): ([($s | scan("(?m)^ {0,3}~{3,}") | sub("^ {0,3}"; "")) | length] | max // 3) as $n | "~" * ($n + 1);
     "# Domain proposal: \($mate) v\($v)\n\nVersion digest: \($digest)\n\n## Bullets\n"
     + (.proposal.bullets | map("- " + .) | join("\n"))
     + "\n\n## Exact changes\n"
     + (.proposal.changes | map(
-        "\n### \(.file) (\(.kind))\n\nObserved original digest: \(.original_digest)\nAlways-loaded size delta: \(.always_loaded_size_delta)\nEffect: \(.effect)\nSources: \(.sources | join(" "))\n\nBefore:\n\n\(fence(.before))\n\(.before)\n\(fence(.before))\n\nAfter:\n\n\(fence(.after))\n\(.after)\n\(fence(.after))\n") | join(""))' \
+        "\n### \(.file) (\(.kind))\n\nObserved original digest: \(.original_digest)\nAlways-loaded size delta: \(.always_loaded_size_delta)\nEffect: \(.effect)\nSources: \(.sources | join(" "))\n\nBefore:\n\n\(fence(.before | nl))\n\(.before | nl)\n\(fence(.before | nl))\n\nAfter:\n\n\(fence(.after | nl))\n\(.after | nl)\n\(fence(.after | nl))\n") | join(""))' \
     "$DIR/v$VERSION.json"
   OPTS=$(mktemp "$STATE/.domain-proposal-options.XXXXXX")
   jq -n --arg digest "$DIGEST" --arg report "$DIR/v$VERSION.md" --slurpfile proposal "$DIR/v$VERSION.json" --arg mate "$MATE" --argjson v "$VERSION" '
