@@ -830,8 +830,8 @@ A local standalone-clone home cannot receive a primary-local commit through that
 ## Orca view tabs (config/orca-view-tabs)
 
 The optional local, gitignored `config/orca-view-tabs` file gives each secondmate on the tmux backend an Orca desktop tab that views its window.
-It holds one word: `on` opens new tabs, and `off` prevents new tabs, as an absent file does.
-Turning it off does not close a tab already recorded for a secondmate; cleanup still attempts to close that tab.
+It accepts one line containing `on` to open new tabs or `off` to prevent them, with surrounding whitespace ignored; an absent file also means `off`.
+Turning it off prevents future tabs and leaves existing tabs open for the operator.
 Any other content is treated as `off` with a one-line warning, so the file never stops a spawn.
 The home that spawns the secondmate reads the switch, and secondmate homes do not inherit it.
 
@@ -853,7 +853,7 @@ The base session itself is never accepted as a view or given view tracking.
 The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate as working, waiting on you, or done on that tab.
 Waiting covers a permission prompt and a question the agent asks.
 Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
-A relaunch, including a worker account switchover, opens a fresh tab and leaves the previous tab open.
+A secondmate relaunch, including a subscription switchover, opens a fresh tab and leaves the previous tab open.
 If a fresh tab cannot open, the relaunch keeps the previous recorded tab and its identity.
 Firstmate never closes view tabs or kills their grouped tmux sessions, including failed opens, replacement, teardown, switch-off, and recursive cleanup.
 Unused views remain for the operator or ordinary tmux session cleanup; orphaned views detach when their tracked window disappears.
@@ -875,7 +875,6 @@ Sessions launched before the switch was turned on carry no Orca identity, so Orc
 They get one at their next relaunch, and nothing here stops or interrupts a running session.
 For the secondmates, turn the switch on in the home that spawned them, then run [`bin/fm-session-refresh.sh`](session-refresh.md) with their ids from that home.
 It relaunches each one only after it reads idle twice, one at a time, and leaves a busy one for a later run; each relaunch opens a fresh tab and forwards its identity.
-A hand-opened tab and its `orca-*` view session stay untouched.
 For the primary, open its tab with `bin/fm-orca-view.sh open --target <session>:<window> --view-session fmview-main --identity-file <home>/state/fmview-main.identity`, then save the identity with `bin/fm-orca-view.sh identity --file <home>/state/fmview-main.identity > <home>/state/fmview-main.env`.
 At the primary's next restart, at a moment it is idle, run `. <home>/state/fmview-main.env` in its window's shell before starting it again.
 
