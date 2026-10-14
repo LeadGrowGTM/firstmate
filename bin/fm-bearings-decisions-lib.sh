@@ -8,5 +8,8 @@ FM_BEARINGS_DECISIONS_JQ_DEFS='
      | {id, title, repo, reason:.hold_reason,
         priority, origin:.hold_origin, hold_set,
         bucket:.hold_bucket, until:.hold_until,
-        pr_url, stale_reason:null}];
+        about:(.decision.about // null), decide:(.decision.decide // null),
+        options:(.decision.options // null), recommended:(.decision.recommended // null),
+        report:(.decision.report // .report_path // null),
+        pr_url:(.decision.pr_url // .pr_url), stale_reason:null}];
 '

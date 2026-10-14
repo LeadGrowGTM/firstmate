@@ -562,7 +562,7 @@ EOF
 print_open_decisions_section() {
   local snapshot=${1:-} open task key verb note line item_bytes=220 global_bytes=4000
   local output='' used=0 shown=0 ordinary_shown=0 omitted=0 bytes
-  local url urls='' known='' lookups=0 unchecked=0 pr_state annotation unparsed lineno warned=0 more=0 more_locations=''
+  local url urls='' known='' lookups=0 unchecked=0 pr_state annotation unparsed lineno warned=0 more=0 more_locations='' orphans
 
   if [ -n "$snapshot" ]; then
     # Before the fold: with no presentation manifest yet, the unread span is
@@ -574,6 +574,21 @@ print_open_decisions_section() {
     unparsed=''
   fi
   [ -n "$open" ] || [ -n "$unparsed" ] || return 0
+
+  # Check every folded open needs-decision, including entries omitted by the
+  # display cap. A failed backend read is disclosed rather than treated as empty.
+  if [ -n "$open" ]; then
+    if orphans=$(printf '%s\n' "$open" | fm_run_timed 20 "$SCRIPT_DIR/fm-captain-hold.sh" orphans 2>/dev/null); then
+      while IFS=$'\t' read -r task key; do
+        [ -n "$task" ] || continue
+        printf 'OPEN DECISIONS: orphan needs-decision task=%s key=%s; no matching captain-held task in this home\n' "$task" "$key" || return 1
+      done <<EOF
+$orphans
+EOF
+    else
+      printf 'OPEN DECISIONS: captain-held task orphan check unavailable; backlog read failed or exceeded its bound\n' || return 1
+    fi
+  fi
 
   # PR states: the offline merge record first, then capped live lookups for the
   # rest, each URL read at most once per drain.

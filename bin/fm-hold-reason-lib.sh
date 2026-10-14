@@ -5,14 +5,22 @@
 # so its own `hold` refuses parentheses and line breaks. A decision reason is
 # ordinary prose, so bin/fm-captain-hold.sh encodes the reason where it writes
 # it and every reader that shows it decodes it again, instead of banning the
-# characters. Stored reasons use the reserved fm-hold-v1: prefix followed by
-# base64-encoded UTF-8 text. Unmarked reasons are plain text. Readers decode only
+# characters. Plain reasons use fm-hold-v1: and reasons with decision copy use
+# fm-hold-v2:, each followed by base64-encoded UTF-8. Unmarked reasons are plain text. Readers decode only
 # the hold-reason field, once, and keep line breaks in quoted output strings.
+# JSON snapshots also receive the decoded hold copy as a decision candidate.
 #
 # Source this file; it defines functions only.
 
 # fm_hold_reason_encode <reason>: print the storable form, no trailing newline.
 fm_hold_reason_encode() {
+  if [ "$#" -eq 2 ]; then
+    local payload
+    payload=$(jq -cn --arg reason "$1" --argjson decision "$2" '{reason:$reason,decision:$decision}') || return 1
+    printf '%s' "$payload" | perl -MMIME::Base64=encode_base64 -0777 -ne \
+      'print "fm-hold-v2:", encode_base64($_, "")'
+    return
+  fi
   printf '%s' "$1" | perl -MMIME::Base64=encode_base64 -0777 -ne \
     'print "fm-hold-v1:", encode_base64($_, "")'
 }
@@ -28,27 +36,36 @@ fm_hold_reason_decode_stream() {
     my $json = JSON::PP->new->allow_nonref;
     sub decode_reason {
       my ($value) = @_;
-      return $value unless defined($value) && $value =~ /^fm-hold-v1:(.*)\z/s;
-      my $payload = $1;
+      return ($value, undef) unless defined($value) && $value =~ /^fm-hold-v([12]):(.*)\z/s;
+      my ($version, $payload) = ($1, $2);
       my $bytes = decode_base64($payload);
-      return $value unless encode_base64($bytes, "") eq $payload;
+      return ($value, undef) unless encode_base64($bytes, "") eq $payload;
       # Historical literals with valid base64 and UTF-8 remain indistinguishable
       # from encoded reasons; malformed payloads retain their stored text.
       my $decoded = eval { decode("UTF-8", $bytes, FB_CROAK) };
-      return $@ ? $value : $decoded;
+      return ($value, undef) if $@;
+      return ($decoded, undef) if $version eq "1";
+      my $data = eval { $json->decode($decoded) };
+      return ($value, undef) if $@ || ref($data) ne "HASH"
+        || ref($data->{reason}) || !defined($data->{reason})
+        || ref($data->{decision}) ne "HASH";
+      return ($data->{reason}, $data->{decision});
     }
     sub decode_field {
       my ($raw) = @_;
       my $value = $raw =~ /^"/ ? $json->decode($raw) : $raw;
-      my $decoded = decode_reason($value);
+      my ($decoded) = decode_reason($value);
       return $decoded eq $value ? $raw : $json->encode($decoded);
     }
     if ($format eq "json") {
       local $/;
       my $snapshot = $json->decode(<STDIN>);
       for my $record (@{$snapshot->{records}}) {
-        $record->{hold_reason} = decode_reason($record->{hold_reason})
-          if exists $record->{hold_reason};
+        if (exists $record->{hold_reason}) {
+          my ($reason, $decision) = decode_reason($record->{hold_reason});
+          $record->{hold_reason} = $reason;
+          $record->{decision} = $decision if defined($decision);
+        }
       }
       print $json->encode($snapshot), "\n";
       exit;
@@ -56,7 +73,7 @@ fm_hold_reason_decode_stream() {
     my ($column, $task);
     while (my $line = <STDIN>) {
       if ($format eq "markdown") {
-        $line =~ s{^([-*] .*\(hold:\s*)(fm-hold-v1:[A-Za-z0-9+/]*={0,2})(\).*)$}
+        $line =~ s{^([-*] .*\(hold:\s*)(fm-hold-v[12]:[A-Za-z0-9+/]*={0,2})(\).*)$}
           {$1 . decode_field($2) . $3}e;
       } elsif ($line =~ /^tasks\[\d+\]\{([^}]*)\}:\n?$/) {
         my @names = split /,/, $1;

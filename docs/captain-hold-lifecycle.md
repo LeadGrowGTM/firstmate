@@ -34,6 +34,7 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 | Subcommand | What it does | Details |
 | --- | --- | --- |
 | `hold` | Creates or reuses a task and holds it for the captain. | [Creating a hold](#creating-a-hold-hold) |
+| `migrate-options` | Previews or imports legacy decision copy into local captain-held tasks. | [Creating a hold](#creating-a-hold-hold) |
 | `answer` | Records the captain's exact words and resolves the call. | [Answering a call](#answering-a-call-answer) |
 | `complete` | Records the reviewed captain-held task ids in the originating task's metadata. | [Recording a reviewed inventory](#recording-a-reviewed-inventory-complete) |
 | `verify` | Read-only check that scout teardown runs before removing source state. | [Checking before scout teardown](#checking-before-scout-teardown-verify) |
@@ -43,6 +44,7 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 | `reconcile-requests` | Internal intake that records a reconcile request from a board selection. | [Reconcile](#reconcile-re-check-reality-never-a-blind-close) |
 | `reconcile close`, `reconcile note`, `reconcile list` | Retire or list pending reconcile requests. | [Verifying and retiring a request](#verifying-and-retiring-a-request) |
 | `diverged` | Read-only report of a call whose two records disagree. | [Record divergence](#record-divergence) |
+| `orphans` | Read-only check for open `needs-decision` keys without a matching local captain hold. | [Creating a hold](#creating-a-hold-hold) |
 
 ### Creating a hold (`hold`)
 
@@ -52,17 +54,26 @@ It works in this order:
 1. It uses an existing task, or creates one when nothing exists to hold.
 2. It records the task's UTC hold-set timestamp as the leading line of the task body.
 3. When `--origin` is supplied, it records the origin on the task, replacing any previous association.
-4. It invokes the underlying tasks-axi hold operation.
+4. It invokes the underlying tasks-axi hold operation with the reason and any option copy in one encoded hold value.
 5. It verifies the hold and timestamp.
 
 Publishing the stamp first ensures a snapshot cannot observe a newly captain-held task without the timestamp that defines its age.
+Decision option copy lives in that task's active hold reason.
+The snapshot projects it into Bearings for markdown-backed homes; Beads-backed homes do not yet project that copy into decision cards.
+[`bin/fm-captain-hold.sh --help`](../bin/fm-captain-hold.sh) owns the option format and dry-run-first legacy import command; the import never deletes its source file.
+Legacy import resolves each existing key to its backend identity and skips aliases without writing, naming the canonical id for a manual hold.
+For a key that matches its backend identity, import checks under the hold mutation lock and skips every already-held task, including holds without option copy, and every closed or durably resolved call.
+The drain flags an open local `needs-decision` task/key without a matching captain-held task in this home, excluding relay lines for holds owned by a secondmate home.
+For a separate held task, the checker looks for the exact status key or the `<origin>-decision-<key>` task id; its `--origin` link alone does not match another key from the same origin.
+If neither supported identity matches the status key, close the old keyed status call through the existing status protocol and publish a new `needs-decision [key=<held-task-id>]` line for that still-open call.
+It discloses an unavailable backlog check rather than claiming the home is clear.
 
 Repeat and edge cases:
 
 - Retries of an active hold preserve its hold-set timestamp.
 - Re-holding released work starts a new timestamped lifecycle.
 - A closed task is refused rather than reopened.
-- `--until` stores the captain's own deferral date through tasks-axi's date gate.
+- `--until` stores the captain's own deferral date through tasks-axi's date gate and preserves the current option copy when no new copy is supplied; an option-free re-hold without `--until` clears that copy.
 - Before the backend hold runs, `--origin` records the origin the call is held for on its own `Captain hold origin:` body line, which `complete` and `verify` check using backend identities rather than alias spellings.
   If that write fails, the backend hold is not attempted.
 - The reason may contain parentheses, semicolons, quotes, and line breaks.

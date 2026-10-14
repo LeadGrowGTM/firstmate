@@ -419,6 +419,7 @@ While the home runs the host, main's lease-checked commands also take the per-ta
 
 The tracked `.tasks.toml` pins the default `tasks-axi` markdown backend to `data/backlog.md`, with `done_keep = 10` and an archive at `data/done-archive.md`.
 A home may instead select another tasks-axi adapter such as Beads through its own `.tasks.toml` or `TASKS_AXI_BACKEND`; firstmate still uses only tasks-axi verbs for routine backlog reads and mutations, and the adapter maps `start` and evidence-bearing `done` transitions to its native statuses and evidence fields.
+The [captain-hold lifecycle mechanism](captain-hold-lifecycle.md#creating-a-hold-hold) owns task option projection into Bearings, which currently supports markdown backlogs only.
 
 ### Captain holds on Beads
 
