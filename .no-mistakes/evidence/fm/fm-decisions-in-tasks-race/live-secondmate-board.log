@@ -1,0 +1,7 @@
+Mate backlog holds the call:
+  id: mate-call
+  held: yes
+  hold_kind: captain
+Main backlog contains mate-call: no
+Parent Bearings reads registered mate ledger:
+{"layout":[{"owner":"mate","key":"mate-call","about":"Secondmate release","options":[{"label":"Stage","value":"stage"},{"label":"All","value":"all"}]}],"unavailable":[]}

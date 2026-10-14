@@ -1,0 +1,4 @@
+ok - hold reason atomically owns current options and preserves task body history
+ok - migration rechecks concurrent held and released calls under the mutation lock
+ok - migration skips aliases without writing and preserves a concurrent canonical hold
+ok - drain flags still-open needs-decision keys without a matching local captain hold

@@ -1,0 +1,10 @@
+Wake drain with open status lines:
+OPEN DECISIONS: orphan needs-decision task=owner-b key=shared; no matching captain-held task in this home
+OPEN DECISIONS: orphan needs-decision task=worker key=lost; no matching captain-held task in this home
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+Direct orphan probe of folded open decisions:
+worker	lost
+owner-b	shared
+Wake drain after resolving lost status:
+OPEN DECISIONS: orphan needs-decision task=owner-b key=shared; no matching captain-held task in this home
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'

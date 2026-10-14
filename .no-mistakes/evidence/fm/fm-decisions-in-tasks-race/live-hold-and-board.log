@@ -1,0 +1,10 @@
+Held task and board projection; stale side-only row exists in data/captain-decisions.json:
+  id: route
+  state: queued
+  held: yes
+  hold_kind: captain
+[{"key":"route","reason":"Choose (north) or south","about":"Current routing","decide":"Pick route","options":[{"hint":"Fast","value":"north","label":"North"},{"value":"south","label":"South"}],"recommended":"north","report":"data/route/report.md","pr_url":"https://github.com/example/repo/pull/17"}]
+Dated deferral preserves options:
+[{"key":"route","reason":"Return in January","about":"Current routing","options":[{"value":"north","label":"North","hint":"Fast"},{"label":"South","value":"south"}],"until":"2099-01-01"}]
+Plain option-free rehold replaces options:
+[{"key":"route","reason":"Fresh option-free call","about":null,"options":null}]

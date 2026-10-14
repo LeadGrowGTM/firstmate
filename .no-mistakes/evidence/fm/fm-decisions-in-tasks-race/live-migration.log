@@ -1,0 +1,9 @@
+Preview, apply, repeat against real tasks-axi:
+would-hold: legacy Legacy decision
+held: legacy
+skipped: legacy (already held)
+Migrated task on Bearings:
+[{"key":"legacy","about":"Migrated copy","decide":"Choose","options":[{"value":"option-1","label":"Stay"},{"value":"option-2","label":"Move"}],"recommended":"option-1"}]
+Legacy source remains: yes
+Invalid batch refusal: fm-captain-hold: invalid legacy option copy
+First task from invalid batch exists: no
