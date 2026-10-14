@@ -334,9 +334,10 @@ cmd_open() {
       note "tmux did not create view session $VIEW_SESSION"
   else
     grouped=$(tmux display-message -p -t "=$VIEW_SESSION:" '#{session_grouped}' 2>/dev/null) || grouped=
-    [ "$grouped" = 1 ] &&
-      tmux list-windows -t "=$VIEW_SESSION" -F '#{window_id}' 2>/dev/null | grep -Fxq "$WINDOW_ID" ||
+    if [ "$grouped" != 1 ] ||
+      ! tmux list-windows -t "=$VIEW_SESSION" -F '#{window_id}' 2>/dev/null | grep -Fxq "$WINDOW_ID"; then
       note "view session $VIEW_SESSION belongs to another tmux base session"
+    fi
     tracked=$(tmux show-options -v -t "=$VIEW_SESSION:" @fm_view_window 2>/dev/null) || tracked=
     if [ -z "$tracked" ]; then
       # An existing untracked group may belong to a hand-opened tab.
