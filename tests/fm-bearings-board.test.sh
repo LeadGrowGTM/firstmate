@@ -26,8 +26,13 @@ make_home() {  # <name>
   # inside a command substitution, so an array append here never reaches the
   # caller and every listener this suite started used to survive the run.
   fm_test_track_procevent_home "$home" "$home/procevent-claims"
-  mkdir -p "$home/state" "$home/data" "$home/lavish-state"
+  mkdir -p "$home/state" "$home/data" "$home/lavish-state" "$home/config"
   fakebin=$(fm_fakebin "$home")
+  cat > "$fakebin/orca-ide" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" = tab && "${2:-}" = create && "${3:-}" = --worktree && \
+   "${5:-}" = --url && "${6:-}" = http://127.0.0.1:* && "${7:-}" = --json ]]
+SH
   cat > "$fakebin/lavish-axi" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -97,7 +102,7 @@ jq -n --arg file "$real" \
 emit "$real" opened
 exit 0
 SH
-  chmod +x "$fakebin/lavish-axi"
+  chmod +x "$fakebin/lavish-axi" "$fakebin/orca-ide"
   printf '%s\n' "$home"
 }
 
@@ -414,7 +419,7 @@ if [ "${1:-}" != poll ]; then
   jq -n --arg file "$real" \
     '{sessions:{"0123456789abcdef":{file:$file,url:"http://127.0.0.1:14387/session/0123456789abcdef"}}}' \
     > "$LAVISH_AXI_STATE_DIR/state.json"
-  printf 'session:\n  status: opened\n'
+  printf 'session:\n  url: "http://127.0.0.1:14387/session/0123456789abcdef"\n  status: opened\n'
   exit 0
 fi
 cat <<EOF

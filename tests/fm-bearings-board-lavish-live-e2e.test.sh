@@ -52,6 +52,8 @@ LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-bearings-lavish-live.XXXXXX") || fail "canno
 LAB=$(cd -P -- "$LAB" && pwd -P)
 mkdir -p "$LAB/state" "$LAB/data"
 fm_test_track_procevent_home "$LAB" "$LAB/procevent-claims"
+fakebin=$(fm_fakebin "$LAB")
+fm_fake_exit0 "$fakebin" orca-ide
 
 cat > "$LAB/payload.json" <<'JSON'
 {
@@ -75,7 +77,7 @@ cat > "$LAB/payload.json" <<'JSON'
 JSON
 
 run_board() {
-  FM_HOME="$LAB" FM_STATE_OVERRIDE="$LAB/state" FM_DATA_OVERRIDE="$LAB/data" \
+  PATH="$fakebin:$PATH" FM_HOME="$LAB" FM_STATE_OVERRIDE="$LAB/state" FM_DATA_OVERRIDE="$LAB/data" \
     FM_PROCEVENT_CLAIM_ROOT="$LAB/procevent-claims" \
     "$ROOT/bin/fm-bearings-board.sh" "$@"
 }
@@ -84,7 +86,7 @@ BOARD="$LAB/.lavish/bearings-board.html"
 run_board build "$LAB/payload.json" >/dev/null 2>&1 || fail "the guard board did not build"
 [ -f "$BOARD" ] || fail "the guard board was not published"
 
-url=$(lavish-axi "$BOARD" | sed -n 's/^[[:space:]]*url:[[:space:]]*//p' | head -1 | tr -d '"')
+url=$(lavish-axi "$BOARD" --no-open | sed -n 's/^[[:space:]]*url:[[:space:]]*//p' | head -1 | tr -d '"')
 case "$url" in
   http://*/session/*) ;;
   *) fail "could not read the guard board session url: $url" ;;
@@ -98,7 +100,7 @@ curl -fsS -X POST "$base/api/$key/end" >/dev/null 2>&1 \
 
 # ASSUMPTION UNDER GUARD: this exits 0 while reporting the session is not live.
 set +e
-ended_out=$(lavish-axi "$BOARD" 2>&1)
+ended_out=$(lavish-axi "$BOARD" --no-open 2>&1)
 ended_rc=$?
 set -e
 [ "$ended_rc" -eq 0 ] \

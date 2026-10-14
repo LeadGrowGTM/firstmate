@@ -13,7 +13,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
 | Automatic reversible work and numeric goals | [Idle sweep and standing targets](#idle-sweep-and-standing-targets) |
-| Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and [Claude Remote Control](#claude-remote-control-configclaude-remote-control) |
+| Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd), [Claude Remote Control](#claude-remote-control-configclaude-remote-control), and [Orca view tabs](#orca-view-tabs-configorca-view-tabs) |
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity) and [worktree pool guard](#worktree-pool-guard) |
 | Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
 | Opt-in recurring task intake | [Recurring intake](#recurring-intake-configschedulesjson) |
@@ -827,6 +827,58 @@ An existing linked-worktree home that predates this rule advances through its ma
 
 A local standalone-clone home cannot receive a primary-local commit through that no-fetch sync, so it receives the rule through `/updatefirstmate`'s origin refresh instead.
 
+## Orca view tabs (config/orca-view-tabs)
+
+The optional local, gitignored `config/orca-view-tabs` file gives each secondmate on the tmux backend an Orca desktop tab that views its window.
+It accepts one line containing `on` to open new tabs or `off` to prevent them, with surrounding whitespace ignored; an absent file also means `off`.
+Turning it off prevents future automatic tabs and leaves existing tabs open for the operator.
+Any other content is treated as `off` with a one-line warning, so the file never stops a spawn.
+The home that spawns the secondmate reads the switch, and secondmate homes do not inherit it.
+
+The optional home-local `config/orca-view-project` file selects the Orca project for both automatic tabs and the public `open` and `window` helpers.
+It contains one nonempty Orca worktree selector, passed as a single `--worktree` argument, preserving Windows paths and spaces.
+An absent file defaults to the `firstmate` project's worktree `33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate`.
+An unreadable, empty, or multiline file reports a note and skips opening a tab.
+This selection is independent of the Firstmate code root, so a WSL checkout path does not select the unrelated `mitch/project` entry.
+With the switch on, every secondmate spawn or relaunch opens one Orca terminal, titled with the secondmate id, on that selected Orca project.
+The tab attaches a grouped tmux view session that shows exactly that secondmate's window, so each tab follows its own window without moving any other viewer.
+It prefers `fmview-<id>` and chooses a distinct name when a candidate is occupied by any unrecorded session or another task's view.
+A recorded view for this secondmate is reused only while it still tracks this secondmate's window.
+The six hand-opened `orca-*` sessions are never selected or tracked by automatic opening.
+It never adopts a view recorded for another secondmate.
+Tracking appends an identifiable hook without replacing existing local or inherited hook entries; untracking removes only that entry.
+The view session tracks the window by its stable tmux window id, never by index or name, and returns to it whenever it is moved off it, such as after a relaunch or another window closes.
+When the secondmate's window itself is gone, the view detaches and removes its tracking instead of displaying another agent's window.
+The base session itself is never accepted as a view or given view tracking.
+The tab's Orca identity is forwarded into the secondmate's launch, so Orca shows the secondmate as working, waiting on you, or done on that tab.
+Each opening uses a unique identity handoff and accepts only the tab identity returned for its fresh terminal handle.
+Waiting covers a permission prompt and a question the agent asks.
+Those states come from Orca's Claude hooks, so they appear only for a Claude configuration directory Orca has installed its hooks into.
+A secondmate relaunch, including a subscription switchover, opens a fresh tab and leaves the previous tab open.
+If a fresh tab cannot open, the relaunch keeps the previous recorded tab and its identity.
+Firstmate never closes view tabs or kills their grouped tmux sessions, including failed opens, replacement, teardown, switch-off, and recursive cleanup.
+Unused views remain for the operator or ordinary tmux session cleanup; orphaned views detach when their tracked window disappears.
+When Orca, its command line, or the Orca project is unavailable, the spawn continues without a new tab and prints one note.
+Ship and scout workers never get a tab, and other runtime backends ignore the switch.
+
+The primary session is not spawned by Firstmate.
+To give it the same kind of tab, run `bin/fm-orca-view.sh open --target <session>:<window> --view-session fmview-main` once from the primary's home.
+That tab shows the primary's window, but its states need the primary's own launch to carry the tab's identity, which this command does not change.
+
+Any home, the primary or a secondmate, can also pop open a tab on one window of its own tmux server with `bin/fm-orca-view.sh window <@N>`, naming the window by its stable tmux id.
+It needs no switch, reuses the same tab-opening code and window-following view, and reaches Orca on WSL through an interop socket it proves live rather than the one the tmux server inherited.
+When Orca is unreachable it says why and exits without a tab.
+`bin/fm-orca-view.sh --help` owns the command line lookup, the tab command, and the identity it forwards.
+
+### Giving already-running sessions their identity
+
+Sessions launched before the switch was turned on carry no Orca identity, so Orca never shows them as working or waiting.
+They get one at their next relaunch, and nothing here stops or interrupts a running session.
+For secondmates, set `FM_HOME` to the home that spawned them, turn on its switch, then run [session refresh](session-refresh.md) with their ids.
+Its [idle and eligibility guards](session-refresh.md#what-it-refreshes) determine which agents relaunch; a successful Orca opening gives each replacement a fresh tab identity.
+For the primary, open its tab with `bin/fm-orca-view.sh open --target <session>:<window> --view-session fmview-main --identity-file <home>/state/fmview-main.identity`, then save the identity with `bin/fm-orca-view.sh identity --file <identity_file returned by open> --tab-id <tab_id returned by open> > <home>/state/fmview-main.env`.
+At the primary's next restart, at a moment it is idle, run `. <home>/state/fmview-main.env` in its window's shell before starting it again.
+
 ## Harness support
 
 claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, and omp are empirically verified for crewmate and secondmate launches; gemini is verified for crewmate and scout launches only, and [README requirements](../README.md#requirements) own the set supported for the primary session.
@@ -1102,6 +1154,16 @@ When the file is absent, worker launches do not add a board address and retain t
 
 Malformed or unreadable values refuse the launch before the worker starts.
 The address selects the existing shared server; it does not authorize starting or stopping the server, and the Lavish startup crash remains a vendor-tool concern.
+
+## Lavish page browser (config/lavish-orca-worktree)
+
+Lavish pages open through [`bin/fm-lavish-open.sh`](../bin/fm-lavish-open.sh), which sends live session URLs to Orca.
+Orca tabs default to the captain's firstmate project at `id:33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate`.
+The optional `config/lavish-orca-worktree` overrides that destination with another `id:<repo-id>::C:\...` Windows worktree selector; path selectors and WSL paths are refused.
+If `orca-ide` is unavailable, the opener prints the page URL and a note for manual opening without launching a browser.
+An invalid destination or failed Orca open reports an error.
+The override file is local, gitignored, and inherited into secondmate homes through the primary-authoritative configuration contract.
+Opening a page grants no authority to drive logged-in sites.
 
 ## Home brief include (config/brief-include.md)
 
@@ -2539,7 +2601,7 @@ A long-polling external process is registered as a *source* through its adapter,
 
 **Open the Lavish artifact first**
 
-Before arming any Lavish source, open its artifact with `lavish-axi` so the saved session identifies the board's server; reply and poll attempts derive their host and port from that session and refuse missing or invalid session evidence before posting or consuming a staged worker reply.
+Before arming any Lavish source, open its artifact with `bin/fm-lavish-open.sh` so the saved session identifies the board's server; reply and poll attempts derive their host and port from that session and refuse missing or invalid session evidence before posting or consuming a staged worker reply.
 
 **Retry interrupted Lavish polls**
 
@@ -2958,6 +3020,7 @@ FM_BACKEND_HERDR_SUBMIT_POLLS=6  # herdr-only: agent-state samples spread across
 FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0.6  # herdr-only: minimum per-Enter confirmation budget before polling agent-state after an idle baseline
 FM_ZELLIJ_SESSION=firstmate  # zellij-only: named session for normal backend ops and test isolation (docs/zellij-backend.md)
 CMUX_SOCKET_PASSWORD=   # cmux-only: socket password fallback when config/cmux-socket-password is absent (docs/cmux-backend.md)
+FM_ORCA_CLI=            # Orca view tabs only: the Orca command line to use instead of the one bin/fm-orca-view.sh finds; see "Orca view tabs"
 FM_SESSION_START_STATUS_TAIL=5   # state/*.status lines printed per task in the session-start digest; each line is capped by bin/fm-line-cap-lib.sh
 FM_SESSION_START_QUEUED_LIMIT=20   # plain queued backlog rows in the session-start digest; in-flight, held, and blocked rows are never bounded and done rows are never listed
 FM_SESSION_START_ENDPOINT_TIMEOUT=10   # seconds bounding each per-task endpoint liveness read in the session-start digest (bin/fm-session-start.sh); nonpositive or invalid values fall back to 10; a read that hits the bound or dies becomes that task's own `endpoint: error` line and the digest continues

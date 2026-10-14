@@ -344,7 +344,10 @@
 #   marker FM_TASK_ID that ship and scout panes receive above, plus the
 #   compact-adviser kill switch COMPACT_ADVISER_DISABLE, which the floor also
 #   pins to 1 with a literal assignment so it survives the cleared environment
-#   even on a host that never had it set.
+#   even on a host that never had it set, plus WSL's interop socket WSL_INTEROP.
+#   A secondmate launched with an Orca view tab (config/orca-view-tabs) also
+#   retains that tab's identity: ORCA_PANE_KEY ORCA_TAB_ID ORCA_WORKTREE_ID
+#   ORCA_AGENT_HOOK_ENDPOINT ORCA_AGENT_HOOK_ENV ORCA_AGENT_HOOK_VERSION.
 #   An enabled task trace also retains TRACEPARENT. Explicit Firstmate launch
 #   assignments still apply inside the filtered environment, including the
 #   FM_TASK_INBOX export every launch carries (the absolute state/<id>.inbox
@@ -731,6 +734,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-wsl-interop-lib.sh
+. "$SCRIPT_DIR/fm-wsl-interop-lib.sh"
 # shellcheck source=bin/fm-project-capacity-lib.sh
 . "$SCRIPT_DIR/fm-project-capacity-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
@@ -1310,6 +1315,9 @@ spawn_remote_secondmate() {
 
 BACKEND=
 ORCA_ABORT_CLEANUP=0
+ORCA_VIEW_IDENTITY_SENT=0
+ORCA_VIEW_HANDLE=
+ORCA_VIEW_SESSION=
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -1374,7 +1382,7 @@ parse_orca_worktree_result() {
 }
 
 spawn_abort_cleanup() {
-  local status=$?
+  local status=$? orca_restore
   local lease_dirty lease_unlanded
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
@@ -1458,11 +1466,26 @@ spawn_abort_cleanup() {
       fi
     fi
   fi
+  # Before identity delivery, a failed relaunch still uses the previous tab's
+  # identity. Keep its record aligned with that pane; leave both tabs open.
+  if [ -n "$ORCA_VIEW_HANDLE" ] && [ "$ORCA_VIEW_IDENTITY_SENT" != 1 ] &&
+    [ "$RELAUNCH" -eq 1 ] &&
+    [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
+    orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
+    if ! { awk -F= '$1 !~ /^orca_view_(handle|session|owned)$/' "$STATE/$ID.meta" >"$orca_restore" &&
+      { [ -z "$ORCA_VIEW_PRIOR_HANDLE" ] ||
+        printf 'orca_view_handle=%s\norca_view_session=%s\n' \
+          "$ORCA_VIEW_PRIOR_HANDLE" "$ORCA_VIEW_PRIOR_SESSION" >>"$orca_restore"; } &&
+      fm_backlog_atomic_transition publish "$orca_restore" "$STATE/$ID.meta" "task record" "$STATE"; }; then
+      rm -f "$orca_restore"
+      echo "warning: could not restore the prior Orca tab record after aborted relaunch of $ID" >&2
+    fi
+  fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
     SPAWN_TASK_LOCK_HELD=0
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
-  if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
+  if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ] && [ "$ORCA_VIEW_IDENTITY_SENT" != 1 ]; then
     if ! spawn_fresh_commit_rollback; then
       status=1
     fi
@@ -3958,7 +3981,10 @@ EOF
 else
   case "$BACKEND" in
   tmux)
-    SES=$(fm_backend_tmux_container_ensure)
+    SES=$(fm_backend_tmux_container_ensure) || {
+      echo "error: could not resolve the tmux container session" >&2
+      exit 1
+    }
     T="$SES:$W"
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's
@@ -5355,6 +5381,85 @@ else
   fi
 fi
 
+# Optional Orca view tab (config/orca-view-tabs; docs/configuration.md "Orca
+# view tabs" owns the switch, bin/fm-orca-view.sh the mechanics). A tmux
+# secondmate's window gets one Orca tab viewing it, and the tab's identity is
+# forwarded into the launch below so Orca badges that tab with the agent's
+# working and done state. Every Orca failure steps aside with a one-line note
+# and the spawn goes on without a tab. A relaunch, or a respawn over an
+# existing record, opens a fresh tab, records it in place of the previous one,
+# and leaves the previous tab for the operator; when no fresh tab opens, the
+# previous one stays recorded. Firstmate never closes Orca view tabs.
+ORCA_VIEW_PRIOR_HANDLE=
+ORCA_VIEW_PRIOR_SESSION=
+ORCA_VIEW_ENABLED=off
+if [ "$KIND" = secondmate ] && [ "$BACKEND" = tmux ]; then
+  ORCA_VIEW_PRIOR_HANDLE=$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)
+  ORCA_VIEW_PRIOR_SESSION=$(fm_meta_get "$STATE/$ID.meta" orca_view_session)
+  ORCA_VIEW_ENABLED=$("$SCRIPT_DIR/fm-orca-view.sh" enabled "$CONFIG") || ORCA_VIEW_ENABLED=off
+fi
+ORCA_VIEW_IDENTITY_FILE=
+ORCA_VIEW_EXPORT=
+orca_view_name_usable() {
+  local group recorded_window target_window owner_meta
+  [ "$1" != "$SES" ] || return 1
+  for owner_meta in "$STATE"/*.meta; do
+    [ "$owner_meta" != "$STATE/$ID.meta" ] && [ -f "$owner_meta" ] || continue
+    [ "$(fm_meta_get "$owner_meta" kind)" = secondmate ] || continue
+    case "$(fm_meta_get "$owner_meta" backend)" in '' | tmux) ;; *) continue ;; esac
+    [ "$(fm_meta_get "$owner_meta" orca_view_session)" != "$1" ] || return 1
+  done
+  if ! tmux has-session -t "=$1" 2>/dev/null; then
+    return 0
+  fi
+  [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] && [ "$ORCA_VIEW_PRIOR_SESSION" = "$1" ] || return 1
+  group=$(tmux display-message -p -t "=$1:" '#{session_group}' 2>/dev/null) || return 1
+  [ "$group" = "$SES" ] || return 1
+  recorded_window=$(tmux show-options -v -t "=$1:" @fm_view_window 2>/dev/null) || return 1
+  target_window=$(tmux display-message -p -t "$T" '#{window_id}' 2>/dev/null) || return 1
+  [ -n "$target_window" ] && [ "$recorded_window" = "$target_window" ]
+}
+if [ "$ORCA_VIEW_ENABLED" = on ]; then
+  ORCA_VIEW_NAME="fmview-$ID"
+  if ! orca_view_name_usable "$ORCA_VIEW_NAME"; then
+    case "$SES" in
+      *[!A-Za-z0-9_-]*)
+        ORCA_VIEW_DERIVED="fmview-$ID-h-$(printf '%s' "$SES" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]')" ;;
+      *) ORCA_VIEW_DERIVED="fmview-$ID-s-$SES" ;;
+    esac
+    ORCA_VIEW_NAME=
+    ORCA_VIEW_SUFFIX=0
+    while :; do
+      ORCA_VIEW_CANDIDATE=$ORCA_VIEW_DERIVED
+      [ "$ORCA_VIEW_SUFFIX" -eq 0 ] || ORCA_VIEW_CANDIDATE="$ORCA_VIEW_DERIVED-$ORCA_VIEW_SUFFIX"
+      if orca_view_name_usable "$ORCA_VIEW_CANDIDATE"; then
+        ORCA_VIEW_NAME=$ORCA_VIEW_CANDIDATE
+        break
+      fi
+      ORCA_VIEW_SUFFIX=$((ORCA_VIEW_SUFFIX + 1))
+    done
+  fi
+  if [ -z "$ORCA_VIEW_NAME" ]; then
+    echo "note: no available Orca view session name for $ID in $SES" >&2
+  else
+    ORCA_VIEW_IDENTITY_FILE="$STATE/$ID.orca-view-identity"
+    if ORCA_VIEW_OUT=$("$SCRIPT_DIR/fm-orca-view.sh" open --target "$T" --view-session "$ORCA_VIEW_NAME" \
+      --title "$ID" --identity-file "$ORCA_VIEW_IDENTITY_FILE"); then
+      ORCA_VIEW_HANDLE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^handle=//p')
+      ORCA_VIEW_SESSION=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^view_session=//p')
+      ORCA_VIEW_IDENTITY_FILE=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^identity_file=//p')
+      ORCA_VIEW_TAB_ID=$(printf '%s\n' "$ORCA_VIEW_OUT" | sed -n 's/^tab_id=//p')
+      if ! ORCA_VIEW_EXPORT=$("$SCRIPT_DIR/fm-orca-view.sh" identity --file "$ORCA_VIEW_IDENTITY_FILE" --tab-id "$ORCA_VIEW_TAB_ID"); then
+        ORCA_VIEW_HANDLE=
+        ORCA_VIEW_SESSION=
+        ORCA_VIEW_IDENTITY_FILE=
+      fi
+    else
+      ORCA_VIEW_IDENTITY_FILE=
+    fi
+  fi
+fi
+
 META_WINDOW=$T
 [ "$BACKEND" = orca ] && META_WINDOW=$W
 SPAWN_GEN="s$(date +%s).${BASHPID:-$$}.$RANDOM"
@@ -5374,7 +5479,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -5427,6 +5532,13 @@ preserve_relaunch_meta() {
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
+  fi
+  if [ -n "$ORCA_VIEW_HANDLE" ]; then
+    echo "orca_view_handle=$ORCA_VIEW_HANDLE"
+    echo "orca_view_session=$ORCA_VIEW_SESSION"
+  elif [ -n "$ORCA_VIEW_PRIOR_HANDLE" ]; then
+    echo "orca_view_handle=$ORCA_VIEW_PRIOR_HANDLE"
+    echo "orca_view_session=$ORCA_VIEW_PRIOR_SESSION"
   fi
   if [ "$RELAUNCH" -eq 1 ]; then
     preserve_relaunch_meta
@@ -5757,6 +5869,25 @@ fi
 if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   spawn_send_text_line "$T" "export FM_TASK_ID=$ID"
 fi
+# A relaunch reuses the window's shell, which still holds the Windows-interop
+# socket of the login that created it; give it the live one window creation
+# would (bin/fm-wsl-interop-lib.sh).
+if [ "$BACKEND" = tmux ] && [ "$RELAUNCH" -eq 1 ] && ORCA_VIEW_LIVE_INTEROP=$(fm_wsl_live_interop); then
+  spawn_send_text_line "$T" "export WSL_INTEROP=$(shell_quote "$ORCA_VIEW_LIVE_INTEROP")"
+fi
+# The Orca view tab's identity (opened above). With the switch on and no tab,
+# any Orca identity the pane inherited is cleared so the agent cannot badge an
+# unrelated tab; a relaunch that keeps its previous tab keeps the identity that
+# tab already gave the reused pane. A forwarded identity also clears any
+# inherited hook port and token, which Orca's hook reads from the endpoint file.
+ORCA_VIEW_ENV_NAMES=
+if [ -z "$ORCA_VIEW_EXPORT" ] && [ "$ORCA_VIEW_ENABLED" = on ] &&
+  { [ "$RELAUNCH" -eq 0 ] || [ -z "$ORCA_VIEW_PRIOR_HANDLE" ]; }; then
+  spawn_send_text_line "$T" "unset ORCA_PANE_KEY ORCA_TAB_ID ORCA_WORKTREE_ID ORCA_AGENT_HOOK_ENDPOINT ORCA_AGENT_HOOK_ENV ORCA_AGENT_HOOK_VERSION ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"
+fi
+if [ "$ORCA_VIEW_ENABLED" = on ] || { [ "$RELAUNCH" -eq 1 ] && [ -n "$ORCA_VIEW_PRIOR_HANDLE" ]; }; then
+  ORCA_VIEW_ENV_NAMES="ORCA_PANE_KEY ORCA_TAB_ID ORCA_WORKTREE_ID ORCA_AGENT_HOOK_ENDPOINT ORCA_AGENT_HOOK_ENV ORCA_AGENT_HOOK_VERSION"
+fi
 # Send through the exact channel that already ships GOTMPDIR, so every backend
 # and harness - ship, scout, and secondmate - gets it before launch. Skipped
 # entirely when trace context is off.
@@ -5783,8 +5914,8 @@ if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
     TMPDIR TMP TEMP GOTMPDIR TMUX TMUX_PANE HERDR_ENV HERDR_SESSION HERDR_SOCKET_PATH \
     HERDR_PANE_ID CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_TAB_ID CMUX_PANEL_ID \
     CMUX_SOCKET_PATH ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID FM_ZELLIJ_SESSION \
-    FM_TASK_ID COMPACT_ADVISER_DISABLE LAVISH_AXI_HOST \
-    $LAUNCH_ENV_NAMES; do
+    FM_TASK_ID COMPACT_ADVISER_DISABLE LAVISH_AXI_HOST WSL_INTEROP \
+    $ORCA_VIEW_ENV_NAMES $LAUNCH_ENV_NAMES; do
     # Only validated names enter shell syntax. Values expand once, quoted, in
     # the pane shell and never become source text or spawn-process snapshots.
     # shellcheck disable=SC2016
@@ -5853,6 +5984,11 @@ if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
   rm -f "$LAUNCH_STAGE"
   echo "error: could not stage the launch command at $LAUNCH_FILE" >&2
   exit 1
+fi
+if [ -n "$ORCA_VIEW_EXPORT" ]; then
+  spawn_send_text_line "$T" "unset ORCA_AGENT_HOOK_PORT ORCA_AGENT_HOOK_TOKEN"
+  spawn_send_text_line "$T" "$ORCA_VIEW_EXPORT"
+  ORCA_VIEW_IDENTITY_SENT=1
 fi
 sleep 0.3
 SPAWN_LAUNCH_ATTEMPTED=1
