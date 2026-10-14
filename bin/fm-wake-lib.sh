@@ -1648,13 +1648,7 @@ try:
         try:
             import tomllib
         except ImportError:
-            try:
-                import tomli as tomllib
-            except ImportError:
-                try:
-                    from pip._vendor import tomli as tomllib
-                except ImportError:
-                    from pip._vendor import toml as tomllib
+            raise RuntimeError("python3 with tomllib is required to verify the treehouse pool location")
         values = tomllib.loads(config.read_text(encoding="utf-8"))
         roots = [value for key, value in values.items() if key.lower() == "root"]
         if len(roots) > 1 or (roots and not isinstance(roots[0], str)):

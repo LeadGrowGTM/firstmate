@@ -893,6 +893,42 @@ test_initial_pane_environment_controls_preflight() {
   pass "initial pool check uses the pane's environment before get"
 }
 
+test_pool_preflight_names_required_toml_parser() {
+  local id=pool-preflight-parser case_dir=$TMP_ROOT/pool-preflight-parser
+  local pane_log allocated lease out status=0
+  CASE_URL=$(make_same_origin_clones "$case_dir/origin")
+  prepare_spawn_home "$case_dir" "$id"
+  printf 'root = "%s"\n' "$case_dir/safe-pool" > "$CASE_HOME/projects/widget/treehouse.toml"
+  cat > "$case_dir/sitecustomize.py" <<'PY'
+import builtins
+
+original_import = builtins.__import__
+
+def deny_tomllib(name, *args, **kwargs):
+    if name == "tomllib":
+        raise ImportError("tomllib unavailable")
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = deny_tomllib
+PY
+  pane_log=$case_dir/pane.log
+  allocated=$case_dir/should-not-allocate/widget
+  lease=$case_dir/should-not-lease
+  : > "$pane_log"
+  out=$(PYTHONPATH="$case_dir" FM_FAKE_PANE_LOG="$pane_log" \
+    FM_FAKE_TREEHOUSE_INITIAL_PATH="$allocated" \
+    FM_FAKE_TREEHOUSE_INITIAL_PROJECT="$CASE_HOME/projects/widget" \
+    FM_FAKE_TREEHOUSE_INITIAL_LEASE="$lease" \
+    run_spawn "$CASE_HOME/projects/widget" "$id") || status=$?
+  [ "$status" -ne 0 ] || fail "spawn accepted a configured pool without tomllib"$'\n'"$out"
+  assert_contains "$out" 'python3 with tomllib is required to verify the treehouse pool location' \
+    "missing parser refusal did not name the requirement"
+  [ ! -e "$allocated" ] && [ ! -e "$lease" ] \
+    || fail "get allocated a copy without a verified TOML pool"
+  [ ! -e "$CASE_HOME/state/$id.meta" ] || fail "parser refusal published a task"
+  pass "configured pool refusal names the required TOML parser"
+}
+
 test_pool_preflight_refuses_fallback_get() {
   local id=pool-preflight-fallback case_dir=$TMP_ROOT/pool-preflight-fallback
   local foreign pane_log tree_log initial_lease out status=0
@@ -1059,6 +1095,7 @@ test_fallback_lease_checks_returned_worktree() {
 test_initial_get_checks_returned_worktree
 test_pool_preflight_refuses_initial_get
 test_initial_pane_environment_controls_preflight
+test_pool_preflight_names_required_toml_parser
 test_pool_preflight_refuses_fallback_get
 test_pool_preflight_uses_operator_git_for_fallback_hash
 test_fake_treehouse_return_requires_submission_and_completion

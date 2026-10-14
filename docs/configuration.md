@@ -1294,6 +1294,7 @@ The optional pool sweep's extra per-home prune and size checks use the pool path
 ### Pool-selection limits
 
 The guard resolves the active Treehouse pool inside the initial pane immediately before `treehouse get`, using that pane's HOME and configuration; the fallback check uses the lease HOME. It refuses a pool inside the spawning home or project clone before either allocation.
+When a repository or user Treehouse TOML config exists, python3 with tomllib is required to verify the pool location; the guard refuses the spawn if it is unavailable.
 It also resolves the allocated worktree after either get and refuses it when it sits inside either boundary, before worker launch; [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns both path checks.
 Firstmate confirms that the interactive pane left the refused copy and that plain `treehouse status` reports that exact copy available; otherwise the spawn reports an unconfirmed return for Treehouse prune.
 An untouched same-clone fallback lease is returned by the existing abort cleanup.
