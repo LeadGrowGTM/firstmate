@@ -4,8 +4,7 @@
 # Reference backend (AGENTS.md section 8; data/fm-backend-design-d7). P1 moves
 # the tmux command sequences that fm-send.sh, fm-peek.sh, fm-watch.sh,
 # fm-spawn.sh, and fm-teardown.sh already ran inline into named functions
-# here, running the EXACT same commands in the EXACT same order, so the
-# default (tmux, `backend=` absent) path stays byte-identical. Sourced only
+# here. Session creation targets exact names rather than tmux prefixes. Sourced only
 # through bin/fm-backend.sh's fm_backend_source, never directly.
 #
 # Worktree acquisition (running `treehouse get` inside the pane, and polling
@@ -78,6 +77,7 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
 # attached through a grouped session (`tmux new-session -t <base> -s <view>`,
 # the shape an Orca view tab opens) would become the recorded container of
 # every later task. A group whose base session is gone keeps the pane's own.
+# A detached caller ensures exact firstmate; a near-named session cannot stand in.
 fm_backend_tmux_container_ensure() {
   local fmt info ses grouped group
   fmt=$'#{session_name}\t#{session_grouped}\t#{session_group}'
@@ -96,7 +96,7 @@ EOF
     fi
     printf '%s\n' "$ses"
   else
-    tmux has-session -t firstmate 2>/dev/null || tmux new-session -d -s firstmate
+    tmux has-session -t '=firstmate' 2>/dev/null || tmux new-session -d -s firstmate || return 1
     printf 'firstmate'
   fi
 }
@@ -118,11 +118,11 @@ EOF
 # lost, so worktree discovery cannot fall back to the active client's window.
 fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints window id
   local ses=$1 wname=$2 proj_abs=$3 wid
-  if tmux list-windows -t "$ses" -F '#{window_name}' | grep -qx "$wname"; then
+  if tmux list-windows -t "=$ses" -F '#{window_name}' | grep -qx "$wname"; then
     echo "error: window $ses:$wname already exists" >&2
     return 1
   fi
-  wid=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$wname" -c "$proj_abs") || return 1
+  wid=$(tmux new-window -dP -F '#{window_id}' -t "=$ses:" -n "$wname" -c "$proj_abs") || return 1
   tmux set-window-option -t "$wid" automatic-rename off 2>/dev/null || true
   tmux set-window-option -t "$wid" allow-rename off 2>/dev/null || true
   printf '%s\n' "$wid"

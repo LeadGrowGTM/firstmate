@@ -1371,7 +1371,7 @@ SH
   fm_write_meta "$home/state/worker-three.meta" 'kind=scout'
   printf 'fm-%s\nfm-worker-two\nfm-worker-three\n' "$id" > "$case_dir/windows"
   rc=0
-  out=$(FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FM_BACKEND=tmux \
+  out=$(env -u TMUX -u TMUX_PANE FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FM_BACKEND=tmux \
     PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn <<'JSON'
 {"id":"worker-four","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"A fourth task","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
 JSON
@@ -1422,10 +1422,10 @@ SH
         || fail 'could not seed an existing queued item'
     fi
     rc=0
-    out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" HOME="$case_dir/user-home" \
+    out=$(env -u TMUX -u TMUX_PANE FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" HOME="$case_dir/user-home" \
       FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
       FM_CONFIG_OVERRIDE="$home/config" FM_PROJECTS_OVERRIDE="$home/projects" FM_BACKEND=tmux \
-      FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" TMUX='fake,1,0' \
+      FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" \
       PATH="$fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn <<'JSON'
 {"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Exercise intake","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
 JSON

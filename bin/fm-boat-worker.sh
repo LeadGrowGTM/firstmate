@@ -16,10 +16,13 @@
 # clones. It generates a normal remote brief and uses fm-spawn.sh, forcing yolo
 # off and a three-worker box-wide cap under one lock. Boat uses the configured
 # tmux backend and its firstmate session; other runtimes refuse dispatch.
+# Commands require the detached remote environment, outside any tmux session,
+# so ordinary spawn and inventory both target the exact firstmate session.
 # Capacity is the larger of retained worker records and live fm-* windows from
 # one backend inventory read; unreadable inventory refuses. Stop is allowed
-# only when both counts are zero. An id without a spawn
-# record may be retried; unknown transport completion must be reconciled.
+# only when both counts are zero. An id may be retried only without a spawn
+# record or matching live endpoint; unknown transport completion
+# must be reconciled before reusing its id or rewriting its briefs.
 # A failed spawn preflight emits boat-launch: refused-before-spawn on stdout.
 # idle reports whether any worker records or endpoints remain under that lock.
 # Before spawn, intake adds a missing backlog item through fm-tasks-axi.sh;
@@ -37,12 +40,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 boat_runtime() {
+  [ -z "${TMUX:-}" ] || die 'Boat worker commands must run outside tmux through the remote transport'
   # shellcheck source=bin/fm-backend.sh
   . "$SCRIPT_DIR/fm-backend.sh"
   [ "$(fm_backend_name)" = tmux ] || die 'Boat worker inventory requires the tmux backend'
   fm_backend_source tmux || die 'Boat tmux adapter unavailable'
 }
-boat_worker_count() {
+boat_worker_count() { # [new task id, refused if its endpoint already exists]
   local meta records=0 live windows status=0
   for meta in "$FM_HOME/state/"*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
@@ -51,6 +55,9 @@ boat_worker_count() {
   done
   windows=$(fm_backend_tmux_window_inventory '=firstmate') || status=$?
   case "$status" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
+  if [ -n "${1:-}" ] && printf '%s\n' "$windows" | grep -Fxq -- "fm-$1"; then
+    die 'task id has a live endpoint; reconcile before retry'
+  fi
   live=$(printf '%s\n' "$windows" | awk '/^fm-/ { n++ } END { print n+0 }')
   if [ "$live" -gt "$records" ]; then printf '%s\n' "$live"; else printf '%s\n' "$records"; fi
 }
@@ -141,7 +148,7 @@ if [ "$MODE" = no-mistakes ]; then
     die 'no-mistakes has not been proven on this box'
   fi
 fi
-COUNT=$(boat_worker_count) || exit 1
+COUNT=$(boat_worker_count "$ID") || exit 1
 [ "$COUNT" -lt 3 ] || { printf 'error: Boat three-worker cap reached\n' >&2; exit 75; }
 REPO="$FM_HOME/projects/$PROJECT"
 [ -d "$REPO" ] && [ ! -L "$REPO" ] && [ "$(cd "$REPO" && pwd -P)" = "$REPO" ] || die 'project clone is unavailable or unsafe'

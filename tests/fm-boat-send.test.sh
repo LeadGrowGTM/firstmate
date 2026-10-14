@@ -192,9 +192,10 @@ run_entry() {
   local home=$1 entry=$2
   shift 2
   OUT=$(env -u FM_ROOT -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u STATE \
-    -u FM_WAKE_QUEUE -u FM_WAKE_QUEUE_LOCK \
+    -u FM_WAKE_QUEUE -u FM_WAKE_QUEUE_LOCK -u TMUX -u TMUX_PANE \
     FM_HOME="$home" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" \
     FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
+    TMUX="${BOAT_TEST_TMUX:-}" \
     FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
     BIN="$BIN" REAL_BRIEF="$ROOT/bin/fm-brief.sh" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
     "$BIN/$entry" "$@" < "$FIXTURES/request.json" 2>&1)
@@ -633,6 +634,34 @@ test_remote_cap_and_merge_authority() {
   pass 'remote capacity spans projects until teardown, excludes secondmates, and merge authority is off'
 }
 
+test_same_id_orphan_retry() {
+  new_case ambient-tmux-refusal
+  BOAT_TEST_TMUX=fixture spawn_task
+  expect_code 1 "$CODE" 'ambient tmux session refuses Boat commands'
+  assert_contains "$OUT" 'must run outside tmux' 'ambient session refusal explanation'
+  assert_no_grep '^inventory ' "$FIXTURES/calls" 'ambient session reached inventory'
+  assert_no_grep '^brief ' "$FIXTURES/calls" 'ambient session rewrote instructions'
+  new_case same-id-orphan-retry
+  seed_project firstmate
+  mkdir -p "$REMOTE_HOME/data/task-one"
+  printf 'Original worker instructions\n' > "$REMOTE_HOME/data/task-one/brief.md"
+  printf 'Original launch instructions\n' > "$REMOTE_HOME/data/task-one/launch-brief.md"
+  cp "$REMOTE_HOME/data/task-one/brief.md" "$FIXTURES/brief.before"
+  cp "$REMOTE_HOME/data/task-one/launch-brief.md" "$FIXTURES/launch.before"
+  printf 'fm-task-one\n' > "$FIXTURES/windows"
+  set_json request '.intent = "Replacement instructions"'
+  spawn_task
+  expect_code 1 "$CODE" 'same-ID orphan endpoint refuses retry'
+  assert_no_grep '^brief ' "$FIXTURES/calls" 'orphan retry regenerated the brief'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'orphan retry reached native spawn'
+  cmp -s "$FIXTURES/brief.before" "$REMOTE_HOME/data/task-one/brief.md" || fail 'orphan retry changed worker instructions'
+  cmp -s "$FIXTURES/launch.before" "$REMOTE_HOME/data/task-one/launch-brief.md" || fail 'orphan retry changed launch instructions'
+  assert_equals 1 "$(grep -c '^inventory ' "$FIXTURES/calls")" 'same-ID guard performed a second inventory'
+  assert_absent "$REMOTE_HOME/state/.boat-worker.lock" 'orphan retry leaked worker lock'
+  pass 'same-ID orphan retry refuses before either worker brief can change'
+}
+
+test_same_id_orphan_retry
 test_confirmed_prelaunch_refusal_stop
 test_validation
 test_whole_timer_reservation
