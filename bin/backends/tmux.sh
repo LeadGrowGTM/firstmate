@@ -193,6 +193,70 @@ fm_backend_tmux_window_inventory() {  # <session-target>
   return 1
 }
 
+# fm_backend_tmux_socket_path: the socket path of the tmux server that holds
+# <target>, as that server itself reports it. This is the endpoint's server
+# identity, recorded at spawn as the task's `tmux_socket=` so a later absence
+# proof reads the server the endpoint lived on rather than whichever server the
+# recovering process happens to address. Empty on any tmux error.
+fm_backend_tmux_socket_path() {  # <target>
+  tmux display-message -p -t "$1" '#{socket_path}' 2>/dev/null
+}
+
+# fm_backend_tmux_window_on_socket: whether the tmux server listening on
+# <socket> holds window <window> of session <session>, read through that socket
+# alone. Prints exactly one verdict:
+#   lacks      - proven not there: the socket file is gone, no server answers
+#                on it, its session is absent, or a readable inventory of that
+#                session omits the window.
+#   holds      - the server on that socket still has the window.
+#   unreadable - the read could not be made, and proves nothing either way.
+# fm_backend_tmux_window_inventory owns the read classification; this only
+# pins every one of its tmux calls to <socket>.
+fm_backend_tmux_window_on_socket() {  # <socket> <session> <window>
+  local socket=$1 session=$2 window=$3 windows inventory_status
+  if [ ! -e "$socket" ] && [ ! -L "$socket" ]; then
+    printf 'lacks'
+    return 0
+  fi
+  windows=$(
+    tmux() { command tmux -S "$socket" "$@"; }
+    fm_backend_tmux_window_inventory "=$session"
+  )
+  inventory_status=$?
+  case "$inventory_status" in
+    0)
+      if printf '%s\n' "$windows" | grep -Fqx -- "$window"; then
+        printf 'holds'
+      else
+        printf 'lacks'
+      fi
+      ;;
+    2) printf 'lacks' ;;
+    *) printf 'unreadable' ;;
+  esac
+}
+
+# fm_backend_tmux_socket_candidates: every socket a tmux server addressed
+# without an explicit -S path could be listening on for this user, one per
+# line - the entries of the per-user socket directory tmux itself derives from
+# TMUX_TMPDIR (default /tmp), plus the directory of the socket an inherited
+# $TMUX names. Returns 1 when a candidate directory exists but cannot be
+# listed, because a socket hidden in it could be a live server.
+fm_backend_tmux_socket_candidates() {
+  local uid dir sock seen=
+  uid=$(id -u) || return 1
+  for dir in "${TMUX_TMPDIR:-/tmp}/tmux-$uid" ${TMUX:+"$(dirname -- "${TMUX%%,*}")"}; do
+    case "$seen" in *"|$dir|"*) continue ;; esac
+    seen="$seen|$dir|"
+    [ -e "$dir" ] || [ -L "$dir" ] || continue
+    [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || return 1
+    for sock in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+      [ -S "$sock" ] && printf '%s\n' "$sock"
+    done
+  done
+  return 0
+}
+
 # fm_backend_tmux_kill: remove one explicitly named task window.
 # Empty, omitted, and malformed targets return nonzero before invoking tmux so
 # tmux can never interpret an empty target as the caller's current window.

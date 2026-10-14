@@ -17,6 +17,9 @@
 #   6. fm-spawn --relaunch refuses on its own: a live agent, a contradicting
 #      flag, an extra positional, or a backend that cannot prove the previous
 #      agent exited.
+#   7. A task whose endpoint is gone is reclaimed in place, and one whose
+#      absence cannot be proven is refused. The tmux cases read real tmux
+#      servers through their own sockets.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -48,6 +51,9 @@ relaunch_cleanup() {
   fm_test_remove_tree "$TMP_ROOT"
 }
 trap 'relaunch_cleanup; fm_test_tmux_cleanup' EXIT
+# Socket-scoped reads (`tmux -S <socket> ...`) reach real, isolated tmux servers
+# through tests/tmux-helpers.sh's wrapper; every other call stays on the stub.
+export FM_FAKE_REAL_TMUX="$FM_TEST_TMUX_ROOT/bin/tmux"
 
 # The same lifecycle-modelling tmux stub as tests/fm-control.test.sh: the
 # harness's exit command stops the agent, and a launch-brief literal starts the
@@ -59,6 +65,10 @@ make_tmux_stub() {  # <dir>
 #!/usr/bin/env bash
 set -u
 D=$FM_FAKE_DIR
+if [ "${1:-}" = -S ]; then
+  [ -n "${FM_FAKE_REAL_TMUX:-}" ] || { echo "error connecting to ${2:-} (No such file or directory)" >&2; exit 1; }
+  exec "$FM_FAKE_REAL_TMUX" "$@"
+fi
 case "${1:-}" in
   send-keys)
     shift
@@ -107,6 +117,7 @@ case "${1:-}" in
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
+        *socket_path*) printf '%s\n' "$D/socket"; exit 0 ;;
         *pane_current_path*)
           if [ -n "${FM_FAKE_CWD_RACE_READY:-}" ]; then
             : > "$FM_FAKE_CWD_RACE_READY"
@@ -158,6 +169,8 @@ case "${1:-}" in
     # Model the one thing an endpoint re-creation depends on: the window now
     # appears in the session inventory, so the very next agent-state read stops
     # answering `missing`. Echo a stable window id the way the real -P -F does.
+    # The container it lands in is live, whatever the read before it said.
+    rm -f "$D/server-dead" "$D/session-missing"
     shift
     name=
     while [ $# -gt 0 ]; do
@@ -2134,12 +2147,9 @@ strand_endpoint() {  # <case-dir> <id>
   : > "$1/fake/windows"
 }
 
-# Every tmux `missing` refuses on BOTH verbs, whatever produced it. tmux is the
-# one verified backend whose absence cannot be proven from a task record: the
-# record carries no socket identity for the endpoint, and any inventory
-# describes only the server this process happens to address. So a window that
-# is merely on a server this seat cannot reach is indistinguishable from one
-# that was destroyed, and neither verb will guess.
+# A tmux `missing` read through this seat's server says nothing about a window
+# on another server, so both verbs refuse unless the window is proven absent
+# from the server it lived on.
 assert_tmux_missing_refuses() {  # <case-dir> <id> <what-was-staged>
   local dir=$1 id=$2 what=$3 out rc brief_before
 
@@ -2165,36 +2175,128 @@ assert_tmux_missing_refuses() {  # <case-dir> <id> <what-was-staged>
   [ ! -s "$dir/fake/literal" ] || fail "a refused transaction must launch nothing ($what)"
 }
 
-test_tmux_refuses_a_window_missing_from_its_session() {
-  local dir
-  dir=$(new_case tmux-gone rl60)
+# A gone tmux window is reclaimed in place: one fresh window in the recorded
+# worktree, the record rebound to it and its server, and the work untouched.
+assert_tmux_reclaimed() {  # <case-dir> <id> <what-was-staged>
+  local dir=$1 id=$2 what=$3 out rc=0 head_before
+  printf 'landed on the branch\n' > "$dir/wt/committed.txt"
+  git -C "$dir/wt" add committed.txt
+  git -C "$dir/wt" -c user.email=t@example.com -c user.name=t commit -qm "work in progress"
+  head_before=$(git -C "$dir/wt" rev-parse HEAD)
+  printf 'never committed\n' > "$dir/wt/dirty.txt"
+
+  out=$(run_control "$dir" "$id" relaunch --note "the tmux server died; pick the work back up") || rc=$?
+  expect_code 0 "$rc" "a tmux window proven gone should be reclaimed ($what)"$'\n'"$out"
+  [ "$(grep -cx "fm-$id" "$dir/fake/created-windows")" = 1 ] \
+    || fail "a reclaim must create exactly one fresh window ($what)"
+  [ "$(meta_field "$dir" "$id" window)" = "firstmate:fm-$id" ] \
+    || fail "the record must rebind to the re-created window ($what)"
+  [ "$(meta_field "$dir" "$id" tmux_socket)" = "$dir/fake/socket" ] \
+    || fail "the record must name the re-created window's server ($what)"
+  [ "$(meta_field "$dir" "$id" worktree)" = "$dir/wt" ] \
+    || fail "a reclaim must keep the recorded worktree ($what)"
+  [ "$(git -C "$dir/wt" rev-parse HEAD)" = "$head_before" ] \
+    || fail "a reclaim moved the worktree's HEAD ($what)"
+  assert_contains "$(cat "$dir/wt/dirty.txt")" "never committed" \
+    "a reclaim destroyed or rewrote an uncommitted change ($what)"
+  [ "$(journal_field "$dir" "$id" exit_result)" = endpoint-gone ] \
+    || fail "the transaction should record that the endpoint was already gone ($what)"
+}
+
+# start_real_tmux <socket-name> <session> <window>: a real, isolated tmux server
+# holding one window; prints its socket path as the server reports it.
+start_real_tmux() {
+  tmux -L "$1" new-session -d -s "$2" -n "$3" 'sleep 600' \
+    || fail "could not start a real tmux server on socket $1"
+  tmux -L "$1" display-message -p -t "=$2:" '#{socket_path}'
+}
+
+# crash_real_tmux <socket-name>: SIGKILL the server the way an OOM kill does,
+# which leaves its socket file behind with nothing listening on it.
+crash_real_tmux() {
+  local server panes
+  server=$(tmux -L "$1" display-message -p '#{pid}') || fail "no real tmux server on socket $1"
+  panes=$(tmux -L "$1" list-panes -a -F '#{pane_pid}')
+  kill -KILL "$server"
+  # shellcheck disable=SC2086 # one pid per word
+  kill $panes 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    tmux -L "$1" list-sessions >/dev/null 2>&1 || return 0
+    /bin/sleep 0.1
+  done
+  fail "the real tmux server on socket $1 survived SIGKILL"
+}
+
+test_tmux_reclaims_a_window_whose_recorded_server_died() {
+  local dir sock
+  dir=$(new_case tmux-dead rl60)
   add_ship_task "$dir" rl60 claude
+  sock=$(start_real_tmux rl60-old fmses fm-rl60)
+  printf 'tmux_socket=%s\n' "$sock" >> "$dir/home/state/rl60.meta"
+  crash_real_tmux rl60-old
+  [ -S "$sock" ] || fail "the crash must leave the dead server's socket file behind"
   strand_endpoint "$dir" rl60
-  assert_tmux_missing_refuses "$dir" rl60 "window absent from a readable session inventory"
-  pass "tmux: a window absent from its session refuses both verbs rather than being assumed gone"
+  assert_tmux_reclaimed "$dir" rl60 "recorded server killed, its socket left behind"
+  pass "tmux: a window whose recorded server died is reclaimed in place with its work intact"
 }
 
-test_tmux_refuses_a_session_that_cannot_be_found() {
-  local dir
-  dir=$(new_case tmux-nosession rl61)
+test_tmux_reclaims_when_a_new_server_reuses_the_recorded_socket() {
+  local dir sock
+  dir=$(new_case tmux-reused rl61)
   add_ship_task "$dir" rl61 claude
-  # Real tmux's answer to a renamed session, and to a different
-  # TMUX_TMPDIR/socket: definitive about the SESSION, silent about whether the
-  # window and its agent survived elsewhere.
-  : > "$dir/fake/session-missing"
-  assert_tmux_missing_refuses "$dir" rl61 "recorded session not found"
-  pass "tmux: an unfindable session refuses both verbs, so a live agent is never duplicated"
+  sock=$(start_real_tmux rl61-shared fmses fm-rl61)
+  printf 'tmux_socket=%s\n' "$sock" >> "$dir/home/state/rl61.meta"
+  crash_real_tmux rl61-shared
+  # The operator's restart: a NEW server on the very same socket path, which
+  # never held the window. A window does not outlive its server.
+  [ "$(start_real_tmux rl61-shared churchill fm-other)" = "$sock" ] \
+    || fail "the new server must listen on the recorded socket path"
+  : > "$dir/fake/server-dead"
+  assert_tmux_reclaimed "$dir" rl61 "a new server on the recorded socket"
+  tmux -L rl61-shared kill-server
+  pass "tmux: a new server on the recorded socket does not hide that the old window is gone"
 }
 
-test_tmux_refuses_when_the_server_is_gone() {
-  local dir
-  dir=$(new_case tmux-noserver rl62)
+test_tmux_refuses_a_window_its_recorded_live_server_still_holds() {
+  local dir sock
+  dir=$(new_case tmux-elsewhere rl62)
   add_ship_task "$dir" rl62 claude
-  # No server on the socket this process addresses. Another server may still be
-  # running the task's window, and the record cannot say which socket is its.
-  : > "$dir/fake/server-dead"
-  assert_tmux_missing_refuses "$dir" rl62 "no tmux server on this socket"
-  pass "tmux: a dead server on this socket refuses both verbs rather than proving absence"
+  sock=$(start_real_tmux rl62-other fmses fm-rl62)
+  printf 'tmux_socket=%s\n' "$sock" >> "$dir/home/state/rl62.meta"
+  # This seat addresses a different server, which has never heard of the
+  # session - but the window is alive on the server the record names.
+  : > "$dir/fake/session-missing"
+  assert_tmux_missing_refuses "$dir" rl62 "window alive on the recorded server, out of this seat's reach"
+  tmux -L rl62-other has-session -t '=fmses' || fail "a refusal must leave the live window alone"
+  tmux -L rl62-other kill-server
+  pass "tmux: a window still alive on its recorded server is never duplicated"
+}
+
+test_tmux_reclaims_a_legacy_record_no_live_server_holds() {
+  local dir
+  dir=$(new_case tmux-legacy rl63)
+  add_ship_task "$dir" rl63 claude
+  # A legacy record names no socket. Every server this user could address is
+  # either dead (a socket left behind by a crash) or live without the window.
+  start_real_tmux rl63-crashed fmses fm-rl63 >/dev/null
+  crash_real_tmux rl63-crashed
+  start_real_tmux rl63-live churchill fm-other >/dev/null
+  : > "$dir/fake/session-missing"
+  assert_tmux_reclaimed "$dir" rl63 "legacy record, no live server holds the window"
+  tmux -L rl63-live kill-server
+  pass "tmux: a legacy record is reclaimed once no server this user could address holds its window"
+}
+
+test_tmux_refuses_a_legacy_record_a_live_server_still_holds() {
+  local dir
+  dir=$(new_case tmux-legacy-live rl64)
+  add_ship_task "$dir" rl64 claude
+  start_real_tmux rl64-live fmses fm-rl64 >/dev/null
+  strand_endpoint "$dir" rl64
+  assert_tmux_missing_refuses "$dir" rl64 "legacy record, a live server on another socket holds the window"
+  tmux -L rl64-live has-session -t '=fmses' || fail "a refusal must leave the live window alone"
+  tmux -L rl64-live kill-server
+  pass "tmux: a legacy record whose window is alive on another server is never duplicated"
 }
 
 test_reclaim_refuses_an_unreadable_endpoint() {
@@ -2960,9 +3062,11 @@ test_spawn_relaunch_refuses_a_pending_authoritative_close
 test_spawn_relaunch_refuses_contradicting_flags
 test_spawn_relaunch_refuses_an_unrecorded_task
 test_spawn_relaunch_refuses_a_pane_outside_the_worktree
-test_tmux_refuses_a_window_missing_from_its_session
-test_tmux_refuses_a_session_that_cannot_be_found
-test_tmux_refuses_when_the_server_is_gone
+test_tmux_reclaims_a_window_whose_recorded_server_died
+test_tmux_reclaims_when_a_new_server_reuses_the_recorded_socket
+test_tmux_refuses_a_window_its_recorded_live_server_still_holds
+test_tmux_reclaims_a_legacy_record_no_live_server_holds
+test_tmux_refuses_a_legacy_record_a_live_server_still_holds
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
