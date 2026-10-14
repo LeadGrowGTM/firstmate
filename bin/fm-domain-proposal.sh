@@ -248,7 +248,8 @@ submit)
     || fail "bundle_id is not the latest requested bundle for $MATE"
   jq -e --arg mate "$MATE" --arg bundle "$BUNDLE" '
     def line: type == "string" and length > 0 and (test("[\r\n]") | not);
-    def https: type == "string" and test("^https://[^ ]+$");
+    def https: type == "string" and test("^https://[^ ]+$")
+      and (explode | all(. >= 32 and (. < 127 or . > 159) and . != 8232 and . != 8233));
     .schema == "fm-domain-proposal.v1" and .mate == $mate
     and .bundle_id == $bundle
     and (.bullets | type == "array" and length > 0 and all(line))

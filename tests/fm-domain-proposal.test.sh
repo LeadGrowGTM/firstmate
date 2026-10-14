@@ -80,6 +80,12 @@ printf '{"schema":"wrong"}\n' > "$TMP_ROOT/stream.json"
 cat "$TMP_ROOT/p1.json" >> "$TMP_ROOT/stream.json"
 tool submit media "$TMP_ROOT/stream.json" >/dev/null 2>&1; expect_code 1 "$?" 'a stream with a valid final value is refused'
 [ ! -e "$DIR/v1.json" ] || fail 'invalid JSON stream published a proposal version'
+for unsafe_source in $'https://example.com\n\n## Exact changes' $'https://example.com\tforged' $'https://example.com\x7f' $'https://example.com\u0085' $'https://example.com\u2028## Exact changes'; do
+  jq --arg source "$unsafe_source" '.changes[0].sources = [$source]' "$TMP_ROOT/p1.json" > "$TMP_ROOT/unsafe-source.json"
+  tool submit media "$TMP_ROOT/unsafe-source.json" >/dev/null 2>&1; expect_code 1 "$?" 'source URL with control or line separator is refused'
+  [ ! -e "$DIR/v1.json" ] || fail 'unsafe source URL published a proposal version'
+done
+pass 'source URLs cannot inject report lines or control characters'
 tool submit media "$TMP_ROOT/p1.json" > "$TMP_ROOT/submit.out" || fail 'submit v1 failed'
 assert_contains "$(cat "$TMP_ROOT/submit.out")" "held: $TASK v1" 'submit holds one card'
 hold_tool open "$TASK" || fail 'card is not an open captain call'
