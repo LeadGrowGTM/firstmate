@@ -1,0 +1,25 @@
+private_session=probe new_window=@1 inherited_server_socket=/run/WSL/5345_interop
+printf "pane_interop=%s\n" "$WSL_INTEROP"; /mnt/c/Windows/System32/cmd.exe /c ve
+r
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M4VZ3J414SD9661YBY2BWP7V$
+ printf "pane_interop=%s\n" "$WSL_INTEROP"; /mnt/c/Windows/System32/cmd.exe /c v
+er
+pane_interop=/run/WSL/1_interop
+'\\wsl.localhost\Ubuntu\home\mitch\.no-mistakes\worktrees\5782b7185c5e\01M4VZ3J4
+14SD9661YBY2BWP7V'
+CMD.EXE was started with the above path as the current directory.
+UNC paths are not supported.  Defaulting to Windows directory.
+
+Microsoft Windows [Version 10.0.26200.9457]
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M4VZ3J414SD9661YBY2BWP7V$
+
+
+
+
+
+
+
+
+
+
+

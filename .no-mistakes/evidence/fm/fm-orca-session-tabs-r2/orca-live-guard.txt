@@ -1,0 +1,7 @@
+private_session=probe window=@0
+malformed_switch=warning: config/orca-view-tabs holds 'on'; accepted values are on and off, so Orca view tabs stay off off 
+valid_switch=on
+window_open_with_unavailable_orca:
+note: no Orca command line was found (set FM_ORCA_CLI, or install Orca's CLI)
+exit=3
+sessions_after=probe,
