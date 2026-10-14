@@ -1249,6 +1249,20 @@ When stripping is enabled, the hooks directory is read-only, so a hook manager r
 The flag is a home-wide attribution choice, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract and a secondmate's own workers keep AI trailers too.
 Per-machine Cursor `cli-config.json` attribution-off is not this contract: it does not travel with Firstmate, defaults back to on when unset, and only feeds the CLI's request to the server, so it suppresses the trailer rather than preventing it.
 
+## Skill overrides (config/skill-overrides.json)
+
+The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills a Claude second mate's session lists, without editing any Claude settings file.
+It must be valid JSON whose top-level `skillOverrides` property is an object mapping skill names to a string value such as `off` or `name-only`, as Claude Code's `skillOverrides` setting defines.
+Only the `skillOverrides` property is read; any other property is ignored.
+
+When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only the `skillOverrides` property to the launch's inline `--settings` JSON.
+An absent file changes nothing.
+A file that is unreadable, is not valid JSON, lacks a `skillOverrides` object, or holds a non-string value is skipped with a one-line note on stderr, and the launch proceeds without it.
+Ship and scout workers never receive it, nor does any non-Claude harness, and Firstmate never writes or edits the file, a `settings.local.json`, or any plugin or account setting.
+
+The file is per home because each second mate needs a different list, and it is not inherited from the primary home.
+[`fm-spawn.sh`](../bin/fm-spawn.sh) owns the delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
+
 ## Project capacity (config/project-capacity)
 
 The optional local, gitignored `config/project-capacity` tells Firstmate how many workers a project can run at once on this machine, for a project whose machine-local resource - a heavy test suite, a local editor stack, a device - only serves a few workers at a time.
