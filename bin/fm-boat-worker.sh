@@ -23,7 +23,6 @@
 # only when both counts are zero. An id may be retried only without a spawn
 # record or matching live endpoint; unknown transport completion
 # must be reconciled before reusing its id or rewriting its briefs.
-# A failed spawn preflight emits boat-launch: refused-before-spawn on stdout.
 # idle reports whether any worker records or endpoints remain under that lock.
 # Before spawn, intake adds a missing backlog item through fm-tasks-axi.sh;
 # an existing item is reused and ordinary spawn owns its In flight transition.
@@ -97,15 +96,9 @@ if [ "$1" = teardown ] || [ "$1" = idle ]; then
 fi
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-boat-worker.XXXXXX")
 LOCK=
-OP=$1
-LAUNCH_ATTEMPTED=0
 cleanup() {
-  local status=$?
   rm -rf -- "$TMP"
   [ -z "$LOCK" ] || fm_lock_release "$LOCK" || true
-  if [ "$status" -ne 0 ] && [ "$OP" = spawn ] && [ "$LAUNCH_ATTEMPTED" -eq 0 ]; then
-    printf 'boat-launch: refused-before-spawn\n'
-  fi
 }
 trap cleanup EXIT
 head -c 65537 > "$TMP/request"
@@ -164,7 +157,9 @@ esac
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 if fm_backlog_row_probe "$FM_HOME/data" "$ID"; then
-  :
+  fm_backlog_row_dispatchable "$FM_BACKLOG_ROW_STATE" || die 'existing backlog item is not dispatchable'
+  [ "$FM_BACKLOG_ROW_KIND" = "$(jq -r .kind "$TMP/request")" ] &&
+    [ "$FM_BACKLOG_ROW_REPO" = "$PROJECT" ] || die 'existing backlog item kind or project differs from request'
 elif [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
   fm_run_timed 30 "$SCRIPT_DIR/fm-tasks-axi.sh" add "$ID" "Boat $PROJECT $ID" \
     --kind "$(jq -r .kind "$TMP/request")" --repo "$PROJECT" --queue >/dev/null || die 'remote backlog intake failed'
@@ -194,6 +189,5 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
 cat "$TMP/brief" > "$BRIEF"
 if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
 ARGS+=(--backend tmux --harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
-LAUNCH_ATTEMPTED=1
 "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"

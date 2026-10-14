@@ -28,8 +28,8 @@
 # FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh.
 # On transport failure, remote completion is unknown: reconcile the SAME task
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
-# A confirmed preflight refusal stops a box this send resumed only after the
-# remote worker lock confirms that no task records remain.
+# A definite spawn refusal stops a box this send resumed only after the
+# remote worker lock confirms that no task records or endpoints remain.
 # Status, steering, and reports use existing fm-on.sh commands against boat-eng;
 # no PC worker endpoint or worktree is allocated. Last-task teardown stops the
 # box; its auto-stop timer is the hard upper bound if teardown cannot complete.
@@ -178,8 +178,7 @@ fi
 DISPATCH_STATUS=0
 "$SCRIPT_DIR/fm-on.sh" --stdin "$ROUTE" fm-boat-worker.sh spawn < "$TMP/request" > "$TMP/dispatch" || DISPATCH_STATUS=$?
 cat "$TMP/dispatch"
-if [ "$DISPATCH_STATUS" -ne 0 ] && [ "$DISPATCH_STATUS" -ne 255 ] && [ "$STATE" = stopped ] &&
-  [ "$(tail -n 1 "$TMP/dispatch")" = 'boat-launch: refused-before-spawn' ]; then
+if [ "$DISPATCH_STATUS" -ne 0 ] && [ "$DISPATCH_STATUS" -ne 255 ] && [ "$STATE" = stopped ]; then
   remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh idle) || remaining=unknown
   if [ "$remaining" = 'boat-tasks-remaining: no' ]; then
     stop_refuse 'remote worker refused before spawning'

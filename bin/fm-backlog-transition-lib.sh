@@ -63,6 +63,8 @@ FM_BACKLOG_TRANSITION_SKIP=
 FM_BACKLOG_TRANSITION_ERROR=
 FM_BACKLOG_ROW_RESULT=
 FM_BACKLOG_ROW_STATE=
+FM_BACKLOG_ROW_KIND=
+FM_BACKLOG_ROW_REPO=
 FM_BACKLOG_ROW_ERROR=
 # Set by fm_backlog_row_probe on a found row: the tasks-axi hold kind, empty when
 # the row is not held.
@@ -428,11 +430,15 @@ fm_backlog_row_probe() {  # <data-dir> <id>
   if ! data=$(fm_backlog_data_absolute "$1"); then
     FM_BACKLOG_ROW_RESULT=error
     FM_BACKLOG_ROW_STATE=
+    FM_BACKLOG_ROW_KIND=
+    FM_BACKLOG_ROW_REPO=
     FM_BACKLOG_ROW_ERROR="data directory cannot be resolved: $1"
     return 1
   fi
   FM_BACKLOG_ROW_RESULT=error
   FM_BACKLOG_ROW_STATE=
+  FM_BACKLOG_ROW_KIND=
+  FM_BACKLOG_ROW_REPO=
   FM_BACKLOG_ROW_HOLD_KIND=
   FM_BACKLOG_ROW_ERROR=
   fm_backlog_source_present "$data" "$authorized_data"
@@ -469,6 +475,8 @@ fm_backlog_row_probe() {  # <data-dir> <id>
   fi
   FM_BACKLOG_ROW_RESULT=found
   FM_BACKLOG_ROW_STATE="$state ${held:-no} ${blocked:-no}"
+  FM_BACKLOG_ROW_KIND=$(printf '%s\n' "$out" | sed -n 's/^  kind: *//p' | head -1)
+  FM_BACKLOG_ROW_REPO=$(printf '%s\n' "$out" | sed -n 's/^  repo: *//p' | head -1)
   case "$hold_kind" in
     ''|'"-"'|-) FM_BACKLOG_ROW_HOLD_KIND= ;;
     *) FM_BACKLOG_ROW_HOLD_KIND=$hold_kind ;;

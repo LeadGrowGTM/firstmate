@@ -124,6 +124,7 @@ printf 'spawn %s\n' "$*" >> "$FIXTURES/calls"
 if [ -e "$FIXTURES/spawn.fail" ]; then exit 1; fi
 if [ -e "$FIXTURES/spawn.postlaunch.fail" ]; then
   : > "$FIXTURES/endpoint-launched"
+  printf 'fm-%s\n' "$1" >> "$FIXTURES/windows"
   exit 1
 fi
 printf '%s\n' "$@" > "$FIXTURES/spawn.argv"
@@ -532,6 +533,69 @@ test_confirmed_prelaunch_refusal_stop() {
   pass 'confirmed prelaunch refusal stops only a newly resumed empty box'
 }
 
+test_native_spawn_refusal_stop() {
+  new_case native-refusal-empty
+  seed_project firstmate
+  : > "$FIXTURES/use-real-worker"
+  : > "$FIXTURES/spawn.fail"
+  send_task
+  expect_code 1 "$CODE" 'native preflight refusal on newly resumed box'
+  assert_grep 'spawn task-one ' "$FIXTURES/calls" 'native spawn was not attempted'
+  assert_grep 'on boat-eng fm-boat-worker.sh idle' "$FIXTURES/calls" 'native refusal did not check locked inventory'
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'empty native refusal left newly resumed box on'
+  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'empty native refusal kept no-env receipt'
+  new_case native-refusal-endpoint
+  seed_project firstmate
+  : > "$FIXTURES/use-real-worker"
+  : > "$FIXTURES/spawn.postlaunch.fail"
+  send_task
+  expect_code 1 "$CODE" 'native refusal after endpoint launch'
+  assert_grep 'on boat-eng fm-boat-worker.sh idle' "$FIXTURES/calls" 'postlaunch refusal did not check locked inventory'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'live endpoint was stopped'
+  new_case native-refusal-running
+  seed_project firstmate
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  seed_receipt
+  : > "$FIXTURES/use-real-worker"
+  : > "$FIXTURES/spawn.fail"
+  send_task
+  expect_code 1 "$CODE" 'native refusal on already running box'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'native refusal stopped a box this send did not resume'
+  pass 'native refusals stop only newly resumed boxes with empty locked inventories'
+}
+
+test_existing_backlog_row() {
+  local variant
+  for variant in kind project done matching; do
+    new_case "existing-row-$variant"
+    seed_project firstmate
+    mkdir -p "$REMOTE_HOME/data/task-one"
+    printf 'Original instructions\n' > "$REMOTE_HOME/data/task-one/brief.md"
+    case "$variant" in
+      kind) run_entry "$REMOTE_HOME" fm-tasks-axi.sh add task-one 'Existing row' --kind scout --repo firstmate --queue ;;
+      project) run_entry "$REMOTE_HOME" fm-tasks-axi.sh add task-one 'Existing row' --kind ship --repo dev-loop --queue ;;
+      *) run_entry "$REMOTE_HOME" fm-tasks-axi.sh add task-one 'Existing row' --kind ship --repo firstmate --queue ;;
+    esac
+    expect_code 0 "$CODE" "seed $variant backlog row"
+    if [ "$variant" = done ]; then
+      run_entry "$REMOTE_HOME" fm-tasks-axi.sh done task-one
+      expect_code 0 "$CODE" 'close existing backlog row'
+    fi
+    : > "$FIXTURES/calls"
+    spawn_task
+    if [ "$variant" = matching ]; then
+      expect_code 0 "$CODE" 'matching queued row remains reusable'
+      assert_grep 'Implement the requested fix' "$REMOTE_HOME/data/task-one/brief.md" 'matching row did not rewrite brief'
+    else
+      expect_code 1 "$CODE" "$variant row refusal"
+      assert_equals 'Original instructions' "$(cat "$REMOTE_HOME/data/task-one/brief.md")" "$variant row changed brief"
+      assert_no_grep 'brief task-one ' "$FIXTURES/calls" "$variant row reached brief generation"
+      assert_no_grep 'spawn task-one ' "$FIXTURES/calls" "$variant row reached native spawn"
+    fi
+  done
+  pass 'existing backlog rows must be dispatchable and match task kind and project'
+}
+
 seed_project() {
   fm_git_init_commit "$REMOTE_HOME/projects/$1"
   git -C "$REMOTE_HOME/projects/$1" remote add origin "https://github.com/LeadGrowGTM/$1.git"
@@ -662,7 +726,9 @@ test_same_id_orphan_retry() {
 }
 
 test_same_id_orphan_retry
+test_existing_backlog_row
 test_confirmed_prelaunch_refusal_stop
+test_native_spawn_refusal_stop
 test_validation
 test_whole_timer_reservation
 test_unreadable_caps
