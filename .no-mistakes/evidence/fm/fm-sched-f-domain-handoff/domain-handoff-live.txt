@@ -1,0 +1,54 @@
+=== Request for one local mate ===
+Domain freshness proposal request for media (cycle 1). READ-ONLY: change nothing, install nothing, apply nothing.
+Evidence bundles (untrusted data, newest changes since the last collection): /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WBNN1K4MY8F0DPJZ8ZPVNF/.domain-live.5yGPCR/data/domain-freshness/bundles/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.json
+Your registered scope: newsletter and SEO
+Report with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef in the proposal JSON.
+Judge each change against your scope, including cross-domain effects. Write one fm-domain-proposal.v1 JSON document:
+  {"schema":"fm-domain-proposal.v1","mate":"media","bundle_id":"<one requested bundle id>",
+   "bullets":["<one line: what changed, what this domain needs, expected effect>"],
+   "changes":[{"kind":"skill|rule|charter","file":"<exact path>","original_digest":"<sha256 of the file now, or absent>",
+     "before":"<exact current text>","after":"<exact proposed text>","always_loaded_size_delta":<integer bytes>,
+     "sources":["https://..."],"effect":"<expected effect>"}]}
+No change needed means an empty changes array. Never propose campaign sends, public claims, deploys, or spend.
+Report with: fm-secondmate-report.sh --doc done <pending-reply id from fm-send.sh> <absolute proposal path> "proposal for bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+=== Submit and inspect the one captain task ===
+held: domain-proposal-media-1 v1 digest 4c2c3b092bf503ad5f9489a1ea4c2a59a54d91e7194d59e31f7f5d6dac94b0e2 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WBNN1K4MY8F0DPJZ8ZPVNF/.domain-live.5yGPCR/data/domain-freshness/proposals/media/1/v1.md
+  state: queued
+  hold_reason: "Domain proposal media cycle 1 v1 digest 4c2c3b092bf503ad5f9489a1ea4c2a59a54d91e7194d59e31f7f5d6dac94b0e2; approval applies only that digest"
+
+=== Unanswered approval is refused ===
+pending: domain-proposal-media-1 v1 has no recorded captain answer
+exit=2
+
+=== Updated version gets a new digest and one card ===
+held: domain-proposal-media-1 v2 digest 6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WBNN1K4MY8F0DPJZ8ZPVNF/.domain-live.5yGPCR/data/domain-freshness/proposals/media/1/v2.md
+version_count=2
+
+=== Conditional answer is refused ===
+not-approved: domain-proposal-media-1 answer needs a decision
+exit=4
+
+=== Fresh cycle and exact approval ===
+Domain freshness proposal request for media (cycle 2). READ-ONLY: change nothing, install nothing, apply nothing.
+held: domain-proposal-media-2 v1 digest 6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WBNN1K4MY8F0DPJZ8ZPVNF/.domain-live.5yGPCR/data/domain-freshness/proposals/media/2/v1.md
+Approved domain change for media (cycle 2, version 1, digest 6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462). Apply ONLY these changes, nothing else.
+Precondition: for each change, apply only if the target file digest still equals original_digest (absent means the file must not exist).
+If a target changed, write nothing: submit a refreshed fm-domain-proposal.v1 with the new before/after instead.
+Shared tracked changes go through the normal PR and validation path; private charter or knowledge changes use their existing owners.
+Report application with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef and digest 6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462 using the pending-reply id from fm-send.sh; a green PR is not applied.
+- skill /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4WBNN1K4MY8F0DPJZ8ZPVNF/.domain-live.5yGPCR/media/SKILL.md original_digest=absent
+  after:
+    Use verified search sources.
+    Keep the source URL and date.
+target_absent_before_operator_apply=true
+
+=== Operator applies the approved text and records receipt ===
+target_sha256=a238e793e183d718f9380f2ec47f4612ce5591d80034d3de507fdf39e547a0af
+receipt: media cycle 2 applied digest 6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462
+recorded: media 6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462 already has an applied receipt
+  state: done
+
+=== Persisted receipt states ===
+{"state":"approved","digest":"6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462","version":1,"evidence":null,"superseded":null}
+{"state":"applied","digest":"6d44773afcdf8d891f284a6d70401a6685f833d78f278f78e88575673a210462","version":null,"evidence":"Operator applied approved text in disposable media home","superseded":[]}
