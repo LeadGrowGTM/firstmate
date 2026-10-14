@@ -537,6 +537,35 @@ test_retained_pool_copy_skips_prune() {
   pass 'sweep preserves a captain-held worker pool copy'
 }
 
+test_eligible_teardown_preserves_held_pool_copy() {
+  local home eligible held out calls
+  home=$(make_home mixed-pool)
+  eligible="$home/treehouse-pool/slot-eligible/project"
+  held="$home/treehouse-pool/slot-held/project"
+  mkdir -p "$home/treehouse-pool/slot-eligible" "$home/treehouse-pool/slot-held"
+  printf '{}\n' > "$home/treehouse-pool/treehouse-state.json"
+  add_worker "$home" ship "$eligible"
+  git -C "$home/projects/project" worktree add -qb fm/held "$held" main
+  fm_write_meta "$home/state/held.meta" \
+    window=firstmate:fm-held endpoint_task_id=held \
+    "worktree=$held" "project=$home/projects/project" \
+    kind=ship branch=fm/held mode=no-mistakes spawn_gen=sweep-test
+  printf 'needs-decision [key=choice]: waiting\nworking: preparing evidence\n' > "$home/state/held.status"
+  printf '%s\n' "$held" > "$home/prune-held"
+  out=$(sweep "$home")
+  assert_contains "$out" 'swept: 1 workers, 1 copies' 'eligible worker swept'
+  assert_contains "$out" "pool prune skipped for $home/projects/project: retained task held has a pool copy" 'held pool skip reported'
+  assert_absent "$home/state/task.meta" 'eligible worker record removed'
+  assert_absent "$eligible" 'eligible worker copy returned'
+  assert_present "$home/state/held.meta" 'held worker record kept'
+  assert_present "$held/file" 'held worker copy kept'
+  calls=$(cat "$home/treehouse-calls")
+  assert_contains "$calls" "return --force $eligible" 'eligible copy returned through treehouse'
+  assert_not_contains "$calls" 'prune --yes' 'teardown leaves pool pruning to sweep'
+  assert_equals 1 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" 'mixed pool result stays one line'
+  pass 'eligible teardown preserves a captain-held worker in the same pool'
+}
+
 test_recorded_pr_kept_until_merged() {
   local home out
   home=$(make_home open-pr); add_worker "$home"
@@ -865,6 +894,7 @@ test_late_work_kept
 test_missing_copy_remote_branch_kept_until_merged
 test_decisions_secondmates_and_unknown_kept
 test_retained_pool_copy_skips_prune
+test_eligible_teardown_preserves_held_pool_copy
 test_recorded_pr_kept_until_merged
 test_scout_gates_and_work_kept
 test_stale_registration_and_live_copy

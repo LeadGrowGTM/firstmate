@@ -4102,7 +4102,7 @@ fi
 # the copy is back in it and the clone is refreshed. bin/fm-treehouse-guard.sh
 # owns the flags and what it declines to prune, and prints its own warning; the
 # cleanup has already succeeded, so a prune that did not run never fails it.
-if [ "$TREEHOUSE_COPY_RETURNED" = 1 ]; then
+if [ "$TREEHOUSE_COPY_RETURNED" = 1 ] && [ "$ONLY_IF_STOPPED" != 1 ]; then
   if [ "$TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
     FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-treehouse-guard.sh" prune --locked "$PROJ" || true
   else
