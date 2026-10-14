@@ -566,7 +566,7 @@ test_native_spawn_refusal_stop() {
 
 test_existing_backlog_row() {
   local variant
-  for variant in kind project done matching; do
+  for variant in kind project 'done' matching; do
     new_case "existing-row-$variant"
     seed_project firstmate
     mkdir -p "$REMOTE_HOME/data/task-one"
@@ -577,8 +577,8 @@ test_existing_backlog_row() {
       *) run_entry "$REMOTE_HOME" fm-tasks-axi.sh add task-one 'Existing row' --kind ship --repo firstmate --queue ;;
     esac
     expect_code 0 "$CODE" "seed $variant backlog row"
-    if [ "$variant" = done ]; then
-      run_entry "$REMOTE_HOME" fm-tasks-axi.sh done task-one
+    if [ "$variant" = 'done' ]; then
+      run_entry "$REMOTE_HOME" fm-tasks-axi.sh 'done' task-one
       expect_code 0 "$CODE" 'close existing backlog row'
     fi
     : > "$FIXTURES/calls"
