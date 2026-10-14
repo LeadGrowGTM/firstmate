@@ -1888,6 +1888,32 @@ SH
   pass "raw secondmate merges skill overrides into one existing settings argument"
 }
 
+test_raw_ship_existing_settings_keeps_launch_arguments() {
+  local rec id out status launch args_log actual expected
+  id=profile-ship-skillov-existing-z37
+  rec=$(make_spawn_case profile-ship-skillov-existing claude "$id")
+  read_case_record "$rec"
+  printf '{"skillOverrides":{"kun":"off"}}\n' > "$HOME_DIR/config/skill-overrides.json"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "claude --model haiku --settings '{\"theme\":\"dark\"}' 'A positional prompt'")
+  status=$?
+  expect_code 0 "$status" "raw ship spawn with existing settings should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  args_log="$CASE_DIR/claude-args.log"
+  FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+    || fail "raw ship Claude launch with existing settings failed"
+  actual=$(cat "$args_log")
+  expected=$(printf '%s\n' --disallowedTools 'Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs' --settings '{}' --model haiku --settings '{"theme":"dark"}' 'A positional prompt')
+  [ "$actual" = "$expected" ] || fail "raw ship Claude arguments changed"$'\n'"expected: $expected"$'\n'"actual: $actual"
+  pass "raw ship launch preserves its existing settings arguments"
+}
+
 test_skill_overrides_never_reach_workers() {
   local rec id out status launch
   id=profile-worker-skillov-z34
@@ -2615,6 +2641,7 @@ test_secondmate_skill_overrides_valid_file_rides_the_settings
 test_secondmate_skill_overrides_malformed_file_is_skipped_with_a_note
 test_raw_secondmate_skill_overrides_reach_claude
 test_raw_secondmate_existing_settings_merge_skill_overrides
+test_raw_ship_existing_settings_keeps_launch_arguments
 test_skill_overrides_never_reach_workers
 test_active_dispatch_profile_does_not_block_secondmate_launch
 test_opt_in_production_launch_receipts

@@ -2447,7 +2447,6 @@ launch_template() {
 
 raw_claude_settings_extract() {
   local source=$1 length=${#1} i=0 start settings_start c next quote= word= expect=0
-  RAW_CLAUDE_SETTINGS_FOUND=0
   while (( i < length )); do
     c=${source:i:1}
     if [[ "$c" == [[:space:]] ]]; then
@@ -2492,9 +2491,7 @@ raw_claude_settings_extract() {
     done
     [ -z "$quote" ] || return 1
     if [ "$expect" = 1 ]; then
-      RAW_CLAUDE_SETTINGS_FOUND=1
       RAW_CLAUDE_SETTINGS_VALUE=$word
-      RAW_CLAUDE_SETTINGS_LITERAL=${source:start:i-start}
       RAW_CLAUDE_SETTINGS_COMMAND=${source:0:settings_start}--disallowedTools\ $CLAUDE_PUBLISHING_TOOLS\ ${source:settings_start:start-settings_start}__CLAUDESETTINGS__${source:i}
       return 0
     fi
@@ -2502,9 +2499,7 @@ raw_claude_settings_extract() {
       expect=1
       settings_start=$start
     elif [[ "$word" == --settings=* ]] && [ "${source:start:11}" = '--settings=' ]; then
-      RAW_CLAUDE_SETTINGS_FOUND=1
       RAW_CLAUDE_SETTINGS_VALUE=${word#--settings=}
-      RAW_CLAUDE_SETTINGS_LITERAL=${source:$((start + 11)):$((i - start - 11))}
       RAW_CLAUDE_SETTINGS_COMMAND=${source:0:start}--disallowedTools\ $CLAUDE_PUBLISHING_TOOLS\ --settings=__CLAUDESETTINGS__${source:i}
       return 0
     fi
@@ -2523,11 +2518,7 @@ case "$ARG3" in
       HARNESS=$(basename "$word")
       if [ "$HARNESS" = claude ]; then
         raw_prefix=${LAUNCH%"$raw_tail"}
-        if raw_claude_settings_extract "$raw_tail"; then
-          raw_tail=$RAW_CLAUDE_SETTINGS_COMMAND
-        else
-          raw_tail=${raw_tail/"$word"/"$word --disallowedTools $CLAUDE_PUBLISHING_TOOLS --settings __CLAUDESETTINGS__"}
-        fi
+        raw_tail=${raw_tail/"$word"/"$word --disallowedTools $CLAUDE_PUBLISHING_TOOLS --settings __CLAUDESETTINGS__"}
         LAUNCH=$raw_prefix$raw_tail
       fi
       break
@@ -5742,36 +5733,32 @@ CLAUDE_REMOTE_CONTROL_FLAG=
 LAUNCH=${LAUNCH//__CLAUDEREMOTECONTROL__/$CLAUDE_REMOTE_CONTROL_FLAG}
 if [ "$HARNESS" = claude ]; then
   if [ "$RAW_LAUNCH" = 1 ]; then
-    if [ "$RAW_CLAUDE_SETTINGS_FOUND" = 1 ]; then
-      CLAUDE_SETTINGS=$RAW_CLAUDE_SETTINGS_VALUE
-      CLAUDE_SETTINGS_TOKEN=$RAW_CLAUDE_SETTINGS_LITERAL
-    else
-      CLAUDE_SETTINGS='{}'
-      CLAUDE_SETTINGS_TOKEN="$(shell_quote "$CLAUDE_SETTINGS")"
-    fi
+    CLAUDE_SETTINGS='{}'
   else
     CLAUDE_SETTINGS='{"feedbackDrafts":"off"}'
     if [ "$KEEP_AI_TRAILERS" != 1 ]; then
       CLAUDE_SETTINGS='{"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false}}'
     fi
-    CLAUDE_SETTINGS_TOKEN="$(shell_quote "$CLAUDE_SETTINGS")"
   fi
   if [ "$KIND" = secondmate ] && [ -f "$WT/config/skill-overrides.json" ]; then
     if so_json=$(jq -ces \
       'if length == 1 and (.[0].skillOverrides | type) == "object" then .[0].skillOverrides else error("skillOverrides must be an object") end' \
       "$WT/config/skill-overrides.json" 2>/dev/null); then
+      if [ "$RAW_LAUNCH" = 1 ] && raw_claude_settings_extract "$ARG3"; then
+        LAUNCH=$RAW_CLAUDE_SETTINGS_COMMAND
+        CLAUDE_SETTINGS=$RAW_CLAUDE_SETTINGS_VALUE
+      fi
       merged_settings=$(jq -cn --argjson settings "$CLAUDE_SETTINGS" --argjson overrides "$so_json" \
         'if ($settings | type) == "object" then $settings + {skillOverrides: $overrides} else error("settings must be an object") end' 2>/dev/null) || {
         echo "error: raw Claude --settings must be a JSON object to merge skillOverrides" >&2
         exit 1
       }
       CLAUDE_SETTINGS=$merged_settings
-      CLAUDE_SETTINGS_TOKEN="$(shell_quote "$CLAUDE_SETTINGS")"
     else
       echo "note: skipped $WT/config/skill-overrides.json: not valid JSON with a top-level skillOverrides object" >&2
     fi
   fi
-  LAUNCH=${LAUNCH/__CLAUDESETTINGS__/"$CLAUDE_SETTINGS_TOKEN"}
+  LAUNCH=${LAUNCH/__CLAUDESETTINGS__/"$(shell_quote "$CLAUDE_SETTINGS")"}
 fi
 if [ "$HARNESS" = rovo ]; then
   ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT" "$DATA" "$STATE" "$ID") || {
