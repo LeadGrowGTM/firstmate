@@ -61,6 +61,18 @@ pending_task() {
   [[ "$shown" == *'state: queued'* && "$shown" != *'hold_kind: captain'* \
     && "$shown" == *'body: "Domain proposal pending approval:'* ]]
 }
+fail_note_once() {
+  cat > "$FAKEBIN/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "$1" = update ] && [ "${2:-}" != --help ] && [ -f "$FM_HOME/state/fail-domain-note-once" ]; then
+  rm "$FM_HOME/state/fail-domain-note-once"
+  exit 1
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+  chmod +x "$FAKEBIN/tasks-axi"
+  : > "$HOME_DIR/state/fail-domain-note-once"
+}
 DIR="$HOME_DIR/data/domain-freshness/proposals/media/1"
 TASK=domain-proposal-media-1
 
@@ -369,7 +381,14 @@ proposal 'later rejected version' > "$TMP_ROOT/later-rejected.json"
 tool submit media "$TMP_ROOT/later-rejected.json" >/dev/null || fail 'later version submission failed'
 answer domain-proposal-media-8 reject
 proposal 'refreshed after rejection' > "$TMP_ROOT/refreshed.json"
-tool submit media "$TMP_ROOT/refreshed.json" >/dev/null || fail 'refresh after a rejected newer version was refused'
+fail_note_once
+out=$(tool submit media "$TMP_ROOT/refreshed.json" 2>&1); rc=$?
+expect_code 1 "$rc" 'failed refreshed proposal note is reported'
+assert_contains "$out" 'could not record proposal note' 'refreshed proposal reached the task-note update'
+rm "$FAKEBIN/tasks-axi"
+R3=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/8/v3.json")
+out=$(tool submit media "$TMP_ROOT/refreshed.json") || fail 'retry of the refreshed proposal note failed'
+assert_contains "$out" "pending-confirmation: domain-proposal-media-8 v3 digest $R3" 'retry did not repair the latest pending note'
 pending_task domain-proposal-media-8 || fail 'refreshed version did not reopen the activation task'
 answer domain-proposal-media-8 reject
 out=$(tool request media "$BUNDLE2" 2>&1); rc=$?
@@ -433,16 +452,7 @@ tool submit media "$TMP_ROOT/c1.json" >/dev/null 2>&1 && fail 'card v1 used the 
 proposal 'card v1' "$BUNDLE2" > "$TMP_ROOT/c1.json"
 tool submit media "$TMP_ROOT/c1.json" >/dev/null || fail 'card v1 failed'
 proposal 'card v2' "$BUNDLE2" > "$TMP_ROOT/c2.json"
-cat > "$FAKEBIN/tasks-axi" <<'SH'
-#!/usr/bin/env bash
-if [ "$1" = update ] && [ -f "$FM_HOME/state/fail-domain-note-once" ]; then
-  rm "$FM_HOME/state/fail-domain-note-once"
-  exit 1
-fi
-exec "$REAL_TASKS_AXI" "$@"
-SH
-chmod +x "$FAKEBIN/tasks-axi"
-: > "$HOME_DIR/state/fail-domain-note-once"
+fail_note_once
 tool submit media "$TMP_ROOT/c2.json" >/dev/null 2>&1; expect_code 1 "$?" 'failed card update is reported'
 rm "$FAKEBIN/tasks-axi"
 C2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/12/v2.json")

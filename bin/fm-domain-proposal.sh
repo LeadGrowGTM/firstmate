@@ -180,7 +180,7 @@ proposal_pending() {  # <task-id>
 }
 confirmation_close_pending() {
   [ "$2" != "done" ] || return 1
-  local body first digest
+  local body first digest version
   body=$(task_body "$1") || fail "cannot read proposal task $1"
   first=${body%%$'\n'*}
   case "$first" in
@@ -189,6 +189,8 @@ confirmation_close_pending() {
         || fail "invalid proposal confirmation on $1" ;;
     *) return 1 ;;
   esac
+  version=$(latest_version "$3")
+  [ -n "$version" ] && [ "$digest" = "$(jq -r '.digest' "$3/v$version.json")" ] || return 1
   [ ! -f "$3/receipts.jsonl" ] \
     || ! jq -es --arg d "$digest" 'any(.[]; .state == "approved" and .digest == $d)' "$3/receipts.jsonl" >/dev/null
 }
