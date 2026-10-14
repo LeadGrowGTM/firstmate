@@ -5368,22 +5368,20 @@ orca_view_name_usable() {
   if ! tmux has-session -t "=$1" 2>/dev/null; then
     return 0
   fi
+  [ -n "$ORCA_VIEW_PRIOR_HANDLE" ] && [ "$ORCA_VIEW_PRIOR_SESSION" = "$1" ] || return 1
   group=$(tmux display-message -p -t "=$1:" '#{session_group}' 2>/dev/null) || return 1
   [ "$group" = "$SES" ] || return 1
-  if recorded_window=$(tmux show-options -v -t "=$1:" @fm_view_window 2>/dev/null); then
-    target_window=$(tmux display-message -p -t "$T" '#{window_id}' 2>/dev/null) || return 1
-    [ -n "$target_window" ] && [ "$recorded_window" = "$target_window" ]
-  else
-    [ "$1" = "orca-$ID" ]
-  fi
+  recorded_window=$(tmux show-options -v -t "=$1:" @fm_view_window 2>/dev/null) || return 1
+  target_window=$(tmux display-message -p -t "$T" '#{window_id}' 2>/dev/null) || return 1
+  [ -n "$target_window" ] && [ "$recorded_window" = "$target_window" ]
 }
 if [ "$ORCA_VIEW_ENABLED" = on ]; then
-  ORCA_VIEW_NAME="orca-$ID"
+  ORCA_VIEW_NAME="fmview-$ID"
   if ! orca_view_name_usable "$ORCA_VIEW_NAME"; then
     case "$SES" in
       *[!A-Za-z0-9_-]*)
-        ORCA_VIEW_DERIVED="orca-$ID-h-$(printf '%s' "$SES" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]')" ;;
-      *) ORCA_VIEW_DERIVED="orca-$ID-s-$SES" ;;
+        ORCA_VIEW_DERIVED="fmview-$ID-h-$(printf '%s' "$SES" | LC_ALL=C od -An -v -tx1 | tr -d '[:space:]')" ;;
+      *) ORCA_VIEW_DERIVED="fmview-$ID-s-$SES" ;;
     esac
     ORCA_VIEW_NAME=
     for ORCA_VIEW_SUFFIX in '' 1 2 3 4 5; do

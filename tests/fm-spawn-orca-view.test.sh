@@ -54,10 +54,10 @@ case "$*" in
     exec "$here/tmux.base" "$@" ;;
   *'#{session_grouped}'*)
     case "$*" in
-      *=orca-*)
+      *=fmview-* | *=orca-*)
         args=$*
-        view=${args#*=orca-}
-        view=orca-${view%%:*}
+        view=${args#*=}
+        view=${view%%:*}
         group=${FM_FAKE_BASE_SESSION:-firstmate}
         [ ! -e "$D/group-$view" ] || group=$(cat "$D/group-$view")
         printf '1\t%s\n' "$group" ;;
@@ -66,8 +66,8 @@ case "$*" in
     exit 0 ;;
   *'#{session_group}'*)
     args=$*
-    view=${args#*=orca-}
-    view=orca-${view%%:*}
+    view=${args#*=}
+    view=${view%%:*}
     group=${FM_FAKE_BASE_SESSION:-firstmate}
     [ ! -e "$D/group-$view" ] || group=$(cat "$D/group-$view")
     printf '%s\n' "$group"
@@ -83,7 +83,7 @@ case "${1:-}" in
     value=
     for a in "$@"; do
       case "$a" in
-        =orca-*: ) view=${a#=}; view=${view%:} ;;
+        =fmview-*: | =orca-*: ) view=${a#=}; view=${view%:} ;;
         @fm_view_window) option=1 ;;
       esac
       value=$a
@@ -101,7 +101,7 @@ case "${1:-}" in
   new-window) printf '%s\n' "$*" >> "$D/new-windows"; exec "$here/tmux.base" "$@" ;;
   has-session)
     for a in "$@"; do
-      case "$a" in =orca-*) [ -e "$D/session-${a#=}" ]; exit $? ;; esac
+      case "$a" in =fmview-* | =orca-*) [ -e "$D/session-${a#=}" ]; exit $? ;; esac
     done ;;
   new-session)
     s=
@@ -111,7 +111,7 @@ case "${1:-}" in
       prev=$a
     done
     case "$s" in
-      orca-*) : > "$D/session-$s"; printf '%s\n' "${FM_FAKE_BASE_SESSION:-firstmate}" > "$D/group-$s"; exit 0 ;;
+      fmview-* | orca-*) : > "$D/session-$s"; printf '%s\n' "${FM_FAKE_BASE_SESSION:-firstmate}" > "$D/group-$s"; exit 0 ;;
     esac ;;
   kill-session) printf '%s\n' "$*" >> "$D/killed"; exit 0 ;;
 esac
@@ -254,10 +254,10 @@ test_switch_on_opens_and_forwards_identity() {
   spawn_secondmate on sm-on on allowlist
   expect_code 0 "$STATUS" "a secondmate spawn with the switch on should succeed: $OUT"
   assert_equals term-1 "$(meta sm-on orca_view_handle)" "the tab's handle is recorded"
-  assert_equals orca-sm-on "$(meta sm-on orca_view_session)" "the view session is recorded"
+  assert_equals fmview-sm-on "$(meta sm-on orca_view_session)" "the view session is recorded"
   assert_contains "$(cat "$VIEW_DIR/orca.log")" 'terminal create --worktree 33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate --title sm-on' \
     "the tab is titled for the secondmate on the configured default firstmate project"
-  assert_present "$VIEW_DIR/session-orca-sm-on" "the spawn created the tab's view session"
+  assert_present "$VIEW_DIR/session-fmview-sm-on" "the spawn created the tab's view session"
   assert_absent "$HOME_DIR/state/sm-on.orca-view-identity" "the identity hand-off file is consumed"
   install_env_probe "$FAKEBIN"
   seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$PANE_LOG")" "$(cat "$LAUNCH_LOG")") \
@@ -357,7 +357,7 @@ SH
 # `untracked` the record names no tab, as for a secondmate launched before the
 # switch, whose hand-opened tab made the view session.
 relaunch_secondmate() {
-  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} harness=${6:-} prior_view=${7:-orca-$2} sm
+  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} harness=${6:-} prior_view=${7:-fmview-$2} sm
   local -a harness_args=()
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
@@ -396,6 +396,11 @@ SH
   : > "$VIEW_DIR/session-$prior_view"
   printf 'fmses\n' > "$VIEW_DIR/group-$prior_view"
   [ -n "$untracked" ] || printf '@0\n' > "$VIEW_DIR/option-$prior_view"
+  if [ -n "$untracked" ]; then
+    : > "$VIEW_DIR/session-orca-$id"
+    printf 'fmses\n' > "$VIEW_DIR/group-orca-$id"
+    printf '@99\n' > "$VIEW_DIR/option-orca-$id"
+  fi
   {
     echo "window=fmses:fm-$id"
     echo "endpoint_task_id=$id"
@@ -450,7 +455,7 @@ test_aborted_relaunch_keeps_prior_tab_record() {
   assert_contains "$OUT" "refusing to stage the launch command" \
     "the relaunch reached staging after opening and publishing the new tab"
   assert_equals term-0 "$(meta sm-abort orca_view_handle)" "the record still names the tab whose identity the surviving pane uses"
-  assert_equals orca-sm-abort "$(meta sm-abort orca_view_session)" "the surviving view is recorded"
+  assert_equals fmview-sm-abort "$(meta sm-abort orca_view_session)" "the surviving view is recorded"
   assert_no_grep "terminal close --terminal term-1 --tab --json" "$VIEW_DIR/orca.log" \
     "abort leaves the replacement tab open"
   assert_no_grep "terminal close --terminal term-0" "$VIEW_DIR/orca.log" \
@@ -472,7 +477,7 @@ test_post_export_abort_keeps_replacement_tab() {
   assert_contains "$OUT" "kimi did not show a verified ready signal" \
     "the relaunch reached readiness after sending the new identity"
   assert_equals term-1 "$(meta sm-post orca_view_handle)" "the exported tab remains recorded"
-  assert_equals orca-sm-post "$(meta sm-post orca_view_session)" "the exported view remains recorded"
+  assert_equals fmview-sm-post "$(meta sm-post orca_view_session)" "the exported view remains recorded"
   assert_grep 'tab-1:leaf' "$VIEW_DIR/keys" "the new identity was sent to the pane"
   assert_no_grep "terminal close --terminal term-0 --tab --json" "$VIEW_DIR/orca.log" \
     "abort leaves the superseded tab open"
@@ -489,7 +494,7 @@ test_post_export_fresh_abort_keeps_only_tab() {
   assert_contains "$OUT" "kimi did not show a verified ready signal" \
     "the fresh spawn reached readiness after sending the new identity"
   assert_equals term-1 "$(meta sm-fresh-post orca_view_handle)" "the only tab remains recorded"
-  assert_equals orca-sm-fresh-post "$(meta sm-fresh-post orca_view_session)" "the only view remains recorded"
+  assert_equals fmview-sm-fresh-post "$(meta sm-fresh-post orca_view_session)" "the only view remains recorded"
   assert_grep 'tab-1:leaf' "$PANE_LOG" "the new identity was sent to the pane"
   assert_no_grep "terminal close --terminal term-1" "$VIEW_DIR/orca.log" \
     "abort keeps the only tab bound to the surviving pane"
@@ -499,32 +504,32 @@ test_post_export_fresh_abort_keeps_only_tab() {
 test_cross_home_view_name_collision() {
   spawn_secondmate cross-first sm-cross on
   expect_code 0 "$STATUS" "the first home's secondmate should open its view: $OUT"
-  assert_equals orca-sm-cross "$(meta sm-cross orca_view_session)" \
+  assert_equals fmview-sm-cross "$(meta sm-cross orca_view_session)" \
     "the first home's default view name is preserved"
   mkdir -p "$TMP_ROOT/cross-second/view"
-  : > "$TMP_ROOT/cross-second/view/session-orca-sm-cross"
-  printf 'firstmate\n' > "$TMP_ROOT/cross-second/view/group-orca-sm-cross"
+  : > "$TMP_ROOT/cross-second/view/session-fmview-sm-cross"
+  printf 'firstmate\n' > "$TMP_ROOT/cross-second/view/group-fmview-sm-cross"
   spawn_secondmate cross-second sm-cross on '' '' otherbase
   expect_code 0 "$STATUS" "the second home's secondmate should open a distinct view: $OUT"
-  assert_equals orca-sm-cross-s-otherbase "$(meta sm-cross orca_view_session)" \
+  assert_equals fmview-sm-cross-s-otherbase "$(meta sm-cross orca_view_session)" \
     "a foreign view is replaced by a deterministic name containing this base session"
-  assert_present "$VIEW_DIR/session-orca-sm-cross-s-otherbase" \
+  assert_present "$VIEW_DIR/session-fmview-sm-cross-s-otherbase" \
     "the second home creates its own grouped view"
-  assert_present "$VIEW_DIR/session-orca-sm-cross" \
+  assert_present "$VIEW_DIR/session-fmview-sm-cross" \
     "the first home's view remains untouched"
   assert_equals term-1 "$(meta sm-cross orca_view_handle)" \
     "the second home records the tab it opened"
   assert_no_grep 'kill-session' "$VIEW_DIR/killed" "no foreign view is removed"
   mkdir -p "$TMP_ROOT/cross-dotted/view"
-  : > "$TMP_ROOT/cross-dotted/view/session-orca-sm-cross"
-  printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-orca-sm-cross"
-  : > "$TMP_ROOT/cross-dotted/view/session-orca-sm-cross-h-6f746865722e62617365"
-  printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-orca-sm-cross-h-6f746865722e62617365"
+  : > "$TMP_ROOT/cross-dotted/view/session-fmview-sm-cross"
+  printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-fmview-sm-cross"
+  : > "$TMP_ROOT/cross-dotted/view/session-fmview-sm-cross-h-6f746865722e62617365"
+  printf 'firstmate\n' > "$TMP_ROOT/cross-dotted/view/group-fmview-sm-cross-h-6f746865722e62617365"
   spawn_secondmate cross-dotted sm-cross on '' '' other.base
   expect_code 0 "$STATUS" "a dotted base session should also open a distinct view: $OUT"
-  assert_equals orca-sm-cross-h-6f746865722e62617365-1 "$(meta sm-cross orca_view_session)" \
+  assert_equals fmview-sm-cross-h-6f746865722e62617365-1 "$(meta sm-cross orca_view_session)" \
     "a dotted base session has a deterministic valid view name"
-  assert_present "$VIEW_DIR/session-orca-sm-cross-h-6f746865722e62617365-1" \
+  assert_present "$VIEW_DIR/session-fmview-sm-cross-h-6f746865722e62617365-1" \
     "the dotted home creates its own grouped view"
   pass "same secondmate id in different base sessions gets a distinct Orca view"
 }
@@ -532,22 +537,22 @@ test_cross_home_view_name_collision() {
 test_derived_view_name_collision() {
   local candidate
   mkdir -p "$TMP_ROOT/derived-collision/view"
-  for candidate in orca-dev orca-dev-s-beta; do
+  for candidate in fmview-dev fmview-dev-s-beta; do
     : > "$TMP_ROOT/derived-collision/view/session-$candidate"
     printf 'firstmate\n' > "$TMP_ROOT/derived-collision/view/group-$candidate"
   done
   spawn_secondmate derived-collision dev on '' '' beta
   expect_code 0 "$STATUS" "a collision with the derived name should still open a tab: $OUT"
-  assert_equals orca-dev-s-beta-1 "$(meta dev orca_view_session)" \
+  assert_equals fmview-dev-s-beta-1 "$(meta dev orca_view_session)" \
     "the first available numbered name is selected"
-  assert_present "$VIEW_DIR/session-orca-dev-s-beta-1" \
+  assert_present "$VIEW_DIR/session-fmview-dev-s-beta-1" \
     "the tab gets its own view instead of reusing the foreign view"
-  for candidate in orca-dev orca-dev-s-beta; do
+  for candidate in fmview-dev fmview-dev-s-beta; do
     assert_present "$VIEW_DIR/session-$candidate" "the foreign $candidate view survives"
   done
 
   mkdir -p "$TMP_ROOT/derived-exhausted/view"
-  for candidate in orca-dev orca-dev-s-beta orca-dev-s-beta-{1..5}; do
+  for candidate in fmview-dev fmview-dev-s-beta fmview-dev-s-beta-{1..5}; do
     : > "$TMP_ROOT/derived-exhausted/view/session-$candidate"
     printf 'firstmate\n' > "$TMP_ROOT/derived-exhausted/view/group-$candidate"
   done
@@ -566,28 +571,28 @@ test_same_group_view_name_alias() {
   first_view="$TMP_ROOT/same-group-first/view"
   second_view="$TMP_ROOT/same-group-second/view"
   mkdir -p "$first_view" "$second_view"
-  : > "$first_view/session-orca-dev"
-  printf 'otherbase\n' > "$first_view/group-orca-dev"
+  : > "$first_view/session-fmview-dev"
+  printf 'otherbase\n' > "$first_view/group-fmview-dev"
   spawn_secondmate same-group-first dev on '' '' beta
   expect_code 0 "$STATUS" "the dev secondmate should open its derived view: $OUT"
-  assert_equals orca-dev-s-beta "$(meta dev orca_view_session)" \
+  assert_equals fmview-dev-s-beta "$(meta dev orca_view_session)" \
     "dev uses the derived name when its primary name belongs to another base"
-  assert_equals @0 "$(cat "$VIEW_DIR/option-orca-dev-s-beta")" \
+  assert_equals @0 "$(cat "$VIEW_DIR/option-fmview-dev-s-beta")" \
     "dev's view records its original target window"
-  for candidate in orca-dev-s-beta orca-dev-s-beta-s-beta orca-dev-s-beta-s-beta-1; do
+  for candidate in fmview-dev-s-beta fmview-dev-s-beta-s-beta fmview-dev-s-beta-s-beta-1; do
     : > "$second_view/session-$candidate"
     printf 'beta\n' > "$second_view/group-$candidate"
     printf '@0\n' > "$second_view/option-$candidate"
   done
   FM_FAKE_TARGET_WINDOW_ID=@1 spawn_secondmate same-group-second dev-s-beta on '' '' beta
   expect_code 0 "$STATUS" "a secondmate with the derived name as its ID should open its own view: $OUT"
-  assert_equals orca-dev-s-beta-s-beta-2 "$(meta dev-s-beta orca_view_session)" \
+  assert_equals fmview-dev-s-beta-s-beta-2 "$(meta dev-s-beta orca_view_session)" \
     "occupied primary, derived, and numbered views of another window are skipped"
-  for candidate in orca-dev-s-beta orca-dev-s-beta-s-beta orca-dev-s-beta-s-beta-1; do
+  for candidate in fmview-dev-s-beta fmview-dev-s-beta-s-beta fmview-dev-s-beta-s-beta-1; do
     assert_equals @0 "$(cat "$VIEW_DIR/option-$candidate")" \
       "a different secondmate's view target stays unchanged"
   done
-  assert_equals @1 "$(cat "$VIEW_DIR/option-orca-dev-s-beta-s-beta-2")" \
+  assert_equals @1 "$(cat "$VIEW_DIR/option-fmview-dev-s-beta-s-beta-2")" \
     "the new view tracks this secondmate's window"
   pass "same-group view aliases cannot retarget another secondmate's tab"
 }
@@ -595,35 +600,35 @@ test_same_group_view_name_alias() {
 test_base_session_is_not_a_view_candidate() {
   local view="$TMP_ROOT/base-view-collision/view"
   mkdir -p "$view"
-  : > "$view/session-orca-dev"
-  printf 'orca-dev\n' > "$view/group-orca-dev"
-  spawn_secondmate base-view-collision dev on '' '' orca-dev
+  : > "$view/session-fmview-dev"
+  printf 'fmview-dev\n' > "$view/group-fmview-dev"
+  spawn_secondmate base-view-collision dev on '' '' fmview-dev
   expect_code 0 "$STATUS" "a base-name collision must not block spawn: $OUT"
-  assert_equals orca-dev-s-orca-dev "$(meta dev orca_view_session)" \
+  assert_equals fmview-dev-s-fmview-dev "$(meta dev orca_view_session)" \
     "spawn chooses a distinct view rather than the base"
-  assert_absent "$VIEW_DIR/option-orca-dev" "spawn never installs tracking on its base"
+  assert_absent "$VIEW_DIR/option-fmview-dev" "spawn never installs tracking on its base"
   pass "spawn: refuses the base itself as a view candidate and opens a distinct view"
 }
 
 test_recycled_prior_view_is_not_reused() {
   local view="$TMP_ROOT/recycled-prior/view"
   mkdir -p "$view"
-  : > "$view/session-orca-dev"
-  printf 'otherbase\n' > "$view/group-orca-dev"
-  : > "$view/session-orca-dev-s-beta"
-  printf 'beta\n' > "$view/group-orca-dev-s-beta"
-  printf '@1\n' > "$view/option-orca-dev-s-beta"
+  : > "$view/session-fmview-dev"
+  printf 'otherbase\n' > "$view/group-fmview-dev"
+  : > "$view/session-fmview-dev-s-beta"
+  printf 'beta\n' > "$view/group-fmview-dev-s-beta"
+  printf '@1\n' > "$view/option-fmview-dev-s-beta"
   cat > "$TMP_ROOT/recycled-prior.prior-meta" <<EOF
 kind=secondmate
 backend=tmux
 orca_view_handle=term-old
-orca_view_session=orca-dev-s-beta
+orca_view_session=fmview-dev-s-beta
 orca_view_owned=1
 EOF
   spawn_secondmate recycled-prior dev on '' '' beta
   expect_code 0 "$STATUS" "a recycled prior view must not block respawn: $OUT"
-  assert_equals orca-dev-s-beta-1 "$(meta dev orca_view_session)" "respawn creates its own view"
-  assert_equals @1 "$(cat "$VIEW_DIR/option-orca-dev-s-beta")" "respawn leaves the other secondmate's view target alone"
+  assert_equals fmview-dev-s-beta-1 "$(meta dev orca_view_session)" "respawn creates its own view"
+  assert_equals @1 "$(cat "$VIEW_DIR/option-fmview-dev-s-beta")" "respawn leaves the other secondmate's view target alone"
   assert_no_grep 'kill-session' "$VIEW_DIR/killed" "replacement cleanup never kills the rejected recycled view"
   assert_no_grep 'terminal close --terminal term-old' "$VIEW_DIR/orca.log" "replacement leaves both the old tab and recycled session alone"
   pass "respawn: a recycled prior view name cannot retarget another secondmate's view"
@@ -632,19 +637,19 @@ EOF
 test_another_recorded_owner_is_not_adopted() {
   local view="$TMP_ROOT/recorded-owner/view"
   mkdir -p "$view"
-  : > "$view/session-orca-dev-s-beta"
-  printf 'beta\n' > "$view/group-orca-dev-s-beta"
+  : > "$view/session-fmview-dev-s-beta"
+  printf 'beta\n' > "$view/group-fmview-dev-s-beta"
   cat > "$TMP_ROOT/recorded-owner.other-meta" <<EOF
 kind=secondmate
-orca_view_session=orca-dev-s-beta
+orca_view_session=fmview-dev-s-beta
 orca_view_owned=1
 EOF
   cp "$TMP_ROOT/recorded-owner.other-meta" "$TMP_ROOT/recorded-owner.prior-meta"
   spawn_secondmate recorded-owner dev-s-beta on '' '' beta
   expect_code 0 "$STATUS" "another owner's view must not block respawn: $OUT"
-  assert_equals orca-dev-s-beta-s-beta "$(meta dev-s-beta orca_view_session)" \
+  assert_equals fmview-dev-s-beta-s-beta "$(meta dev-s-beta orca_view_session)" \
     "a view recorded for another secondmate is never adopted"
-  assert_absent "$VIEW_DIR/option-orca-dev-s-beta" "the other owner's untracked view is untouched"
+  assert_absent "$VIEW_DIR/option-fmview-dev-s-beta" "the other owner's untracked view is untouched"
   pass "respawn: creates a distinct view when another secondmate owns the recorded prior name"
 }
 
@@ -671,14 +676,16 @@ test_incomplete_identity_keeps_prior_tab() {
 }
 
 # A secondmate already running when the switch is turned on gets its identity at
-# its next relaunch. Its hand-opened tab is never closed, and the view session
-# that tab made is reused but never becomes this feature's to remove.
-test_relaunch_adopts_a_secondmate_launched_before_the_switch() {
+# its next relaunch. An untracked view and a hand-opened tab stay untouched.
+test_relaunch_preserves_untracked_views() {
   local seen launch
   relaunch_secondmate relaunch-adopt sm-adopt on untracked
   expect_code 0 "$STATUS" "relaunching a secondmate launched before the switch should succeed: $OUT"
   assert_equals term-1 "$(meta sm-adopt orca_view_handle)" "the relaunch records its fresh tab"
-  assert_equals orca-sm-adopt "$(meta sm-adopt orca_view_session)" "the hand-opened tab's view session is reused"
+  assert_equals fmview-sm-adopt-s-fmses "$(meta sm-adopt orca_view_session)" "the relaunch creates a distinct view"
+  assert_absent "$VIEW_DIR/option-fmview-sm-adopt" "an untracked feature-named view is not adopted"
+  assert_equals @99 "$(cat "$VIEW_DIR/option-orca-sm-adopt")" "the hand-opened view's window stays unchanged"
+  assert_present "$VIEW_DIR/session-orca-sm-adopt" "the hand-opened grouped session stays present"
   assert_no_grep "terminal close" "$VIEW_DIR/orca.log" "no tab is closed, so a hand-opened tab stays open"
   [ ! -s "$VIEW_DIR/killed" ] || fail "no view session may be removed: $(cat "$VIEW_DIR/killed")"
   install_env_probe "$FAKEBIN"
@@ -687,7 +694,7 @@ test_relaunch_adopts_a_secondmate_launched_before_the_switch() {
   seen=$(run_launch "$FAKEBIN" "$(grep -E '^(export|unset) ' "$VIEW_DIR/keys")" "$launch") \
     || fail "the replacement launch failed to run: $seen"
   assert_equals "pane=tab-1:leaf token=unset" "$seen" "the replacement agent starts with the fresh tab's identity"
-  pass "relaunch adopts a secondmate launched before the switch: fresh tab and identity, hand-opened tab untouched"
+  pass "relaunch opens its own view and identity while untracked and hand-opened sessions stay untouched"
 }
 
 test_relaunch_with_switch_off_keeps_the_tab() {
@@ -701,7 +708,7 @@ test_relaunch_with_switch_off_keeps_the_tab() {
 # The window-gone recovery respawns a secondmate over its existing record; its
 # previous tab is left open while the recorded handle is replaced.
 test_respawn_replaces_the_previous_tab() {
-  printf 'window=firstmate:fm-sm-back\nendpoint_task_id=sm-back\nkind=secondmate\norca_view_handle=term-0\norca_view_session=orca-sm-back\norca_view_owned=1\n' \
+  printf 'window=firstmate:fm-sm-back\nendpoint_task_id=sm-back\nkind=secondmate\norca_view_handle=term-0\norca_view_session=fmview-sm-back\norca_view_owned=1\n' \
     > "$TMP_ROOT/respawn.prior-meta"
   spawn_secondmate respawn sm-back on
   expect_code 0 "$STATUS" "a secondmate respawn with the switch on should succeed: $OUT"
@@ -728,7 +735,7 @@ test_views_are_never_automatically_closed() {
   mkdir -p "$(dirname "$child")"
   childhome="$CASE_DIR/nested-home"
   make_secondmate_home "$childhome" child
-  printf 'kind=secondmate\nwindow=firstmate:fm-child\nworktree=%s\nproject=%s\nhome=%s\norca_view_handle=term-child\norca_view_session=orca-child\norca_view_owned=1\n' \
+  printf 'kind=secondmate\nwindow=firstmate:fm-child\nworktree=%s\nproject=%s\nhome=%s\norca_view_handle=term-child\norca_view_session=fmview-child\norca_view_owned=1\n' \
     "$childhome" "$childhome" "$childhome" > "$child"
   printf 'off\n' > "$HOME_DIR/config/orca-view-tabs"
   out=$(PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" \
@@ -765,6 +772,6 @@ test_base_session_is_not_a_view_candidate
 test_recycled_prior_view_is_not_reused
 test_another_recorded_owner_is_not_adopted
 test_incomplete_identity_keeps_prior_tab
-test_relaunch_adopts_a_secondmate_launched_before_the_switch
+test_relaunch_preserves_untracked_views
 test_relaunch_with_switch_off_keeps_the_tab
 test_views_are_never_automatically_closed

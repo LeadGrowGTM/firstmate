@@ -121,6 +121,11 @@ test_switch_values() {
   assert_equals off "$(run_view enabled "$cfg")" "an absent switch is off"
   printf 'on\n' > "$cfg/orca-view-tabs"
   assert_equals on "$(run_view enabled "$cfg")" "on turns the tabs on"
+  printf 'on\n\n' > "$cfg/orca-view-tabs"
+  out=$(run_view enabled "$cfg" 2>"$TMP_ROOT/err")
+  assert_equals off "$out" "on followed by a blank line does not turn tabs on"
+  assert_contains "$(cat "$TMP_ROOT/err")" "accepted values are on and off" \
+    "a multiline switch is rejected"
   printf ' off \n' > "$cfg/orca-view-tabs"
   assert_equals off "$(run_view enabled "$cfg")" "off keeps the tabs off"
   printf ' o n \n' > "$cfg/orca-view-tabs"
@@ -144,21 +149,25 @@ test_command_never_names_claude() {
     || fail "the Orca agent regex must flag a bare claude window name"
   names_claude "tmux select-window -t 'claude'" \
     || fail "the Orca agent regex must flag a quoted claude window name"
-  cmd=$(run_view command --target firstmate:claude --view-session orca-main --identity-file "$TMP_ROOT/id") \
-    || fail "command failed for a window named claude"
+  run_view open --target firstmate:claude --view-session orca-cmd-main --identity-file "$TMP_ROOT/id" >/dev/null \
+    || fail "open failed for a window named claude"
+  cmd=$(tail -n 1 "$ORCA_LOG")
   names_claude "$cmd" && fail "the tab command must never name claude, got: $cmd"
-  assert_contains "$cmd" "attach-session -t '=orca-main'" "the tab attaches its view session by exact name"
-  cmd=$(run_view command --target "firstmate:$DEV_ID" --view-session orca-dev) || fail "command failed by id"
-  assert_contains "$cmd" "attach-session -t '=orca-dev'" "an id target is accepted"
-  expect_code 1 "$(run_view command --target firstmate:nope --view-session orca-dev >/dev/null 2>&1; echo $?)" \
+  assert_contains "$cmd" "attach-session -t '=orca-cmd-main'" "the tab attaches its view session by exact name"
+  run_view open --target "firstmate:$DEV_ID" --view-session orca-cmd-dev >/dev/null || fail "open failed by id"
+  cmd=$(tail -n 1 "$ORCA_LOG")
+  assert_contains "$cmd" "attach-session -t '=orca-cmd-dev'" "an id target is accepted"
+  expect_code 1 "$(run_view open --target firstmate:nope --view-session orca-cmd-nope >/dev/null 2>&1; echo $?)" \
     "a missing window is refused"
-  expect_code 2 "$(run_view command --target firstmate --view-session orca-dev >/dev/null 2>&1; echo $?)" \
+  expect_code 2 "$(run_view open --target firstmate --view-session orca-cmd-nope >/dev/null 2>&1; echo $?)" \
     "a target without a window is invalid use"
+  expect_code 2 "$(run_view command --target firstmate:fm-dev --view-session orca-cmd-nope >/dev/null 2>&1; echo $?)" \
+    "command is not a public subcommand"
   expect_code 2 "$(run_view open --target firstmate:fm-dev --view-session orca-extra --worktree /other >/dev/null 2>&1; echo $?)" \
     "open refuses a public worktree override"
   expect_code 2 "$(run_view window "$DEV_ID" --worktree /other >/dev/null 2>&1; echo $?)" \
     "window refuses a public worktree override"
-  pass "command: attaches the view session without naming any window, so no launch line names claude"
+  pass "open: generated tab command avoids naming claude and the command subcommand is unavailable"
 }
 
 test_open_views_the_window_and_writes_identity() {
@@ -213,6 +222,11 @@ test_home_local_orca_project() {
   printf 'first\nsecond\n' > "$config/orca-view-project"
   out=$(FM_CONFIG_OVERRIDE="$config" run_view window "$DEV_ID" 2>&1)
   expect_code 3 "$?" "a multiline project selection steps aside"
+  printf 'repo-other::C:\\Users\\other\\Project With Spaces\n\n' > "$config/orca-view-project"
+  : > "$ORCA_LOG"
+  out=$(FM_CONFIG_OVERRIDE="$config" run_view window "$DEV_ID" 2>&1)
+  expect_code 3 "$?" "a valid project selector followed by a blank line steps aside"
+  assert_no_grep 'terminal create' "$ORCA_LOG" "a trailing blank line creates no tab"
   pass "project: home-local override preserves Windows paths and spaces; invalid selections step aside"
 }
 
@@ -572,8 +586,8 @@ SH
 }
 
 test_switch_values
-test_command_never_names_claude
 test_open_views_the_window_and_writes_identity
+test_command_never_names_claude
 test_home_local_orca_project
 test_open_refuses_the_base_as_a_view
 test_open_preserves_borrowed_hooks

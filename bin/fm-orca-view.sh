@@ -3,7 +3,6 @@
 #
 # Usage:
 #   fm-orca-view.sh enabled <config-dir>
-#   fm-orca-view.sh command --target <session:window> --view-session <name> [--identity-file <path>]
 #   fm-orca-view.sh open --target <session:window> --view-session <name> [--title <text>] [--identity-file <path>]
 #   fm-orca-view.sh window <@N> [--title <text>]
 #   fm-orca-view.sh identity --file <path>
@@ -28,11 +27,6 @@
 # enabled   prints `on` or `off` from <config-dir>/orca-view-tabs
 #           (docs/configuration.md "Orca view tabs" owns the switch). An absent
 #           file is off; any other content is off with a one-line warning.
-# command   prints the startup command the tab runs: it attaches the view
-#           session by name and names no window at all, because Orca treats a
-#           terminal whose launch command contains the bare word `claude` as a
-#           live Claude session (the primary's window is often named claude),
-#           which stalls Orca's Claude account machinery.
 # open      creates or reuses the view session, points it at the target window
 #           as described above, then creates the Orca terminal on the
 #           home-local Orca project (config/orca-view-project; schema in
@@ -107,16 +101,17 @@ on_wsl() {  # the interop directory bin/fm-wsl-interop-lib.sh reads marks WSL
 }
 
 cmd_enabled() {
-  local dir=${1:-} file value
+  local dir=${1:-} file value lines
   [ -n "$dir" ] || die_usage "enabled needs <config-dir>"
   file="$dir/orca-view-tabs"
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then
     printf 'off\n'
     return 0
   fi
+  lines=$(awk 'END { print NR }' "$file" 2>/dev/null) || lines=0
   value=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$file" 2>/dev/null) || value='(unreadable)'
-  case "$value" in
-  on | off) printf '%s\n' "$value" ;;
+  case "$lines:$value" in
+  1:on | 1:off) printf '%s\n' "$value" ;;
   *)
     echo "warning: config/orca-view-tabs holds '$value'; accepted values are on and off, so Orca view tabs stay off" >&2
     printf 'off\n'
@@ -125,16 +120,17 @@ cmd_enabled() {
 }
 
 orca_project() {
-  local file="$CONFIG/orca-view-project" value
+  local file="$CONFIG/orca-view-project" value lines
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then
     printf '%s\n' '33a08beb-aaba-4bf4-9d55-a9700dc0c36a::C:\Users\mitch\Everything_CC\firstmate'
     return 0
   fi
+  lines=$(awk 'END { print NR }' "$file" 2>/dev/null) ||
+    note "cannot read config/orca-view-project, so no Orca tab was opened"
   value=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$file" 2>/dev/null) ||
     note "cannot read config/orca-view-project, so no Orca tab was opened"
-  case "$value" in
-  '' | *$'\n'*) note "config/orca-view-project must contain one nonempty Orca worktree selector" ;;
-  esac
+  [ "$lines" = 1 ] && [ -n "$value" ] ||
+    note "config/orca-view-project must contain one nonempty Orca worktree selector"
   printf '%s\n' "$value"
 }
 
@@ -320,12 +316,6 @@ orca_call() {
   (cd / && fm_run_timed "$timeout" "$ORCA_CLI" "$@" </dev/null 2>&1)
 }
 
-cmd_command() {
-  parse_view_args "$@"
-  resolve_target "$TARGET"
-  view_command "$IDFILE"
-}
-
 cmd_open() {
   local cmd out handle grouped group project
   parse_view_args "$@"
@@ -442,7 +432,6 @@ cmd_identity() {
 case "${1:-}" in
 -h | --help) usage; exit 0 ;;
 enabled) shift; cmd_enabled "$@" ;;
-command) shift; cmd_command "$@" ;;
 open) shift; cmd_open "$@" ;;
 window) shift; cmd_window "$@" ;;
 identity) shift; cmd_identity "$@" ;;
