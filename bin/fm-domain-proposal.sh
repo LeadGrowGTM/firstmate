@@ -35,9 +35,12 @@
 #   always_loaded_size_delta, https sources, effect). Its sha256 over the sorted
 #   compact JSON is the version digest; an identical resubmission is idempotent.
 #   A changed proposal becomes the next version and re-holds the same task, so
-#   one open card per mate always shows the newest. Zero changes records the
-#   version and closes the task. A closed cycle accepts only an exact replay of
-#   its zero-change version.
+#   one open card per mate always shows the newest. An identical resubmission is
+#   unchanged only when the open card is already bound to that digest; otherwise it
+#   re-runs the hold. Zero changes records the version and closes the task, or, while
+#   an approved digest awaits application, records the withdrawal, releases the card,
+#   and leaves the activation task open. A closed cycle accepts only an exact replay
+#   of its zero-change version.
 # approve: succeeds only when the task holds a recorded `answered` captain
 #   decision that is exactly approve-<full LATEST version digest>.
 #   An answer bound to an older version, a rejection, or an unanswered card
@@ -46,6 +49,8 @@
 #   changes, each preconditioned on its observed original_digest, with an
 #   instruction to return a refreshed submit instead of overwriting a changed target.
 # receipt: records applied against an approved digest; repeating it is a no-op.
+#   Applying version N retires every older approval still unapplied, listed in the
+#   receipt's superseded field.
 # All proposal content is untrusted data from a mate and is never executed.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -122,10 +127,32 @@ task_answer() {  # <task-id>; prints mode TAB first decision line, or nothing
     /^Resolution mode: / && !mode { mode = substr($0, 18) }
     /^Captain decision:$/ && !seen { seen = 1; getline; print mode "\t" $0; exit }'
 }
+card_digest() {  # <task-id>; the version digest the open card was held for, or nothing
+  local show
+  show=$(bash "$SCRIPT_DIR/fm-tasks-axi.sh" show "$1" --full 2>/dev/null) || return 0
+  printf '%s\n' "$show" | sed -n 's/^  hold_reason: .*digest \([a-f0-9]\{64\}\).*/\1/p' | head -1
+}
+withdraw() {  # <task> <dir> <version> <digest>: close the task unless an approved digest awaits application
+  local task=$1 dir=$2 version=$3 digest=$4
+  if has_outstanding_approval "$dir/receipts.jsonl"; then
+    if task_open "$task"; then
+      bash "$SCRIPT_DIR/fm-tasks-axi.sh" unhold "$task" >/dev/null || fail "could not release the withdrawn card on $task"
+    fi
+    if ! grep -q "\"state\":\"withdrawn\",\"digest\":\"$digest\"" "$dir/receipts.jsonl"; then
+      jq -cn --arg digest "$digest" --argjson v "$version" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{state:"withdrawn",digest:$digest,version:$v,at:$at}' >> "$dir/receipts.jsonl"
+    fi
+    printf 'withdrawn: %s v%s recorded, activation of an approved version stays open\n' "$task" "$version"
+  else
+    bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "$task" --note "Domain proposal withdrawn at v$version digest $digest; no changes requested" >/dev/null \
+      || fail "could not close withdrawn proposal task $task"
+    printf 'no-change: %s v%s recorded, no card\n' "$task" "$version"
+  fi
+}
 has_outstanding_approval() {
   local pending
   [ -f "$1" ] || return 1
-  pending=$(jq -rs '([.[] | select(.state == "approved") | .digest] - [.[] | select(.state == "applied") | .digest] | length) > 0' "$1") \
+  pending=$(jq -rs '([.[] | select(.state == "approved") | .digest] - [.[] | select(.state == "applied") | .digest, (.superseded // [])[]] | length) > 0' "$1") \
     || fail "cannot read application receipts: $1"
   [ "$pending" = true ]
 }
@@ -249,15 +276,16 @@ submit)
   fi
   APPROVED=0
   if [ -f "$DIR/receipts.jsonl" ] && jq -es 'any(.[]; .state == "approved")' "$DIR/receipts.jsonl" >/dev/null; then APPROVED=1; fi
+  APPROVED_THIS=0
+  if [ -f "$DIR/receipts.jsonl" ] && jq -es --arg d "$DIGEST" 'any(.[]; .state == "approved" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then APPROVED_THIS=1; fi
   if [ -n "$VERSION" ]; then
     if [ "$(jq -r '.digest' "$DIR/v$VERSION.json")" = "$DIGEST" ]; then
       if [ "$(jq '.proposal.changes | length' "$DIR/v$VERSION.json")" -eq 0 ]; then
-        bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "$TASK" --note "Domain proposal withdrawn at v$VERSION digest $DIGEST; no changes requested" >/dev/null \
-          || fail "could not close withdrawn proposal task $TASK"
-        printf 'no-change: %s v%s recorded, no card\n' "$TASK" "$VERSION"
+        withdraw "$TASK" "$DIR" "$VERSION" "$DIGEST"
         exit 0
       fi
-      if task_open "$TASK" || [ "$APPROVED" -eq 1 ]; then
+      # Unchanged only when the open card is already bound to this digest or it was approved.
+      if { task_open "$TASK" && [ "$(card_digest "$TASK")" = "$DIGEST" ]; } || [ "$APPROVED_THIS" -eq 1 ]; then
         printf 'unchanged: %s v%s digest %s\n' "$TASK" "$VERSION" "$DIGEST"
         exit 0
       fi
@@ -275,9 +303,7 @@ submit)
   atomic "$DIR/v$VERSION.json" jq -n -c --argjson version "$VERSION" --arg digest "$DIGEST" --slurpfile proposal "$CANON_FILE" \
     '{version:$version,digest:$digest,proposal:$proposal[0]}'
   if [ "$(printf '%s' "$CANON" | jq '.changes | length')" -eq 0 ]; then
-    bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "$TASK" --note "Domain proposal withdrawn at v$VERSION digest $DIGEST; no changes requested" >/dev/null \
-      || fail "could not close withdrawn proposal task $TASK"
-    printf 'no-change: %s v%s recorded, no card\n' "$TASK" "$VERSION"
+    withdraw "$TASK" "$DIR" "$VERSION" "$DIGEST"
     exit 0
   fi
   # shellcheck disable=SC2016 # jq variables are expanded by jq.
@@ -381,8 +407,11 @@ receipt)
   BUNDLE=$(jq -rs --arg d "$DIGEST" 'map(select(.state == "approved" and .digest == $d)) | last | .bundle_id' "$DIR/receipts.jsonl")
   VERSION=$(latest_version "$DIR")
   LATEST_DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
+  # The activation task closes with the latest version, or when the latest version is a withdrawal.
+  CLOSES=0
+  if [ "$DIGEST" = "$LATEST_DIGEST" ] || [ "$(jq '.proposal.changes | length' "$DIR/v$VERSION.json")" -eq 0 ]; then CLOSES=1; fi
   if jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then
-    if [ "$DIGEST" = "$LATEST_DIGEST" ]; then
+    if [ "$CLOSES" -eq 1 ]; then
       bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST bundle_id $BUNDLE" >/dev/null \
         || fail "could not close activation task for $MATE cycle $CYCLE"
     fi
@@ -390,9 +419,14 @@ receipt)
     exit 0
   fi
   [ -n "$EVIDENCE" ] || fail 'application evidence is required'
-  jq -cn --arg digest "$DIGEST" --arg bundle "$BUNDLE" --arg evidence "$EVIDENCE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{state:"applied",digest:$digest,bundle_id:$bundle,evidence:$evidence,at:$at}' >> "$DIR/receipts.jsonl"
-  if [ "$DIGEST" = "$LATEST_DIGEST" ]; then
+  # Applying version N supersedes every older approval still unapplied; the receipt records them.
+  # shellcheck disable=SC2016 # jq variables are expanded by jq.
+  SUPERSEDED=$(jq -cs --arg d "$DIGEST" '
+    (map(select(.state == "approved" and .digest == $d)) | last | .version) as $n
+    | ([.[] | select(.state == "approved" and .version < $n) | .digest] - [.[] | select(.state == "applied") | .digest]) | unique' "$DIR/receipts.jsonl")
+  jq -cn --arg digest "$DIGEST" --arg bundle "$BUNDLE" --arg evidence "$EVIDENCE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson superseded "$SUPERSEDED" \
+    '{state:"applied",digest:$digest,bundle_id:$bundle,evidence:$evidence,superseded:$superseded,at:$at}' >> "$DIR/receipts.jsonl"
+  if [ "$CLOSES" -eq 1 ]; then
     bash "$SCRIPT_DIR/fm-tasks-axi.sh" "done" "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST bundle_id $BUNDLE: $EVIDENCE" >/dev/null \
       || fail "application receipt recorded but could not close activation task for $MATE cycle $CYCLE"
   fi

@@ -273,6 +273,68 @@ assert_contains "$out" 'resolution mode is released' 'released answer is rejecte
   || fail 'released answer wrote an approval receipt'
 pass 'only an answered captain decision authorizes application'
 
+PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
+  bash "$ROOT/bin/fm-tasks-axi.sh" "done" domain-proposal-media-10 --note 'released cycle closed by the fixture' >/dev/null || fail 'fixture could not close the released cycle'
+tool request media "$BUNDLE" >/dev/null || fail 'refresh scenario request failed'
+proposal 'refresh v1' > "$TMP_ROOT/r1.json"
+tool submit media "$TMP_ROOT/r1.json" >/dev/null || fail 'refresh v1 failed'
+R1=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/11/v1.json")
+answer domain-proposal-media-11 "approve-$R1"
+tool approve media >/dev/null || fail 'refresh v1 approval failed'
+proposal 'refresh v2' > "$TMP_ROOT/r2.json"
+tool submit media "$TMP_ROOT/r2.json" >/dev/null || fail 'refresh v2 failed'
+R2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/11/v2.json")
+answer domain-proposal-media-11 "approve-$R2"
+tool approve media >/dev/null || fail 'refresh v2 approval failed'
+tool receipt media applied --digest "$R2" --evidence 'refreshed version applied' >/dev/null || fail 'refresh v2 receipt failed'
+jq -se --arg d "$R1" 'any(.[]; .state == "applied" and (.superseded | index($d) != null))' \
+  "$HOME_DIR/data/domain-freshness/proposals/media/11/receipts.jsonl" >/dev/null || fail 'receipt did not record the superseded approval'
+out=$(tool request media "$BUNDLE2") || fail 'a superseded approval still blocks a new cycle'
+assert_contains "$out" 'cycle 12' 'new cycle starts after the refreshed version applied'
+pass 'an applied receipt retires older unapplied approvals'
+
+proposal 'card v1' > "$TMP_ROOT/c1.json"
+tool submit media "$TMP_ROOT/c1.json" >/dev/null 2>&1 && fail 'card v1 used the stale bundle'
+proposal 'card v1' "$BUNDLE2" > "$TMP_ROOT/c1.json"
+tool submit media "$TMP_ROOT/c1.json" >/dev/null || fail 'card v1 failed'
+proposal 'card v2' "$BUNDLE2" > "$TMP_ROOT/c2.json"
+cat > "$FAKEBIN/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "$1" = hold ] && [ -f "$FM_HOME/state/fail-domain-hold-once" ]; then
+  rm "$FM_HOME/state/fail-domain-hold-once"
+  exit 1
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+chmod +x "$FAKEBIN/tasks-axi"
+: > "$HOME_DIR/state/fail-domain-hold-once"
+tool submit media "$TMP_ROOT/c2.json" >/dev/null 2>&1; expect_code 1 "$?" 'failed card update is reported'
+rm "$FAKEBIN/tasks-axi"
+C2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/12/v2.json")
+out=$(tool submit media "$TMP_ROOT/c2.json") || fail 'retry of the failed card update failed'
+assert_contains "$out" "held: domain-proposal-media-12 v2 digest $C2" 'retry re-ran the missing hold'
+out=$(tool submit media "$TMP_ROOT/c2.json"); assert_contains "$out" 'unchanged' 'bound card makes resubmission unchanged'
+shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-12 --full)
+assert_contains "$shown" "$C2" 'card is bound to the newest digest'
+pass 'identical resubmission re-runs a hold that failed'
+
+answer domain-proposal-media-12 reject
+tool request media "$BUNDLE2" >/dev/null || fail 'withdrawal scenario request failed'
+proposal 'approved then withdrawn' "$BUNDLE2" > "$TMP_ROOT/w1.json"
+tool submit media "$TMP_ROOT/w1.json" >/dev/null || fail 'withdrawal v1 failed'
+W1=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/13/v1.json")
+answer domain-proposal-media-13 "approve-$W1"
+tool approve media >/dev/null || fail 'withdrawal v1 approval failed'
+jq -n --arg b "$BUNDLE2" '{schema:"fm-domain-proposal.v1",mate:"media",bundle_id:$b,bullets:["Withdrawn"],changes:[]}' > "$TMP_ROOT/w2.json"
+out=$(tool submit media "$TMP_ROOT/w2.json") || fail 'zero-change after approval failed'
+assert_contains "$out" 'withdrawn' 'withdrawal is recorded'
+shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-13 --full)
+assert_not_contains "$shown" 'state: done' 'withdrawal closed an outstanding activation task'
+tool receipt media applied --digest "$W1" --evidence 'approved version applied' >/dev/null || fail 'withdrawal v1 receipt failed'
+shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-13 --full)
+assert_contains "$shown" 'state: done' 'receipt did not close the activation task'
+pass 'a zero-change revision keeps an approved activation task open'
+
 mkdir -p "$TMP_ROOT/mate/state"
 printf 'media\n' > "$TMP_ROOT/mate/.fm-secondmate-home"
 FM_HOME="$TMP_ROOT/mate" bash "$TOOL" request media "$BUNDLE" >/dev/null 2>&1; expect_code 1 "$?" 'a non-main home is refused'
