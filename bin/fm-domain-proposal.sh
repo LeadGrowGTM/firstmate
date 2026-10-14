@@ -29,8 +29,8 @@
 #   otherwise a new cycle starts. It creates one main-owned task and records the
 #   latest requested bundle. Remote mates are refused. The printed text asks for a READ-ONLY
 #   fm-domain-proposal.v1 document and forbids applying anything.
-#   If an older card is answered after a newer bundle request, approval and submission
-#   refuse safely without applying anything; a fresh request starts recovery.
+#   If a newer bundle is requested before confirmation, confirm and approve
+#   reject the earlier proposal; submit must cover the latest bundle.
 # submit: validates the document (schema, mate, the latest bundle_id, nonempty
 #   one-line bullets, and per change: kind skill|rule|charter, file,
 #   original_digest sha256-or-"absent", before, after, integer
