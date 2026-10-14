@@ -15,7 +15,7 @@
 #
 # The one approved box is bx_ahnbu3qr. Reads are fresh, bounded limits, list,
 # info, and rolling-24-hour usage calls. Unavailable readings or exhausted caps
-# refuse dispatch; a box this invocation resumed is stopped on refusal.
+# refuse dispatch.
 # The entire auto-stop window is reserved
 # below $20/month, 60000 account seconds/day, and 43000 box seconds/day ($0.43).
 # Resume uses --no-env and an explicit timer (4 hours paid, 2 hours trial).

@@ -25,7 +25,8 @@
 # must be reconciled before reusing its id or rewriting its briefs.
 # idle reports whether any worker records or endpoints remain under that lock.
 # Before spawn, intake adds a missing backlog item through fm-tasks-axi.sh;
-# an existing item is reused and ordinary spawn owns its In flight transition.
+# an existing item must be dispatchable and match kind and project before its
+# brief can be rewritten. Ordinary spawn owns its In flight transition.
 # no-mistakes requires the operator's config/boat-no-mistakes-proven receipt:
 # one successful proof PR URL after a real box pipeline, plus an installed CLI.
 # Neither validation nor dispatch manufactures that proof or downgrades a mode.

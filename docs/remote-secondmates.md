@@ -565,7 +565,7 @@ The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact
 
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
-The approved box and SSH alias are pinned by the sender; `--prepare --code-only` performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
+The approved box and SSH alias are pinned by the sender; `--prepare --code-only` takes a valid task envelope on stdin and performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
 Use the sender for each overflow resume: an independent `boat resume` does not establish the current instance's `--no-env` receipt, so later dispatch is refused.
 
 Send one JSON task envelope whose `intent` and `spec` contain only code-only task prose, with the concrete `harness`, `model`, and `effort` already resolved under the ordinary dispatch and quota rules:
@@ -595,8 +595,9 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
 ```
 
 The command uses ordinary remote teardown and its landed-work checks.
-It stops the approved box when no Boat task records remain, meeting R2 at the last teardown; the existing four-hour auto-stop timer is the backstop if teardown cannot complete.
-The sender refuses on unreadable spend state or a cap violation, stops a box it resumed when a later step fails, and preserves an uncertain remote launch for same-task reconciliation.
+It stops the approved box when both Boat task records and worker endpoints are gone, meeting R2 at the last teardown; the box's auto-stop timer is the backstop if teardown cannot complete.
+The sender refuses on unreadable spend state or a cap violation; after a definite spawn refusal, it stops a box resumed by this send only when a locked remote inventory confirms both counts are zero.
+The sender leaves an uncertain remote launch untouched for same-task reconciliation.
 It adds no automatic worker retry, merge path, or supervision loop.
 
 ## Provision a route
