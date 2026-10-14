@@ -5,7 +5,7 @@
 #        FM_HOME=<main-home> fm-domain-proposal.sh submit <mate> <proposal.json>
 #        FM_HOME=<main-home> fm-domain-proposal.sh approve <mate> [<cycle>]
 #        FM_HOME=<main-home> fm-domain-proposal.sh receipt <mate> applied
-#                            [--cycle <n>] [--digest <sha256>] [--evidence <one line>]
+#                            --digest <sha256> [--cycle <n>] [--evidence <one line>]
 #        fm-domain-proposal.sh --help
 #
 # Main-home only. This script never sends, schedules, enables, or applies anything:
@@ -27,6 +27,8 @@
 #   otherwise a new cycle starts. It creates one main-owned task and records the
 #   latest requested bundle. Remote mates are refused. The printed text asks for a READ-ONLY
 #   fm-domain-proposal.v1 document and forbids applying anything.
+#   If an older card is answered after a newer bundle request, approval and submission
+#   refuse safely without applying anything; a fresh request starts recovery.
 # submit: validates the document (schema, mate, the latest bundle_id, nonempty
 #   one-line bullets, and per change: kind skill|rule|charter, file,
 #   original_digest sha256-or-"absent", before, after, integer
@@ -37,7 +39,7 @@
 #   version and closes the task. A closed cycle accepts only an exact replay of
 #   its zero-change version.
 # approve: succeeds only when the task holds a recorded `answered` captain
-#   decision that is exactly approve-<first 12 hex of the LATEST version digest>.
+#   decision that is exactly approve-<full LATEST version digest>.
 #   An answer bound to an older version, a rejection, or an unanswered card
 #   exits 3, 4, and 2 respectively and authorizes nothing. Success records the
 #   `approved` receipt and prints the application request: only the approved
@@ -120,7 +122,6 @@ task_answer() {  # <task-id>; prints mode TAB first decision line, or nothing
     /^Resolution mode: / && !mode { mode = substr($0, 18) }
     /^Captain decision:$/ && !seen { seen = 1; getline; print mode "\t" $0; exit }'
 }
-digest12() { printf '%s' "$1" | cut -c1-12; }
 has_outstanding_approval() {
   local pending
   [ -f "$1" ] || return 1
@@ -157,7 +158,7 @@ request)
         if [ -n "$VERSION" ]; then
           DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
           ANSWER=$(task_answer "$TASK")
-          if [ "$ANSWER" = "answered"$'\t'"approve-$(digest12 "$DIGEST")" ] \
+          if [ "$ANSWER" = "answered"$'\t'"approve-$DIGEST" ] \
             && [ "$(jq -r '.proposal.bundle_id' "$DIR/v$VERSION.json")" = "$(jq -r '.latest_bundle_id' "$DIR/request.json")" ] \
             && { [ ! -f "$DIR/receipts.jsonl" ] \
               || ! jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; }; then
@@ -284,14 +285,13 @@ submit)
     + (.proposal.changes | map(
         "\n### \(.file) (\(.kind))\n\nObserved original digest: \(.original_digest)\nAlways-loaded size delta: \(.always_loaded_size_delta)\nEffect: \(.effect)\nSources: \(.sources | join(" "))\n\nBefore:\n\n\(fence(.before))\n\(.before)\n\(fence(.before))\n\nAfter:\n\n\(fence(.after))\n\(.after)\n\(fence(.after))\n") | join(""))' \
     "$DIR/v$VERSION.json"
-  D12=$(digest12 "$DIGEST")
   OPTS=$(mktemp "$STATE/.domain-proposal-options.XXXXXX")
-  jq -n --arg d12 "$D12" --arg report "$DIR/v$VERSION.md" --slurpfile proposal "$DIR/v$VERSION.json" --arg mate "$MATE" --argjson v "$VERSION" '
+  jq -n --arg digest "$DIGEST" --arg report "$DIR/v$VERSION.md" --slurpfile proposal "$DIR/v$VERSION.json" --arg mate "$MATE" --argjson v "$VERSION" '
     {about: ("Domain proposal for " + $mate + " v" + ($v|tostring) + ": " + ($proposal[0].proposal.bullets | join("; "))),
-     decide: ("Apply exactly the before/after changes in the report (version digest " + $d12 + ")?"),
-     options: [{value: ("approve-" + $d12), label: "Approve exactly this version", hint: "A newer version needs its own approval."},
+     decide: ("Apply exactly the before/after changes in the report (version digest " + $digest + ")?"),
+     options: [{value: ("approve-" + $digest), label: "Approve exactly this version", hint: "A newer version needs its own approval."},
                {value: "reject", label: "Reject; keep everything inactive"}],
-     recommended: ("approve-" + $d12), report: $report}' > "$OPTS"
+     recommended: ("approve-" + $digest), report: $report}' > "$OPTS"
   rc=0
   bash "$SCRIPT_DIR/fm-captain-hold.sh" hold "$TASK" --title "Domain proposal: $MATE cycle $CYCLE" \
     --reason "Domain proposal $MATE cycle $CYCLE v$VERSION digest $DIGEST; approval applies only that digest" \
@@ -312,7 +312,6 @@ approve)
   DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
   [ "$(jq -r '.proposal.bundle_id' "$DIR/v$VERSION.json")" = "$(jq -r '.latest_bundle_id' "$DIR/request.json")" ] \
     || fail "latest proposal does not cover the latest requested bundle for $MATE"
-  D12=$(digest12 "$DIGEST")
   ANSWER=$(task_answer "$TASK")
   if [ -z "$ANSWER" ]; then
     printf 'pending: %s v%s has no recorded captain answer\n' "$TASK" "$VERSION" >&2
@@ -320,11 +319,11 @@ approve)
   fi
   MODE=${ANSWER%%$'\t'*}
   TEXT=${ANSWER#*$'\t'}
-  case "$MODE" in answered|released) ;; *) printf 'not-approved: %s resolution mode is %s\n' "$TASK" "$MODE" >&2; exit 4 ;; esac
+  case "$MODE" in answered) ;; *) printf 'not-approved: %s resolution mode is %s\n' "$TASK" "$MODE" >&2; exit 4 ;; esac
   case "$TEXT" in
     reject) printf 'rejected: %s stays inactive\n' "$TASK" >&2; exit 4 ;;
-    "approve-$D12") ;;
-    approve-*) printf 'stale: answer %s does not match latest version v%s digest %s\n' "$TEXT" "$VERSION" "$D12" >&2; exit 3 ;;
+    "approve-$DIGEST") ;;
+    approve-*) printf 'stale: answer %s does not match latest version v%s digest %s\n' "$TEXT" "$VERSION" "$DIGEST" >&2; exit 3 ;;
     *) printf 'not-approved: %s answer is not an approval value\n' "$TASK" >&2; exit 4 ;;
   esac
   if [ -f "$DIR/receipts.jsonl" ] && jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then
@@ -350,7 +349,7 @@ approve)
   }
   ;;
 receipt)
-  [ "$#" -ge 2 ] || fail 'usage: receipt <mate> applied [--cycle <n>] [--digest <sha256>] [--evidence <text>]'
+  [ "$#" -ge 2 ] || fail 'usage: receipt <mate> applied --digest <sha256> [--cycle <n>] [--evidence <text>]'
   MATE=$1 STATE_NAME=$2
   shift 2
   slug mate "$MATE"
@@ -370,12 +369,9 @@ receipt)
   done
   number cycle "${CYCLE:-}"
   case "$EVIDENCE" in *$'\n'*) fail 'evidence must be one line' ;; esac
+  [ -n "$DIGEST" ] || fail 'receipt requires --digest'
   DIR="$BASE/proposals/$MATE/$CYCLE"
   [ -f "$DIR/receipts.jsonl" ] || fail "no approved receipt for $MATE cycle $CYCLE"
-  if [ -z "$DIGEST" ]; then
-    DIGEST=$(jq -rs 'map(select(.state == "approved")) | last | .digest // empty' "$DIR/receipts.jsonl")
-  fi
-  [ -n "$DIGEST" ] || fail 'no approved digest to bind this receipt to'
   jq -es --arg d "$DIGEST" 'any(.[]; .state == "approved" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null \
     || fail "digest $DIGEST was never approved"
   BUNDLE=$(jq -rs --arg d "$DIGEST" 'map(select(.state == "approved" and .digest == $d)) | last | .bundle_id' "$DIR/receipts.jsonl")

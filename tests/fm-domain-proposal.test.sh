@@ -107,7 +107,7 @@ D2=$(jq -r .digest "$DIR/v2.json")
 assert_not_equals "$D1" "$D2" 'versions have distinct digests'
 hold_tool open "$TASK" || fail 'v2 re-hold closed the card'
 [ "$(find "$HOME_DIR/data/domain-freshness/proposals/media" -name 'request.json' | wc -l)" -eq 1 ] || fail 'second card or cycle was created'
-answer "$TASK" "approve-$(printf %s "$D1" | cut -c1-12)"
+answer "$TASK" "approve-$D1"
 out=$(tool approve media 2>&1); rc=$?
 expect_code 3 "$rc" 'approval of an older digest authorizes nothing'
 assert_contains "$out" 'stale' 'stale approval is named'
@@ -118,7 +118,7 @@ out=$(tool request media "$BUNDLE"); assert_contains "$out" 'cycle 2' 'answered 
 proposal 'cycle2 text' > "$TMP_ROOT/p3.json"
 tool submit media "$TMP_ROOT/p3.json" >/dev/null || fail 'submit cycle 2 failed'
 D3=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/2/v1.json")
-answer domain-proposal-media-2 "approve-$(printf %s "$D3" | cut -c1-12)"
+answer domain-proposal-media-2 "approve-$D3"
 out=$(tool request media "$BUNDLE" 2>&1); rc=$?
 expect_code 1 "$rc" 'an answered approval stays on its current cycle'
 assert_contains "$out" 'activation is pending' 'pending approval is disclosed'
@@ -129,8 +129,13 @@ assert_contains "$out" "digest $D3" 'application request binds the digest'
 assert_contains "$out" 'cycle2 text' 'application request carries only approved after text'
 assert_contains "$out" 'original_digest=absent' 'application request carries the precondition'
 tool request media "$BUNDLE" >/dev/null 2>&1; expect_code 1 "$?" 'approved activation blocks another request'
-tool receipt media applied --evidence 'file written' >/dev/null || fail 'applied receipt failed'
-tool receipt media applied >/dev/null || fail 'repeated receipt is not idempotent'
+out=$(tool receipt media applied --evidence 'file written' 2>&1); rc=$?
+expect_code 1 "$rc" 'application receipt requires an explicit digest'
+assert_contains "$out" 'receipt requires --digest' 'missing digest refusal is clear'
+jq -es 'all(.[]; .state == "approved")' "$HOME_DIR/data/domain-freshness/proposals/media/2/receipts.jsonl" >/dev/null \
+  || fail 'missing digest wrote an applied receipt'
+tool receipt media applied --digest "$D3" --evidence 'file written' >/dev/null || fail 'applied receipt failed'
+tool receipt media applied --digest "$D3" >/dev/null || fail 'repeated receipt is not idempotent'
 tool receipt media validated >/dev/null 2>&1; expect_code 1 "$?" 'extra receipt state is refused'
 jq -es --arg b "$BUNDLE" --arg d "$D3" 'all(.[]; .bundle_id == $b and .digest == $d and (has("corr") | not))' \
   "$HOME_DIR/data/domain-freshness/proposals/media/2/receipts.jsonl" >/dev/null \
@@ -151,7 +156,7 @@ out=$(tool submit media "$TMP_ROOT/p5.json"); assert_contains "$out" 'no-change'
 out=$(tool submit media "$TMP_ROOT/p5.json"); assert_contains "$out" 'no-change' 'closed zero-change replay is idempotent'
 [ ! -e "$HOME_DIR/data/domain-freshness/proposals/media/4/v2.json" ] || fail 'zero-change replay wrote a new version'
 tool submit media "$TMP_ROOT/p4.json" >/dev/null 2>&1; expect_code 1 "$?" 'a different closed-cycle proposal is refused'
-assert_contains "$(tool receipt media applied 2>&1)" 'no approved receipt' 'withdrawal does not approve application'
+assert_contains "$(tool receipt media applied --digest "$D3" 2>&1)" 'no approved receipt' 'withdrawal does not approve application'
 pass 'a no-change proposal records a version and opens no card'
 
 printf '%s\n' '- media - Media mate (host: remote-host; root: /x/code; home: /x/media; scope: remote scope; projects: -; added 2026-10-13)' > "$HOME_DIR/data/secondmates.md"
@@ -201,7 +206,7 @@ tool request media "$BUNDLE" >/dev/null
 proposal 'approved first version' > "$TMP_ROOT/approved-first.json"
 tool submit media "$TMP_ROOT/approved-first.json" >/dev/null || fail 'first version setup failed'
 D7=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/7/v1.json")
-answer domain-proposal-media-7 "approve-$(printf %s "$D7" | cut -c1-12)"
+answer domain-proposal-media-7 "approve-$D7"
 tool approve media >/dev/null || fail 'first version approval failed'
 proposal 'pending second version' > "$TMP_ROOT/pending-second.json"
 tool submit media "$TMP_ROOT/pending-second.json" >/dev/null || fail 'second version submission failed'
@@ -229,7 +234,7 @@ tool request media "$BUNDLE" >/dev/null || fail 'new cycle after applied approva
 proposal 'approved but outstanding' > "$TMP_ROOT/outstanding.json"
 tool submit media "$TMP_ROOT/outstanding.json" >/dev/null || fail 'outstanding approval setup failed'
 D8=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/8/v1.json")
-answer domain-proposal-media-8 "approve-$(printf %s "$D8" | cut -c1-12)"
+answer domain-proposal-media-8 "approve-$D8"
 tool approve media >/dev/null || fail 'outstanding approval failed'
 proposal 'later rejected version' > "$TMP_ROOT/later-rejected.json"
 tool submit media "$TMP_ROOT/later-rejected.json" >/dev/null || fail 'later version submission failed'
@@ -242,6 +247,31 @@ tool receipt media applied --digest "$D8" --evidence 'earlier approved version a
 out=$(tool request media "$BUNDLE2") || fail 'applied earlier approval failed to unblock a new cycle'
 assert_contains "$out" 'cycle 9' 'new cycle did not start after all approvals were applied'
 pass 'new-cycle gate checks every approved digest for application'
+
+proposal 'prefix answer' "$BUNDLE2" > "$TMP_ROOT/prefix.json"
+tool submit media "$TMP_ROOT/prefix.json" >/dev/null || fail 'prefix refusal setup failed'
+D9=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/9/v1.json")
+answer domain-proposal-media-9 "approve-${D9:0:12}"
+out=$(tool approve media 2>&1); rc=$?
+expect_code 3 "$rc" 'a digest prefix cannot approve a version'
+assert_contains "$out" 'stale' 'prefix-only approval is stale'
+[ ! -s "$HOME_DIR/data/domain-freshness/proposals/media/9/receipts.jsonl" ] \
+  || fail 'prefix-only answer wrote an approval receipt'
+pass 'approval requires the full version digest'
+
+tool request media "$BUNDLE2" >/dev/null || fail 'released-answer setup request failed'
+proposal 'released answer' "$BUNDLE2" > "$TMP_ROOT/released.json"
+tool submit media "$TMP_ROOT/released.json" >/dev/null || fail 'released-answer setup proposal failed'
+D10=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/10/v1.json")
+printf 'approve-%s\n' "$D10" > "$TMP_ROOT/answer"
+hold_tool answer domain-proposal-media-10 --decision-file "$TMP_ROOT/answer" --release >/dev/null \
+  || fail 'released-answer setup failed'
+out=$(tool approve media 2>&1); rc=$?
+expect_code 4 "$rc" 'a released decision cannot authorize application'
+assert_contains "$out" 'resolution mode is released' 'released answer is rejected'
+[ ! -s "$HOME_DIR/data/domain-freshness/proposals/media/10/receipts.jsonl" ] \
+  || fail 'released answer wrote an approval receipt'
+pass 'only an answered captain decision authorizes application'
 
 mkdir -p "$TMP_ROOT/mate/state"
 printf 'media\n' > "$TMP_ROOT/mate/.fm-secondmate-home"
