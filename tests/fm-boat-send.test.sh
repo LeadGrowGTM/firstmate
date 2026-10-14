@@ -34,7 +34,15 @@ fm_backend_tmux_window_inventory() {
 }
 SH
 REAL_DATE=$(command -v date)
+REAL_CAT=$(command -v cat)
 REAL_TIMEOUT=$(command -v timeout || command -v gtimeout || true)
+cat > "$FAKEBIN/cat" <<SH
+#!/usr/bin/env bash
+if [ "\$*" = /proc/sys/kernel/random/boot_id ]; then
+  exec '$REAL_CAT' "\$FIXTURES/boot-id"
+fi
+exec '$REAL_CAT' "\$@"
+SH
 if [ -n "$REAL_TIMEOUT" ]; then
   cat > "$FAKEBIN/timeout" <<SH
 #!/usr/bin/env bash
@@ -95,23 +103,28 @@ cat > "$BIN/fm-boat-alias-refresh.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
 [ "$*" = 'bx_ahnbu3qr boat-prove' ] || exit 97
+[ ! -e "$FIXTURES/rotate-on-alias" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
 [ ! -e "$FIXTURES/alias.fail" ]
 SH
 cat > "$BIN/fm-on.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'on %s\n' "$*" >> "$FIXTURES/calls"
-if [ "$*" = 'boat-eng fm-boat-worker.sh idle' ]; then
-  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" idle
-  exit $?
+if [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = idle ]; then
+  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" idle "$4"
+  status=$?
+  [ ! -e "$FIXTURES/rotate-after-idle" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
+  exit "$status"
 fi
 if [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = teardown ]; then
-  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" teardown "$4"
-  exit $?
+  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" teardown "$4" "$5"
+  status=$?
+  [ ! -e "$FIXTURES/rotate-after-teardown" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
+  exit "$status"
 fi
-[ "$*" = '--stdin boat-eng fm-boat-worker.sh spawn' ] || exit 97
+[ "${1:-}" = --stdin ] && [ "${2:-}" = boat-eng ] && [ "${3:-}" = fm-boat-worker.sh ] && [ "${4:-}" = spawn ] || exit 97
 cat > "$FIXTURES/transport.request"
 if [ -e "$FIXTURES/use-real-worker" ]; then
-  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" spawn < "$FIXTURES/transport.request"
+  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" spawn "$5" < "$FIXTURES/transport.request"
   exit $?
 fi
 exit "$(cat "$FIXTURES/transport.code" 2>/dev/null || printf 0)"
@@ -211,7 +224,7 @@ run_entry() {
   CODE=$?
 }
 send_task() { run_entry "$LOCAL_HOME" fm-boat-send.sh --code-only; }
-spawn_task() { run_entry "$REMOTE_HOME" fm-boat-worker.sh spawn; }
+spawn_task() { run_entry "$REMOTE_HOME" fm-boat-worker.sh spawn "$(cat "$FIXTURES/boot-id")"; }
 seed_receipt() { printf 'bx_ahnbu3qr %s\n' "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-no-env"; }
 
 assert_pre_resume_refusal() {
@@ -345,7 +358,7 @@ test_sender_success_and_timer() {
       grep -Fx 120 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan resume was not bounded"
       grep -Fx 45 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan instance read was not bounded"
     fi
-    assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn' \
+    assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
       "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
     cmp -s "$FIXTURES/request.json" "$FIXTURES/transport.request" || fail 'transport changed the request bytes'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
@@ -522,7 +535,7 @@ test_confirmed_prelaunch_refusal_stop() {
   assert_contains "$OUT" 'has not been proven' 'remote refusal was not preserved'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'confirmed empty refusal left newly resumed box on'
   assert_absent "$LOCAL_HOME/state/.boat-no-env" 'refused box kept its receipt'
-  assert_no_grep 'spawn ' "$FIXTURES/calls" 'prelaunch refusal spawned a worker'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'prelaunch refusal spawned a worker'
   new_case running-refusal-empty
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
   seed_receipt
@@ -621,13 +634,13 @@ test_remote_cap_and_merge_authority() {
   spawn_task
   expect_code 75 "$CODE" 'orphan endpoint must reserve the third slot'
   assert_equals 1 "$(grep -c '^inventory ' "$FIXTURES/calls")" 'capacity performed more than one endpoint inventory'
-  assert_no_grep 'spawn ' "$FIXTURES/calls" 'orphan endpoint bypassed capacity'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'orphan endpoint bypassed capacity'
   new_case unavailable-endpoints
   seed_project firstmate
   : > "$FIXTURES/inventory.fail"
   spawn_task
   expect_code 1 "$CODE" 'unreadable endpoint inventory must refuse'
-  assert_no_grep 'spawn ' "$FIXTURES/calls" 'unreadable inventory spawned a worker'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'unreadable inventory spawned a worker'
   new_case unsupported-runtime
   seed_project firstmate
   printf 'orca\n' > "$REMOTE_HOME/config/backend"
@@ -643,7 +656,7 @@ test_remote_cap_and_merge_authority() {
   expect_code 75 "$CODE" 'box-wide three-worker cap'
   assert_contains "$OUT" 'three-worker cap' 'cap refusal explanation'
   assert_no_grep 'brief ' "$FIXTURES/calls" 'full box generated a new brief'
-  assert_no_grep 'spawn ' "$FIXTURES/calls" 'full box spawned a worker'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'full box spawned a worker'
   assert_absent "$REMOTE_HOME/state/.boat-worker.lock" 'refused dispatch leaked its lock'
   new_case remote-spawn
   seed_project firstmate
@@ -653,7 +666,7 @@ test_remote_cap_and_merge_authority() {
   seed_worker mate secondmate dev-loop 'state: working active'
   spawn_task
   expect_code 75 "$CODE" 'retained terminal worker still occupies a slot'
-  assert_no_grep 'spawn ' "$FIXTURES/calls" 'terminal worker metadata bypassed capacity'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'terminal worker metadata bypassed capacity'
   rm "$REMOTE_HOME/state/worker-done.meta"
   : > "$FIXTURES/calls"
   spawn_task
@@ -669,7 +682,7 @@ test_remote_cap_and_merge_authority() {
   : > "$FIXTURES/calls"
   spawn_task
   expect_code 1 "$CODE" 'existing task id refuses relaunch'
-  assert_no_grep 'spawn ' "$FIXTURES/calls" 'existing task id launched again'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'existing task id launched again'
   new_case retry-prelaunch-failure
   seed_project firstmate
   : > "$FIXTURES/use-real-brief"
@@ -702,7 +715,7 @@ test_remote_cap_and_merge_authority() {
   spawn_task
   expect_code 1 "$CODE" 'unproven remote no-mistakes mode'
   assert_contains "$OUT" 'has not been proven' 'unproven pipeline refusal'
-  assert_no_grep 'spawn ' "$FIXTURES/calls" 'unproven no-mistakes launched or downgraded'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'unproven no-mistakes launched or downgraded'
   pass 'remote capacity spans projects until teardown, excludes secondmates, and merge authority is off'
 }
 
@@ -754,7 +767,39 @@ test_independent_resume_before_refusal() {
   pass 'pre-resume safety refusals preserve an independently resumed box'
 }
 
+test_instance_changes_at_action_boundary() {
+  new_case instance-changes-during-alias-refresh
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  seed_receipt
+  : > "$FIXTURES/rotate-on-alias"
+  : > "$FIXTURES/use-real-worker"
+  send_task
+  expect_code 1 "$CODE" 'changed instance refuses remote spawn'
+  assert_contains "$OUT" 'Boat instance changed; action refused' 'remote instance refusal was not returned'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'changed instance launched a worker'
+  assert_absent "$REMOTE_HOME/data/task-one/brief.md" 'changed instance wrote a worker brief'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'changed running instance was stopped'
+
+  new_case instance-changes-before-teardown-stop
+  seed_receipt
+  seed_worker task-one ship firstmate 'state: done complete'
+  : > "$FIXTURES/rotate-after-teardown"
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'changed instance refuses last-task stop'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'changed teardown instance was stopped'
+
+  new_case instance-changes-before-refusal-stop
+  set_json request '.mode = "no-mistakes"'
+  : > "$FIXTURES/use-real-worker"
+  : > "$FIXTURES/rotate-after-idle"
+  send_task
+  expect_code 1 "$CODE" 'changed instance refuses cleanup stop'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'changed refusal instance was stopped'
+  pass 'instance changes refuse remote work and later Boat stops'
+}
+
 test_independent_resume_before_refusal
+test_instance_changes_at_action_boundary
 test_same_id_orphan_retry
 test_existing_backlog_row
 test_confirmed_prelaunch_refusal_stop

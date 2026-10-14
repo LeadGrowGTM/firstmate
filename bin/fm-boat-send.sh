@@ -83,6 +83,12 @@ receipt_matches() {
   [ -f "$NO_ENV_RECEIPT" ] && [ ! -L "$NO_ENV_RECEIPT" ] &&
     [ "$(cat "$NO_ENV_RECEIPT")" = "$BOX $1" ]
 }
+stop_current_instance() {
+  local current
+  current=$(boat_instance) && [ "$current" = "$instance" ] && receipt_matches "$current" || return 1
+  fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null || return 1
+  rm -f -- "$NO_ENV_RECEIPT"
+}
 REG="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
 if [ "$PREPARE" -eq 0 ]; then
   [ "$(secondmate_registry_field "$REG" "$ROUTE" host)" = boat-prove ] || die 'boat-eng must use boat-prove'
@@ -93,12 +99,11 @@ fi
 if [ -n "$TEARDOWN_ID" ]; then
   instance=$(boat_instance) || die 'approved box instance is unavailable'
   receipt_matches "$instance" || die 'approved box has no current --no-env resume receipt'
-  remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh teardown "$TEARDOWN_ID") || die 'remote Boat teardown failed; reconcile before stopping'
+  remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh teardown "$TEARDOWN_ID" "$instance") || die 'remote Boat teardown failed; reconcile before stopping'
   case "$remaining" in
     'boat-tasks-remaining: yes') printf 'teardown: %s; other Boat tasks remain\n' "$TEARDOWN_ID" ;;
     'boat-tasks-remaining: no')
-      fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null || die 'last-task teardown completed but Boat stop failed'
-      rm -f -- "$NO_ENV_RECEIPT"
+      stop_current_instance || die 'last-task teardown completed but current-instance Boat stop failed'
       printf 'teardown: %s; stopped %s\n' "$TEARDOWN_ID" "$BOX"
       ;;
     *) die 'remote Boat teardown result is invalid; reconcile before stopping' ;;
@@ -106,11 +111,11 @@ if [ -n "$TEARDOWN_ID" ]; then
   exit 0
 fi
 STOP_ON_REFUSAL=0
+instance=
 stop_refuse() {
   if [ "$STOP_ON_REFUSAL" -eq 1 ]; then
-    rm -f -- "$NO_ENV_RECEIPT"
-    fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null 2>&1 || true
-    die "$1; dispatch refused (stop requested for $BOX)"
+    stop_current_instance >/dev/null 2>&1 || die "$1; dispatch refused (current-instance stop unavailable)"
+    die "$1; dispatch refused (stopped $BOX)"
   fi
   die "$1; dispatch refused"
 }
@@ -151,6 +156,9 @@ case "$STATE" in
   stopped)
     fm_run_timed 120 "$BOAT_BIN" --no-update resume "$BOX" --no-env --ttl "$TTL" --json > "$TMP/resume" || stop_refuse 'Boat resume failed'
     STOP_ON_REFUSAL=1
+    instance=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable'
+    [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] && [ ! -L "$NO_ENV_RECEIPT" ] || stop_refuse 'unsafe no-env receipt path'
+    printf '%s %s\n' "$BOX" "$instance" > "$NO_ENV_RECEIPT"
     read_boat info "$BOX"
     ;;
   ready|idle|running) ;;
@@ -163,11 +171,11 @@ jq -e --argjson ttl "$TTL" --argjson now "$(date +%s)" '
   ((.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now > 0) and
   ((.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now <= $ttl)
 ' "$TMP/info" >/dev/null 2>&1 || stop_refuse 'box auto-stop timer is unavailable or exceeds the reserved budget'
-instance=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable'
+current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable'
 if [ "$STATE" = stopped ]; then
-  [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] && [ ! -L "$NO_ENV_RECEIPT" ] || stop_refuse 'unsafe no-env receipt path'
-  printf '%s %s\n' "$BOX" "$instance" > "$NO_ENV_RECEIPT"
+  [ "$current" = "$instance" ] && receipt_matches "$current" || stop_refuse 'Boat instance changed after resume'
 else
+  instance=$current
   receipt_matches "$instance" || stop_refuse 'running box has no current --no-env resume receipt'
 fi
 FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" boat-prove || stop_refuse 'SSH refresh or hydration failed'
@@ -178,10 +186,10 @@ fi
 # Stdin and argv reuse the existing remote job lane, environment scrub, and
 # exit-255 contract. An uncertain launch is deliberately not retried or stopped.
 DISPATCH_STATUS=0
-"$SCRIPT_DIR/fm-on.sh" --stdin "$ROUTE" fm-boat-worker.sh spawn < "$TMP/request" > "$TMP/dispatch" || DISPATCH_STATUS=$?
+"$SCRIPT_DIR/fm-on.sh" --stdin "$ROUTE" fm-boat-worker.sh spawn "$instance" < "$TMP/request" > "$TMP/dispatch" || DISPATCH_STATUS=$?
 cat "$TMP/dispatch"
 if [ "$DISPATCH_STATUS" -ne 0 ] && [ "$DISPATCH_STATUS" -ne 255 ] && [ "$STATE" = stopped ]; then
-  remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh idle) || remaining=unknown
+  remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh idle "$instance") || remaining=unknown
   if [ "$remaining" = 'boat-tasks-remaining: no' ]; then
     stop_refuse 'remote worker refused before spawning'
   fi

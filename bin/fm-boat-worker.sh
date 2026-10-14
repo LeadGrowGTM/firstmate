@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Validate or spawn a single code-only worker in the dedicated Boat overflow home.
-# Usage: fm-boat-worker.sh validate|spawn < request.json; teardown <task-id>; idle.
+# Usage: fm-boat-worker.sh validate < request.json
+#        fm-boat-worker.sh spawn <box-instance> < request.json
+#        fm-boat-worker.sh teardown <task-id> <box-instance>
+#        fm-boat-worker.sh idle <box-instance>
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
 #   id: safe task id; project: firstmate|dev-loop; kind: ship|scout;
@@ -63,11 +66,17 @@ boat_worker_count() { # [new task id, refused if its endpoint already exists]
 }
 case "${1:-}" in
   --help) sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
-  validate|spawn) [ "$#" -eq 1 ] || die 'one operation required' ;;
-  teardown) [ "$#" -eq 2 ] || die 'task id required' ;;
-  idle) [ "$#" -eq 1 ] || die 'idle takes no arguments' ;;
+  validate) [ "$#" -eq 1 ] || die 'one operation required' ;;
+  spawn) [ "$#" -eq 2 ] || die 'box instance required' ;;
+  teardown) [ "$#" -eq 3 ] || die 'task id and box instance required' ;;
+  idle) [ "$#" -eq 2 ] || die 'box instance required' ;;
   *) die 'expected validate, spawn, teardown, or idle' ;;
 esac
+if [ "$1" != validate ]; then
+  expected_instance=${!#}
+  [[ "$expected_instance" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die 'invalid box instance'
+  [ "$(cat /proc/sys/kernel/random/boot_id)" = "$expected_instance" ] || die 'Boat instance changed; action refused'
+fi
 if [ "$1" = teardown ] || [ "$1" = idle ]; then
   FM_HOME=${FM_HOME:?FM_HOME is required}
   [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
