@@ -54,6 +54,9 @@
 #   Applying version N retires every older approval still unapplied, listed in the
 #   receipt's superseded field. The activation task closes only when no approved
 #   digest remains outstanding and no newer proposal card is held.
+#   Accepted residual: a receipt naming an approval already retired by a later applied
+#   receipt is still recorded; it grants no authority because only an exact approved
+#   digest is ever applied and the operator who records it also performs the application.
 # All proposal content is untrusted data from a mate and is never executed.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
