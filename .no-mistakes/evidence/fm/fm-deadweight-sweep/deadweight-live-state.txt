@@ -1,0 +1,16 @@
+Live isolated Treehouse status:
+1     leased       ~/.treehouse/project-162323/1/project  (held by unlanded)
+2     leased       ~/.treehouse/project-162323/2/project  (held by held)
+
+Task records:
+eligible: removed
+held: kept
+unlanded: kept
+
+Project worktree registrations:
+worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VRW61KSGAW3KQK9K156MJ0/.test-tmp/fm-lab.ltxhn9/projects/project
+worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VRW61KSGAW3KQK9K156MJ0/.test-tmp/fm-lab.ltxhn9/.treehouse/project-162323/1/project
+worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VRW61KSGAW3KQK9K156MJ0/.test-tmp/fm-lab.ltxhn9/.treehouse/project-162323/2/project
+
+Unlanded content:
+new project change
