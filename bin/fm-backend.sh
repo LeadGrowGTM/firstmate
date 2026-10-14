@@ -648,7 +648,7 @@ fm_backend_source() {  # <name>
       # A marked home is permission to use a lab, never the operator socket.
       # Check before even sourcing the adapter, independently of gate markers.
       fm_backend_tmux_lab_check || return 1
-      set -- fm-tmux-lib.sh fm-composer-lib.sh fm-cursor-lib.sh fm-session-lock-lib.sh fm-agent-process-lib.sh fm-gemini-lib.sh
+      set -- fm-tmux-lib.sh fm-composer-lib.sh fm-cursor-lib.sh fm-session-lock-lib.sh fm-agent-process-lib.sh fm-gemini-lib.sh fm-wsl-interop-lib.sh fm-timeout-lib.sh
       ;;
     herdr)
       set -- fm-composer-lib.sh fm-transition-lib.sh fm-agent-process-lib.sh fm-session-lock-lib.sh fm-gemini-lib.sh

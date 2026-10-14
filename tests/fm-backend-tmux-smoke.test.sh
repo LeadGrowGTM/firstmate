@@ -26,13 +26,26 @@ wait_for_capture_text() {  # <target> <text> [samples]
   return 1
 }
 
+wait_for_shell_ready() {
+  local target=$1
+  for _ in $(seq 1 100); do
+    tmux send-keys -t "$target" C-c
+    tmux send-keys -t "$target" -l "printf 'shell-%s\\n' ready"
+    tmux send-keys -t "$target" Enter
+    wait_for_capture_text "$target" "shell-ready" 10 && return 0
+  done
+  return 1
+}
+
 command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-backend-smoke-$$"
+OUTER_SOCKET=
 SHIM_DIR=
 trap cleanup_all EXIT
 
 cleanup_all() {
+  [ -z "$OUTER_SOCKET" ] || "$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${SHIM_DIR:-}" ] && rm -rf "$SHIM_DIR"
 }
@@ -79,17 +92,7 @@ pass "real tmux: fm_backend_tmux_create_task creates a window and refuses a dupl
 # editor are ready to accept Enter. Prove command execution with an output token
 # that does not appear contiguously in the command, retrying the harmless probe
 # until the shell acknowledges it.
-SHELL_READY=false
-for _ in $(seq 1 100); do
-  tmux send-keys -t "$TARGET" C-c
-  tmux send-keys -t "$TARGET" -l "printf 'shell-%s\\n' ready"
-  tmux send-keys -t "$TARGET" Enter
-  if wait_for_capture_text "$TARGET" "shell-ready" 10; then
-    SHELL_READY=true
-    break
-  fi
-done
-[ "$SHELL_READY" = true ] || fail "the tmux task shell did not become ready"
+wait_for_shell_ready "$TARGET" || fail "the tmux task shell did not become ready"
 
 tmux send-keys -t "$TARGET" "cd /tmp && PS1='smoke\$ ' && clear && printf 'setup-%s\\n' ready" Enter
 wait_for_capture_text "$TARGET" "setup-ready" || fail "the tmux task shell did not complete setup"
@@ -197,8 +200,33 @@ got=$(TMUX=x TMUX_PANE="$SPAWNER_PANE" fm_backend_tmux_container_ensure) \
 got=$(TMUX=x TMUX_PANE='' fm_backend_tmux_container_ensure) \
   || fail "fm_backend_tmux_container_ensure failed without a pane"
 [ "$got" = base ] || fail "a grouped session without a pane must resolve to its base, got '$got'"
+got=$(TMUX='' TMUX_PANE='' fm_backend_tmux_container_ensure) \
+  || fail "fm_backend_tmux_container_ensure failed outside tmux"
+[ "$got" = firstmate ] || fail "outside tmux, the dedicated firstmate session was not selected"
 "$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
+OUTER_SOCKET=
 pass "real tmux: container_ensure records the base session while a grouped viewer is attached"
+
+# --- a new window carries a live WSL interop socket ---------------------------
+INTEROP_DIR="$SHIM_DIR/run-wsl"
+mkdir -p "$INTEROP_DIR"
+: > "$INTEROP_DIR/1_interop"
+: > "$INTEROP_DIR/2_interop"
+cat > "$SHIM_DIR/interop-probe" <<'SH'
+#!/bin/sh
+case "$WSL_INTEROP" in */2_interop) exit 0 ;; esac
+exit 1
+SH
+chmod +x "$SHIM_DIR/interop-probe"
+WSL_WID=$(WSL_INTEROP=/dead/5345_interop FM_WSL_INTEROP_DIR="$INTEROP_DIR" \
+  FM_WSL_INTEROP_PROBE="$SHIM_DIR/interop-probe" \
+  fm_backend_tmux_create_task base fm-interop "$HOME") \
+  || fail "fm_backend_tmux_create_task failed with an interop directory"
+wait_for_shell_ready "$WSL_WID" || fail "the tmux interop shell did not become ready"
+fm_backend_tmux_send_text_line "$WSL_WID" "printf 'interop=%s\\n' \"\$WSL_INTEROP\""
+wait_for_capture_text "$WSL_WID" "interop=$INTEROP_DIR/2_interop" \
+  || fail "the new window's shell did not receive the live interop socket"$'\n'"$(fm_backend_tmux_capture "$WSL_WID" 20)"
+pass "real tmux: a window created on WSL carries the live interop socket, not the inherited one"
 
 cleanup_all
 trap - EXIT
