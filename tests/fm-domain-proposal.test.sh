@@ -255,6 +255,10 @@ tool approve media >/dev/null || fail 'outstanding approval failed'
 proposal 'later rejected version' > "$TMP_ROOT/later-rejected.json"
 tool submit media "$TMP_ROOT/later-rejected.json" >/dev/null || fail 'later version submission failed'
 answer domain-proposal-media-8 reject
+proposal 'refreshed after rejection' > "$TMP_ROOT/refreshed.json"
+tool submit media "$TMP_ROOT/refreshed.json" >/dev/null || fail 'refresh after a rejected newer version was refused'
+hold_tool open domain-proposal-media-8 || fail 'refreshed version did not reopen the activation task'
+answer domain-proposal-media-8 reject
 out=$(tool request media "$BUNDLE2" 2>&1); rc=$?
 expect_code 1 "$rc" 'unapplied earlier approval blocks a new cycle'
 assert_contains "$out" 'activation is pending' 'outstanding earlier approval is disclosed'

@@ -40,7 +40,8 @@
 #   re-runs the hold. Zero changes records the version and closes the task, or, while
 #   an approved digest awaits application, records the withdrawal, releases the card,
 #   and leaves the activation task open without a separate withdrawal receipt.
-#   A closed cycle accepts only an exact replay of its zero-change version.
+#   A closed cycle accepts only an exact replay of its zero-change version, or, while an
+#   approved digest awaits application, a refreshed proposal that reopens the task.
 # approve: succeeds only when the task holds a recorded `answered` captain
 #   decision that is exactly approve-<full LATEST version digest>.
 #   An answer bound to an older version, a rejection, or an unanswered card
@@ -272,7 +273,12 @@ submit)
       printf 'no-change: %s v%s recorded, no card\n' "$TASK" "$VERSION"
       exit 0
     fi
-    fail "cycle $CYCLE of $MATE is closed: run request for a new cycle"
+    # A rejected newer version leaves the older approval outstanding; keep its cycle open for a refresh.
+    if has_outstanding_approval "$DIR/receipts.jsonl"; then
+      bash "$SCRIPT_DIR/fm-tasks-axi.sh" reopen "$TASK" >/dev/null || fail "cannot reopen activation task $TASK"
+    else
+      fail "cycle $CYCLE of $MATE is closed: run request for a new cycle"
+    fi
   fi
   APPROVED=0
   if [ -f "$DIR/receipts.jsonl" ] && jq -es 'any(.[]; .state == "approved")' "$DIR/receipts.jsonl" >/dev/null; then APPROVED=1; fi
