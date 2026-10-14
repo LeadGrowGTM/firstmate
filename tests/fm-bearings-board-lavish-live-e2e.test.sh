@@ -64,7 +64,7 @@ cat > "$LAB/payload.json" <<'JSON'
   "captains_call": [
     {
       "key": "sample-live-guard-call",
-      "type": "decision",
+      "type": "decision", "category": "security",
       "repo": "sample",
       "title": "Guard placeholder",
       "options": [{ "value": "yes", "label": "Yes" }]

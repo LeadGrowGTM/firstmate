@@ -3,7 +3,7 @@
 This document explains how a captain call is held, answered, reconciled, shown, and verified.
 It is for maintainers changing `bin/fm-captain-hold.sh` or any surface that reads or closes a captain hold.
 
-The normative policy is owned by `.agents/skills/captain-hold-lifecycle/SKILL.md` and is not restated here.
+The lifecycle policy is owned by `.agents/skills/captain-hold-lifecycle/SKILL.md`; the escalation test is owned by `bin/fm-captain-hold.sh --help` and neither is restated here.
 This document records the deterministic mechanism, structured surfaces, compatibility contract, and privacy-safe regression evidence.
 
 ## Find a topic
@@ -33,7 +33,8 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 
 | Subcommand | What it does | Details |
 | --- | --- | --- |
-| `hold` | Creates or reuses a task and holds it for the captain. | [Creating a hold](#creating-a-hold-hold) |
+| `hold` | Checks the declared category, then creates or reuses a task and holds it for the captain. | [Creating a hold](#creating-a-hold-hold) |
+| `check-category` | Read-only category check shared by hold creation and decision-card filing. | `bin/fm-captain-hold.sh --help` |
 | `migrate-options` | Previews or imports legacy decision copy into local captain-held tasks. | [Creating a hold](#creating-a-hold-hold) |
 | `answer` | Records the captain's exact words and resolves the call. | [Answering a call](#answering-a-call-answer) |
 | `complete` | Records the reviewed captain-held task ids in the originating task's metadata. | [Recording a reviewed inventory](#recording-a-reviewed-inventory-complete) |
@@ -51,11 +52,12 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 The `hold` subcommand is the mandatory captain-hold creation path.
 It works in this order:
 
-1. It uses an existing task, or creates one when nothing exists to hold.
-2. It records the task's UTC hold-set timestamp as the leading line of the task body.
-3. When `--origin` is supplied, it records the origin on the task, replacing any previous association.
-4. It invokes the underlying tasks-axi hold operation with the reason and any option copy in one encoded hold value.
-5. It verifies the hold and timestamp.
+1. It validates the single declared category through the script-owned escalation test before acquiring a task lock or accessing the backlog.
+2. It uses an existing task, or creates one when nothing exists to hold.
+3. It records the task's UTC hold-set timestamp as the leading line of the task body.
+4. When `--origin` is supplied, it records the origin on the task, replacing any previous association.
+5. It invokes the underlying tasks-axi hold operation with the reason and any option copy in one encoded hold value.
+6. It verifies the hold and timestamp.
 
 Publishing the stamp first ensures a snapshot cannot observe a newly captain-held task without the timestamp that defines its age.
 Decision option copy lives in that task's active hold reason.
@@ -497,7 +499,7 @@ A markdown home keeps its legacy rows verbatim, so its resolution is unchanged.
 ### The `fm-decision-hold.sh` shim
 
 `bin/fm-decision-hold.sh` itself remains for one release as a thin command-mapping shim over `bin/fm-captain-hold.sh`.
-In-flight work briefed before the collapse therefore keeps working, and the shim's header owns the exact mapping.
+The shim's header owns the exact mapping; hold calls must now supply the category required by `bin/fm-captain-hold.sh --help`, while existing rows and answer paths remain compatible.
 The shim recognizes an exact replay of a pre-collapse routed resolution by its historical answer digest and routed ids.
 It then finishes any still-recorded dependency-edge cleanup without rewriting the old decision text.
 

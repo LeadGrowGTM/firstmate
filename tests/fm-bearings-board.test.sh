@@ -149,7 +149,7 @@ write_valid_payload() {  # <path>
   "captains_call": [
     {
       "key": "sample-instruction-layer-refinement-review-decision-perishable-first-admission-choice",
-      "type": "decision",
+      "type": "decision", "category": "security",
       "repo": "sample",
       "title": "Perishable-first admission",
       "about": "A payload string that tries to break out: </script><b>x</b>",
@@ -396,7 +396,7 @@ test_registration_cannot_consume_before_any_origin_binding() {
 ## Done
 EOF
   fm_write_meta "$home/state/$origin.meta" "project=$home/projects/sample" "kind=scout"
-  run_decisions "$home" hold "$origin" "$key" \
+  run_decisions "$home" hold "$origin" "$key" --category security \
     --title "Choose the order proof" --reason "captain choice pending" --repo sample >/dev/null \
     || fail "could not create the order-proof captain hold"
 
@@ -653,23 +653,23 @@ test_build_drops_decision_cards_whose_subject_already_landed() {
   board="$home/.lavish/bearings-board.html"
   write_valid_payload "$data"
   jq '.captains_call = [
-        {"key":"landed-by-task","owner":"(main)","type":"decision","repo":"sample","title":"Already shipped",
+        {"key":"landed-by-task","owner":"(main)","type":"decision", "category": "security","repo":"sample","title":"Already shipped",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"landed-by-task","owner":"mate","type":"decision","repo":"sample","title":"Foreign call with the same key",
+        {"key":"landed-by-task","owner":"mate","type":"decision", "category": "security","repo":"sample","title":"Foreign call with the same key",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"timeout-reattach","type":"decision","repo":"sample","title":"Already merged",
+        {"key":"timeout-reattach","type":"decision", "category": "security","repo":"sample","title":"Already merged",
          "pr_url":"https://github.com/sample/sample/pull/7",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"closed-linked-pr","type":"decision","repo":"sample","title":"Closed PR",
+        {"key":"closed-linked-pr","type":"decision", "category": "security","repo":"sample","title":"Closed PR",
          "pr_url":"https://github.com/sample/sample/pull/8","pr_state":"CLOSED",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"verified-duplicate","type":"decision","repo":"sample","title":"Verified duplicate",
+        {"key":"verified-duplicate","type":"decision", "category": "security","repo":"sample","title":"Verified duplicate",
          "stale_reason":"Verified duplicate of another open call",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"quota-version","type":"decision","repo":"sample","title":"Old quota release",
+        {"key":"quota-version","type":"decision", "category": "security","repo":"sample","title":"Old quota release",
          "subject":{"artifact":"quota-axi","version":"0.1.37"},
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"still-open","type":"decision","repo":"sample","title":"Genuinely open",
+        {"key":"still-open","type":"decision", "category": "security","repo":"sample","title":"Genuinely open",
          "subject":{"artifact":"quota-axi","version":"0.2.0"},
          "options":[{"value":"yes","label":"Yes"}]}
       ]
@@ -707,13 +707,13 @@ test_landed_task_matches_home_not_contributor() {
   board="$home/.lavish/bearings-board.html"
   write_valid_payload "$data"
   jq '.captains_call = [
-        {"key":"choice","owner":"(main)","type":"decision","repo":"sample","title":"Main choice",
+        {"key":"choice","owner":"(main)","type":"decision", "category": "security","repo":"sample","title":"Main choice",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"choice","owner":"mate","type":"decision","repo":"sample","title":"Mate choice",
+        {"key":"choice","owner":"mate","type":"decision", "category": "security","repo":"sample","title":"Mate choice",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"contributor-collision","owner":"(main)","type":"decision","repo":"sample","title":"Main landed choice",
+        {"key":"contributor-collision","owner":"(main)","type":"decision", "category": "security","repo":"sample","title":"Main landed choice",
          "options":[{"value":"yes","label":"Yes"}]},
-        {"key":"contributor-collision","owner":"mate","type":"decision","repo":"sample","title":"Mate open choice",
+        {"key":"contributor-collision","owner":"mate","type":"decision", "category": "security","repo":"sample","title":"Mate open choice",
          "options":[{"value":"yes","label":"Yes"}]}
       ]
       | .landed = [
@@ -745,7 +745,7 @@ test_build_keeps_a_decision_absent_from_the_main_backlog() {
 EOF
   write_valid_payload "$data"
   jq '.captains_call = [{
-        "key":"remote-mate-call","type":"decision","repo":"sample",
+        "key":"remote-mate-call","type":"decision", "category": "security","repo":"sample",
         "title":"Remote secondmate decision",
         "options":[{"value":"yes","label":"Yes"}]
       }]
@@ -840,6 +840,98 @@ test_build_refuses_a_nondecision_reconcile_value() {
   pass "build reserves reconcile across non-decision cards"
 }
 
+test_decision_categories_survive_build_and_other_cards_need_none() {
+  local home data board
+  home=$(make_home categories-accepted)
+  data="$home/payload.json"
+  board="$home/.lavish/bearings-board.html"
+  write_valid_payload "$data"
+  jq '.captains_call[0] as $card
+    | .captains_call = (["spend","live-client","deploy-publish","legal-public",
+        "captain-login-billing","security","destructive"]
+      | map(. as $category | $card + {key:("category-" + $category),category:$category,owner:"mate"}))' \
+    "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  run_board "$home" build "$data" >/dev/null || fail "board refused allowed decision categories"
+  extract_payload "$board" | jq -e '
+    [.captains_call[].category] == ["spend","live-client","deploy-publish","legal-public",
+      "captain-login-billing","security","destructive"]' >/dev/null \
+    || fail "decision categories did not survive template injection"
+  write_valid_payload "$data"
+  jq '.captains_call = [.captains_call[1]]' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  run_board "$home" build "$data" >/dev/null || fail "merge-only board now needs a decision category"
+  jq '.captains_call = []' "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+  run_board "$home" build "$data" >/dev/null || fail "empty board now needs a decision category"
+  pass "decision categories survive board injection, while merge-only and empty calls keep their behavior"
+}
+
+test_invalid_decision_categories_refuse_before_board_or_session_changes() {
+  local home data board expected filter rc
+  home=$(make_home categories-refused)
+  data="$home/payload.json"
+  board="$home/.lavish/bearings-board.html"
+  mkdir -p "$home/.lavish"
+  printf 'keep existing board\n' > "$board"
+  cp -R "$home/.lavish" "$TMP_ROOT/categories-board-before"
+  cp -R "$home/state" "$TMP_ROOT/categories-state-before"
+  cp -R "$home/config" "$TMP_ROOT/categories-config-before"
+  cp -R "$home/lavish-state" "$TMP_ROOT/categories-session-before"
+  cat > "$home/fakebin/lavish-axi" <<'SH'
+#!/usr/bin/env bash
+touch "$FM_HOME/session-tool-used"
+exit 75
+SH
+  chmod +x "$home/fakebin/lavish-axi"
+  expected="$TMP_ROOT/board-category-expected.err"
+  FM_HOME="$home" "$ROOT/bin/fm-captain-hold.sh" check-category > /dev/null 2> "$expected" || true
+  # These are jq filters; dollar variables belong to jq, not the shell.
+  # shellcheck disable=SC2016
+  for filter in \
+    'del(.captains_call[0].category)' \
+    '.captains_call[0].category = "unknown"' \
+    '.captains_call[0].category = ""' \
+    '.captains_call[0].category = "Security"' \
+    '.captains_call[0].category = null' \
+    '.captains_call[0].category = 7' \
+    '.captains_call[0].category = true' \
+    '.captains_call[0].category = ["security","spend"]' \
+    '.captains_call[0].category = {category:"security"}' \
+    '.captains_call[0].category = " security"' \
+    '.captains_call[0].category = "security "' \
+    '.captains_call[0].category = "security\n"' \
+    '.captains_call[0].category = "security\r\n"' \
+    '.captains_call[0].category = "security\nspend"' \
+    '.captains_call[0].category = "security\u0000"' \
+    'del(.captains_call[0].category) | .captains_call[0].stale_reason = "Already shipped"' \
+    '.captains_call[0] as $card | .captains_call = [$card, ($card | del(.category))] | .captains_call[1].key = "invalid-later"'; do
+    write_valid_payload "$data"
+    jq "$filter" "$data" > "$data.tmp" && mv "$data.tmp" "$data"
+    if run_board "$home" build "$data" > "$TMP_ROOT/board-category.out" 2> "$TMP_ROOT/board-category.err"; then
+      fail "board accepted invalid category input: $filter"
+    else
+      rc=$?
+    fi
+    [ "$rc" -eq 2 ] || fail "board category failure returned $rc instead of shared exit 2"
+    [ ! -s "$TMP_ROOT/board-category.out" ] || fail "invalid category reached board publication"
+    sed '$d' "$TMP_ROOT/board-category.err" > "$TMP_ROOT/board-category-shared.err"
+    diff -u "$expected" "$TMP_ROOT/board-category-shared.err" || fail "board did not forward the shared category refusal"
+    if [[ "$filter" = *invalid-later* ]]; then
+      assert_grep 'invalid decision category for (main)/invalid-later' "$TMP_ROOT/board-category.err" \
+        "valid first card hid the invalid later card"
+    else
+      assert_grep 'invalid decision category for (main)/sample-instruction-layer-refinement-review-decision-perishable-first-admission-choice' \
+        "$TMP_ROOT/board-category.err" "board failure did not identify its card"
+    fi
+    diff -r "$TMP_ROOT/categories-board-before" "$home/.lavish" || fail "category refusal replaced the existing board"
+    diff -r "$TMP_ROOT/categories-state-before" "$home/state" || fail "category refusal changed source or binding state"
+    diff -r "$TMP_ROOT/categories-config-before" "$home/config" || fail "category refusal changed config"
+    diff -r "$TMP_ROOT/categories-session-before" "$home/lavish-state" || fail "category refusal changed the session"
+    assert_absent "$home/session-tool-used" "category refusal contacted session tooling"
+  done
+  pass "every supplied decision category refuses before pruning, board replacement, session, binding, or arming"
+}
+
+test_decision_categories_survive_build_and_other_cards_need_none
+test_invalid_decision_categories_refuse_before_board_or_session_changes
 test_path_is_stable_and_home_scoped
 test_build_refuses_malformed_payloads_before_touching_the_board
 test_build_accepts_an_incomplete_freeform_card

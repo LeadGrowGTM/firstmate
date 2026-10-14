@@ -1548,8 +1548,8 @@ Machine-specific inventory paths are local choices and must not be inherited acr
 [`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
 Daily intake is a separate integration; this collector neither schedules work nor changes installations or operational instructions.
 [`bin/fm-domain-proposal.sh`](../bin/fm-domain-proposal.sh) provides manual main-home handoff for currently registered local mates using a collected bundle; remote handoff is unsupported.
-One ordinary task per proposal cycle appears on the existing decisions board while held for captain approval.
-The script header and `--help` own the request, proposal, approval, and receipt protocol; the command does not schedule or apply changes.
+One ordinary queued task per proposal cycle records pending before/after confirmation outside categorized captain holds.
+The script header and `--help` own the request, proposal, confirmation, approval, and receipt protocol; the command does not schedule or apply changes.
 
 This section owns the version 1 configuration schema:
 

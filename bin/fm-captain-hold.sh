@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # fm-captain-hold.sh - deterministic mechanics for tasks held for the captain.
 #
-# The semantic policy is owned once by
-# .agents/skills/captain-hold-lifecycle/SKILL.md. This script never reads
+# The lifecycle policy is owned once by
+# .agents/skills/captain-hold-lifecycle/SKILL.md. The filing-time escalation
+# test is owned by this script's category table and printed by --help.
+# This script never reads
 # report, visual-review, chat, or terminal prose to guess whether the captain
 # owes an answer. The invoking agent decides what is genuinely waiting on the
 # captain; this script supplies guarded creation, a durable record of what the
@@ -20,10 +22,11 @@
 # and secondmate-home ownership aligned with the work that discovered the call.
 #
 # Usage:
-#   fm-captain-hold.sh hold <task-id> --reason <reason> \
+#   fm-captain-hold.sh hold <task-id> --category <category> --reason <reason> \
 #     [--title <title>] [--repo <repo>] [--origin <origin-id>] [--until YYYY-MM-DD] \
 #     [--corr <raw-lowercase-16-hex-id>]
 #     [--options-file <decision.json>]
+#   fm-captain-hold.sh check-category <category>
 #   fm-captain-hold.sh migrate-options <captain-decisions.json> [--apply]
 #   fm-captain-hold.sh answer <task-id> --decision-file <path> [--release]
 #   fm-captain-hold.sh answers [<legacy-origin> | --any-origin] --source <provenance>   (keyed answers on stdin)
@@ -40,6 +43,12 @@
 #   fm-captain-hold.sh reconcile close <task-id> --evidence-file <path>
 #   fm-captain-hold.sh reconcile note <task-id> --note-file <path>
 #
+# `hold` requires exactly one allowed category before any task lock, backend
+# access, or mutation. The agent declares the actual boundary from consequences;
+# this script does not infer a category from prose. check-category is the same
+# read-only test for decision-card filing, accepting one category silently with
+# exit 0, or refusing invalid input with exit 2 and the full category table.
+# The table is printed below by --help and category refusal, not copied here.
 # `hold` places an existing task under an active captain hold, or creates the
 # task first when no work item exists to hold (--title required to create; the
 # optional --origin records provenance in the new task's body and supplies the
@@ -294,12 +303,44 @@ captain_hold_cleanup() {
 }
 trap captain_hold_cleanup EXIT
 
+CAPTAIN_CALL_CATEGORIES=(
+  'spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved, and the mate decides and records it'
+  'live-client - a live client send or campaign change'
+  'deploy-publish - a deploy or publish'
+  'legal-public - legal wording or a public claim'
+  'captain-login-billing - a login or billing step only he can do'
+  'security - security'
+  'destructive - anything destructive'
+)
+
+category_table() {
+  printf 'Allowed categories:\n'
+  printf '  %s\n' "${CAPTAIN_CALL_CATEGORIES[@]}"
+  printf 'Decide on the best evidence, record the choice and reason in the task note, and act.\n'
+}
+
+category_refuse() {
+  printf 'fm-captain-hold: captain calls require exactly one allowed --category.\n' >&2
+  category_table >&2
+  exit 2
+}
+
+command_check_category() {
+  local row
+  [ "$#" -eq 1 ] || category_refuse
+  for row in "${CAPTAIN_CALL_CATEGORIES[@]}"; do
+    [ "$1" != "${row%% - *}" ] || return 0
+  done
+  category_refuse
+}
+
 usage() {
   awk '
     NR == 1 { next }
     /^#/ { sub(/^# ?/, ""); print; next }
     { exit }
   ' "$0"
+  category_table
 }
 
 fail() {
@@ -987,10 +1028,18 @@ command_hold() {
   shift
   local id=${1:-} title='' reason='' repo='' origin='' until='' corr='' corr_given=0 show state existing_title body='' hold_kind hold_set occurrence
   local existing_hold_kind='' existing_held='' preserve_hold_set=0 stored_reason prior_body='' hold_status=0 options_file='' copy='' snapshot
-  [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+  local category='' category_count=0
+  [ "$#" -ge 1 ] || category_refuse
   shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --category)
+        [ "$#" -ge 2 ] || category_refuse
+        category_count=$((category_count + 1))
+        [ "$category_count" -eq 1 ] || category_refuse
+        command_check_category "$2"
+        shift; category=$1
+        ;;
       --title) shift; title=${1:-} ;;
       --reason) shift; reason=${1:-} ;;
       --repo) shift; repo=${1:-} ;;
@@ -1002,6 +1051,11 @@ command_hold() {
     esac
     shift
   done
+  # Legacy option migration imports previously filed calls, not new decisions.
+  if [ "$import_only" = 0 ]; then
+    [ "$category_count" -eq 1 ] || category_refuse
+    command_check_category "$category"
+  fi
   validate_slug task-id "$id"
   [ -z "$options_file" ] || copy=$(decision_copy "$options_file")
   [ -n "$reason" ] || fail "reason must not be empty"
@@ -2269,6 +2323,7 @@ command_open() {  # <task-id> [--identity] [--distinguish-absent]
 }
 
 case "${1:-}" in
+  check-category) shift; command_check_category "$@" ;;
   hold) shift; command_hold 0 "$@" ;;
   _migrate-options-hold) shift; command_hold 1 "$@" ;;
   answer) shift; command_answer "$@" ;;

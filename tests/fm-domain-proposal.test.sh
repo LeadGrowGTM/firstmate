@@ -44,7 +44,22 @@ proposal() {  # <after-text> [<bundle>]
 }
 answer() {  # <task> <text>
   printf '%s\n' "$2" > "$TMP_ROOT/answer"
-  hold_tool answer "$1" --decision-file "$TMP_ROOT/answer" >/dev/null
+  local cycle=${1##*-} dir version digest
+  dir="$HOME_DIR/data/domain-freshness/proposals/media/$cycle"
+  version=$(find "$dir" -maxdepth 1 -name 'v[0-9]*.json' | sed 's|.*/v||; s|\.json$||' | sort -n | tail -1)
+  digest=$(jq -r .digest "$dir/v$version.json")
+  tool confirm media --cycle "$cycle" --digest "$digest" --decision-file "$TMP_ROOT/answer" >/dev/null
+}
+show_task() {
+  PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" \
+    FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
+    bash "$ROOT/bin/fm-tasks-axi.sh" show "$1" --full
+}
+pending_task() {
+  local shown
+  shown=$(show_task "$1") || return 1
+  [[ "$shown" == *'state: queued'* && "$shown" != *'hold_kind: captain'* \
+    && "$shown" == *'body: "Domain proposal pending approval:'* ]]
 }
 DIR="$HOME_DIR/data/domain-freshness/proposals/media/1"
 TASK=domain-proposal-media-1
@@ -99,14 +114,31 @@ for field in bullets file effect sources before after; do
 done
 pass 'report fields reject display control sequences'
 tool submit media "$TMP_ROOT/p1.json" > "$TMP_ROOT/submit.out" || fail 'submit v1 failed'
-assert_contains "$(cat "$TMP_ROOT/submit.out")" "held: $TASK v1" 'submit holds one card'
-hold_tool open "$TASK" || fail 'card is not an open captain call'
+assert_contains "$(cat "$TMP_ROOT/submit.out")" "pending-confirmation: $TASK v1" 'submit records pending confirmation on the task'
+pending_task "$TASK" || fail 'proposal is not queued for explicit confirmation outside captain holds'
 assert_present "$DIR/v1.md" 'exact before/after rendering exists'
 assert_grep 'v1 text' "$DIR/v1.md" 'rendering carries the after text'
 D1=$(jq -r .digest "$DIR/v1.json")
 out=$(tool submit media "$TMP_ROOT/p1.json"); assert_contains "$out" 'unchanged' 'identical resubmission is idempotent'
 [ ! -e "$DIR/v2.json" ] || fail 'idempotent resubmission wrote a version'
-pass 'submit opens one card and an identical resubmission is a no-op'
+pass 'submit records queued pending confirmation and an identical resubmission is a no-op'
+
+before=$(show_task "$TASK")
+printf 'approve-%s\n' "$D1" > "$TMP_ROOT/confirm-words"
+tool confirm media --decision-file "$TMP_ROOT/confirm-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation requires an explicit digest'
+tool confirm media --digest "${D1:0:12}" --decision-file "$TMP_ROOT/confirm-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation refuses a digest prefix'
+tool confirm media --digest "$D1" --decision-file "$TMP_ROOT/missing-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation requires existing captain words'
+printf ' \n\t\n' > "$TMP_ROOT/blank-words"
+tool confirm media --digest "$D1" --decision-file "$TMP_ROOT/blank-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation refuses blank captain words'
+head -c 8193 /dev/zero | tr '\0' x > "$TMP_ROOT/too-many-words"
+tool confirm media --digest "$D1" --decision-file "$TMP_ROOT/too-many-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation bounds captain words'
+assert_equals "$before" "$(show_task "$TASK")" 'refused confirmation changed the pending task'
+pass 'invalid confirmation inputs preserve queued pending approval'
 
 printf '{"schema":"fm-domain-proposal.v1","mate":"media","bundle_id":"%s","bullets":["x"],"changes":[{"kind":"skill","file":"f","original_digest":"nothex","before":"a","after":"b","always_loaded_size_delta":0,"sources":["https://e.x"],"effect":"e"}]}' \
   "$BUNDLE" > "$TMP_ROOT/bad.json"
@@ -133,14 +165,38 @@ grep -xF '~~~~~~~' "$DIR/v2.md" >/dev/null || fail 'indented closing fence did n
 assert_grep '   ~~~~~~' "$DIR/v2.md" 'indented proposed text was not preserved'
 D2=$(jq -r .digest "$DIR/v2.json")
 assert_not_equals "$D1" "$D2" 'versions have distinct digests'
-hold_tool open "$TASK" || fail 'v2 re-hold closed the card'
+pending_task "$TASK" || fail 'v2 lost pending confirmation'
 [ "$(find "$HOME_DIR/data/domain-freshness/proposals/media" -name 'request.json' | wc -l)" -eq 1 ] || fail 'second card or cycle was created'
+before=$(show_task "$TASK")
+tool confirm media --digest "$D1" --decision-file "$TMP_ROOT/confirm-words" >/dev/null 2>&1
+expect_code 1 "$?" 'late confirmation cannot bind an older version'
+assert_equals "$before" "$(show_task "$TASK")" 'late confirmation retired the newest pending approval'
+cat > "$FAKEBIN/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "$1" = done ] && [ -f "$FM_HOME/state/fail-confirm-close-once" ]; then
+  rm "$FM_HOME/state/fail-confirm-close-once"
+  exit 1
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+chmod +x "$FAKEBIN/tasks-axi"
+: > "$HOME_DIR/state/fail-confirm-close-once"
+answer "$TASK" "approve-$D1" >/dev/null 2>&1
+expect_code 1 "$?" 'failed confirmation close is reported'
+assert_contains "$(show_task "$TASK")" 'Domain proposal confirmation:' 'actual words were not recorded before the failed close'
+rm "$FAKEBIN/tasks-axi"
 answer "$TASK" "approve-$D1"
+before=$(show_task "$TASK")
+answer "$TASK" "approve-$D1" || fail 'exact confirmation replay failed'
+assert_equals "$before" "$(show_task "$TASK")" 'exact confirmation replay changed the task'
+answer "$TASK" reject >/dev/null 2>&1
+expect_code 1 "$?" 'changed words cannot overwrite a recorded confirmation'
+assert_equals "$before" "$(show_task "$TASK")" 'changed words altered the recorded confirmation'
 out=$(tool approve media 2>&1); rc=$?
 expect_code 3 "$rc" 'approval of an older digest authorizes nothing'
 assert_contains "$out" 'stale' 'stale approval is named'
 [ ! -s "$DIR/receipts.jsonl" ] || [ ! -e "$DIR/receipts.jsonl" ] || fail 'stale approval wrote a receipt'
-pass 'a newer version re-holds one card and an older digest approval is refused'
+pass 'a newer version updates one queued confirmation task and an older digest approval is refused'
 
 out=$(tool request media "$BUNDLE"); assert_contains "$out" 'cycle 2' 'answered cycle starts a new cycle'
 proposal 'cycle2 text' > "$TMP_ROOT/p3.json"
@@ -152,6 +208,7 @@ expect_code 1 "$rc" 'an answered approval stays on its current cycle'
 assert_contains "$out" 'activation is pending' 'pending approval is disclosed'
 [ ! -d "$HOME_DIR/data/domain-freshness/proposals/media/3" ] || fail 'request advanced past an answered approval'
 out=$(tool approve media) || fail 'approve failed on a matching answer'
+answer domain-proposal-media-2 "approve-$D3" || fail 'confirmation replay after approval failed'
 assert_contains "$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-2 --full)" 'state: queued' 'approval did not preserve the activation task'
 assert_contains "$out" "digest $D3" 'application request binds the digest'
 assert_contains "$out" 'cycle2 text' 'application request carries only approved after text'
@@ -217,7 +274,7 @@ rm "$FAKEBIN/tasks-axi"
 out=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-5 --full)
 assert_contains "$out" 'state: done' 'withdrawal did not close held task'
 assert_contains "$out" 'withdrawn' 'withdrawal evidence was not recorded'
-pass 'zero-change revision closes the held task with evidence'
+pass 'zero-change revision closes the queued task with evidence'
 
 tool request media "$BUNDLE" >/dev/null
 head -c 150000 /dev/zero | tr '\0' x > "$TMP_ROOT/large.txt"
@@ -238,23 +295,29 @@ answer domain-proposal-media-7 "approve-$D7"
 tool approve media >/dev/null || fail 'first version approval failed'
 proposal 'pending second version' > "$TMP_ROOT/pending-second.json"
 tool submit media "$TMP_ROOT/pending-second.json" >/dev/null || fail 'second version submission failed'
-hold_tool open domain-proposal-media-7 || fail 'second version is not held'
+pending_task domain-proposal-media-7 || fail 'second version is not pending confirmation'
 tool receipt media applied --digest "$D7" --evidence 'first version applied' >/dev/null || fail 'first receipt failed'
-hold_tool open domain-proposal-media-7 || fail 'first receipt closed the newer pending version'
+pending_task domain-proposal-media-7 || fail 'first receipt closed the newer pending version'
 tool receipt media applied --digest "$D7" >/dev/null || fail 'repeat first receipt failed'
-hold_tool open domain-proposal-media-7 || fail 'repeat receipt closed the newer pending version'
-pass 'older application receipts preserve a newer captain hold'
+pending_task domain-proposal-media-7 || fail 'repeat receipt closed the newer pending version'
+pass 'older application receipts preserve a newer pending confirmation'
 
 out=$(tool request media "$BUNDLE2") || fail 'request remained blocked by an applied historical approval'
 assert_contains "$out" 'cycle 7' 'new evidence should remain on the open cycle'
 jq -e --arg b "$BUNDLE2" '.latest_bundle_id == $b' "$HOME_DIR/data/domain-freshness/proposals/media/7/request.json" >/dev/null \
   || fail 'new bundle was not recorded as latest'
+before=$(show_task domain-proposal-media-7)
+printf 'approve-%s\n' "$D7" > "$TMP_ROOT/confirm-words"
+pending_digest=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/7/v2.json")
+tool confirm media --digest "$pending_digest" --decision-file "$TMP_ROOT/confirm-words" >/dev/null 2>&1
+expect_code 1 "$?" 'confirmation refuses a stale evidence bundle'
+assert_equals "$before" "$(show_task domain-proposal-media-7)" 'stale evidence confirmation changed the task'
 out=$(tool submit media "$TMP_ROOT/pending-second.json" 2>&1); rc=$?
 expect_code 1 "$rc" 'delayed proposal for older bundle is refused'
 assert_contains "$out" 'not the latest requested bundle' 'stale bundle refusal is clear'
 proposal 'current bundle proposal' "$BUNDLE2" > "$TMP_ROOT/current-bundle.json"
 tool submit media "$TMP_ROOT/current-bundle.json" >/dev/null || fail 'current bundle proposal failed'
-hold_tool open domain-proposal-media-7 || fail 'current bundle did not keep the one held task'
+pending_task domain-proposal-media-7 || fail 'current bundle did not keep the one pending task'
 answer domain-proposal-media-7 reject
 pass 'latest requested bundle binds proposal replies on the same cycle'
 
@@ -269,7 +332,7 @@ tool submit media "$TMP_ROOT/later-rejected.json" >/dev/null || fail 'later vers
 answer domain-proposal-media-8 reject
 proposal 'refreshed after rejection' > "$TMP_ROOT/refreshed.json"
 tool submit media "$TMP_ROOT/refreshed.json" >/dev/null || fail 'refresh after a rejected newer version was refused'
-hold_tool open domain-proposal-media-8 || fail 'refreshed version did not reopen the activation task'
+pending_task domain-proposal-media-8 || fail 'refreshed version did not reopen the activation task'
 answer domain-proposal-media-8 reject
 out=$(tool request media "$BUNDLE2" 2>&1); rc=$?
 expect_code 1 "$rc" 'unapplied earlier approval blocks a new cycle'
@@ -295,6 +358,8 @@ tool request media "$BUNDLE2" >/dev/null || fail 'released-answer setup request 
 proposal 'released answer' "$BUNDLE2" > "$TMP_ROOT/released.json"
 tool submit media "$TMP_ROOT/released.json" >/dev/null || fail 'released-answer setup proposal failed'
 D10=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/10/v1.json")
+hold_tool hold domain-proposal-media-10 --category security --reason 'Synthetic legacy security gate' >/dev/null \
+  || fail 'could not establish the synthetic legacy captain hold'
 printf 'approve-%s\n' "$D10" > "$TMP_ROOT/answer"
 hold_tool answer domain-proposal-media-10 --decision-file "$TMP_ROOT/answer" --release >/dev/null \
   || fail 'released-answer setup failed'
@@ -332,23 +397,23 @@ tool submit media "$TMP_ROOT/c1.json" >/dev/null || fail 'card v1 failed'
 proposal 'card v2' "$BUNDLE2" > "$TMP_ROOT/c2.json"
 cat > "$FAKEBIN/tasks-axi" <<'SH'
 #!/usr/bin/env bash
-if [ "$1" = hold ] && [ -f "$FM_HOME/state/fail-domain-hold-once" ]; then
-  rm "$FM_HOME/state/fail-domain-hold-once"
+if [ "$1" = update ] && [ -f "$FM_HOME/state/fail-domain-note-once" ]; then
+  rm "$FM_HOME/state/fail-domain-note-once"
   exit 1
 fi
 exec "$REAL_TASKS_AXI" "$@"
 SH
 chmod +x "$FAKEBIN/tasks-axi"
-: > "$HOME_DIR/state/fail-domain-hold-once"
+: > "$HOME_DIR/state/fail-domain-note-once"
 tool submit media "$TMP_ROOT/c2.json" >/dev/null 2>&1; expect_code 1 "$?" 'failed card update is reported'
 rm "$FAKEBIN/tasks-axi"
 C2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/12/v2.json")
 out=$(tool submit media "$TMP_ROOT/c2.json") || fail 'retry of the failed card update failed'
-assert_contains "$out" "held: domain-proposal-media-12 v2 digest $C2" 'retry re-ran the missing hold'
+assert_contains "$out" "pending-confirmation: domain-proposal-media-12 v2 digest $C2" 'retry re-ran the missing approval note'
 out=$(tool submit media "$TMP_ROOT/c2.json"); assert_contains "$out" 'unchanged' 'bound card makes resubmission unchanged'
 shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-12 --full)
 assert_contains "$shown" "$C2" 'card is bound to the newest digest'
-pass 'identical resubmission re-runs a hold that failed'
+pass 'identical resubmission re-runs an approval note that failed'
 
 answer domain-proposal-media-12 reject
 tool request media "$BUNDLE2" >/dev/null || fail 'withdrawal scenario request failed'
@@ -436,6 +501,29 @@ C2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/17/v1.json")
 answer domain-proposal-media-17 "  approve-$C2  "
 tool approve media >/dev/null || fail 'surrounding whitespace prevented an exact approval'
 pass 'only the complete trimmed captain answer authorizes application'
+
+tool receipt media applied --digest "$C2" --evidence 'confirmed version applied' >/dev/null \
+  || fail 'could not finish the whitespace-confirmed activation'
+tool request media "$BUNDLE2" >/dev/null || fail 'legacy record setup request failed'
+proposal 'legacy confirmation' "$BUNDLE2" > "$TMP_ROOT/legacy-proposal.json"
+tool submit media "$TMP_ROOT/legacy-proposal.json" >/dev/null || fail 'legacy record setup submission failed'
+L1=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/18/v1.json")
+hold_tool hold domain-proposal-media-18 --category security --reason 'Synthetic legacy security gate' >/dev/null \
+  || fail 'could not establish a synthetic legacy hold'
+before=$(show_task domain-proposal-media-18)
+printf 'approve-%s\n' "$L1" > "$TMP_ROOT/legacy-words"
+tool confirm media --digest "$L1" --decision-file "$TMP_ROOT/legacy-words" >/dev/null 2>&1
+expect_code 1 "$?" 'proposal confirmation cannot close a legacy captain hold'
+proposal 'replacement legacy confirmation' "$BUNDLE2" > "$TMP_ROOT/legacy-replacement.json"
+tool submit media "$TMP_ROOT/legacy-replacement.json" >/dev/null 2>&1
+expect_code 1 "$?" 'a pending legacy hold cannot be silently replaced'
+assert_equals "$before" "$(show_task domain-proposal-media-18)" 'legacy hold changed without its answer'
+[ ! -e "$HOME_DIR/data/domain-freshness/proposals/media/18/v2.json" ] || fail 'refused legacy replacement wrote a version'
+hold_tool answer domain-proposal-media-18 --decision-file "$TMP_ROOT/legacy-words" >/dev/null \
+  || fail 'legacy captain hold answer failed'
+out=$(tool approve media) || fail 'existing legacy approval stopped working'
+assert_contains "$out" "digest $L1" 'legacy approval lost its version binding'
+pass 'legacy held confirmations remain protected and answered records still approve their exact version'
 
 mkdir -p "$TMP_ROOT/mate/state"
 printf 'media\n' > "$TMP_ROOT/mate/.fm-secondmate-home"
