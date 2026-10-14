@@ -1,0 +1,2 @@
+error: python3 with tomllib is required to verify the treehouse pool location
+checker exit=1

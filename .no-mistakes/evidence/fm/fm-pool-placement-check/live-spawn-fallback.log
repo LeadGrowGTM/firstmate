@@ -1,0 +1,5 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT376PZFAQDGJ/.fm-pool-live.keR6Oh/home
+error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT376PZFAQDGJ/.fm-pool-live.keR6Oh/home/unsafe-pool/.treehouse/widget-276bac is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT376PZFAQDGJ/.fm-pool-live.keR6Oh/home; refusing allocation
+spawn exit=1
+synthetic fallback pool state absent; task metadata absent
+returned foreign copy status: 1     available    /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT376PZFAQDGJ/.fm-pool-live.keR6Oh/fallback-default-pool/.treehouse/widget-276bac/1/widget

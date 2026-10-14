@@ -1,0 +1,24 @@
+See "man sudo_root" for details.
+
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT37
+6PZFAQDGJ/.fm-pool-live.keR6Oh/home/projects/widget$ bash '/home/mitch/.no-mista
+kes/worktrees/5782b7185c5e/01M4VYET2XEZGFT376PZFAQDGJ/bin/fm-treehouse-pool-chec
+k.sh' '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT376PZFAQDG
+J/.fm-pool-live.keR6Oh/home' '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01
+M4VYET2XEZGFT376PZFAQDGJ/.fm-pool-live.keR6Oh/home/projects/widget' '/home/mitch
+/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT376PZFAQDGJ/.fm-pool-live.ke
+R6Oh/home/state/.fm-treehouse-pool.W0Y5cJ' && treehouse get
+🌳 Setting up worktree...
+🌳 Entered worktree at /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2
+XEZGFT376PZFAQDGJ/.fm-pool-live.keR6Oh/fallback-default-pool/.treehouse/widget-2
+76bac/1/widget. Type 'exit' to return.
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT37
+6PZFAQDGJ/.fm-pool-live.keR6Oh/fallback-default-pool/.treehouse/widget-276bac/1/
+widget$ exit
+exit
+🌳 Worktree returned to pool.
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VYET2XEZGFT37
+6PZFAQDGJ/.fm-pool-live.keR6Oh/home/projects/widget$
