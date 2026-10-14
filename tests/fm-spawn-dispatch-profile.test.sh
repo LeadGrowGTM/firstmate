@@ -1723,6 +1723,213 @@ test_claude_secondmate_launch_carries_the_attribution_policy() {
   pass "a claude secondmate launch carries the attribution-off policy too"
 }
 
+assert_skill_overrides_setting() {  # <launch-command> <expected-object-json> <what>
+  local launch=$1 expected=$2 what=$3 settings
+  settings=$(claude_settings_json_arg "$launch")
+  printf '%s' "$settings" | jq -e --argjson want "$expected" '.skillOverrides == $want' >/dev/null \
+    || fail "$what launch settings JSON does not carry exactly the skillOverrides object: $settings"
+}
+
+assert_no_skill_overrides_setting() {  # <launch-command> <what>
+  local launch=$1 what=$2 settings
+  settings=$(claude_settings_json_arg "$launch")
+  printf '%s' "$settings" | jq -e '.feedbackDrafts == "off" and (has("skillOverrides") | not)' >/dev/null \
+    || fail "$what launch settings JSON unexpectedly carries skillOverrides: $settings"
+}
+
+test_secondmate_skill_overrides_absent_file_leaves_launch_unchanged() {
+  local rec id sm out status launch
+  id=profile-secondmate-skillov-absent-z31
+  rec=$(make_spawn_case profile-secondmate-skillov-absent claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$CASE_DIR/claude-work" \
+    run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  status=$?
+  expect_code 0 "$status" "secondmate spawn without skill-overrides.json should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_no_skill_overrides_setting "$launch" "secondmate without an override file"
+  assert_attribution_policy "$launch" "secondmate without an override file"
+  pass "an absent skill-overrides.json leaves the secondmate launch settings unchanged"
+}
+
+test_secondmate_skill_overrides_valid_file_rides_the_settings() {
+  local rec id sm out status launch want
+  id=profile-secondmate-skillov-valid-z32
+  rec=$(make_spawn_case profile-secondmate-skillov-valid claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  want='{"anthropic-skills:docx":"off","it'"'"'s":"off","a\u0026b":"name-only","x":1}'
+  mkdir -p "$sm/config"
+  printf '{"skillOverrides": %s, "ignored": true}\n' "$want" > "$sm/config/skill-overrides.json"
+  cp "$sm/config/skill-overrides.json" "$CASE_DIR/skill-overrides.before"
+
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$CASE_DIR/claude-work" \
+    run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  status=$?
+  expect_code 0 "$status" "secondmate spawn with a valid skill-overrides.json should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_skill_overrides_setting "$launch" "$want" "secondmate with an override file"
+  assert_attribution_policy "$launch" "secondmate with an override file"
+  cmp -s "$sm/config/skill-overrides.json" "$CASE_DIR/skill-overrides.before" \
+    || fail "the launch modified skill-overrides.json"
+  pass "a valid skill-overrides.json rides the secondmate launch settings and is left untouched"
+}
+
+test_secondmate_skill_overrides_malformed_file_is_skipped_with_a_note() {
+  local rec id sm out status launch bad
+  id=profile-secondmate-skillov-bad-z33
+  rec=$(make_spawn_case profile-secondmate-skillov-bad claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  mkdir -p "$sm/config"
+  for bad in '{not json' '[]' '{"skillOverrides":["kun"]}' '{"skillOverrides":{"kun":"off"}} {"skillOverrides":{"x":"off"}}'; do
+    printf '%s\n' "$bad" > "$sm/config/skill-overrides.json"
+    : > "$LAUNCH_LOG"
+    out=$(FM_TEST_CLAUDE_CONFIG_DIR="$CASE_DIR/claude-work" \
+      run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+    status=$?
+    expect_code 0 "$status" "a malformed skill-overrides.json ($bad) must not block the launch"$'\n'"$out"
+    assert_contains "$out" "skipped $sm/config/skill-overrides.json" \
+      "a malformed skill-overrides.json ($bad) was skipped without a note"
+    launch=$(cat "$LAUNCH_LOG")
+    assert_no_skill_overrides_setting "$launch" "secondmate with a malformed override file"
+  done
+  pass "a malformed skill-overrides.json is skipped with a note and the launch proceeds"
+}
+
+test_raw_secondmate_skill_overrides_reach_claude() {
+  local rec id sm out status launch args_log settings want
+  id=profile-secondmate-skillov-raw-z35
+  rec=$(make_spawn_case profile-secondmate-skillov-raw claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  mkdir -p "$sm/config"
+  want='{"it'"'"'s":"off","a\u0026b":"name-only","x":1}'
+  printf '{"skillOverrides":%s,"ignored":true}\n' "$want" > "$sm/config/skill-overrides.json"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" \
+    "claude --model haiku 'A positional prompt'" --secondmate)
+  status=$?
+  expect_code 0 "$status" "raw secondmate spawn with skill overrides should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  args_log="$CASE_DIR/claude-args.log"
+  FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+    || fail "raw secondmate Claude launch command failed"
+  settings=$(awk 'prev { print; exit } $0 == "--settings" { prev = 1 }' "$args_log")
+  printf '%s' "$settings" | jq -e --argjson want "$want" '.skillOverrides == $want and (has("feedbackDrafts") | not)' >/dev/null \
+    || fail "raw secondmate Claude received incorrect settings: $settings"
+  pass "raw secondmate Claude receives the complete skillOverrides object"
+}
+
+test_raw_secondmate_existing_settings_merge_skill_overrides() {
+  local form rec id sm out status launch args_log raw arg settings count want
+  want='{"it'"'"'s":"off","a\u0026b":"name-only"}'
+  for form in split-before split-after equals-before equals-after; do
+    id="profile-secondmate-skillov-existing-$form-z36"
+    rec=$(make_spawn_case "profile-secondmate-skillov-existing-$form" claude "$id")
+    read_case_record "$rec"
+    sm="$CASE_DIR/secondmate-home"
+    make_seeded_secondmate_home "$sm" "$id"
+    mkdir -p "$sm/config"
+    printf '{"skillOverrides":%s}\n' "$want" > "$sm/config/skill-overrides.json"
+    cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+    chmod +x "$FAKEBIN_DIR/claude"
+    case "$form" in
+    split-before) raw="claude --settings '{\"theme\":\"dark\"}' --model haiku 'A positional prompt'" ;;
+    split-after) raw="claude 'A positional prompt' --settings '{\"theme\":\"dark\"}'" ;;
+    equals-before) raw="claude --settings='{\"theme\":\"dark\"}' 'A positional prompt'" ;;
+    equals-after) raw="claude 'A positional prompt' --settings='{\"theme\":\"dark\"}'" ;;
+    esac
+
+    out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" "$raw" --secondmate)
+    status=$?
+    expect_code 0 "$status" "raw secondmate spawn with existing $form settings should succeed"$'\n'"$out"
+    launch=$(cat "$LAUNCH_LOG")
+    args_log="$CASE_DIR/claude-args.log"
+    FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+      || fail "raw secondmate Claude launch with existing $form settings failed"
+    awk '$0 == "--disallowedTools" { if (getline <= 0 || $0 != "Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs" || getline <= 0 || $0 !~ /^--settings(=|$)/) exit 1; found = 1 } END { if (!found) exit 1 }' "$args_log" \
+      || fail "raw Claude placed a positional prompt after variadic --disallowedTools for $form form"
+    grep -Fxq 'A positional prompt' "$args_log" \
+      || fail "raw Claude lost its positional prompt for $form form"
+    count=0
+    settings=
+    while IFS= read -r arg; do
+      case "$arg" in
+      --settings)
+        IFS= read -r settings || fail "raw Claude --settings lacks its value"
+        count=$((count + 1))
+        ;;
+      --settings=*)
+        settings=${arg#--settings=}
+        count=$((count + 1))
+        ;;
+      esac
+    done < "$args_log"
+    [ "$count" -eq 1 ] || fail "raw Claude received $count --settings arguments for $form form"
+    printf '%s' "$settings" | jq -e --argjson want "$want" \
+      '.theme == "dark" and .skillOverrides == $want' >/dev/null \
+      || fail "raw Claude did not merge skill overrides into existing $form settings: $settings"
+  done
+  pass "raw secondmate merges skill overrides into one existing settings argument"
+}
+
+test_raw_ship_existing_settings_keeps_launch_arguments() {
+  local rec id out status launch args_log actual expected
+  id=profile-ship-skillov-existing-z37
+  rec=$(make_spawn_case profile-ship-skillov-existing claude "$id")
+  read_case_record "$rec"
+  printf '{"skillOverrides":{"kun":"off"}}\n' > "$HOME_DIR/config/skill-overrides.json"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "claude --model haiku --settings '{\"theme\":\"dark\"}' 'A positional prompt'")
+  status=$?
+  expect_code 0 "$status" "raw ship spawn with existing settings should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  args_log="$CASE_DIR/claude-args.log"
+  FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+    || fail "raw ship Claude launch with existing settings failed"
+  actual=$(cat "$args_log")
+  expected=$(printf '%s\n' --disallowedTools 'Artifact,ArtifactComments,ArtifactData,ArtifactCheck,mcp__claude_ai_Claude_Docs' --settings '{}' --model haiku --settings '{"theme":"dark"}' 'A positional prompt')
+  [ "$actual" = "$expected" ] || fail "raw ship Claude arguments changed"$'\n'"expected: $expected"$'\n'"actual: $actual"
+  pass "raw ship launch preserves its existing settings arguments"
+}
+
+test_skill_overrides_never_reach_workers() {
+  local rec id out status launch
+  id=profile-worker-skillov-z34
+  rec=$(make_spawn_case profile-worker-skillov claude "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/config"
+  printf '{"skillOverrides":{"kun":"off"}}\n' > "$HOME_DIR/config/skill-overrides.json"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "claude ship spawn with a skill-overrides.json should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_no_skill_overrides_setting "$launch" "claude ship worker"
+  pass "skill overrides never reach a ship worker launch"
+}
+
 test_active_dispatch_profile_does_not_block_secondmate_launch() {
   local rec id sm out status
   id=profile-secondmate-z16
@@ -2429,6 +2636,13 @@ test_claude_crewmate_launch_carries_the_attribution_policy
 test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks
 test_keep_ai_trailers_reaches_secondmate_crew_launches
 test_claude_secondmate_launch_carries_the_attribution_policy
+test_secondmate_skill_overrides_absent_file_leaves_launch_unchanged
+test_secondmate_skill_overrides_valid_file_rides_the_settings
+test_secondmate_skill_overrides_malformed_file_is_skipped_with_a_note
+test_raw_secondmate_skill_overrides_reach_claude
+test_raw_secondmate_existing_settings_merge_skill_overrides
+test_raw_ship_existing_settings_keeps_launch_arguments
+test_skill_overrides_never_reach_workers
 test_active_dispatch_profile_does_not_block_secondmate_launch
 test_opt_in_production_launch_receipts
 test_production_late_launch_receipt

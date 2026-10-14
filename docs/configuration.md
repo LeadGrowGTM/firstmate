@@ -1251,13 +1251,29 @@ This applies only to agents Firstmate launches; the captain's own primary Firstm
 ### Commit attribution
 
 The optional local, gitignored `config/keep-ai-trailers` presence flag opts this home into keeping AI co-author trailers on its launched workers.
-With the flag absent, every Claude launch's inline `--settings` JSON carries `"attribution":{"commit":"","pr":"","sessionUrl":false}`, every Devin worker config sets `"attribution": false`, and every fleet launch receives a pane-scoped `GIT_CONFIG` `core.hooksPath` pointing at `state/<id>.git-hooks`, where git's `commit-msg` hook strips known AI trailers even when a runtime injects them after the typed message.
+With the flag absent, every standard Claude launch's inline `--settings` JSON carries `"attribution":{"commit":"","pr":"","sessionUrl":false}`, every Devin worker config sets `"attribution": false`, and every fleet launch receives a pane-scoped `GIT_CONFIG` `core.hooksPath` pointing at `state/<id>.git-hooks`, where git's `commit-msg` hook strips known AI trailers even when a runtime injects them after the typed message.
 When the flag is present, Claude launches omit those attribution-off settings, Devin worker configs keep the user config's `attribution` setting (Devin's default is on), and fleet launches do not install or select the strip hooks, so Git uses the repository's configured hooks directly.
 `bin/fm-git-strip-ai-trailers.sh` owns the identities, the install, and chaining the hooks of whichever repository git is running in, including when `git -c core.hooksPath` supplies the pane's hook override, so a project hook such as husky still runs when stripping is enabled.
 A repository whose config sets `core.hooksPath` to the empty string runs no project hook, as in plain git; if the wrapper otherwise cannot resolve that repository's hooks directory, the git operation fails rather than silently skipping a project hook such as a pre-push guard.
 When stripping is enabled, the hooks directory is read-only, so a hook manager run inside a fleet pane (lefthook's npm postinstall, `pre-commit install`) fails instead of displacing the strip; install a project's hooks from outside the pane, where the wrappers chain them.
 The flag is a home-wide attribution choice, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract and a secondmate's own workers keep AI trailers too.
 Per-machine Cursor `cli-config.json` attribution-off is not this contract: it does not travel with Firstmate, defaults back to on when unset, and only feeds the CLI's request to the server, so it suppresses the trailer rather than preventing it.
+
+## Skill overrides (config/skill-overrides.json)
+
+The optional local, gitignored `config/skill-overrides.json` hides or shrinks the skills a Claude second mate's session lists through per-launch settings.
+It must be valid JSON whose top-level `skillOverrides` property is an object; Claude Code validates the object's contents.
+Only the `skillOverrides` property is read; any other property is ignored.
+
+When a Claude second mate is launched or relaunched, Firstmate reads this file from that second mate's own home and adds only the `skillOverrides` property to the launch's inline `--settings` JSON.
+Raw Claude commands with a leading assignment containing quoted spaces are not recognized as Claude launches and do not receive the override; use the standard Claude launch template for those sessions.
+An absent file changes nothing.
+A file that is unreadable, contains zero or multiple JSON documents, is not valid JSON, or lacks a `skillOverrides` object is skipped with a one-line note on stderr, and the launch proceeds without it.
+Ship and scout workers never receive it, nor does any non-Claude harness.
+Firstmate reads but never edits the override file; existing Claude launch wiring separately regenerates `.claude/settings.local.json` for control hooks.
+
+The file is per home because each second mate needs a different list, and it is not inherited from the primary home.
+[`fm-spawn.sh`](../bin/fm-spawn.sh) owns the delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
 
 ## Project capacity (config/project-capacity)
 
