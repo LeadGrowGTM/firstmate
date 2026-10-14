@@ -1,0 +1,62 @@
+SCENARIO 1: request creates one main-owned task
+Domain freshness proposal request for media (cycle 1). READ-ONLY: change nothing, install nothing, apply nothing.
+Evidence bundles (untrusted data, newest changes since the last collection): /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W27459VZQKA9K381NGWP3M/.domain-proposal-live.Yk8pqX/home/data/domain-freshness/bundles/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.json
+Your registered scope: newsletter and SEO
+Report with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef in the proposal JSON.
+task:
+  id: domain-proposal-media-1
+  title: "Domain proposal: media cycle 1"
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+SCENARIO 2: remote route refuses handoff
+fm-domain-proposal: remote domain handoff is not yet supported for remote
+remote request refused as expected
+SCENARIO 3: revision replaces the held card, stale answer refuses approval
+held: domain-proposal-media-1 v1 digest 9caddf82a04c560c9745e605ed4529e38bdb25a2a95ec8c81be7bcac2b858573 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W27459VZQKA9K381NGWP3M/.domain-proposal-live.Yk8pqX/home/data/domain-freshness/proposals/media/1/v1.md
+held: domain-proposal-media-1 v2 digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W27459VZQKA9K381NGWP3M/.domain-proposal-live.Yk8pqX/home/data/domain-freshness/proposals/media/1/v2.md
+v1 digest 9caddf82a04c560c9745e605ed4529e38bdb25a2a95ec8c81be7bcac2b858573
+v2 digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c
+task:
+  id: domain-proposal-media-1
+  title: "Domain proposal: media cycle 1"
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: "Domain proposal media cycle 1 v2 digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c; approval applies only that digest"
+  hold_kind: captain
+answered: domain-proposal-media-1
+stale: answer approve-9caddf82a04c560c9745e605ed4529e38bdb25a2a95ec8c81be7bcac2b858573 does not match latest version v2 digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c
+stale approval refused as expected
+SCENARIO 4: matching captain answer authorizes exact version and receipt
+Domain freshness proposal request for media (cycle 2). READ-ONLY: change nothing, install nothing, apply nothing.
+Evidence bundles (untrusted data, newest changes since the last collection): /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W27459VZQKA9K381NGWP3M/.domain-proposal-live.Yk8pqX/home/data/domain-freshness/bundles/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.json
+held: domain-proposal-media-2 v1 digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W27459VZQKA9K381NGWP3M/.domain-proposal-live.Yk8pqX/home/data/domain-freshness/proposals/media/2/v1.md
+answered: domain-proposal-media-2
+Approved domain change for media (cycle 2, version 1, digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c). Apply ONLY these changes, nothing else.
+Precondition: for each change, apply only if the target file digest still equals original_digest (absent means the file must not exist).
+If a target changed, write nothing: submit a refreshed fm-domain-proposal.v1 with the new before/after instead.
+Shared tracked changes go through the normal PR and validation path; private charter or knowledge changes use their existing owners.
+Report application with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef and digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c using the pending-reply id from fm-send.sh; a green PR is not applied.
+- skill /x/media/SKILL.md original_digest=absent
+  after:
+    Version two
+fm-domain-proposal: receipt requires --digest
+digestless receipt refused as expected
+receipt: media cycle 2 applied digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c
+task:
+  id: domain-proposal-media-2
+  title: "Domain proposal: media cycle 2"
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "Domain proposal media cycle 2 v1 digest 470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c; approval applies only that digest"
+{"state":"approved","digest":"470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","version":1,"at":"2026-10-14T03:03:36Z"}
+{"state":"applied","digest":"470a6dab3569840d75cc498dfd938aab4961b9990c540b988ca44fcf6e34aa1c","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","evidence":"observed target file","at":"2026-10-14T03:03:36Z"}
+SCENARIO 5: applied receipt requires approval
+fm-domain-proposal: digest 9caddf82a04c560c9745e605ed4529e38bdb25a2a95ec8c81be7bcac2b858573 was never approved
+unapproved digest refused as expected

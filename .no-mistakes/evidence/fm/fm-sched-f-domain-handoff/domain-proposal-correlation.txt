@@ -1,0 +1,4 @@
+Latest request: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+Delayed old-bundle reply: fm-domain-proposal: bundle_id is not the latest requested bundle for media
+refused
+Current-bundle reply: no-change: domain-proposal-media-1 v1 recorded, no card
