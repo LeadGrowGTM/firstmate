@@ -1,0 +1,7 @@
+REAL PRODUCT: fm-spawn.sh on isolated Claude/tmux lab; spawn HOME differs from pane HOME
+pane-user-config: exit=1; output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-pane.8vl4mg3r/home
+error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-pane.8vl4mg3r/home/unsafe/.treehouse/widget-9ca83e is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-pane.8vl4mg3r/home; refusing allocation
+pane-user-config: pool created=False; task record created=False
+pane-linked-default: exit=1; output=fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-pane.8vl4mg3r/home
+error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-pane.8vl4mg3r/home/unsafe/widget-9ca83e is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-pane.8vl4mg3r/home; refusing allocation
+pane-linked-default: task record created=False; linked-pool allocation was checked separately in pool-placement-live.txt

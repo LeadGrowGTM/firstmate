@@ -1,0 +1,6 @@
+REAL PRODUCT: fm-spawn.sh with Claude primary on private fm-lab tmux socket
+spawn exit=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-live.fibmza6m/home
+error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-live.fibmza6m/home/unsafe-pool/.treehouse/widget-baffe1 is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-spawn-live.fibmza6m/home; refusing allocation
+unsafe pool created=False
+task metadata created=False

@@ -1,0 +1,15 @@
+REAL PRODUCT: executable pool guard with real Treehouse v2.1.1
+CASE: unsafe user-level config
+guard exit=1: error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-pool-live.yr385y78/home/unsafe/.treehouse/widget-d972b6 is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-pool-live.yr385y78/home; refusing allocation
+No Treehouse allocation inside Firstmate home
+CASE: linked default pool
+guard exit=1: error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-pool-live.yr385y78/home/linked-pool/widget-d972b6 is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-pool-live.yr385y78/home; refusing allocation
+No Treehouse allocation through the link
+CASE: unsafe repository root overrides safe user root
+guard exit=1: error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-pool-live.yr385y78/home/repo-unsafe/.treehouse/widget-d972b6 is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-pool-live.yr385y78/home; refusing allocation
+No Treehouse allocation at repository-selected root
+CASE: safe user-level root
+guard exit=0
+Treehouse allocated /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VP5SDEWYQNVCPZ57PR2GYG/.fm-pool-live.yr385y78/safe/.treehouse/widget-d972b6/1/widget
+Allocated copy is inside the safe external root
+Real Treehouse lease returned
