@@ -21,10 +21,11 @@
 # tmux backend and its firstmate session; other runtimes refuse dispatch.
 # Commands require the detached remote environment, outside any tmux session,
 # so ordinary spawn and inventory both target the exact firstmate session.
-# Capacity is the larger of retained worker records and live fm-* windows from
-# one backend inventory read; unreadable inventory refuses. Stop is allowed
-# only when both counts are zero. An id may be retried only without a spawn
-# record or matching live endpoint; unknown transport completion
+# Capacity counts distinct task IDs across retained worker records and live
+# fm-* windows from one backend inventory read; unreadable inventory refuses.
+# Stop is allowed only when both counts are zero.
+# An id may be retried only without a spawn record or matching live endpoint;
+# unknown transport completion
 # must be reconciled before reusing its id or rewriting its briefs.
 # idle reports whether any worker records or endpoints remain under that lock.
 # Before spawn, intake adds a missing backlog item through fm-tasks-axi.sh;
@@ -50,19 +51,23 @@ boat_runtime() {
   fm_backend_source tmux || die 'Boat tmux adapter unavailable'
 }
 boat_worker_count() { # [new task id, refused if its endpoint already exists]
-  local meta records=0 live windows status=0
+  local meta id records= windows status=0
   for meta in "$FM_HOME/state/"*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
     [ -f "$meta" ] && [ ! -L "$meta" ] || die 'unsafe worker metadata'
-    [ "$(sed -n 's/^kind=//p' "$meta")" = secondmate ] || records=$((records + 1))
+    if [ "$(sed -n 's/^kind=//p' "$meta")" != secondmate ]; then
+      id=${meta##*/}
+      id=${id%.meta}
+      case "$id" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) die 'unsafe worker metadata' ;; esac
+      records="${records}fm-$id"$'\n'
+    fi
   done
   windows=$(fm_backend_tmux_window_inventory '=firstmate') || status=$?
   case "$status" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
   if [ -n "${1:-}" ] && printf '%s\n' "$windows" | grep -Fxq -- "fm-$1"; then
     die 'task id has a live endpoint; reconcile before retry'
   fi
-  live=$(printf '%s\n' "$windows" | awk '/^fm-/ { n++ } END { print n+0 }')
-  if [ "$live" -gt "$records" ]; then printf '%s\n' "$live"; else printf '%s\n' "$records"; fi
+  printf '%s\n%s\n' "$records" "$windows" | awk '/^fm-/ && !seen[$0]++ { n++ } END { print n+0 }'
 }
 case "${1:-}" in
   --help) sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0 ;;

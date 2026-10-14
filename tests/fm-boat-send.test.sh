@@ -635,6 +635,17 @@ test_remote_cap_and_merge_authority() {
   expect_code 75 "$CODE" 'orphan endpoint must reserve the third slot'
   assert_equals 1 "$(grep -c '^inventory ' "$FIXTURES/calls")" 'capacity performed more than one endpoint inventory'
   assert_no_grep '^spawn ' "$FIXTURES/calls" 'orphan endpoint bypassed capacity'
+  new_case mixed-record-endpoint-cap
+  seed_project firstmate
+  seed_worker worker-a ship firstmate 'state: working active'
+  seed_worker worker-b scout dev-loop 'state: working active'
+  printf 'fm-worker-a\nfm-orphan\n' > "$FIXTURES/windows"
+  spawn_task
+  expect_code 75 "$CODE" 'distinct records and endpoints must fill the box'
+  assert_contains "$OUT" 'three-worker cap' 'mixed inventory refusal did not reach capacity check'
+  assert_equals 1 "$(grep -c '^inventory ' "$FIXTURES/calls")" 'mixed inventory performed more than one endpoint read'
+  assert_no_grep '^spawn ' "$FIXTURES/calls" 'mixed inventory launched a fourth task'
+  assert_absent "$REMOTE_HOME/data/task-one/brief.md" 'mixed inventory wrote a fourth brief'
   new_case unavailable-endpoints
   seed_project firstmate
   : > "$FIXTURES/inventory.fail"
