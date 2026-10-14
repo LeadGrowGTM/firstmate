@@ -1624,20 +1624,20 @@ fm_treehouse_worktree_check() {  # <fm-home> <project> <worktree>
 }
 
 fm_treehouse_pool_check() {  # <fm-home> <project> <treehouse-home>
-  local home project git origin pool boundary label
+  local home project git origin hash pool boundary label
   home=$(CDPATH='' cd -- "$1" && pwd -P) || return 1
   project=$(CDPATH='' cd -- "$2" && pwd -P) || return 1
   [ -n "${3:-}" ] || return 1
   git=$(type -P git) || return 1
   origin=$("$git" -C "$project" remote get-url origin 2>/dev/null) || origin=$project
-  pool=$(HOME=$3 python3 - "$project" "$origin" <<'PY'
-import hashlib
+  hash=$(printf '%s' "$origin" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:6])') || return 1
+  [ "${#hash}" -eq 6 ] || return 1
+  pool=$(HOME=$3 python3 - "$project" "$hash" <<'PY'
 import os
 from pathlib import Path
 import sys
 
 try:
-    import tomllib
     project = Path(sys.argv[1])
     user = Path(os.environ["HOME"])
     repo_config = project / "treehouse.toml"
@@ -1645,8 +1645,17 @@ try:
     config = repo_config if repo_config.exists() else user_config
     root = ""
     if config.exists():
-        with config.open("rb") as file:
-            values = tomllib.load(file)
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib
+            except ImportError:
+                try:
+                    from pip._vendor import tomli as tomllib
+                except ImportError:
+                    from pip._vendor import toml as tomllib
+        values = tomllib.loads(config.read_text(encoding="utf-8"))
         roots = [value for key, value in values.items() if key.lower() == "root"]
         if len(roots) > 1 or (roots and not isinstance(roots[0], str)):
             raise ValueError(f"ambiguous or non-string root in {config}")
@@ -1661,8 +1670,7 @@ try:
             base = project / base
     else:
         base = user
-    key = sys.argv[2]
-    name = f"{project.name}-{hashlib.sha256(key.encode()).hexdigest()[:6]}"
+    name = f"{project.name}-{sys.argv[2]}"
     print((base / ".treehouse" / name).resolve())
 except (OSError, RuntimeError, ValueError, ImportError) as error:
     print(f"error: could not resolve Treehouse pool before allocation: {error}", file=sys.stderr)

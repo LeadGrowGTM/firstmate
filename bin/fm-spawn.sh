@@ -4588,11 +4588,12 @@ agy_spawn_fail() {  # <detail>
 # it is, and the wait continues. On failure SPAWN_WT_LAST_SEEN and
 # SPAWN_WT_LAST_REASON name the last path and why it was rejected.
 spawn_wait_isolated_worktree() {
-  local candidate="" p p_real _
+  local refusal_file=${1:-} candidate="" p p_real _
   WT=
   SPAWN_WT_LAST_SEEN=
   SPAWN_WT_LAST_REASON="the pane reported no path"
   for _ in $(seq 1 60); do
+    [ -z "$refusal_file" ] || [ ! -s "$refusal_file" ] || return 1
     p=$(spawn_current_path "$WT_TARGET" || true)
     [ -z "$p" ] || SPAWN_WT_LAST_SEEN=$p
     if [ -n "$p" ] && spawn_worktree_isolated "$p"; then
@@ -4717,12 +4718,22 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  fm_treehouse_pool_check "$FM_HOME" "$PROJ_ABS" "$HOME" || exit 1
-  spawn_send_text_line "$WT_TARGET" "HOME=$(shell_quote "$HOME") treehouse get"
-  if ! spawn_wait_isolated_worktree; then
+  pool_refusal_file=$(umask 077; mktemp "$STATE/.fm-treehouse-pool.XXXXXX") || exit 1
+  if ! spawn_send_text_line "$WT_TARGET" "bash $(shell_quote "$SCRIPT_DIR/fm-treehouse-pool-check.sh") $(shell_quote "$FM_HOME") $(shell_quote "$PROJ_ABS") $(shell_quote "$pool_refusal_file") && treehouse get"; then
+    rm -f -- "$pool_refusal_file"
+    exit 1
+  fi
+  if ! spawn_wait_isolated_worktree "$pool_refusal_file"; then
+    if [ -s "$pool_refusal_file" ]; then
+      cat "$pool_refusal_file" >&2
+      rm -f -- "$pool_refusal_file"
+      exit 1
+    fi
+    rm -f -- "$pool_refusal_file"
     echo "error: treehouse get did not enter an isolated worktree within 60s (last seen '${SPAWN_WT_LAST_SEEN:-none}': $SPAWN_WT_LAST_REASON; spawning project '$PROJ_ABS'); inspect window $T" >&2
     exit 1
   fi
+  rm -f -- "$pool_refusal_file"
   if ! fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$WT"; then
     if ! spawn_send_text_line "$WT_TARGET" 'exit' ||
       ! spawn_wait_left_path "$WT" || ! spawn_wait_treehouse_returned "$WT"; then
