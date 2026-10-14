@@ -335,6 +335,35 @@ shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR
 assert_contains "$shown" 'state: done' 'receipt did not close the activation task'
 pass 'a zero-change revision keeps an approved activation task open'
 
+tool request media "$BUNDLE2" >/dev/null || fail 'multiple-approval withdrawal request failed'
+proposal 'first approved change' "$BUNDLE2" > "$TMP_ROOT/multi-first.json"
+tool submit media "$TMP_ROOT/multi-first.json" >/dev/null || fail 'first multiple-approval submission failed'
+M1=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/14/v1.json")
+answer domain-proposal-media-14 "approve-$M1"
+tool approve media >/dev/null || fail 'first multiple-approval decision failed'
+proposal 'second approved change' "$BUNDLE2" > "$TMP_ROOT/multi-second.json"
+tool submit media "$TMP_ROOT/multi-second.json" >/dev/null || fail 'second multiple-approval submission failed'
+M2=$(jq -r .digest "$HOME_DIR/data/domain-freshness/proposals/media/14/v2.json")
+answer domain-proposal-media-14 "approve-$M2"
+tool approve media >/dev/null || fail 'second multiple-approval decision failed'
+tool submit media "$TMP_ROOT/w2.json" >/dev/null || fail 'multiple-approval withdrawal failed'
+jq -e '.proposal.changes == []' "$HOME_DIR/data/domain-freshness/proposals/media/14/v3.json" >/dev/null \
+  || fail 'withdrawal was not recorded as a zero-change version'
+jq -es 'all(.[]; .state == "approved")' "$HOME_DIR/data/domain-freshness/proposals/media/14/receipts.jsonl" >/dev/null \
+  || fail 'withdrawal added a redundant receipt'
+pass 'a zero-change version records withdrawal without a separate receipt'
+
+tool receipt media applied --digest "$M1" --evidence 'first approved change applied' >/dev/null || fail 'first multiple-approval receipt failed'
+shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-14 --full)
+assert_not_contains "$shown" 'state: done' 'first receipt closed the outstanding second approval'
+tool receipt media applied --digest "$M1" >/dev/null || fail 'repeat first multiple-approval receipt failed'
+shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-14 --full)
+assert_not_contains "$shown" 'state: done' 'repeat first receipt closed the outstanding second approval'
+tool receipt media applied --digest "$M2" --evidence 'second approved change applied' >/dev/null || fail 'second multiple-approval receipt failed'
+shown=$(PATH="$FAKEBIN:$PATH" REAL_TASKS_AXI="$TASKS_AXI_BIN" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" FM_CONFIG_OVERRIDE="$HOME_DIR/config" bash "$ROOT/bin/fm-tasks-axi.sh" show domain-proposal-media-14 --full)
+assert_contains "$shown" 'state: done' 'final approval receipt did not close the activation task'
+pass 'first and repeat receipts preserve each outstanding approval'
+
 mkdir -p "$TMP_ROOT/mate/state"
 printf 'media\n' > "$TMP_ROOT/mate/.fm-secondmate-home"
 FM_HOME="$TMP_ROOT/mate" bash "$TOOL" request media "$BUNDLE" >/dev/null 2>&1; expect_code 1 "$?" 'a non-main home is refused'
