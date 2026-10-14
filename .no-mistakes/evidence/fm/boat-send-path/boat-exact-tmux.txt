@@ -1,0 +1,4 @@
+selected session: firstmate
+@2
+exact firstmate inventory: bash,fm-evidence
+near-named session inventory: bash

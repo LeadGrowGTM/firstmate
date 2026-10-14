@@ -1,0 +1,8 @@
+Real receiver: allowed firstmate code-only envelope
+exit=0
+Real sender: reject a client project before Boat access
+error: invalid code-only Boat request
+exit=1
+Real sender: reject an injected env field before Boat access
+error: invalid code-only Boat request
+exit=1
