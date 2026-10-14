@@ -1,0 +1,16 @@
+/tmp/fm-lab.fFuokE
+LAB_SOCKET=/tmp/fml.dwG379/tmux-1000/fm-lab
+SPAWN_OUTPUT_BEGIN
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.fFuokE
+warning: /tmp/fm-lab.fFuokE/data/live-spawn/launch-brief.md records no ship branch; defaulting to legacy branch fm/live-spawn
+warning: /tmp/fm-lab.fFuokE/data/live-spawn/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: live-spawn ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: treehouse pool /tmp/fm-lab.fFuokE/unsafe-pool/.treehouse/widget-aca1c6 is inside Firstmate home /tmp/fm-lab.fFuokE; refusing allocation
+SPAWN_OUTPUT_END
+SPAWN_RC=1
+UNSAFE_ALLOCATED=no
+TASK_PUBLISHED=no
+LAB_WINDOWS_BEGIN
+claude /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VX5Q34SCAD9RH9BJYF9ER8
+fm-live-spawn /tmp/fm-lab.fFuokE/projects/widget
+LAB_WINDOWS_END

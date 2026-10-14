@@ -1,0 +1,23 @@
+/tmp/fm-lab.2pGChS
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.treehouse/widget-e9228d/1/widget. Run 'treehouse return ~/.treehouse/widget-e9228d/1/widget' to release it.
+SETUP_SLOT=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VX5Q34SCAD9RH9BJYF9ER8/.live-fallback-fixture-1543885/operator/.treehouse/widget-e9228d/1/widget
+🌳 Worktree returned to pool.
+SYNTHETIC_HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VX5Q34SCAD9RH9BJYF9ER8/.live-fallback-fixture-1543885/operator/.local/state/firstmate/fm-lab.2pGChS-c46dde
+LAB_SOCKET=/tmp/fml.qLso3k/tmux-1000/fm-lab
+SPAWN_OUTPUT_BEGIN
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.2pGChS
+warning: /tmp/fm-lab.2pGChS/data/live-fallback/launch-brief.md records no ship branch; defaulting to legacy branch fm/live-fallback
+warning: /tmp/fm-lab.2pGChS/data/live-fallback/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: live-fallback ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: treehouse pool /tmp/fm-lab.2pGChS/unsafe-fallback-pool/.treehouse/widget-e9228d is inside Firstmate home /tmp/fm-lab.2pGChS; refusing allocation
+SPAWN_OUTPUT_END
+SPAWN_RC=1
+UNSAFE_FALLBACK_ALLOCATED=no
+TASK_PUBLISHED=no
+OPERATOR_STATUS_BEGIN
+A new version of treehouse is available: v2.1.1 → v3.1.3
+Run "treehouse update" to update
+
+1     available    ~/.treehouse/widget-e9228d/1/widget
+OPERATOR_STATUS_END

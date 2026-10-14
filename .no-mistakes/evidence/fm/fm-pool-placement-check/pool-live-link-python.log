@@ -1,0 +1,16 @@
+/tmp/fm-lab.w9RWlk
+LINK_SPAWN_OUTPUT_BEGIN
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.w9RWlk
+warning: /tmp/fm-lab.w9RWlk/data/live-link/launch-brief.md records no ship branch; defaulting to legacy branch fm/live-link
+warning: /tmp/fm-lab.w9RWlk/data/live-link/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: live-link ships mode=local-only while the standing posture for widget is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: treehouse pool /tmp/fm-lab.w9RWlk/unsafe-linked/widget-ecf8b6 is inside Firstmate home /tmp/fm-lab.w9RWlk; refusing allocation
+LINK_SPAWN_OUTPUT_END
+LINK_SPAWN_RC=1
+LINK_POOL_ALLOCATED=no
+TASK_PUBLISHED=no
+MISSING_PYTHON_OUTPUT_BEGIN
+error: python3 with tomllib is required to verify the treehouse pool location
+MISSING_PYTHON_OUTPUT_END
+MISSING_PYTHON_RC=1
+MISSING_PYTHON_REFUSAL=error: python3 with tomllib is required to verify the treehouse pool location

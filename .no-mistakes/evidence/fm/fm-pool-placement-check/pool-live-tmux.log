@@ -1,0 +1,65 @@
+/tmp/fm-lab.mzHwfJ
+LAB_SOCKET=/tmp/fml.UN1fYk/tmux-1000/fm-lab
+CLAUDE_PRIMARY=primary
+UNSAFE_PANE_BEGIN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+mitch@The-GOAT:/tmp/fm-lab.mzHwfJ/projects/widget$ bash /home/mitch/.no-mistakes
+/worktrees/5782b7185c5e/01M4VX5Q34SCAD9RH9BJYF9ER8/bin/fm-treehouse-pool-check.s
+h /tmp/fm-lab.mzHwfJ /tmp/fm-lab.mzHwfJ/projects/widget /tmp/fm-lab.mzHwfJ/state
+/unsafe.refusal && treehouse get
+error: treehouse pool /tmp/fm-lab.mzHwfJ/unsafe-pool/.treehouse/widget-b0de46 is
+ inside Firstmate home /tmp/fm-lab.mzHwfJ; refusing allocation
+mitch@The-GOAT:/tmp/fm-lab.mzHwfJ/projects/widget$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+UNSAFE_PANE_END
+UNSAFE_REFUSAL=error: treehouse pool /tmp/fm-lab.mzHwfJ/unsafe-pool/.treehouse/widget-b0de46 is inside Firstmate home /tmp/fm-lab.mzHwfJ; refusing allocation
+UNSAFE_ALLOCATED=no
+SAFE_PANE_PATH=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4VX5Q34SCAD9RH9BJYF9ER8/.live-pool-fixture-1467692/operator/.treehouse/widget-b0de46/1/widget
+SAFE_PANE_BEGIN
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+mitch@The-GOAT:/tmp/fm-lab.mzHwfJ/projects/widget$ bash /home/mitch/.no-mistakes
+/worktrees/5782b7185c5e/01M4VX5Q34SCAD9RH9BJYF9ER8/bin/fm-treehouse-pool-check.s
+h /tmp/fm-lab.mzHwfJ /tmp/fm-lab.mzHwfJ/projects/widget /tmp/fm-lab.mzHwfJ/state
+/safe.refusal && treehouse get
+🌳 Setting up worktree...
+🌳 Entered worktree at ~/.treehouse/widget-b0de46/1/widget. Type 'exit' to retur
+n.
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+mitch@The-GOAT:~/.treehouse/widget-b0de46/1/widget$
+
+
+
+
+
+
+
+
+
+
+SAFE_PANE_END
+SAFE_REFUSAL=none
+SAFE_TREEHOUSE_STATUS_BEGIN
+A new version of treehouse is available: v2.1.1 → v3.1.3
+Run "treehouse update" to update
+
+1     available    ~/.treehouse/widget-b0de46/1/widget
+SAFE_TREEHOUSE_STATUS_END
