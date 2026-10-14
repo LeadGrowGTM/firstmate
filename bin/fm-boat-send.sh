@@ -173,7 +173,9 @@ jq -e --argjson ttl "$TTL" --argjson now "$(date +%s)" '
 ' "$TMP/info" >/dev/null 2>&1 || stop_refuse 'box auto-stop timer is unavailable or exceeds the reserved budget'
 current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable'
 if [ "$STATE" = stopped ]; then
-  [ "$current" = "$instance" ] && receipt_matches "$current" || stop_refuse 'Boat instance changed after resume'
+  if [ "$current" != "$instance" ] || ! receipt_matches "$current"; then
+    stop_refuse 'Boat instance changed after resume'
+  fi
 else
   instance=$current
   receipt_matches "$instance" || stop_refuse 'running box has no current --no-env resume receipt'

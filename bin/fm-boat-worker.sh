@@ -51,7 +51,7 @@ boat_runtime() {
   fm_backend_source tmux || die 'Boat tmux adapter unavailable'
 }
 boat_worker_count() { # [new task id, refused if its endpoint already exists]
-  local meta id records= windows status=0
+  local meta id records='' windows status=0
   for meta in "$FM_HOME/state/"*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
     [ -f "$meta" ] && [ ! -L "$meta" ] || die 'unsafe worker metadata'
