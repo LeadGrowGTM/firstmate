@@ -1,0 +1,8 @@
+VALID_REQUEST
+exit=0
+REJECT_ENV_FIELD
+error: invalid code-only Boat request
+exit=1
+REJECT_CLIENT_PROJECT
+error: invalid code-only Boat request
+exit=1
