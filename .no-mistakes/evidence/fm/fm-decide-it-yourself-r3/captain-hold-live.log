@@ -1,0 +1,81 @@
+CASE: filing guidance
+Allowed categories:
+  spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved: decide, record the decision and reason, and proceed without a captain hold
+  live-client - a live client send or campaign change
+  deploy-publish - a deploy or publish
+  legal-public - legal wording or a public claim
+  captain-login-billing - a login or billing step only he can do
+  security - security
+  destructive - anything destructive
+Decide on the best evidence, record the choice and reason in the task note, and act.
+CASE: seven allowed categories are accepted read-only
+spend accepted
+live-client accepted
+deploy-publish accepted
+legal-public accepted
+captain-login-billing accepted
+security accepted
+destructive accepted
+CASE: invalid and repeated categories refuse without creating a task
+fm-captain-hold: captain calls require exactly one allowed --category.
+Allowed categories:
+  spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved: decide, record the decision and reason, and proceed without a captain hold
+  live-client - a live client send or campaign change
+  deploy-publish - a deploy or publish
+  legal-public - legal wording or a public claim
+  captain-login-billing - a login or billing step only he can do
+  security - security
+  destructive - anything destructive
+Decide on the best evidence, record the choice and reason in the task note, and act.
+invalid category exit 2
+fm-captain-hold: captain calls require exactly one allowed --category.
+Allowed categories:
+  spend - new spend or spend beyond an established budget; spend within an already-established budget is auto-approved: decide, record the decision and reason, and proceed without a captain hold
+  live-client - a live client send or campaign change
+  deploy-publish - a deploy or publish
+  legal-public - legal wording or a public claim
+  captain-login-billing - a login or billing step only he can do
+  security - security
+  destructive - anything destructive
+Decide on the best evidence, record the choice and reason in the task note, and act.
+repeated category exit 2
+no captain task created
+CASE: valid security call can be filed and answered
+sample-security-call
+task:
+  id: sample-security-call
+  title: Security approval
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: "fm-hold-v1:Q2FwdGFpbiBtdXN0IGRlY2lkZSBzZWN1cml0eSBpc3N1ZQ=="
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-10-14
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-10-14T18:02:09Z"
+answered: sample-security-call
+task:
+  id: sample-security-call
+  title: Security approval
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "fm-hold-v1:Q2FwdGFpbiBtdXN0IGRlY2lkZSBzZWN1cml0eSBpc3N1ZQ=="
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: "-"
+  closed: 2026-10-14
+  deps: none
+  links: none
+  body: "Resolution recorded by fm-captain-hold.\nDecision digest: e0b833f2c38382d2d8c61fc089dbd63451acb0109b7b3bbd04cec1318a32194a\nResolution mode: answered\n\nCaptain decision:\nApprove the stated security change."

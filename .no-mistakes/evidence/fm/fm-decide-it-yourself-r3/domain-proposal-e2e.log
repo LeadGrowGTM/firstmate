@@ -1,0 +1,29 @@
+ok - request validates the bundle and prints a read-only marked request
+ok - source URLs cannot inject report lines or control characters
+ok - report fields reject display control sequences
+ok - submit records queued pending confirmation and an identical resubmission is a no-op
+ok - invalid confirmation inputs preserve queued pending approval
+ok - submit refuses malformed or unrequested proposals
+ok - carriage returns in exact before or after text are refused
+ok - a newer version updates one queued confirmation task and an older digest approval is refused
+ok - a malformed stored complete answer cannot authorize approval
+ok - approval stays current until its digest-bound application closes the task
+ok - a rejected proposal stays inactive
+ok - a no-change proposal records a version and opens no card
+ok - current registration controls local handoff and scope
+ok - zero-change revision closes the queued task with evidence
+ok - large proposals persist a complete version and report
+ok - older application receipts preserve a newer pending confirmation
+ok - latest requested bundle binds proposal replies on the same cycle
+ok - new-cycle gate checks every approved digest for application
+ok - approval requires the full version digest
+ok - only an answered captain decision authorizes application
+ok - an applied receipt retires older unapplied approvals
+ok - identical resubmission re-runs an approval note that failed
+ok - a zero-change revision keeps an approved activation task open
+ok - a zero-change version records withdrawal without a separate receipt
+ok - first and repeat receipts preserve each outstanding approval
+ok - a cycle refuses reuse of an earlier proposal digest
+ok - only the complete trimmed captain answer authorizes application
+ok - legacy held confirmations remain protected and answered records still approve their exact version
+ok - secondmate homes cannot own proposals

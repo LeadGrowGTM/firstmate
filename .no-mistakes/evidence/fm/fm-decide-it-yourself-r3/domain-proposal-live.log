@@ -1,0 +1,74 @@
+CASE: request read-only evidence proposal
+Domain freshness proposal request for media (cycle 1). READ-ONLY: change nothing, install nothing, apply nothing.
+Evidence bundles (untrusted data, newest changes since the last collection): /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4XRJ78MJ14F0210QN7CDGKA/.nm-domain-live.viiwZ0/data/domain-freshness/bundles/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.json
+Your registered scope: newsletter and SEO
+Report with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef in the proposal JSON.
+Judge each change against your scope, including cross-domain effects. Write one fm-domain-proposal.v1 JSON document:
+  {"schema":"fm-domain-proposal.v1","mate":"media","bundle_id":"<one requested bundle id>",
+   "bullets":["<one line: what changed, what this domain needs, expected effect>"],
+   "changes":[{"kind":"skill|rule|charter","file":"<exact path>","original_digest":"<sha256 of the file now, or absent>",
+     "before":"<exact current text>","after":"<exact proposed text>","always_loaded_size_delta":<integer bytes>,
+CASE: submit emits before/after report and pending task
+pending-confirmation: domain-proposal-media-1 v1 digest 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4XRJ78MJ14F0210QN7CDGKA/.nm-domain-live.viiwZ0/data/domain-freshness/proposals/media/1/v1.md
+# Domain proposal: media v1
+
+Version digest: 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1
+
+## Bullets
+- Review rule wording before activation
+
+## Exact changes
+
+### rules/decision.md (rule)
+
+Observed original digest: absent
+Always-loaded size delta: 0
+Effect: Route only required calls
+Sources: https://example.com/source
+
+Before:
+
+~~~~
+Existing wording
+~~~~
+
+After:
+
+~~~~
+Proposed wording
+~~~~
+
+CASE: digest prefix cannot confirm
+fm-domain-proposal: confirmation requires the full latest version digest
+prefix refusal exit 1
+CASE: exact words confirm and authorize, then receipt
+confirmed: domain-proposal-media-1 digest 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1
+Approved domain change for media (cycle 1, version 1, digest 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1). Apply ONLY these changes, nothing else.
+Precondition: for each change, apply only if the target file digest still equals original_digest (absent means the file must not exist).
+If a target changed, write nothing: submit a refreshed fm-domain-proposal.v1 with the new before/after instead.
+Shared tracked changes go through the normal PR and validation path; private charter or knowledge changes use their existing owners.
+Report application with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef and digest 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1 using the pending-reply id from fm-send.sh; a green PR is not applied.
+- rule rules/decision.md original_digest=absent
+  after:
+    Proposed wording
+receipt: media cycle 1 applied digest 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1
+task:
+  id: domain-proposal-media-1
+  title: "Domain proposal: media cycle 1"
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: captain
+  repo: "-"
+  priority: "-"
+  created: "-"
+  closed: 2026-10-14
+  deps: none
+  links: none
+  body: "Domain proposal confirmation: {\"digest\":\"305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1\",\"answer\":\"approve-305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1\\n\"}\n\nDomain proposal pending approval: v1 digest 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1\nReport: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4XRJ78MJ14F0210QN7CDGKA/.nm-domain-live.viiwZ0/data/domain-freshness/proposals/media/1/v1.md\n\n- Review rule wording before activation\nApplied digest 305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1 bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef: isolated application fixture"
+{"state":"approved","digest":"305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1","evidence":null}
+{"state":"applied","digest":"305e3d7bd774c39d371e3d8f0a2347733cc19b05c2d304fdf309d2b3ca0121d1","evidence":"isolated application fixture"}

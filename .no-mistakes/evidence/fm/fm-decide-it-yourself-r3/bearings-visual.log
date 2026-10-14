@@ -1,0 +1,5 @@
+board: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4XRJ78MJ14F0210QN7CDGKA/.nm-board-visual.iUb7st/.lavish/bearings-board.html
+fm-lavish-open: cannot establish the Lavish session
+fm-bearings-board: cannot establish the board Lavish session
+visual fixture stopped after board HTML was built
+/home/mitch/.no-mistakes/evidence/01M4XRJ78MJ14F0210QN7CDGKA/bearings-board.png: cannot open `/home/mitch/.no-mistakes/evidence/01M4XRJ78MJ14F0210QN7CDGKA/bearings-board.png' (No such file or directory)
