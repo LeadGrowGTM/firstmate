@@ -1,0 +1,16 @@
+AGENTS.md	49663	37444	-12219
+.agents/skills/agent-skill-trigger-index/SKILL.md	4873	5376	+503
+.agents/skills/bootstrap-diagnostics/SKILL.md	14262	14243	-19
+.agents/skills/captain-voice/SKILL.md	0	3199	+3199
+.agents/skills/crewmate-briefs/SKILL.md	0	2342	+2342
+.agents/skills/firstmate-codexapp/SKILL.md	5702	5696	-6
+.agents/skills/firstmate-coding-guidelines/SKILL.md	12579	13542	+963
+.agents/skills/operational-home-layout/SKILL.md	26491	27152	+661
+.agents/skills/project-management/SKILL.md	8391	8383	-8
+.agents/skills/quota-array-dispatch/SKILL.md	12403	12617	+214
+.agents/skills/session-start-recovery/SKILL.md	7083	8123	+1040
+.agents/skills/ship-intake/SKILL.md	0	3158	+3158
+.agents/skills/stow/SKILL.md	35818	36993	+1175
+.agents/skills/stuck-crewmate-recovery/SKILL.md	8830	9146	+316
+.agents/skills/updatefirstmate/SKILL.md	9936	9930	-6
+Original cut commit AGENTS.md	37297

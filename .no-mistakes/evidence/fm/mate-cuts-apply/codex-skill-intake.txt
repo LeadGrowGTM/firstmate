@@ -1,0 +1,40 @@
+  fallback profile, not an array. For this read-only intake decision, what happens next? State whether quota-array-
+  dispatch applies. Do not run commands or create files.
+
+
+• Captain, off sends the brief back to ordinary dispatch intake. With no higher-priority task override or matching rule,
+  use the project’s single configured fallback profile. quota-array-dispatch does not apply because there is no profile
+  array to choose from. This is a read-only decision; I ran no commands and created no files.
+
+  Worked for 5s • 07:12
+
+
+› Captain, draft only the two task subsections for a ship brief for this ask: Fix the single typo in README.md. Do not
+  expand scope, scaffold, or edit a file. Follow the brief-writing skill before drafting, and show the two subsection
+  headings.
+
+
+• Captain, I’ll read the brief-writing skill, then draft only the two requested subsections. I won’t edit a file.
+
+• Explored
+  └ Read SKILL.md (crewmate-briefs skill)
+    + Show details
+
+• Captain, I followed the crewmate-briefs skill. Here are the two subsections:
+
+  ## Captain's intent
+
+  Fix the single typo in /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4X17EKMEB6N1VMY3HMP5MRR/README.md.
+
+  ## Firstmate spec
+
+  Correct only that typo. Leave all other text and files untouched.
+  └ Tip: When the composer is empty, press Esc to step back and edit your last message; Enter confirms.
+
+  Worked for 16s • 07:13
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M4X17EKMEB6N1VMY3HMP5MRR · Context 10% used · 30.4K used
+  ← for agents · ? for shortcuts                                                               ⚠ 1 warning · f2 to view

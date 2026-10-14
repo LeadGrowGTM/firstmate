@@ -1,0 +1,13 @@
+Missing explicit mode:
+error: ship briefs require --mode <no-mistakes|direct-PR|local-only>; resolve it at intake from the captain's instruction and the project's registered posture in data/projects.md
+exit=1
+Explicit mode:
+scaffolded: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4X17EKMEB6N1VMY3HMP5MRR/.fm-lab.byvXMP/data/demo-task/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})
+exit=0
+Persisted delivery contract:
+4:## Captain's intent
+7:## Firstmate spec
+18:**Verify isolation before anything else.** Run `pwd -P` and `git rev-parse --show-toplevel`; both must resolve to the disposable task worktree you were launched in, such as a treehouse pool path or an Orca-managed worktree, not the primary checkout firstmate operates from.
+19:The path check is authoritative: `git rev-parse --git-dir` and `git rev-parse --git-common-dir` can help inspect the repo, but they do not prove you are outside the primary checkout.
+20:If the top-level path is the primary checkout or not the worktree you were launched in, STOP - do not branch or commit here - append `blocked [at=<epoch>]: launched in primary checkout, not an isolated worktree` to the status file and stop.
+107:Delivery contract: mode=no-mistakes
