@@ -64,6 +64,8 @@ The snapshot projects it into Bearings for markdown-backed homes; Beads-backed h
 Legacy import resolves each existing key to its backend identity and skips aliases without writing, naming the canonical id for a manual hold.
 For a key that matches its backend identity, import checks under the hold mutation lock and skips every already-held task, including holds without option copy, and every closed or durably resolved call.
 The drain flags an open local `needs-decision` task/key without a matching captain-held task in this home, excluding relay lines for holds owned by a secondmate home.
+For a separate held task, the checker looks for the exact status key or the `<origin>-decision-<key>` task id; its `--origin` link alone does not match another key from the same origin.
+If neither supported identity matches the status key, close the old keyed status call through the existing status protocol and publish a new `needs-decision [key=<held-task-id>]` line for that still-open call.
 It discloses an unavailable backlog check rather than claiming the home is clear.
 
 Repeat and edge cases:
