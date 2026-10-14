@@ -1,0 +1,4 @@
+command: FM_HOME=<isolated-home> FM_BOAT_BIN=<sentinel> bin/fm-boat-send.sh --code-only < rejected.json
+exit: 1
+error: invalid code-only Boat request
+Boat calls: 0

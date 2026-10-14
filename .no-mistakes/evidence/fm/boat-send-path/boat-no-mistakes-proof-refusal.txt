@@ -1,0 +1,4 @@
+request mode: no-mistakes; proof receipt: absent
+spawn exit: 1
+error: no-mistakes has not been proven on this box
+worker instructions created: no

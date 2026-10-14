@@ -1,0 +1,8 @@
+real tmux worker windows:
+host
+fm-worker-a
+fm-orphan-c
+retained task records: worker-a, worker-b
+spawn new-d exit: 75
+error: Boat three-worker cap reached
+new-d brief after refusal: Original instructions

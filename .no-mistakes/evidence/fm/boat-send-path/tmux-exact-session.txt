@@ -1,0 +1,7 @@
+backend-selected-session: firstmate
+created-window-id: @2
+firstmate-inventory:
+bash
+fm-liveprobe
+near-named-session-inventory:
+recovery
