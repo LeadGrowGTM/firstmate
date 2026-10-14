@@ -1,0 +1,47 @@
+SCENARIO request + versioned proposal
+Domain freshness proposal request for media (cycle 1). READ-ONLY: change nothing, install nothing, apply nothing.
+Evidence bundles (untrusted data, newest changes since the last collection): /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W7KKE6SDS4WE01Q4M0MSJC/.domain-proposal-live-272375/data/domain-freshness/bundles/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.json
+Your registered scope: newsletter and SEO
+Report with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef in the proposal JSON.
+held: domain-proposal-media-1 v1 digest 3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W7KKE6SDS4WE01Q4M0MSJC/.domain-proposal-live-272375/data/domain-freshness/proposals/media/1/v1.md
+  state: queued
+  hold_reason: "Domain proposal media cycle 1 v1 digest 3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad; approval applies only that digest"
+# Domain proposal: media v1
+
+Version digest: 3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad
+
+## Bullets
+- Update media drafting guidance
+
+## Exact changes
+
+### /x/media/SKILL.md (skill)
+
+Observed original digest: absent
+Always-loaded size delta: 18
+Effect: Drafts use current guidance
+Sources: https://example.com/change
+
+Before:
+
+~~~~
+
+~~~~
+
+SCENARIO invalid source and stale approval
+unsafe source rejected
+digest prefix rejected
+SCENARIO fresh cycle + digest approval + application receipt
+held: domain-proposal-media-2 v1 digest 3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W7KKE6SDS4WE01Q4M0MSJC/.domain-proposal-live-272375/data/domain-freshness/proposals/media/2/v1.md
+Approved domain change for media (cycle 2, version 1, digest 3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad). Apply ONLY these changes, nothing else.
+Precondition: for each change, apply only if the target file digest still equals original_digest (absent means the file must not exist).
+If a target changed, write nothing: submit a refreshed fm-domain-proposal.v1 with the new before/after instead.
+Shared tracked changes go through the normal PR and validation path; private charter or knowledge changes use their existing owners.
+Report application with bundle_id 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef and digest 3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad using the pending-reply id from fm-send.sh; a green PR is not applied.
+receipt: media cycle 2 applied digest 3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad
+  state: done
+{"state":"approved","digest":"3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","version":1,"at":"2026-10-14T04:12:19Z"}
+{"state":"applied","digest":"3c3986e0fca807803cbc68a6324b25f60a688dc6ebe7904b18a56896f01c7fad","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","evidence":"Application confirmed in disposable lab","superseded":[],"at":"2026-10-14T04:12:19Z"}
+SCENARIO remote route refusal
+remote request rejected
+live CLI scenarios complete

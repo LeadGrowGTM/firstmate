@@ -1,0 +1,6 @@
+SCENARIO zero-change proposal
+no-change: domain-proposal-media-1 v1 recorded, no card
+state: done
+no approval report for zero changes
+SCENARIO secondmate home cannot own proposal
+secondmate request rejected

@@ -1,0 +1,25 @@
+SCENARIO two approvals, repeated prior digest refused
+held: domain-proposal-media-1 v1 digest 29c08389552e8b417474e93a3e00c1dc43e3e33277da9bf14b94365f9cb606f0 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W7KKE6SDS4WE01Q4M0MSJC/.domain-proposal-live-314367/data/domain-freshness/proposals/media/1/v1.md
+held: domain-proposal-media-1 v2 digest 484ea4535f3e31d378a879ca42fcd69b7a713a5ca64839b0b2199339c77f2c89 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W7KKE6SDS4WE01Q4M0MSJC/.domain-proposal-live-314367/data/domain-freshness/proposals/media/1/v2.md
+older digest reuse rejected
+SCENARIO withdrawal leaves two approvals outstanding
+withdrawn: domain-proposal-media-1 v3 recorded, activation of an approved version stays open
+state: queued
+no withdrawal receipt appended
+SCENARIO first and repeated receipt preserve second approval
+receipt: media cycle 1 applied digest 29c08389552e8b417474e93a3e00c1dc43e3e33277da9bf14b94365f9cb606f0
+state: queued
+recorded: media 29c08389552e8b417474e93a3e00c1dc43e3e33277da9bf14b94365f9cb606f0 already has an applied receipt
+state: queued
+SCENARIO final receipt closes activation
+receipt: media cycle 1 applied digest 484ea4535f3e31d378a879ca42fcd69b7a713a5ca64839b0b2199339c77f2c89
+state: done
+{"state":"approved","digest":"29c08389552e8b417474e93a3e00c1dc43e3e33277da9bf14b94365f9cb606f0","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","version":1,"at":"2026-10-14T04:12:50Z"}
+{"state":"approved","digest":"484ea4535f3e31d378a879ca42fcd69b7a713a5ca64839b0b2199339c77f2c89","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","version":2,"at":"2026-10-14T04:12:52Z"}
+{"state":"applied","digest":"29c08389552e8b417474e93a3e00c1dc43e3e33277da9bf14b94365f9cb606f0","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","evidence":"first version applied","superseded":[],"at":"2026-10-14T04:12:53Z"}
+{"state":"applied","digest":"484ea4535f3e31d378a879ca42fcd69b7a713a5ca64839b0b2199339c77f2c89","bundle_id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","evidence":"second version applied","superseded":[],"at":"2026-10-14T04:12:54Z"}
+SCENARIO latest bundle binds mate reply
+stale bundle reply rejected
+held: domain-proposal-media-2 v1 digest 15ea425b3fc42fb6a5e85cf923b27446957ca837bd21f86f792dc2d95f7fdda1 report /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M4W7KKE6SDS4WE01Q4M0MSJC/.domain-proposal-live-314367/data/domain-freshness/proposals/media/2/v1.md
+latest bundle card state: queued
+live lifecycle scenarios complete
