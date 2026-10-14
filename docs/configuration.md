@@ -1524,9 +1524,9 @@ If Python is unavailable, the command fails closed because it cannot safely iden
 Machine-specific inventory paths are local choices and must not be inherited across hosts.
 [`bin/fm-domain-freshness.sh`](../bin/fm-domain-freshness.sh) owns collection commands, evidence/cursor formats, publication order, read limits, and exit statuses.
 Daily intake is a separate integration; this collector neither schedules work nor changes installations or operational instructions.
-[`bin/fm-domain-proposal.sh`](../bin/fm-domain-proposal.sh) is the manual main-home handoff for local mates that consumes a collected bundle and owns the proposal records under `data/domain-freshness/proposals/`, the digest-bound approval rule, and application receipts; request checks the current `data/secondmates.md` route and scope, and remote domain handoff is not yet supported.
-Each proposal reply names the latest requested bundle; `fm-send.sh` owns the separate pending-reply transport ID.
-Each mate's proposal cycle has one ordinary task from request through application: it is held for the captain when a change is proposed, then closed after an applied receipt or withdrawal. The existing decisions board shows the held task; no second board or decision store exists, and nothing is scheduled or enabled by it.
+[`bin/fm-domain-proposal.sh`](../bin/fm-domain-proposal.sh) provides manual main-home handoff for currently registered local mates using a collected bundle; remote handoff is unsupported.
+One ordinary task per proposal cycle appears on the existing decisions board while held for captain approval.
+The script header and `--help` own the request, proposal, approval, and receipt protocol; the command does not schedule or apply changes.
 
 This section owns the version 1 configuration schema:
 
