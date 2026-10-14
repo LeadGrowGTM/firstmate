@@ -70,6 +70,10 @@
 # only as the deliberate genuinely-no-repo marker. In that exceptional case
 # the template may display the routing id. Anything else refuses before the
 # existing board is touched.
+# Every decision card requires one string category accepted by
+# bin/fm-captain-hold.sh check-category. All supplied decision cards are checked
+# before stale pruning, board writes, or session/source operations; the checker
+# owns the accepted categories and refusal text.
 #
 # Optional call fields: owner is a non-empty home id (default "(main)"),
 # impact is a nonnegative integer, gate is presentation text, stale_reason is a
@@ -373,6 +377,29 @@ await_source_owner() {  # <source-id>
   printf '%s\n' "${owner:-none}"
 }
 
+validate_decision_categories() {  # <data.json>
+  local row category key owner rc
+  while IFS= read -r row; do
+    key=$(jq -r '.key' <<< "$row")
+    owner=$(jq -r '.owner // "(main)"' <<< "$row")
+    # A sentinel preserves trailing newlines, and NUL refuses before shell
+    # decoding so invalid JSON strings cannot be normalized into acceptance.
+    if jq -e '.category | type == "string" and (contains("\u0000") | not)' <<< "$row" >/dev/null; then
+      category=$(jq -jr '.category, "x"' <<< "$row")
+      category=${category%x}
+      rc=0
+      "$SCRIPT_DIR/fm-captain-hold.sh" check-category "$category" || rc=$?
+    else
+      rc=0
+      "$SCRIPT_DIR/fm-captain-hold.sh" check-category || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+      printf 'fm-bearings-board: invalid decision category for %s/%s\n' "$owner" "$key" >&2
+      return "$rc"
+    fi
+  done < <(jq -c '.captains_call[] | select(.type == "decision")' "$1")
+}
+
 command_build() {
   local data=${1-} board json tmp sid extracted effective owner version pre_reopen_owner
   [ "$#" -eq 1 ] || { usage >&2; exit 2; }
@@ -380,6 +407,7 @@ command_build() {
   [ -f "$data" ] || fail "board data does not exist: $data"
   jq empty "$data" 2>/dev/null || fail "board data is not valid JSON: $data"
   validate_payload "$data" || fail "board data does not satisfy $BOARD_SCHEMA: $data"
+  validate_decision_categories "$data" || exit "$?"
   [ -f "$TEMPLATE" ] && [ ! -L "$TEMPLATE" ] || fail "board template is missing: $TEMPLATE"
   [ "$(grep -cxF "$PLACEHOLDER" "$TEMPLATE")" -eq 1 ] \
     || fail "board template does not carry exactly one data slot: $TEMPLATE"
