@@ -1,0 +1,10 @@
+{"case": "matevalid", "processes": [{"pid": "924270", "name": "-bash"}, {"pid": "927260", "name": "claude"}, {"pid": "927732", "name": "node"}], "claude_count": 1}
+{"case": "matevalid", "mode": "valid", "prompt_positional": false, "running_cli": true, "settings": {"attribution": {"commit": "", "pr": "", "sessionUrl": false}, "feedbackDrafts": "off", "skillOverrides": {"anthropic-skills:docx": "off"}}, "settings_argument_count": 1, "skip_note": false, "variadic_safe": true}
+{"case": "mateabsent", "processes": [{"pid": "933321", "name": "-bash"}, {"pid": "938223", "name": "claude"}, {"pid": "940348", "name": "node"}], "claude_count": 1}
+{"case": "mateabsent", "mode": "absent", "prompt_positional": false, "running_cli": true, "settings": {"attribution": {"commit": "", "pr": "", "sessionUrl": false}, "feedbackDrafts": "off"}, "settings_argument_count": 1, "skip_note": false, "variadic_safe": true}
+{"case": "matebad", "processes": [{"pid": "944007", "name": "-bash"}, {"pid": "947710", "name": "claude"}, {"pid": "949024", "name": "node"}], "claude_count": 1}
+{"case": "matebad", "mode": "malformed", "prompt_positional": false, "running_cli": true, "settings": {"attribution": {"commit": "", "pr": "", "sessionUrl": false}, "feedbackDrafts": "off"}, "settings_argument_count": 1, "skip_note": true, "variadic_safe": true}
+{"case": "materawbefore", "processes": [{"pid": "951755", "name": "-bash"}, {"pid": "955676", "name": "claude"}, {"pid": "957215", "name": "node"}], "claude_count": 1}
+{"case": "materawbefore", "mode": "raw-before", "prompt_positional": true, "running_cli": true, "settings": {"skillOverrides": {"anthropic-skills:docx": "off"}, "theme": "dark"}, "settings_argument_count": 1, "skip_note": false, "variadic_safe": true}
+{"case": "materawafter", "processes": [{"pid": "959623", "name": "-bash"}, {"pid": "963116", "name": "claude"}, {"pid": "964219", "name": "node"}], "claude_count": 1}
+{"case": "materawafter", "mode": "raw-after", "prompt_positional": true, "running_cli": true, "settings": {"skillOverrides": {"anthropic-skills:docx": "off"}, "theme": "dark"}, "settings_argument_count": 1, "skip_note": false, "variadic_safe": true}

@@ -1,0 +1,2 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.N0UXqO
+warning: secondmate labmate sync skipped before launch: primary default-branch commit cannot be resolved

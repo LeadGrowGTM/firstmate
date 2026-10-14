@@ -1,0 +1,2 @@
+{"phase": "off", "running_cli": true, "settings_argument_count": 1, "skillOverrides": {"anthropic-skills:docx": "off"}}
+{"phase": "name-only", "running_cli": true, "settings_argument_count": 1, "skillOverrides": {"anthropic-skills:docx": "name-only"}}
