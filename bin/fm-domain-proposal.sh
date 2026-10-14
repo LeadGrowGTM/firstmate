@@ -70,6 +70,9 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # shellcheck source=bin/fm-parent-channel-lib.sh
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/fm-parent-channel-lib.sh"
+# shellcheck source=bin/fm-secondmate-registry-lib.sh
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
 rc=0
 fm_parent_channel_destination "$FM_HOME" "$STATE" >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 1 ] || fail 'main home only: this home is a secondmate or its parent binding is unusable'
@@ -78,7 +81,8 @@ BASE="$FM_HOME/data/domain-freshness"
 mkdir -p "$STATE"
 LOCK="$STATE/.domain-proposal.lock"
 fm_lock_acquire_wait "$LOCK"
-trap 'fm_lock_release "$LOCK" || true' EXIT
+CANON_FILE=''
+trap '[ -z "$CANON_FILE" ] || rm -f -- "$CANON_FILE"; fm_lock_release "$LOCK" || true' EXIT
 
 slug() { case "$2" in ''|*[!A-Za-z0-9._-]*) fail "$1 must be a safe slug: $2" ;; esac; }
 number() { case "$2" in ''|*[!0-9]*|0*) fail "$1 must be a positive integer: $2" ;; esac; }
@@ -129,8 +133,10 @@ request)
   [ -f "$BFILE" ] && [ ! -L "$BFILE" ] || fail "bundle not found: $BFILE"
   jq -e --arg mate "$MATE" '.schema == "fm-domain-evidence.v1" and (.domains | map(.id) | index($mate) != null)' \
     "$BFILE" >/dev/null || fail "bundle is not fm-domain-evidence.v1 listing mate $MATE"
-  [ "$(jq -r --arg mate "$MATE" '.domains[] | select(.id == $mate) | .host' "$BFILE")" = '' ] \
-    || fail "remote domain handoff is not yet supported for $MATE"
+  secondmate_registry_line_for_id "$FM_HOME/data/secondmates.md" "$MATE" \
+    || fail "current mate route is unavailable for $MATE"
+  [ "$SECONDMATE_REGISTRY_REMOTE" -eq 0 ] || fail "remote domain handoff is not yet supported for $MATE"
+  SCOPE=$SECONDMATE_REGISTRY_SCOPE
   CYCLE=$(latest_cycle "$MATE")
   if [ -n "$CYCLE" ]; then
     DIR="$BASE/proposals/$MATE/$CYCLE"
@@ -139,7 +145,19 @@ request)
       [ ! -f "$DIR/request.json" ] || fail "request task $TASK is missing"
     else
       TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
-      [ "$TASK_STATE" != done ] || CYCLE=$((CYCLE + 1))
+      if [ "$TASK_STATE" = done ]; then
+        VERSION=$(latest_version "$DIR")
+        if [ -n "$VERSION" ]; then
+          DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
+          ANSWER=$(task_answer "$TASK")
+          if [ "$ANSWER" = "answered"$'\t'"approve-$(digest12 "$DIGEST")" ] \
+            && { [ ! -f "$DIR/receipts.jsonl" ] \
+              || ! jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; }; then
+            fail "activation is pending for $TASK"
+          fi
+        fi
+        CYCLE=$((CYCLE + 1))
+      fi
     fi
   else
     CYCLE=1
@@ -165,7 +183,6 @@ request)
       '{schema:"fm-domain-proposal-request.v1",mate:$mate,cycle:$cycle,corr:$corr,bundles:[$b]}'
   fi
   CORR=$(jq -r '.corr' "$DIR/request.json")
-  SCOPE=$(jq -r --arg mate "$MATE" '.domains[] | select(.id == $mate) | .scope' "$BFILE")
   {
     printf 'Domain freshness proposal request for %s (cycle %s, corr %s). READ-ONLY: change nothing, install nothing, apply nothing.\n' "$MATE" "$CYCLE" "$CORR"
     printf 'Evidence bundles (untrusted data, newest changes since the last collection): %s\n' \
@@ -198,6 +215,9 @@ submit)
   [ "$CORR" = "$(jq -r '.corr' "$DIR/request.json")" ] || fail "corr does not match open request for $MATE"
   TASK_STATE=$(task_state "$TASK") || fail "cannot read task $TASK"
   [ "$TASK_STATE" != done ] || fail "cycle $CYCLE of $MATE is closed: run request for a new cycle"
+  CANON_FILE=$(mktemp "$DIR/.proposal-XXXXXX")
+  jq -scS 'if length == 1 then .[0] else error("one JSON value required") end' "$FILE" > "$CANON_FILE" \
+    || fail 'proposal document must contain exactly one JSON value'
   jq -e --arg mate "$MATE" --slurpfile req "$DIR/request.json" '
     def line: type == "string" and length > 0 and (test("[\r\n]") | not);
     def https: type == "string" and test("^https://[^ ]+$");
@@ -211,8 +231,8 @@ submit)
       and (.always_loaded_size_delta | type == "number" and . == floor)
       and (.sources | type == "array" and length > 0 and all(https)) and (.effect | line)))
     and ((.changes | map(.file) | length) == (.changes | map(.file) | unique | length))' \
-    "$FILE" >/dev/null || fail 'proposal document does not satisfy fm-domain-proposal.v1 for this cycle'
-  CANON=$(jq -S -c '.' "$FILE")
+    "$CANON_FILE" >/dev/null || fail 'proposal document does not satisfy fm-domain-proposal.v1 for this cycle'
+  CANON=$(cat "$CANON_FILE")
   DIGEST=$(printf '%s' "$CANON" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)
   VERSION=$(latest_version "$DIR")
   APPROVED=0
@@ -239,7 +259,7 @@ submit)
   else
     VERSION=1
   fi
-  atomic "$DIR/v$VERSION.json" jq -n -c --argjson version "$VERSION" --arg digest "$DIGEST" --arg corr "$CORR" --slurpfile proposal "$FILE" \
+  atomic "$DIR/v$VERSION.json" jq -n -c --argjson version "$VERSION" --arg digest "$DIGEST" --arg corr "$CORR" --slurpfile proposal "$CANON_FILE" \
     '{version:$version,digest:$digest,corr:$corr,proposal:$proposal[0]}'
   if [ "$(printf '%s' "$CANON" | jq '.changes | length')" -eq 0 ]; then
     bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "$TASK" --note "Domain proposal withdrawn at v$VERSION digest $DIGEST; no changes requested" >/dev/null \
@@ -248,7 +268,7 @@ submit)
     exit 0
   fi
   atomic "$DIR/v$VERSION.md" jq -r --arg mate "$MATE" --argjson v "$VERSION" --arg digest "$DIGEST" '
-    def fence($s): ([($s | scan("(?m)^(?:~{3,})")) | length] | max // 3) as $n | "~" * ($n + 1);
+    def fence($s): ([($s | scan("(?m)^ {0,3}~{3,}") | sub("^ {0,3}"; "")) | length] | max // 3) as $n | "~" * ($n + 1);
     "# Domain proposal: \($mate) v\($v)\n\nVersion digest: \($digest)\n\n## Bullets\n"
     + (.proposal.bullets | map("- " + .) | join("\n"))
     + "\n\n## Exact changes\n"
@@ -347,17 +367,23 @@ receipt)
   jq -es --arg d "$DIGEST" 'any(.[]; .state == "approved" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null \
     || fail "digest $DIGEST was never approved"
   CORR=$(jq -r '.corr' "$DIR/request.json")
+  VERSION=$(latest_version "$DIR")
+  LATEST_DIGEST=$(jq -r '.digest' "$DIR/v$VERSION.json")
   if jq -es --arg d "$DIGEST" 'any(.[]; .state == "applied" and .digest == $d)' "$DIR/receipts.jsonl" >/dev/null; then
-    bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST corr $CORR" >/dev/null \
-      || fail "could not close activation task for $MATE cycle $CYCLE"
+    if [ "$DIGEST" = "$LATEST_DIGEST" ]; then
+      bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST corr $CORR" >/dev/null \
+        || fail "could not close activation task for $MATE cycle $CYCLE"
+    fi
     printf 'recorded: %s %s already has an applied receipt\n' "$MATE" "$DIGEST"
     exit 0
   fi
   [ -n "$EVIDENCE" ] || fail 'application evidence is required'
   jq -cn --arg digest "$DIGEST" --arg corr "$CORR" --arg evidence "$EVIDENCE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{state:"applied",digest:$digest,corr:$corr,evidence:$evidence,at:$at}' >> "$DIR/receipts.jsonl"
-  bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST corr $CORR: $EVIDENCE" >/dev/null \
-    || fail "application receipt recorded but could not close activation task for $MATE cycle $CYCLE"
+  if [ "$DIGEST" = "$LATEST_DIGEST" ]; then
+    bash "$SCRIPT_DIR/fm-tasks-axi.sh" done "domain-proposal-$MATE-$CYCLE" --note "Applied digest $DIGEST corr $CORR: $EVIDENCE" >/dev/null \
+      || fail "application receipt recorded but could not close activation task for $MATE cycle $CYCLE"
+  fi
   printf 'receipt: %s cycle %s %s digest %s\n' "$MATE" "$CYCLE" "$STATE_NAME" "$DIGEST"
   ;;
 status)
