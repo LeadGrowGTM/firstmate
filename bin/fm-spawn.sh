@@ -4637,7 +4637,7 @@ spawn_wait_treehouse_returned() {  # <path>
         listed=${BASH_REMATCH[1]}
         case "$listed" in
           '~') listed=$HOME ;;
-          '~/'*) listed=$HOME${listed#\~} ;;
+          \~/*) listed=$HOME${listed#\~} ;;
         esac
         if [ "$(real_path_or_raw "$listed")" = "$path" ]; then
           return 0

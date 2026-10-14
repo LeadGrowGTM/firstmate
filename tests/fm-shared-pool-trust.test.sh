@@ -868,7 +868,7 @@ test_initial_pane_environment_controls_preflight() {
   local pane_log tree_log allocated lease out status=0
   CASE_URL=$(make_same_origin_clones "$case_dir/origin")
   prepare_spawn_home "$case_dir" "$id"
-  printf 'root = "$POOL_BASE"\n' > "$CASE_HOME/projects/widget/treehouse.toml"
+  printf "root = \"\$POOL_BASE\"\n" > "$CASE_HOME/projects/widget/treehouse.toml"
   mkdir -p "$case_dir/safe-pool" "$CASE_HOME/unsafe-pool"
   pane_log=$case_dir/pane.log
   tree_log=$case_dir/treehouse.log
