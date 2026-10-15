@@ -561,7 +561,7 @@ The check reads Boat and reports; it never stops a sandbox.
 
 An explicitly Boat-selected ship or scout can use [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) through a purpose-built `boat-eng` remote route.
 Firstmate still labels and selects work at intake; the sender does not evaluate routing policy or choose a model profile.
-The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, refusal behavior, and transport recovery commands in their headers and `--help`.
+The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, and refusal behavior in their headers and `--help`; an unconfirmed-start refusal prints the same-task recovery commands.
 
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
@@ -578,6 +578,16 @@ The box generates its own normal worker brief and operational paths, allocates i
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
+Ships require `gh-axi` installed on the box; GitHub credential setup remains a separate operation.
+The sender supplies the effective Git commit name and email from the controller's firstmate project for every ship and scout, and the worker applies it only to that worker's isolated worktree.
+Boat worktree pools live only on the box, every worker there receives that controller identity and overwrites a reused slot before launch, and PC pools never host Boat workers.
+Boat ship PR delivery waits for a separate provisioning follow-up: the box must receive GitHub authentication from Infisical through a Boat-provisioned machine identity, never from this PC.
+Do not send a token in task JSON: the current remote job transport stages stdin on disk.
+
+Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.
+The worker does not auto-answer Codex directory-trust text because a rendered transcript cannot prove an active modal.
+Without a fresh worker status declaration, dispatch refuses success and leaves the task intact for same-task reconciliation.
+Running boxes reserve only their existing timer's remaining duration against the unchanged spend caps; dispatch never extends the timer.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
 
@@ -595,6 +605,15 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
 ```
 
 The command uses ordinary remote teardown and its landed-work checks.
+For scouts, first review the report's unresolved calls and record the completion inventory from the controller with the origin task id:
+
+```sh
+FM_HOME=<controller-home> bin/fm-on.sh boat-eng fm-captain-hold.sh complete <task-id> --none
+```
+
+Use `--none` only after confirming there are no unresolved calls; otherwise pass the durable held task ids as defined by `fm-captain-hold.sh --help`.
+Teardown requires a completed `fm-captain-hold.sh` inventory for the origin task id under the same trust model as local scouts; it does not verify who recorded the inventory.
+When the inventory is incomplete, teardown refuses and prints the controller command, preserving both the scout and the box.
 It stops the approved box when both Boat task records and worker endpoints are gone.
 There is no twenty-minute idle monitor: if teardown does not complete, the box runs until its auto-stop timer expires.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.

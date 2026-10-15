@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
-#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--git-name <name> --git-email <email>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--git-name <name> --git-email <email>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
@@ -48,6 +48,12 @@
 #   base_branch= in state/<id>.meta, which a relaunch reuses and later review and
 #   cleanup read; it is refused on secondmates and relaunches, and without it
 #   nothing changes.
+#   --git-name and --git-email must be supplied together on a fresh ship or
+#   scout launch. They set the committer identity only in its verified linked
+#   task worktree via Git worktree config, before the harness starts. Enabling
+#   extensions.worktreeConfig changes common config, so an existing core.bare=true
+#   or core.worktree refuses the launch before that change. No flags leave Git
+#   config untouched; secondmates and relaunches cannot set this identity.
 #   Ship/scout launches always put fm-dod-lib.sh's current worker role scope
 #   first in the private launch-brief overlay, including the exact task-owned
 #   steering inbox. This never rewrites a project's instruction files or a
@@ -756,6 +762,8 @@ MODE=
 YOLO=
 BRANCH_PREFIX=fm/
 TRACEPARENT_ARG=
+GIT_NAME=
+GIT_EMAIL=
 HARNESS_SET=0
 MODEL_SET=0
 EFFORT_SET=0
@@ -766,6 +774,8 @@ BRANCH_PREFIX_SET=0
 BASE_BRANCH=
 BASE_BRANCH_SET=0
 TRACEPARENT_SET=0
+GIT_NAME_SET=0
+GIT_EMAIL_SET=0
 RELAUNCH=0
 # Opt-in only: exact-resume presentation-order lock waits instead of refusing.
 # Absent/unset keeps upstream refuse-on-contention. See header.
@@ -816,6 +826,14 @@ for a in "$@"; do
     traceparent)
       TRACEPARENT_ARG=$a
       TRACEPARENT_SET=1
+      ;;
+    git-name)
+      GIT_NAME=$a
+      GIT_NAME_SET=1
+      ;;
+    git-email)
+      GIT_EMAIL=$a
+      GIT_EMAIL_SET=1
       ;;
     *)
       echo "error: internal parser state for --$want_value" >&2
@@ -881,6 +899,16 @@ for a in "$@"; do
     TRACEPARENT_ARG=${a#--traceparent=}
     TRACEPARENT_SET=1
     ;;
+  --git-name) want_value='git-name' ;;
+  --git-name=*)
+    GIT_NAME=${a#--git-name=}
+    GIT_NAME_SET=1
+    ;;
+  --git-email) want_value='git-email' ;;
+  --git-email=*)
+    GIT_EMAIL=${a#--git-email=}
+    GIT_EMAIL_SET=1
+    ;;
   *) POS+=("$a") ;;
   esac
 done
@@ -916,6 +944,34 @@ done
   echo "error: --traceparent requires a non-empty value" >&2
   exit 1
 }
+if [ "$GIT_NAME_SET" -ne "$GIT_EMAIL_SET" ]; then
+  echo "error: --git-name and --git-email must be supplied together" >&2
+  exit 1
+fi
+if [ "$GIT_NAME_SET" -eq 1 ]; then
+  case "$GIT_NAME" in
+  ''|*[[:cntrl:]]*|*'<'*|*'>'*) echo "error: --git-name must be non-empty and contain no control or Git ident delimiter characters" >&2; exit 1 ;;
+  esac
+  case "$GIT_EMAIL" in
+  ''|*[[:cntrl:][:space:]]*|*'<'*|*'>'*|@*|*@|*@*@*) echo "error: --git-email must be a non-empty Git email address without whitespace, control, or ident delimiter characters" >&2; exit 1 ;;
+  esac
+  case "$GIT_EMAIL" in
+  *@*) ;;
+  *) echo "error: --git-email must contain an address with a local and domain part" >&2; exit 1 ;;
+  esac
+  git_ident=$(GIT_COMMITTER_NAME="$GIT_NAME" GIT_COMMITTER_EMAIL="$GIT_EMAIL" git var GIT_COMMITTER_IDENT 2>/dev/null) || {
+    echo "error: --git-name and --git-email do not form a valid Git committer ident" >&2
+    exit 1
+  }
+  case "$git_ident" in
+  "$GIT_NAME <$GIT_EMAIL> "*) ;;
+  *) echo "error: --git-name and --git-email do not round-trip as a Git committer ident" >&2; exit 1 ;;
+  esac
+  [ "$KIND" != secondmate ] && [ "$RELAUNCH" -eq 0 ] || {
+    echo "error: --git-name and --git-email apply only to fresh ship and scout launches" >&2
+    exit 1
+  }
+fi
 # A parent-delivered carrier replaces this home's own resolution, so it is
 # refused unless it is a secondmate spawn carrying a strictly valid W3C value.
 # Nothing else may reach the pane's TRACEPARENT export.
@@ -1681,6 +1737,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ "$YOLO_SET" -eq 0 ] || shared_args+=(--yolo "$YOLO")
   [ "$BRANCH_PREFIX_SET" -eq 0 ] || shared_args+=(--branch-prefix "$BRANCH_PREFIX")
   [ "$BASE_BRANCH_SET" -eq 0 ] || shared_args+=(--base-branch "$BASE_BRANCH")
+  [ "$GIT_NAME_SET" -eq 0 ] || shared_args+=(--git-name "$GIT_NAME" --git-email "$GIT_EMAIL")
   [ "$HERDR_RESUME_LOCK_WAIT" -eq 0 ] || shared_args+=(--herdr-resume-lock-wait)
   for pair in "${POS[@]}"; do
     case "$pair" in
@@ -3722,6 +3779,36 @@ validate_spawn_worktree() { # <source> <inspect-target>
   fi
 }
 
+set_spawn_git_identity() { # <verified linked worktree>
+  local worktree=$1 common bare ident rc
+  common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir) || return 1
+  bare=$(git config --file "$common/config" --includes --get --bool core.bare 2>/dev/null) || {
+    rc=$?
+    [ "$rc" -eq 1 ] || { echo "error: common Git core.bare is invalid; refusing worktree config" >&2; return 1; }
+    bare=
+  }
+  if git config --file "$common/config" --includes --get core.worktree >/dev/null 2>&1; then
+    echo "error: common Git core.worktree is set; refusing worktree config" >&2
+    return 1
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] || { echo "error: common Git core.worktree could not be read; refusing worktree config" >&2; return 1; }
+  fi
+  if [ "$bare" = true ]; then
+    echo "error: common Git core.bare=true or core.worktree makes extensions.worktreeConfig unsafe; refusing worker identity" >&2
+    return 1
+  fi
+  git -C "$worktree" config --local extensions.worktreeConfig true || return 1
+  # Boat-only pools pass this pair on every launch, overwriting a reused slot before use.
+  git -C "$worktree" config --worktree user.name "$GIT_NAME" || return 1
+  git -C "$worktree" config --worktree user.email "$GIT_EMAIL" || return 1
+  ident=$(env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL git -C "$worktree" var GIT_COMMITTER_IDENT) || return 1
+  case "$ident" in
+  "$GIT_NAME <$GIT_EMAIL> "*) ;;
+  *) echo "error: task worktree Git committer ident did not match requested identity" >&2; return 1 ;;
+  esac
+}
+
 # A pooled slot whose only deviation is a submodule gitlink is stale, not dirty:
 # an earlier refresh moved the superproject and left the submodule checkout on
 # the pin the previous base recorded. The refusal still stands and this gate
@@ -4913,6 +5000,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
   freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" || exit 1
+  [ "$GIT_NAME_SET" -eq 0 ] || set_spawn_git_identity "$WT" || exit 1
 fi
 
 # Re-assert the durable task copy after either treehouse acquisition or endpoint

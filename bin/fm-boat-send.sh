@@ -16,7 +16,7 @@
 # The one approved box is bx_ahnbu3qr. Reads are fresh, bounded limits, list,
 # info, and rolling-24-hour usage calls. Unavailable readings or exhausted caps
 # refuse dispatch.
-# The entire auto-stop window is reserved
+# The remaining auto-stop window (full timer on resume) is reserved
 # below $20/month, 60000 account seconds/day, and 43000 box seconds/day ($0.43).
 # Resume uses --no-env and an explicit timer (4 hours paid, 2 hours trial).
 # A receipt binds that no-env resume to the current box instance, so an
@@ -25,6 +25,10 @@
 # this command never extends it. No box creation/deletion/sharing, billing,
 # plan, credit, environment injection, or merge command exists here.
 #
+# Every dispatched worker carries the effective Git identity of this
+# controller's firstmate project. An absent or invalid pair refuses before
+# Boat contact; --prepare does not dispatch a worker.
+# Dispatch returns success only after the remote worker confirms fresh status.
 # FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh.
 # On transport failure, remote completion is unknown: reconcile the SAME task
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
@@ -70,6 +74,17 @@ if [ -z "$TEARDOWN_ID" ]; then
   [ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
   # Both ends use the same validator; no remote contact occurs before validation.
   "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
+  jq -e '(has("git_name") or has("git_email")) | not' "$TMP/request" >/dev/null || die 'request must not supply git identity'
+  if [ "$PREPARE" -eq 0 ]; then
+    PROJECT_DIR="$FM_HOME/projects/firstmate"
+    [ -d "$PROJECT_DIR" ] || die 'controller firstmate project is unavailable'
+    GIT_NAME=$(git -C "$PROJECT_DIR" config user.name || true)
+    GIT_EMAIL=$(git -C "$PROJECT_DIR" config user.email || true)
+    [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'controller firstmate Git committer name and email are required'
+    jq --arg name "$GIT_NAME" --arg email "$GIT_EMAIL" '. + {git_name:$name,git_email:$email}' "$TMP/request" > "$TMP/identified"
+    mv "$TMP/identified" "$TMP/request"
+    "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request" || die 'controller firstmate Git committer identity is invalid'
+  fi
 fi
 LOCK_PATH="$FM_HOME/state/.boat-send.lock"
 fm_lock_acquire_wait "$LOCK_PATH" || die 'Boat send lock unavailable'
@@ -131,13 +146,17 @@ fi
 read_boat limits
 read_boat list --all
 read_boat usage "$BOX" --since "$(( $(date +%s) - 86400 ))"
-# Reserve the whole timer rather than trusting a worker's runtime estimate.
+# Reserve the existing remaining timer, or the full timer for a new resume.
 TTL=$(jq -nr --slurpfile l "$TMP/limits" --slurpfile b "$TMP/list" \
-  --slurpfile i "$TMP/info" --slurpfile u "$TMP/usage" --arg box "$BOX" '
+  --slurpfile i "$TMP/info" --slurpfile u "$TMP/usage" --arg box "$BOX" --argjson now "$(date +%s)" '
   def nonneg: type == "number" and . >= 0;
   $l[0] as $l | $b[0] as $b | $i[0].sandbox as $i | $u[0] as $u |
-  (if $l.billingStatus == "active" then 14400 elif $l.billingStatus == "trialing" then 7200 else error("plan is off") end) as $ttl |
-  if ($i.state == "stopped" and $l.canStart != true) or $l.creditSecondsPerDollar != 100000 or
+  (if $l.billingStatus == "active" then 14400 elif $l.billingStatus == "trialing" then 7200 else error("plan is off") end) as $max_ttl |
+  (if $i.state == "stopped" then $max_ttl
+   elif ($i.state | IN("ready", "idle", "running")) and ($i.archiveAfter | type) == "string" then
+     ($i.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now
+   else error("unreadable Boat timer") end) as $ttl |
+  if $ttl <= 0 or $ttl > $max_ttl or ($i.state == "stopped" and $l.canStart != true) or $l.creditSecondsPerDollar != 100000 or
      ($l.creditUsedSeconds | nonneg | not) or ($l.last24hUsageSeconds | nonneg | not) or
      ($l.creditBalanceSeconds | nonneg | not) or
      $b.pageInfo.hasMore != false or ($b.sandboxes | type) != "array" or
@@ -190,6 +209,11 @@ fi
 DISPATCH_STATUS=0
 "$SCRIPT_DIR/fm-on.sh" --stdin "$ROUTE" fm-boat-worker.sh spawn "$instance" < "$TMP/request" > "$TMP/dispatch" || DISPATCH_STATUS=$?
 cat "$TMP/dispatch"
+if [ "$DISPATCH_STATUS" -eq 0 ]; then
+  ID=$(jq -r .id "$TMP/request")
+  grep -Fxq "boat-started: $ID (fresh worker status)" "$TMP/dispatch" ||
+    die "worker start unconfirmed for $ID; reconcile with fm-on.sh boat-eng fm-crew-state.sh $ID before retry"
+fi
 if [ "$DISPATCH_STATUS" -ne 0 ] && [ "$DISPATCH_STATUS" -ne 255 ] && [ "$STATE" = stopped ]; then
   remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh idle "$instance") || remaining=unknown
   if [ "$remaining" = 'boat-tasks-remaining: no' ]; then
