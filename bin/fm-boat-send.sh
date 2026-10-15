@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Send one explicitly Boat-selected, code-only task through the boat-eng route.
-# Usage: fm-boat-send.sh [--prepare] [--git-name <name> --git-email <email>] --code-only < request.json
+# Usage: fm-boat-send.sh [--prepare] --code-only < request.json
 #        fm-boat-send.sh --teardown <task-id>
 # --prepare performs the guarded resume/SSH refresh only, for initial seeding;
 # it does not dispatch a worker. The same valid, selected task is required.
@@ -25,10 +25,9 @@
 # this command never extends it. No box creation/deletion/sharing, billing,
 # plan, credit, environment injection, or merge command exists here.
 #
-# Ships carry a non-secret paired git_name/git_email in the envelope. Explicit
-# --git-name/--git-email override envelope values, which otherwise default to
-# this controller's global Git user.name/user.email. Empty identities refuse
-# before Boat contact. Scouts and --prepare do not require an identity.
+# Every dispatched worker carries the effective Git identity of this
+# controller's firstmate project. An absent or invalid pair refuses before
+# Boat contact; --prepare does not dispatch a worker.
 # Dispatch returns success only after the remote worker confirms fresh status.
 # FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh.
 # On transport failure, remote completion is unknown: reconcile the SAME task
@@ -56,16 +55,7 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 [ "${1:-}" != --help ] || { sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0; }
 PREPARE=0
 TEARDOWN_ID=
-GIT_NAME=
-GIT_EMAIL=
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --git-name) [ "$#" -ge 2 ] || die 'git name value required'; GIT_NAME=$2; shift 2 ;;
-    --git-email) [ "$#" -ge 2 ] || die 'git email value required'; GIT_EMAIL=$2; shift 2 ;;
-    --prepare) PREPARE=1; shift ;;
-    *) break ;;
-  esac
-done
+if [ "${1:-}" = --prepare ]; then PREPARE=1; shift; fi
 if [ "${1:-}" = --teardown ]; then
   [ "$PREPARE" -eq 0 ] || die 'prepare cannot teardown a task'
   [ "$#" -eq 2 ] || die 'task id required for teardown'
@@ -84,15 +74,16 @@ if [ -z "$TEARDOWN_ID" ]; then
   [ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
   # Both ends use the same validator; no remote contact occurs before validation.
   "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
-  if [ "$PREPARE" -eq 0 ] && [ "$(jq -r .kind "$TMP/request")" = ship ]; then
-    GIT_NAME=${GIT_NAME:-$(jq -r '.git_name // empty' "$TMP/request")}
-    GIT_EMAIL=${GIT_EMAIL:-$(jq -r '.git_email // empty' "$TMP/request")}
-    GIT_NAME=${GIT_NAME:-$(git config --global user.name || true)}
-    GIT_EMAIL=${GIT_EMAIL:-$(git config --global user.email || true)}
-    [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'ship requires git committer name and email; configure controller global Git identity or pass --git-name and --git-email'
+  jq -e '(has("git_name") or has("git_email")) | not' "$TMP/request" >/dev/null || die 'request must not supply git identity'
+  if [ "$PREPARE" -eq 0 ]; then
+    PROJECT_DIR="$FM_HOME/projects/firstmate"
+    [ -d "$PROJECT_DIR" ] || die 'controller firstmate project is unavailable'
+    GIT_NAME=$(git -C "$PROJECT_DIR" config user.name || true)
+    GIT_EMAIL=$(git -C "$PROJECT_DIR" config user.email || true)
+    [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'controller firstmate Git committer name and email are required'
     jq --arg name "$GIT_NAME" --arg email "$GIT_EMAIL" '. + {git_name:$name,git_email:$email}' "$TMP/request" > "$TMP/identified"
     mv "$TMP/identified" "$TMP/request"
-    "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
+    "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request" || die 'controller firstmate Git committer identity is invalid'
   fi
 fi
 LOCK_PATH="$FM_HOME/state/.boat-send.lock"

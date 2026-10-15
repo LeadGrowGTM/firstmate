@@ -579,9 +579,8 @@ The box-wide three-worker cap counts distinct task IDs across retained records a
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 Ships also require `gh-axi` installed on the box; installing that developer tool is allowed under R6, while credential setup remains a separate operation.
-The sender supplies a non-secret Git commit name and email, defaulting to the controller's global Git identity; its header documents the explicit overrides.
-The worker applies that identity only to its isolated worktree's Git configuration, leaving other workers' identities intact.
-Boat ship PR delivery still depends on the separate memory-only GitHub authentication transport follow-up; this route does not transfer a token, set a credential, or prove GitHub authentication.
+The sender supplies the effective Git commit name and email from the controller's firstmate project for every ship and scout, and the worker applies it only to that worker's isolated worktree.
+Boat ship PR delivery waits for a separate provisioning follow-up: the box must receive GitHub authentication from Infisical through a Boat-provisioned machine identity, never from this PC.
 Do not send a token in task JSON: the current remote job transport stages stdin on disk.
 
 Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.

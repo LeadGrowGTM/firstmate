@@ -12,8 +12,8 @@
 #   harness: claude|codex|grok; model: concrete nonempty model; effort:
 #   low|medium|high|xhigh|max|ultra. These are the profile selected by firstmate
 #   under its ordinary dispatch/quota rules, never an alternate quota budget.
-# Optional paired git_name/git_email are non-secret per-worker Git identity.
-# Ships require both at spawn; validate and scouts may omit them.
+# Paired git_name/git_email are non-secret per-worker Git identity.
+# Every spawn requires both; validate also accepts the controller's raw request.
 # No other keys (including env, secrets, home, origin, yolo, flags) are accepted.
 #
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
@@ -45,7 +45,7 @@
 # missing proof leaves the task intact for same-id reconciliation, never retry.
 # Scout teardown requires a controller-reviewed completion inventory; refusal
 # prints the exact controller command rather than manufacturing --none consent.
-# Ships require gh-axi and a valid supplied Git identity before backlog intake;
+# Ships require gh-axi; every worker requires a valid supplied Git identity before backlog intake;
 # fm-spawn.sh applies the identity only to the isolated worker worktree.
 # No merges, home transfer, secret injection, or new supervision loop is added.
 set -eu
@@ -183,13 +183,11 @@ case "$origin" in
 esac
 [ -z "$(git -C "$REPO" ls-files -- 'clients' '.env' '**/.env')" ] || die 'project tracks client or secret files'
 [ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
-if [ "$MODE" != scout ]; then
-  command -v gh-axi >/dev/null || die 'ship requires gh-axi installed on the Boat box'
-  GIT_NAME=$(jq -r '.git_name // empty' "$TMP/request")
-  GIT_EMAIL=$(jq -r '.git_email // empty' "$TMP/request")
-  [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'ship requires git committer name and email supplied by the controller'
-  git -C "$REPO" -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" var GIT_COMMITTER_IDENT >/dev/null 2>&1 || die 'ship git committer identity is invalid'
-fi
+if [ "$MODE" != scout ]; then command -v gh-axi >/dev/null || die 'ship requires gh-axi installed on the Boat box'; fi
+GIT_NAME=$(jq -r '.git_name // empty' "$TMP/request")
+GIT_EMAIL=$(jq -r '.git_email // empty' "$TMP/request")
+[ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'worker requires git committer name and email supplied by the controller'
+git -C "$REPO" -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" var GIT_COMMITTER_IDENT >/dev/null 2>&1 || die 'worker git committer identity is invalid'
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
@@ -225,7 +223,8 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
   { print }
 ' "$BRIEF" > "$TMP/brief"
 cat "$TMP/brief" > "$BRIEF"
-if [ "$MODE" != scout ]; then ARGS+=(--yolo off --git-name "$GIT_NAME" --git-email "$GIT_EMAIL"); fi
+if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
+ARGS+=(--git-name "$GIT_NAME" --git-email "$GIT_EMAIL")
 ARGS+=(--backend tmux --harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
 STATUS="$FM_HOME/state/$ID.status"
 STATUS_LINES=0

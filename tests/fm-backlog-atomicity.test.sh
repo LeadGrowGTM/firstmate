@@ -1428,6 +1428,7 @@ SH
     cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 case "\$*" in *'#{pane_current_path}'*) printf '%s\n' '$case_dir/wt'; exit 0 ;; esac
+case "\$*" in *'-S -0'*) printf 'working [at=1791892800]: brief consumed\n' >> '$home/state/task-one.status' ;; esac
 case "\${1:-}" in display-message) printf 'firstmate\n' ;; esac
 exit 0
 SH
@@ -1442,9 +1443,9 @@ SH
     out=$(env -u TMUX -u TMUX_PANE FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" HOME="$case_dir/user-home" \
       FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
       FM_CONFIG_OVERRIDE="$home/config" FM_PROJECTS_OVERRIDE="$home/projects" FM_BACKEND=tmux \
-      FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" \
+      FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 \
       PATH="$fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn "$BOAT_FIXTURE_INSTANCE" <<'JSON'
-{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Exercise intake","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
+{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Exercise intake","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low","git_name":"Firstmate Tests","git_email":"tests@example.invalid"}
 JSON
     ) || rc=$?
     expect_code 0 "$rc" "$name backlog intake through real spawn: $out"

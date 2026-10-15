@@ -218,8 +218,9 @@ new_case() {
   printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$REMOTE_HOME/.tasks.toml"
   printf '## In flight\n\n## Queued\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
   : > "$FIXTURES/windows"
-  printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium","git_name":"Fixture","git_email":"fixture@example.invalid"}' \
+  printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium"}' \
     > "$FIXTURES/request.json"
+  jq '. + {git_name:"Fixture",git_email:"fixture@example.invalid"}' "$FIXTURES/request.json" > "$FIXTURES/worker-request.json"
   printf '%s\n' '{"billingStatus":"active","canStart":true,"creditSecondsPerDollar":100000,"creditUsedSeconds":1000,"last24hUsageSeconds":2000,"creditBalanceSeconds":100000,"activeStates":["ready","idle","running"]}' \
     > "$FIXTURES/limits.json"
   printf '%s\n' '{"pageInfo":{"hasMore":false},"sandboxes":[{"id":"bx_ahnbu3qr","state":"stopped"}]}' \
@@ -234,27 +235,35 @@ new_case() {
   printf '%s\n' '11111111-1111-4111-8111-111111111111' > "$FIXTURES/boot-id"
   git config --file "$CASE/user-home/.gitconfig" user.name Fixture
   git config --file "$CASE/user-home/.gitconfig" user.email fixture@example.invalid
+  fm_git_init_commit "$LOCAL_HOME/projects/firstmate"
+  git -C "$LOCAL_HOME/projects/firstmate" config user.name 'Firstmate Local'
+  git -C "$LOCAL_HOME/projects/firstmate" config user.email firstmate-local@example.invalid
   : > "$FIXTURES/calls"
 }
 
 set_json() {
   jq "$2" "$FIXTURES/$1.json" > "$FIXTURES/$1.new" || fail 'fixture JSON mutation failed'
   mv "$FIXTURES/$1.new" "$FIXTURES/$1.json"
+  if [ "$1" = request ]; then
+    jq "$2" "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new" || fail 'worker fixture JSON mutation failed'
+    mv "$FIXTURES/worker-request.new" "$FIXTURES/worker-request.json"
+  fi
 }
 
 # All environment and operational paths are fixture-local. Each test invokes
 # the complete executable, never sources the production implementation.
 run_entry() {
-  local home=$1 entry=$2
+  local home=$1 entry=$2 input="$FIXTURES/request.json"
   shift 2
+  if [ "$entry" = fm-boat-worker.sh ] && [ "${1:-}" = spawn ]; then input="$FIXTURES/worker-request.json"; fi
   OUT=$(env -u FM_ROOT -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u STATE \
     -u FM_WAKE_QUEUE -u FM_WAKE_QUEUE_LOCK -u TMUX -u TMUX_PANE \
-    FM_HOME="$home" HOME="$CASE/user-home" GIT_CONFIG_GLOBAL="$CASE/user-home/.gitconfig" PATH="$FAKEBIN:$PATH" \
+    FM_HOME="$home" HOME="$CASE/user-home" GIT_CONFIG_GLOBAL="$CASE/user-home/.gitconfig" GIT_CONFIG_NOSYSTEM=1 PATH="$FAKEBIN:$PATH" \
     FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
     TMUX="${BOAT_TEST_TMUX:-}" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 \
     FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
     BIN="$BIN" REAL_BRIEF="$ROOT/bin/fm-brief.sh" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
-    "$BIN/$entry" "$@" < "$FIXTURES/request.json" 2>&1)
+    "$BIN/$entry" "$@" < "$input" 2>&1)
   CODE=$?
 }
 send_task() { run_entry "$LOCAL_HOME" fm-boat-send.sh --code-only; }
@@ -274,7 +283,7 @@ test_validation() {
     '.home = "/home/user/other"' '.origin = "https://example.invalid/repo"' '.yolo = "on"' \
     '.flags = ["--unsafe"]' '.secrets = {}' '.mode = "local-only"' '.kind = "secondmate"' \
     '.harness = "echo"' '.effort = "unknown"' '.model = ""' '.intent = ""' \
-    '.spec = ""' '.git_name = ""' '.git_email = "invalid"' 'del(.git_email)' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
+    '.spec = ""' '.git_name = ""' '.git_email = "invalid"' '.git_name = "Fixture"' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
     '.intent = "hidden\u0000text"' '.kind = "scout"'; do
     n=$((n + 1))
     new_case "invalid-$n"
@@ -388,45 +397,79 @@ test_worker_start() {
 }
 
 test_ship_prerequisites_and_identity() {
-  new_case sender-global-identity
-  set_json request 'del(.git_name,.git_email)'
+  new_case sender-project-identity
   send_task
-  expect_code 0 "$CODE" "controller default identity: $OUT"
-  assert_equals Fixture "$(jq -r .git_name "$FIXTURES/transport.request")" 'controller default name missing'
-  assert_equals fixture@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'controller default email missing'
-  new_case sender-explicit-identity
+  expect_code 0 "$CODE" "controller project identity: $OUT"
+  assert_equals 'Firstmate Local' "$(jq -r .git_name "$FIXTURES/transport.request")" 'effective project name missing'
+  assert_equals firstmate-local@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'effective project email missing'
+  new_case sender-effective-global-fallback
+  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.name
+  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.email
+  send_task
+  expect_code 0 "$CODE" "effective global fallback identity: $OUT"
+  assert_equals Fixture "$(jq -r .git_name "$FIXTURES/transport.request")" 'effective global name missing'
+  assert_equals fixture@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'effective global email missing'
+  new_case sender-scout-identity
+  set_json request '.kind = "scout" | .mode = "scout" | .project = "dev-loop"'
+  send_task
+  expect_code 0 "$CODE" "scout controller identity: $OUT"
+  assert_equals 'Firstmate Local' "$(jq -r .git_name "$FIXTURES/transport.request")" 'scout project name missing'
+  assert_equals firstmate-local@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'scout project email missing'
+  new_case sender-request-identity
+  set_json request '.git_name = "Another User" | .git_email = "another@example.invalid"'
+  send_task
+  assert_pre_resume_refusal 'request identity override'
+  assert_contains "$OUT" 'request must not supply git identity' 'request override diagnostic'
+  new_case sender-cli-identity
   run_entry "$LOCAL_HOME" fm-boat-send.sh --git-name 'Another User' --git-email another@example.invalid --code-only
-  expect_code 0 "$CODE" "explicit controller identity: $OUT"
-  assert_equals 'Another User' "$(jq -r .git_name "$FIXTURES/transport.request")" 'explicit name not used'
-  assert_equals another@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'explicit email not used'
+  assert_pre_resume_refusal 'CLI identity override'
   new_case sender-no-identity
-  set_json request 'del(.git_name,.git_email)'
+  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.name
+  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.email
   rm "$CASE/user-home/.gitconfig"
   send_task
   assert_pre_resume_refusal 'missing controller identity'
-  assert_contains "$OUT" 'git committer name and email' 'missing identity diagnostic'
+  assert_contains "$OUT" 'Git committer name and email' 'missing identity diagnostic'
   new_case sender-invalid-identity
-  run_entry "$LOCAL_HOME" fm-boat-send.sh --git-name $'Injected\nname' --code-only
+  git -C "$LOCAL_HOME/projects/firstmate" config user.name $'Injected\nname'
+  send_task
   assert_pre_resume_refusal 'unsafe identity'
   new_case worker-no-identity
   seed_project firstmate
-  set_json request 'del(.git_name,.git_email)'
+  jq 'del(.git_name,.git_email)' "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new"
+  mv "$FIXTURES/worker-request.new" "$FIXTURES/worker-request.json"
   spawn_task
   expect_code 1 "$CODE" 'worker refuses missing supplied identity'
   assert_contains "$OUT" 'git committer name and email' 'worker identity diagnostic'
   assert_no_grep 'brief ' "$FIXTURES/calls" 'missing identity accepted backlog intake'
+  new_case scout-worker-identity
+  seed_project dev-loop
+  set_json request '.kind = "scout" | .mode = "scout" | .project = "dev-loop"'
+  spawn_task
+  expect_code 0 "$CODE" "scout worker identity: $OUT"
+  assert_equals "$(printf '%s\n' task-one "$REMOTE_HOME/projects/dev-loop" \
+    --scout --git-name Fixture --git-email fixture@example.invalid --backend tmux --harness codex --model gpt-6-sol --effort medium)" \
+    "$(cat "$FIXTURES/spawn.argv")" 'scout spawn did not receive paired worktree identity'
+  new_case scout-worker-no-identity
+  seed_project dev-loop
+  set_json request '.kind = "scout" | .mode = "scout" | .project = "dev-loop"'
+  jq 'del(.git_name,.git_email)' "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new"
+  mv "$FIXTURES/worker-request.new" "$FIXTURES/worker-request.json"
+  spawn_task
+  expect_code 1 "$CODE" 'scout refuses missing supplied identity'
+  assert_no_grep 'brief ' "$FIXTURES/calls" 'missing scout identity accepted backlog intake'
   new_case worker-no-gh-axi
   seed_project firstmate
   # Shadow command discovery, leaving all other real tools available.
   mkdir -p "$CASE/no-gh"
   # The wrapper is sourced through BASH_ENV only in this isolated child.
   printf 'command() { if [ "$*" = "-v gh-axi" ]; then return 1; fi; builtin command "$@"; }\n' > "$CASE/no-gh/bash-env"
-  OUT=$(BASH_ENV="$CASE/no-gh/bash-env" env -u TMUX FM_HOME="$REMOTE_HOME" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" FIXTURES="$FIXTURES" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 "$BIN/fm-boat-worker.sh" spawn "$(cat "$FIXTURES/boot-id")" < "$FIXTURES/request.json" 2>&1)
+  OUT=$(BASH_ENV="$CASE/no-gh/bash-env" env -u TMUX FM_HOME="$REMOTE_HOME" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" FIXTURES="$FIXTURES" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 "$BIN/fm-boat-worker.sh" spawn "$(cat "$FIXTURES/boot-id")" < "$FIXTURES/worker-request.json" 2>&1)
   CODE=$?
   expect_code 1 "$CODE" 'worker refuses missing gh-axi'
   assert_contains "$OUT" 'gh-axi installed' 'missing gh-axi diagnostic'
   assert_no_grep 'brief ' "$FIXTURES/calls" 'missing gh-axi accepted backlog intake'
-  pass 'ships preflight gh-axi and controller-provided identity before intake'
+  pass 'ships and scouts use the controller project identity and ships preflight gh-axi'
 }
 
 test_whole_timer_reservation() {
@@ -510,7 +553,7 @@ test_sender_success_and_timer() {
     fi
     assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
       "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
-    assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc . "$FIXTURES/transport.request")" 'transport changed request fields'
+    assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc 'del(.git_name,.git_email)' "$FIXTURES/transport.request")" 'transport changed task fields'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
     assert_equals 'bx_ahnbu3qr 22222222-2222-4222-8222-222222222222' "$(cat "$LOCAL_HOME/state/.boat-no-env")" 'successful no-env resume receipt'
   done
