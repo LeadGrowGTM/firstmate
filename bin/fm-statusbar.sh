@@ -289,8 +289,11 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
       if [ -z "$win" ] || ! printf '%s\n' "$live" | grep -qxF -- "$win"; then continue; fi
     fi
     (
-      FM_HOME="$home" FM_CREW_STATE_NO_FORGE=1 FM_CREW_STATE_NM_TIMEOUT=1 \
-        fm_run_timed 3 bash "$TRACKER_CREW_STATE" "$id" 2>/dev/null |
+      fm_run_timed 3 env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+        FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
+        FM_PROJECTS_OVERRIDE="$home/projects" TMUX="${FM_SB_SOCKET:+$FM_SB_SOCKET,0,0}" \
+        FM_CREW_STATE_NO_FORGE=1 FM_CREW_STATE_NM_TIMEOUT=1 \
+        bash "$TRACKER_CREW_STATE" "$id" 2>/dev/null |
         sed -n '1s/^state: \([^ ]*\).*/\1/p' >"$scratch/$id"
     ) &
     jobs+=("$!")
@@ -332,8 +335,11 @@ fm_sb_tracker_refresh() {
     else
       home="$TRACKER_ROOT/firstmate"; label=unknown
       if [ -f "$home/state/$mate.meta" ]; then
-        state=$(FM_HOME="$home" FM_CREW_STATE_NO_FORGE=1 FM_CREW_STATE_NM_TIMEOUT=1 \
-          fm_run_timed 6 bash "$TRACKER_CREW_STATE" "$mate" 2>/dev/null |
+        state=$(fm_run_timed 6 env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+          FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
+          FM_PROJECTS_OVERRIDE="$home/projects" TMUX="${FM_SB_SOCKET:+$FM_SB_SOCKET,0,0}" \
+          FM_CREW_STATE_NO_FORGE=1 FM_CREW_STATE_NM_TIMEOUT=1 \
+          bash "$TRACKER_CREW_STATE" "$mate" 2>/dev/null |
           sed -n '1s/^state: \([^ ]*\).*/\1/p')
         label=${state:-unknown}
       fi

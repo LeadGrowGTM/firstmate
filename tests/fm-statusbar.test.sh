@@ -537,6 +537,9 @@ printf 'window=firstmate:fm-live-second\nkind=ship\n' >"$WORK/fm-homes/ottersec/
 printf 'window=firstmate:fm-dev\nkind=secondmate\n' >"$WORK/firstmate/state/dev.meta"
 cat >"$WORK/crew-state-fixture.sh" <<'SH'
 #!/usr/bin/env bash
+[ "$FM_STATE_OVERRIDE" = "$FM_HOME/state" ] || { echo 'state: unknown · source: wrong-home'; exit; }
+[ "$FM_DATA_OVERRIDE" = "$FM_HOME/data" ] || { echo 'state: unknown · source: wrong-data'; exit; }
+case "$TMUX" in "$FM_SB_EXPECTED_SOCKET",*) ;; *) echo 'state: unknown · source: wrong-socket'; exit ;; esac
 case "$1" in
   main-task|dev-task) echo 'state: working · source: pane' ;;
   otter-task|dev) echo 'state: parked · source: status-log' ;;
@@ -544,8 +547,9 @@ case "$1" in
 esac
 SH
 export FM_SB_CREW_STATE_SCRIPT="$WORK/crew-state-fixture.sh"
+export FM_SB_EXPECTED_SOCKET="$SOCKET_PATH"
 rm -f "$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt" "$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt"
-tracker=$(statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+tracker=$(FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" crew-tracker)
 [ "$tracker" = 'crew: loading' ] || fail "cold tracker did not return immediately" "$tracker"
 i=0
 while [ ! -s "$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
