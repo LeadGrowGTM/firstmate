@@ -282,9 +282,10 @@ cmd_fleet() {
 # Run current-state reads only for task metadata with a live tmux window (or a
 # non-tmux backend). Parallel reads are capped at four and each has a hard bound.
 fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
-  local home=$1 mate=$2 live=$3 output=$4 meta id kind backend win state running=0 waiting=0
+  local home=$1 mate=$2 live=$3 output=$4 meta id kind backend win state running=0 waiting=0 unknown=0 suffix=
   local -a jobs=()
   local scratch="${output}.tasks"
+  [ -d "$home/state" ] || { printf '%s ?r/?w\n' "$mate" >"$output"; return 0; }
   mkdir -p "$scratch" || return 1
   for meta in "$home/state"/*.meta; do
     [ -f "$meta" ] || continue
@@ -317,11 +318,14 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
     case "$state" in
       working) running=$((running + 1)) ;;
       parked|paused|blocked) waiting=$((waiting + 1)) ;;
+      done|failed) ;;
+      *) unknown=$((unknown + 1)) ;;
     esac
   done
   rm -f "$scratch"/*
   rmdir "$scratch" 2>/dev/null || true
-  printf '%s %dr/%dw\n' "$mate" "$running" "$waiting" >"$output"
+  [ "$unknown" -eq 0 ] || suffix="+${unknown}?"
+  printf '%s %dr/%dw%s\n' "$mate" "$running" "$waiting" "$suffix" >"$output"
 }
 
 fm_sb_tracker_refresh() {
@@ -331,7 +335,12 @@ fm_sb_tracker_refresh() {
   live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
   primary_windows=$(tmux list-windows -a -F '#{@fm_task}|#{@fm_state}' 2>/dev/null) || primary_windows=
   for mate in "${mates[@]}"; do
-    if [ "$mate" = churchill ]; then home="$TRACKER_ROOT/firstmate"; else home="$TRACKER_ROOT/fm-homes/$mate"; fi
+    if [ "$mate" = churchill ]; then
+      home="$TRACKER_ROOT/firstmate"
+    else
+      home=$(sed -n 's/^home=//p' "$TRACKER_ROOT/firstmate/state/$mate.meta" 2>/dev/null | tail -1)
+      [ -n "$home" ] || home="$TRACKER_ROOT/fm-homes/$mate"
+    fi
     fm_sb_tracker_home "$home" "$mate" "$live" "$tmp.$i" &
     i=$((i + 1))
   done

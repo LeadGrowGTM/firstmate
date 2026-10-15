@@ -534,13 +534,15 @@ export FM_SB_TRACKER_CACHE_DIR="$WORK/tracker-proof-cache"
 TRACKER_CACHE_FILE="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
 TRACKER_ATTEMPT_FILE="$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt.$TRACKER_SOCKET_KEY"
 mkdir -p "$WORK/firstmate/state" "$WORK/fm-homes/dev/state" \
+  "$WORK/custom-dev/state" \
   "$WORK/fm-homes/napoleon/state" "$WORK/fm-homes/alexander-media/state" \
   "$WORK/fm-homes/ottersec/state" "$WORK/fm-homes/legion/state"
 printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/firstmate/state/main-task.meta"
-printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/fm-homes/dev/state/dev-task.meta"
-printf 'window=firstmate:fm-gone-crew\nkind=ship\n' >"$WORK/fm-homes/dev/state/gone-task.meta"
+printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/custom-dev/state/dev-task.meta"
+printf 'window=firstmate:fm-live-second\nkind=ship\n' >"$WORK/custom-dev/state/dev-unknown.meta"
+printf 'window=firstmate:fm-gone-crew\nkind=ship\n' >"$WORK/custom-dev/state/gone-task.meta"
 printf 'window=firstmate:fm-live-second\nkind=ship\n' >"$WORK/fm-homes/ottersec/state/otter-task.meta"
-printf 'window=firstmate:fm-dev\nkind=secondmate\n' >"$WORK/firstmate/state/dev.meta"
+printf 'window=firstmate:fm-dev\nkind=secondmate\nhome=%s\n' "$WORK/custom-dev" >"$WORK/firstmate/state/dev.meta"
 FM_STATE_OVERRIDE="$WORK/firstmate/state" statusbar "$SB" "$SOCKET_PATH" \
   label firstmate:fm-demo-task firstmate claude opus high "$WORK/firstmate"
 cat >"$WORK/crew-state-fixture.sh" <<'SH'
@@ -563,7 +565,7 @@ i=0
 while [ ! -s "$TRACKER_CACHE_FILE" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
 tracker=$(statusbar "$SB" "$SOCKET_PATH" crew-tracker)
 case "$tracker" in
-  *'churchill:on 1r/0w'*'dev:parked 1r/0w'*'ottersec:unknown 0r/1w'*'legion:unknown 0r/0w'*) ;;
+  *'churchill:on 1r/0w'*'dev:parked 1r/0w+1?'*'ottersec:unknown 0r/1w'*'legion:unknown 0r/0w'*) ;;
   *) fail "tracker did not reconcile per-mate running and waiting crew" "$tracker" ;;
 esac
 case "$tracker" in *website-genie*|*rothschild*) fail "tracker included excluded mates" "$tracker" ;; esac
