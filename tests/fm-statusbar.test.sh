@@ -475,7 +475,6 @@ pass "fleet counts live workers and second mates from metadata"
 printf 'window=firstmate:fm-live-crew\nkind=ship\nsecret=DO_NOT_DISPLAY\n' >"$FLEET_STATE/crew-a.meta"
 printf 'window=firstmate:fm-live-second\nkind=secondmate\n' >"$FLEET_STATE/second-a.meta"
 FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" apply --primary firstmate
-left=$(tmux show-options -t firstmate -v status-left)
 right=$(tmux show-options -t firstmate -v status-right)
 case "$right" in *"crew-tracker"*) pass "apply --primary puts the crew tracker in status-right" ;; *) fail "status-right lacks crew tracker" "$right" ;; esac
 other=$(tmux show-options -t orca-later -v status-right)
@@ -551,6 +550,12 @@ cat >"$WORK/crew-state-fixture.sh" <<'SH'
 [ "$FM_DATA_OVERRIDE" = "$FM_HOME/data" ] || { echo 'state: unknown · source: wrong-data'; exit; }
 case "$TMUX" in "$FM_SB_EXPECTED_SOCKET",*) ;; *) echo 'state: unknown · source: wrong-socket'; exit ;; esac
 case "$1" in
+  dev|napoleon|alexander-media|ottersec|legion)
+    [ -z "${FM_SB_SLOW_MATE_PROBES:-}" ] || sleep 8 ;;
+  slow-task*)
+    [ -z "${FM_SB_SLOW_MATE_PROBES:-}" ] || sleep 8 ;;
+esac
+case "$1" in
   main-task|dev-task) echo 'state: working · source: pane' ;;
   otter-task|dev) echo 'state: parked · source: status-log' ;;
   *) echo 'state: unknown · source: none' ;;
@@ -570,6 +575,24 @@ case "$tracker" in
 esac
 case "$tracker" in *website-genie*|*rothschild*) fail "tracker included excluded mates" "$tracker" ;; esac
 pass "tracker refreshes all six homes through current-state reads"
+for i in 1 2 3 4 5 6 7 8; do
+  printf 'window=firstmate:fm-live-second\nkind=ship\n' >"$WORK/custom-dev/state/slow-task-$i.meta"
+done
+export FM_SB_SLOW_MATE_PROBES=1
+rm -f "$TRACKER_CACHE_FILE" "$TRACKER_ATTEMPT_FILE"
+tracker=$(statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+[ "$tracker" = 'crew: loading' ] || fail "slow tracker did not start a fresh refresh" "$tracker"
+i=0
+while [ ! -s "$TRACKER_CACHE_FILE" ] && [ "$i" -lt 200 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s "$TRACKER_CACHE_FILE" ] || fail "slow mate probes prevented a cache publish inside the deadline"
+tracker=$(cat "$TRACKER_CACHE_FILE")
+case "$tracker" in
+  *'churchill:on 1r/0w'*'dev:unknown '*'ottersec:unknown 0r/1w'*'legion:unknown 0r/0w'*) ;;
+  *) fail "slow mate probes lost the reconciled summary" "$tracker" ;;
+esac
+unset FM_SB_SLOW_MATE_PROBES
+rm -f "$WORK/custom-dev/state"/slow-task-*.meta
+pass "concurrent slow mate probes publish a summary inside the refresh deadline"
 other_socket=$("$REAL_TMUX" -L "$OUTER" display-message -p '#{socket_path}')
 other_key=$(printf '%s' "$other_socket" | cksum)
 other_key=${other_key%% *}

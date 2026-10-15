@@ -329,7 +329,7 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
 }
 
 fm_sb_tracker_refresh() {
-  local live primary_windows tmp home mate state label result='' i=0
+  local live primary_windows tmp home mate label result='' i=0
   local -a mates=(churchill dev napoleon alexander-media ottersec legion)
   tmp="$TRACKER_CACHE.$$"
   live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
@@ -341,30 +341,41 @@ fm_sb_tracker_refresh() {
       home=$(sed -n 's/^home=//p' "$TRACKER_ROOT/firstmate/state/$mate.meta" 2>/dev/null | tail -1)
       [ -n "$home" ] || home="$TRACKER_ROOT/fm-homes/$mate"
     fi
-    fm_sb_tracker_home "$home" "$mate" "$live" "$tmp.$i" &
+    fm_run_timed 27 bash "$SELF" --socket "$FM_SB_SOCKET" \
+      crew-tracker-home "$home" "$mate" "$live" "$tmp.$i" &
+    if [ "$mate" = churchill ]; then
+      label=on
+      printf '%s\n' "$primary_windows" | grep -qxF "firstmate|$home/state" || label=off
+      printf '%s\n' "$label" >"$tmp.label.$i"
+    else
+      (
+        label=unknown
+        if [ -f "$TRACKER_ROOT/firstmate/state/$mate.meta" ]; then
+          label=$(fm_run_timed 7 env FM_HOME="$TRACKER_ROOT/firstmate" \
+            FM_STATE_OVERRIDE="$TRACKER_ROOT/firstmate/state" \
+            FM_DATA_OVERRIDE="$TRACKER_ROOT/firstmate/data" \
+            FM_CONFIG_OVERRIDE="$TRACKER_ROOT/firstmate/config" \
+            FM_PROJECTS_OVERRIDE="$TRACKER_ROOT/firstmate/projects" \
+            TMUX="${FM_SB_SOCKET:+$FM_SB_SOCKET,0,0}" \
+            FM_CREW_STATE_NO_FORGE=1 FM_CREW_STATE_NM_TIMEOUT=1 \
+            bash "$TRACKER_CREW_STATE" "$mate" 2>/dev/null |
+            sed -n '1s/^state: \([^ ]*\).*/\1/p')
+        fi
+        printf '%s\n' "${label:-unknown}" >"$tmp.label.$i"
+      ) &
+    fi
     i=$((i + 1))
   done
   wait
   i=0
   for mate in "${mates[@]}"; do
-    if [ "$mate" = churchill ]; then
-      home="$TRACKER_ROOT/firstmate"; label=on
-      printf '%s\n' "$primary_windows" | grep -qxF "firstmate|$home/state" || label=off
-    else
-      home="$TRACKER_ROOT/firstmate"; label=unknown
-      if [ -f "$home/state/$mate.meta" ]; then
-        state=$(fm_run_timed 6 env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
-          FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
-          FM_PROJECTS_OVERRIDE="$home/projects" TMUX="${FM_SB_SOCKET:+$FM_SB_SOCKET,0,0}" \
-          FM_CREW_STATE_NO_FORGE=1 FM_CREW_STATE_NM_TIMEOUT=1 \
-          bash "$TRACKER_CREW_STATE" "$mate" 2>/dev/null |
-          sed -n '1s/^state: \([^ ]*\).*/\1/p')
-        label=${state:-unknown}
-      fi
-    fi
+    label=$(cat "$tmp.label.$i" 2>/dev/null) || label=unknown
+    rm -f "$tmp.label.$i"
     [ -f "$tmp.$i" ] || printf '%s ?r/?w\n' "$mate" >"$tmp.$i"
     result="${result}${result:+ | }$(sed "s/^$mate /$mate:$label /" "$tmp.$i")"
     rm -f "$tmp.$i"
+    rm -f "$tmp.$i.tasks"/* 2>/dev/null || true
+    rmdir "$tmp.$i.tasks" 2>/dev/null || true
     i=$((i + 1))
   done
   printf '%s\n' "$result" >"$tmp" && mv -f "$tmp" "$TRACKER_CACHE"
@@ -575,6 +586,7 @@ case "$sub" in
 theme) cmd_theme ;;
 crew-tracker) cmd_crew_tracker ;;
 crew-tracker-refresh) fm_sb_tracker_refresh ;;
+crew-tracker-home) fm_sb_tracker_home "$@" ;;
 install|check) cmd_config "$sub" "$@" ;;
 source-line) fm_sb_source_line ;;
 label) cmd_label "$@" ;;
