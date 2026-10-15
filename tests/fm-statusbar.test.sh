@@ -606,6 +606,31 @@ while [ ! -s "$other_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); d
 [ "$(cat "$TRACKER_CACHE_FILE")" = "$tracker" ] || fail "another tmux server overwrote the first cache"
 pass "tracker caches are isolated by tmux socket"
 
+socketless_cache_dir="$WORK/socketless-cache"
+socketless_cache="$socketless_cache_dir/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+socketless=$(FM_SB_TRACKER_CACHE_DIR="$socketless_cache_dir" bash "$SB" crew-tracker)
+[ "$socketless" = 'crew: loading' ] || fail "socketless tracker did not start its own refresh" "$socketless"
+i=0
+while [ ! -s "$socketless_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s "$socketless_cache" ] || fail "socketless tracker did not publish under the resolved socket key"
+socketless=$(FM_SB_TRACKER_CACHE_DIR="$socketless_cache_dir" bash "$SB" crew-tracker)
+case "$socketless" in *'churchill:on 1r/0w'*) ;; *) fail "socketless tracker did not read its published cache" "$socketless" ;; esac
+pass "socketless tracker resolves the live socket before caching"
+
+mkdir -p "$WORK/operator/state"
+printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/operator/state/main-task.meta"
+operator_cache_dir="$WORK/operator-cache"
+operator_cache="$operator_cache_dir/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+operator=$(FM_HOME="$WORK/operator" FM_SB_TRACKER_ROOT='' FM_SB_TRACKER_CACHE_DIR="$operator_cache_dir" \
+  statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+[ "$operator" = 'crew: loading' ] || fail "selected-home tracker did not start a fresh refresh" "$operator"
+i=0
+while [ ! -s "$operator_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s "$operator_cache" ] || fail "selected-home tracker did not publish"
+operator=$(cat "$operator_cache")
+case "$operator" in *'churchill:off 1r/0w'*) ;; *) fail "tracker did not read the selected operational home" "$operator" ;; esac
+pass "tracker uses the selected operational home even when its name differs"
+
 # --- persistent config: preserve user settings and survive server restart ---
 config="$WORK/user tmux.conf"
 printf 'set -g mouse on' >"$config"
@@ -620,6 +645,15 @@ bash "$SB" install "$config" >/dev/null || fail "repeat install failed"
 [ "$(cat "$config")" = "$installed" ] || fail "install duplicated its source line"
 case "$installed" in 'set -g mouse on'*) ;; *) fail "install lost existing settings" ;; esac
 pass "config install is idempotent and preserves existing bytes"
+
+tmux new-session -d -s space-owner -n root 'sleep 600'
+FM_SB_TRACKER_ROOT="$WORK/root with spaces" FM_SB_TRACKER_CACHE_DIR="$WORK/cache with spaces" \
+  statusbar "$SB" "$SOCKET_PATH" apply --primary space-owner
+space_right=$(tmux show-options -qv -t space-owner status-right)
+tmux new-session -d -t space-owner -s space-later
+late_right=$(tmux show-options -qv -t space-later status-right)
+[ "$late_right" = "$space_right" ] || fail "late grouped view lost tracker job shell escapes" "$late_right"
+pass "late grouped views preserve tracker paths containing spaces"
 
 # Space-containing checkout paths remain usable by both tmux and the shell.
 mkdir -p "$WORK/installed repo/bin"
