@@ -27,7 +27,6 @@ fm_backend_source() { [ "$1" = tmux ]; }
 fm_backend_of_meta() { sed -n 's/^backend=//p' "$1" | awk 'NR==1 { found=1; print } END { if (!found) print "tmux" }'; }
 fm_backend_tmux_visible_capture() {
   printf 'capture %s\n' "$1" >> "$FIXTURES/calls"
-  [ ! -e "$FIXTURES/capture.fail" ] || return 1
   if [ -e "$FIXTURES/trust" ]; then
     printf 'Do you trust the contents of this directory?\n\n› 1. Yes, I trust this folder\n  2. No, exit\n'
   elif [ -e "$FIXTURES/quoted-trust" ]; then
@@ -356,13 +355,12 @@ test_running_reservation_and_start() {
 
 test_worker_start() {
   local variant
-  for variant in status trust stale capture quoted quoted-no-op quoted-exact negative; do
+  for variant in status trust stale quoted quoted-no-op quoted-exact negative; do
     new_case "start-$variant"
     seed_project firstmate
     case "$variant" in
       trust) : > "$FIXTURES/trust" ;;
       stale) : > "$FIXTURES/no-start"; printf 'working [at=1]: old\n' > "$REMOTE_HOME/state/task-one.status" ;;
-      capture) : > "$FIXTURES/capture.fail"; : > "$FIXTURES/no-start" ;;
       quoted) : > "$FIXTURES/quoted-trust"; : > "$FIXTURES/no-start" ;;
       quoted-no-op) : > "$FIXTURES/quoted-no-op"; : > "$FIXTURES/no-start" ;;
       quoted-exact) : > "$FIXTURES/quoted-exact"; : > "$FIXTURES/no-start" ;;
@@ -380,9 +378,14 @@ test_worker_start() {
         [ -e "$REMOTE_HOME/state/task-one.meta" ] || fail 'unconfirmed launch lost metadata'
         ;;
     esac
-    if [ "$variant" = quoted-no-op ] || [ "$variant" = quoted-exact ] || [ "$variant" = trust ]; then
-      assert_contains "$OUT" 'worker start unconfirmed' 'non-dialog viewport was classified as a trust dialog'
+    if [ "$variant" != status ]; then
+      assert_contains "$OUT" 'worker task-one did not prove start with a fresh status' 'missing start refusal'
+      assert_contains "$OUT" 'Codex folder-trust prompt is a known cause' 'missing trust diagnostic'
+      assert_contains "$OUT" 'Inspect: fm-on.sh boat-eng fm-peek.sh task-one' 'missing inspect command'
+      assert_contains "$OUT" 'fm-on.sh boat-eng fm-send.sh task-one --key Enter' 'missing conditional answer command'
+      assert_contains "$OUT" 'Then inspect: fm-on.sh boat-eng fm-peek.sh task-one' 'missing follow-up inspect command'
     fi
+    assert_no_grep 'capture ' "$FIXTURES/calls" 'worker still gated start on viewport capture'
     assert_no_grep 'key ' "$FIXTURES/calls" 'viewport text received Enter without modal proof'
   done
   new_case scout-completion-missing

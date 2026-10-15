@@ -234,7 +234,7 @@ fi
 if [ -f "$STATUS" ]; then STATUS_LINES=$(wc -l < "$STATUS"); fi
 "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}" >&2
 # A spawned pane is not proof that the brief was consumed. Only a new worker
-# declaration counts; captures cannot supply start proof.
+# declaration counts.
 polls=${FM_BOAT_START_POLLS:-120}
 interval=${FM_BOAT_START_INTERVAL:-1}
 case "$polls" in ''|*[!0-9]*|0) die 'invalid Boat start poll limit' ;; esac
@@ -248,10 +248,13 @@ for ((poll=0; poll<polls; poll++)); do
     printf 'boat-started: %s (fresh worker status)\n' "$ID"
     break
   fi
-  fm_backend_tmux_visible_capture "=firstmate:=fm-$ID" >/dev/null || die "worker start unconfirmed: viewport unavailable for $ID; reconcile the existing task before retry"
   if [ "$poll" -lt "$((polls - 1))" ]; then sleep "$interval"; fi
 done
 if [ "$poll" -eq "$polls" ]; then
-  die "worker start unconfirmed for $ID; inspect with fm-on.sh boat-eng fm-peek.sh $ID and reconcile before retry"
+  printf 'error: worker %s did not prove start with a fresh status; a Codex folder-trust prompt is a known cause. Reconcile the same task before retry.\n' "$ID" >&2
+  printf 'Inspect: fm-on.sh boat-eng fm-peek.sh %s\n' "$ID" >&2
+  printf 'If the live pane shows that prompt, answer: fm-on.sh boat-eng fm-send.sh %s --key Enter\n' "$ID" >&2
+  printf 'Then inspect: fm-on.sh boat-eng fm-peek.sh %s\n' "$ID" >&2
+  exit 1
 fi
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"
