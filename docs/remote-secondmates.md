@@ -565,8 +565,11 @@ The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact
 
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
-The approved box and SSH alias are pinned by the sender; `--prepare --code-only` takes a valid task envelope on stdin and performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
-Use the sender for each overflow resume: an independent `boat resume` does not establish the current instance's `--no-env` receipt, so later dispatch is refused.
+Record the approved box id in the controller home's `config/boat-box-id`; the sender's header owns its validation and the fixed `boat-prove` SSH alias.
+`--prepare --code-only` takes a valid task envelope on stdin and performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
+Use the sender for each overflow resume so it establishes the current instance's `fm-code` environment receipt; an independent resume does not authorize later dispatch.
+A box once resumed with `--no-env` can never receive named-environment injection and needs a replacement environment-enabled box.
+Changing the configured id requires approval of that replacement; the sender never creates or replaces boxes.
 
 Send one JSON task envelope whose `intent` and `spec` contain only code-only task prose, with the concrete `harness`, `model`, and `effort` already resolved under the ordinary dispatch and quota rules:
 
@@ -578,11 +581,14 @@ The box generates its own normal worker brief and operational paths, allocates i
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
-Ships require `gh-axi` installed on the box; GitHub credential setup remains a separate operation.
-The sender supplies the effective Git commit name and email from the controller's firstmate project for every ship and scout, and the worker applies it only to that worker's isolated worktree.
-Boat worktree pools live only on the box, every worker there receives that controller identity and overwrites a reused slot before launch, and PC pools never host Boat workers.
-Boat ship PR delivery waits for a separate provisioning follow-up: the box must receive GitHub authentication from Infisical through a Boat-provisioned machine identity, never from this PC.
+Provision the dedicated `fm-code` Boat environment with GitHub access enabled and secrets, Boat credentials, and agent credentials disabled.
+The box acts as the captain's GitHub account through Boat's own GitHub connection; no PC credential or Infisical token is transferred.
+Install `gh-axi` on the box and ensure its worker harnesses have working logins; this environment does not inject agent logins.
+Before backlog intake, every ship and scout resolves the injected GitHub account on the box and derives its public noreply committer name and email.
+The worker applies that identity only to its isolated worktree, including reused slots; no identity is read from the controller's Git configuration or accepted in task JSON.
+Boat worktree pools live only on the box, and PC pools never host Boat workers.
 Do not send a token in task JSON: the current remote job transport stages stdin on disk.
+The separate live delivery check must prove GitHub authentication, repository access, and PR delivery on the approved environment-enabled box before reporting this setup as working.
 
 Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.
 The worker does not auto-answer Codex directory-trust text because a rendered transcript cannot prove an active modal.
