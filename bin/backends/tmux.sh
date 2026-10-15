@@ -26,6 +26,22 @@
 # shellcheck source=bin/fm-wsl-interop-lib.sh
 . "$FM_BACKEND_LIB_DIR/fm-wsl-interop-lib.sh"
 
+# Bind lifecycle reads and writes to the task's durable server identity.
+# TMUX is tmux's native socket selector; clearing TMUX_PANE prevents a caller's
+# pane id on another server from becoming this task's launch container.
+# Legacy records retain the caller's selector and require process absence when
+# missing (fm_control_endpoint_absence_verdict owns that proof).
+fm_backend_tmux_bind_record() {  # <meta-file>
+  local meta=$1 socket
+  grep -q '^tmux_socket=' "$meta" || return 0
+  socket=$(fm_backend_meta_exact_value "$meta" tmux_socket) || return 1
+  case "$socket" in /*) ;; *) return 1 ;; esac
+  case "$socket" in *[$'\n\r\t']*) return 1 ;; esac
+  TMUX="$socket,0,0"
+  export TMUX
+  unset TMUX_PANE
+}
+
 # fm_backend_tmux_resolve_bare_selector: the live-window-listing fallback for a
 # selector that is neither an explicit target nor a task selector routed
 # through meta - an ad hoc window name with no recorded task. Mirrors the

@@ -807,17 +807,16 @@ test_missing_tmux_endpoint_reports_gone_only_once_proven() {
   dir=$(new_case gone)
   add_task "$dir" t1 claude
   : > "$dir/fake/windows"
-  # `missing` on tmux is not a finding about the endpoint on its own: it is
-  # read through this seat's server, and the window could live on another.
-  # This legacy record names no socket, and no server this user could address
-  # holds the window, so its absence is proven and exit reports exactly that -
-  # without sending anything (docs/agent-control.md "Reclaiming a task whose
-  # endpoint is gone"). tests/fm-control-relaunch.test.sh pins the refusals.
+  # A missing endpoint needs independent process evidence. Make the inventory
+  # unreadable explicitly so this refusal never depends on the host's services.
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$dir/fakebin/ps"
+  cp "$dir/fakebin/ps" "$dir/fakebin/lsof"
+  chmod +x "$dir/fakebin/ps" "$dir/fakebin/lsof"
   out=$(run_control "$dir" t1 exit); rc=$?
-  expect_code 0 "$rc" "a tmux endpoint proven gone is exit's postcondition already holding"$'\n'"$out"
-  assert_contains "$out" "endpoint-gone t1" "exit must report the endpoint gone rather than a stop it performed"
-  [ -z "$(literals "$dir")" ] || fail "nothing may be sent into an endpoint that is gone"
-  pass "fm-control exit: a tmux endpoint proven gone reports endpoint-gone and sends nothing"
+  expect_code 1 "$rc" "a tmux endpoint whose absence cannot be proven must refuse"
+  assert_not_contains "$out" "endpoint-gone" "exit must not report a stop it could not prove"
+  [ -z "$(literals "$dir")" ] || fail "nothing may be sent into an endpoint exit cannot trust"
+  pass "fm-control exit: an unprovable tmux endpoint refuses instead of claiming the agent stopped"
 }
 
 test_interrupt_refuses_when_no_agent_runs() {

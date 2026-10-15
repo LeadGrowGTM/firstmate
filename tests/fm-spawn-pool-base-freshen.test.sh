@@ -689,6 +689,74 @@ lay_out_as_pool_slot() {
   SLOT_CLAIM="$slot_root/1/.fm-slot-owner"
 }
 
+test_pool_custody_refuses_before_refresh_or_claim() {
+  local variant rec id other other_home recorded before_head before_remote before_reflog before_claim out status launch_log pane_log
+  for variant in same-home sibling-home alias unsafe-metadata other-claim; do
+    id="pool-custody-${variant}-r1"
+    other="prior-${variant}-r1"
+    rec=$(make_case "custody-$variant" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    other_home=$HOME_DIR
+    recorded=$POOL_DIR
+    case "$variant" in
+      sibling-home)
+        other_home="$CASE_DIR/secondmate-home"
+        mkdir -p "$other_home/state" "$other_home/data" "$other_home/config"
+        printf '%s\n' "- mate - fixture (home: $other_home; scope: test; projects: project; added 2026-01-01)" \
+          > "$HOME_DIR/data/secondmates.md"
+        ;;
+      alias)
+        ln -s "$POOL_DIR" "$CASE_DIR/pool-alias"
+        recorded="$CASE_DIR/pool-alias"
+        ;;
+    esac
+    if [ "$variant" != other-claim ]; then
+      if [ "$variant" = unsafe-metadata ]; then
+        printf 'worktree=%s\nworktree=%s\n' "$POOL_DIR" "$POOL_DIR" \
+          > "$other_home/state/$other.meta"
+      else
+        fm_write_meta "$other_home/state/$other.meta" \
+          "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+          "worktree=$recorded" "project=$PROJECT_DIR" "kind=scout"
+      fi
+    fi
+    before_claim=
+    if [ "$variant" = other-claim ]; then
+      printf 'task=%s\nhome=%s\n' "$other" "$other_home" > "$SLOT_CLAIM"
+      before_claim=$(cat "$SLOT_CLAIM")
+    fi
+    before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+    before_remote=$(git -C "$POOL_DIR" rev-parse --verify -q refs/remotes/origin/main || true)
+    before_reflog=$(git -C "$POOL_DIR" reflog)
+    launch_log="$CASE_DIR/launch.log"
+    pane_log="$CASE_DIR/pane.log"
+    out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$variant: spawn accepted a slot already held by $other"
+    assert_absent "$HOME_DIR/state/$id.meta" "$variant: refused spawn published metadata"
+    if [ "$variant" = other-claim ]; then
+      [ "$(cat "$SLOT_CLAIM")" = "$before_claim" ] \
+        || fail "$variant: refused spawn overwrote the owner marker"
+    else
+      assert_absent "$SLOT_CLAIM" "$variant: refused spawn wrote a new owner marker"
+    fi
+    [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] \
+      || fail "$variant: refused spawn moved HEAD"
+    [ "$(git -C "$POOL_DIR" rev-parse --verify -q refs/remotes/origin/main || true)" = "$before_remote" ] \
+      || fail "$variant: refused spawn fetched the remote base"
+    [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] \
+      || fail "$variant: refused spawn changed the reflog"
+    [ ! -e "$POOL_DIR/advanced-main.txt" ] \
+      || fail "$variant: refused spawn refreshed the checkout"
+    [ ! -s "$launch_log" ] || fail "$variant: refused spawn launched a worker"
+    if [ -f "$pane_log" ]; then
+      assert_no_grep 'treehouse get' "$pane_log" "$variant: custody refusal happened after pool acquisition"
+    fi
+    pass "spawn refuses a $variant pool custody collision before refresh and claim"
+  done
+}
+
 # The spawn side of the slot-owner claim that bin/fm-teardown.sh later reads:
 # a launched task's claim names it, a slot that cannot be claimed refuses before
 # anything is published, and an abort while the allocation lock is still held
@@ -720,7 +788,7 @@ test_pool_slot_claim_follows_the_spawn_outcome() {
   out=$(run_spawn "$id" --scout)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn launched a worker on a slot it could not claim"
-  assert_contains "$out" "could not claim Treehouse pool slot" \
+  assert_contains "$out" "unreadable custody" \
     "spawn did not name the unclaimable slot as the reason"
   [ -d "$SLOT_CLAIM" ] || fail "spawn replaced the directory blocking its slot claim"
   [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "spawn published a record for an unclaimable slot"
@@ -876,6 +944,7 @@ test_scout_base_branch_refused_on_gerrit_forge() {
 
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
+test_pool_custody_refuses_before_refresh_or_claim
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
 test_named_base_branch_starts_from_that_branch

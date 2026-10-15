@@ -154,6 +154,16 @@ Observed output:
 ok - real tmux: default spawn and inventory share the exact session, with no prefix fallback
 ```
 
+The preserved-copy absence proof was verified on 2026-10-15 on Linux 6.6.87.2-microsoft-standard-WSL2 with tmux 3.4, using the same smoke command above.
+The public control command reads a recorded private socket and a real process inventory; a descendant process blocks recovery even when its arguments contain no worktree path.
+Observed output:
+
+```text
+ok - real tmux: a second private server can hide a live endpoint from the current socket
+ok - real tmux: control proves a missing recorded endpoint gone through its socket and process inventory
+ok - real process: kernel cwd identifies a rooted process that command arguments do not
+```
+
 Foreground-process behavior was verified on 2026-07-07 with tmux 3.6a on macOS.
 
 ```sh

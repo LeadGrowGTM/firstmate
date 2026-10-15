@@ -114,3 +114,86 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
     printf 'other'
   fi
 }
+
+# Recovery proof, independent of harness names: EVERY same-user process rooted
+# in the recorded copy is a possible surviving worker. No signals are sent.
+# Print matching pids; a failed inventory or an unreadable live cwd refuses.
+# Linux uses kernel cwd links, including descendants in subdirectories. macOS
+# uses the bounded cwd-only lsof inventory, never a recursive file-tree walk.
+fm_agent_worktree_processes() {  # <worktree> [spawn-gen] -> pids (empty means none)
+  local worktree=$1 generation=${2:-} out pid path line
+  [ -d "$worktree" ] || return 1
+  worktree=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
+  case "$(uname -s)" in
+    Linux)
+      python3 - "$worktree" "$generation" <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import sys
+import re
+
+try:
+    root = sys.argv[1]
+    generation = re.fullmatch(r"s([0-9]+)\..+", sys.argv[2])
+    cutoff = int(generation[1]) if generation else None
+    boot = None
+    if cutoff is not None:
+        for line in Path("/proc/stat").read_text().splitlines():
+            if line.startswith("btime "):
+                boot = int(line.split()[1])
+    inventory = subprocess.run(
+        ["ps", "-u", str(os.geteuid()), "-o", "pid="],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    if not inventory or any(not pid.isdigit() for pid in inventory):
+        raise RuntimeError("unreadable process inventory")
+    for pid in inventory:
+        process = Path("/proc") / pid
+        try:
+            cwd = os.readlink(process / "cwd")
+        except OSError:
+            try:
+                stat = (process / "stat").read_text()
+            except FileNotFoundError:
+                continue
+            fields = stat.rsplit(")", 1)[1].split()
+            if fields[0] == "Z":
+                continue
+            # A process born before this launch cannot be its agent or child.
+            # This permits an unreadable pre-existing user service, while an
+            # unreadable possible worker remains a refusal. Keep two seconds
+            # of headroom for the whole-second boot/launch timestamps.
+            if boot is not None and boot + int(fields[19]) / os.sysconf("SC_CLK_TCK") < cutoff - 2:
+                continue
+            raise RuntimeError(f"cannot read live process {pid}'s cwd")
+        if cwd == root or cwd.startswith(root + "/"):
+            print(pid)
+except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, IndexError) as error:
+    print(f"process absence unproven: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+      ;;
+    Darwin)
+      out=$(lsof -a -u "$(id -u)" -d cwd -Fpn 2>&1) || return 1
+      [ -n "$out" ] || return 1
+      pid=
+      while IFS= read -r line; do
+        case "$line" in
+          p*) pid=${line#p}; case "$pid" in ''|*[!0-9]*) return 1 ;; esac ;;
+          fcwd) [ -n "$pid" ] || return 1 ;;
+          n*)
+            [ -n "$pid" ] || return 1
+            path=${line#n}
+            case "$path" in "$worktree"|"$worktree"/*) printf '%s\n' "$pid" ;; esac
+            ;;
+          '') ;;
+          *) return 1 ;;
+        esac
+      done <<EOF
+$out
+EOF
+      ;;
+    *) return 1 ;;
+  esac
+}

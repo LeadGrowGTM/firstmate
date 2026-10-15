@@ -81,12 +81,9 @@
 #   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
-#   merely unreachable from here: HERDR must still read the recorded pane as
-#   gone once that session's server is running again, and TMUX must prove its
-#   server died through socket age and process attribution. A re-created tmux window opens in this process's
-#   container session, and the republished record carries its new socket. An
-#   endpoint that turns out to have survived, or that cannot be proven absent,
-#   refuses. The worktree is reused untouched either way; a
+#   merely unreachable from here. fm_control_endpoint_absence_verdict owns the
+#   tmux socket/process proof and Herdr recorded-session recheck. A surviving
+#   agent or unprovable absence refuses. The worktree is reused untouched either way; a
 #   rebind is a recovery, never a teardown. Only a crewmate or scout rebinds: a
 #   secondmate whose endpoint is gone is respawned by its own owner
 #   (`--secondmate`, driven by the session-start liveness sweep).
@@ -2003,6 +2000,14 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
+  if [ "$BACKEND" = tmux ]; then
+    SPAWN_CALLER_TMUX=${FM_CONTROL_CALLER_TMUX-${TMUX-}}
+    SPAWN_CALLER_TMUX_PANE=${FM_CONTROL_CALLER_TMUX_PANE-${TMUX_PANE-}}
+    fm_backend_tmux_bind_record "$RELAUNCH_META" || {
+      echo "error: task $ID has malformed tmux socket identity" >&2
+      exit 1
+    }
+  fi
   # A relaunch must PROVE the previous agent is gone before it launches another
   # one into the same endpoint, and only tmux and herdr have a recovery-grade
   # classifier that can (bin/fm-control-lib.sh owns that capability table).
@@ -2022,14 +2027,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # endpoint was DESTROYED" with "the endpoint is UNREACHABLE from here right
   # now", and an unreachable endpoint can still hold the live agent this
   # relaunch would duplicate. So absence is PROVEN before it may rebind, never
-  # inferred from a failed read:
-  #   herdr - the recorded session's server is started, and the recorded pane is
-  #           RE-READ through that session's own socket. `dead` means the pane
-  #           survived the restart and is adopted after all; `alive` means the
-  #           agent came back and refuses; only a second `missing` proves the
-  #           pane itself did not survive.
-  #   tmux  - the server's death is proven from socket age and process
-  #           attribution, never from a missing session or window.
+  # inferred from a failed read. fm_control_endpoint_absence_verdict owns the
+  # per-backend proof, including the recorded tmux socket and process scan.
   # Every transient or self-contradicting read stays `unreadable`/`ambiguous`
   # and refuses as it always did (bin/fm-backend.sh's fm_backend_agent_state
   # owns that vocabulary). The proof itself lives in one place for the whole
@@ -2037,8 +2036,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # `relaunch` cannot reach two different answers about one endpoint.
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
   if [ "$RELAUNCH_STATE" = missing ]; then
-    RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET" \
-      "$(fm_meta_get "$RELAUNCH_META" tmux_socket)" "$(fm_meta_get "$RELAUNCH_META" spawn_gen)")
+    RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
     case "${RELAUNCH_ABSENCE%%$'\t'*}" in
       gone) RELAUNCH_STATE=missing ;;
       dead) RELAUNCH_STATE=dead ;;
@@ -3493,7 +3491,7 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
   SPAWN_PROJECT_CAPACITY=$FM_PROJECT_CAPACITY
   SPAWN_PROJECT_CAPACITY_ANY=$FM_PROJECT_CAPACITY_ANY
 fi
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] &&
+if [ "$KIND" != secondmate ] &&
   { [ "$BACKEND" != orca ] || [ -n "$SPAWN_PROJECT_CAPACITY_ANY" ]; }; then
   SPAWN_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ_ABS") || {
     echo "error: could not resolve the shared Treehouse project lock for $PROJ_ABS" >&2
@@ -3508,6 +3506,16 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] &&
     exit 1
   fi
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
+fi
+if [ "$RELAUNCH" = 1 ] && [ "$KIND" != secondmate ]; then
+  fm_worktree_custody_check "$STATE" "$RELAUNCH_META" "$RELAUNCH_WT" "$ID" || exit 1
+  if fm_treehouse_pool_slot "$PROJ_ABS" "$RELAUNCH_WT"; then
+    fm_treehouse_slot_owner_state "$RELAUNCH_WT" "$ID"
+    case "$FM_TREEHOUSE_SLOT_OWNER" in
+      mine|absent) ;;
+      *) echo "error: task $ID's recorded pool copy has conflicting or unreadable custody; refusing to relaunch" >&2; exit 1 ;;
+    esac
+  fi
 fi
 if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
   if ! fm_project_capacity_occupants "$SPAWN_TREEHOUSE_PROJECT_LOCK" "$PROJ_ABS" "$STATE" "$ID"; then
@@ -4093,6 +4101,18 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # untouched. Until that record is published the window is this launch's to
     # close on abort, so a refused attempt leaves no window behind to collide
     # with a retry.
+    if [ -n "$SPAWN_CALLER_TMUX" ]; then
+      TMUX=$SPAWN_CALLER_TMUX
+      export TMUX
+    else
+      unset TMUX
+    fi
+    if [ -n "$SPAWN_CALLER_TMUX_PANE" ]; then
+      TMUX_PANE=$SPAWN_CALLER_TMUX_PANE
+      export TMUX_PANE
+    else
+      unset TMUX_PANE
+    fi
     SES=$(fm_backend_tmux_container_ensure) || {
       echo "error: could not resolve the tmux container session to re-create task $ID's endpoint in" >&2
       exit 1
@@ -4131,46 +4151,56 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # session from a seat that is not in it would silently relocate the task
     # onto another herdr server - an identity change, published as a
     # self-consistent but wrong record.
-    HERDR_REBIND_SES=${RELAUNCH_TARGET%%:*}
-    HERDR_CONTAINER_RAW=$(HERDR_PANE_ID="$RELAUNCH_LAUNCHER_PANE_ID" \
-      fm_backend_herdr_container_ensure "$PROJ_ABS" launcher-home "$HERDR_REBIND_SES") || {
-      # container_ensure returns 1 for several unrelated reasons - a failed
-      # version check, a server that will not start, an ambiguous workspace
-      # label, a cross-session launcher identity, a failed workspace create -
-      # and each already printed its own accurate message. Add only what this
-      # layer actually knows, and name the session mismatch solely when there
-      # IS one, rather than asserting a cause this condition cannot establish.
-      #
-      # A seat with NO herdr pane never reaches the cross-session guard at all:
-      # fm_backend_herdr_launcher_identity returns 2 for it and the placement
-      # falls back to the recorded session's labeled container, which is what
-      # makes a plain ssh or cron reclaim work. Its ambient session still reads
-      # `default` (fm_backend_herdr_session's fallback), so the inequality alone
-      # would fire for EVERY named-session task reclaimed from a plain shell and
-      # send the operator chasing a session mismatch that was never the cause.
-      HERDR_AMBIENT_SES=$(fm_backend_herdr_session)
-      if [ -n "$RELAUNCH_LAUNCHER_PANE_ID" ] && [ "$HERDR_AMBIENT_SES" != "$HERDR_REBIND_SES" ]; then
-        echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; this seat is running in herdr session '$HERDR_AMBIENT_SES', and a reclaim never moves a task to another session" >&2
-      else
-        echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; see the refusal above for what failed" >&2
+    if [ "$BACKEND" = tmux ]; then
+      SES=${RELAUNCH_TARGET%%:*}
+      if ! tmux has-session -t "=$SES" 2>/dev/null; then
+        tmux new-session -d -s "$SES" -n recovery -c "$PROJ_ABS" || exit 1
       fi
-      exit 1
-    }
-    CONTAINER=${HERDR_CONTAINER_RAW%%$'\t'*}
-    HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
-    HERDR_SES=${CONTAINER%%:*}
-    HERDR_WORKSPACE_ID=${CONTAINER#*:}
-    HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
-    read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
+      T="$SES:$W"
+      WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
+      WT_TARGET=$WID
+    else
+      HERDR_REBIND_SES=${RELAUNCH_TARGET%%:*}
+      HERDR_CONTAINER_RAW=$(HERDR_PANE_ID="$RELAUNCH_LAUNCHER_PANE_ID" \
+        fm_backend_herdr_container_ensure "$PROJ_ABS" launcher-home "$HERDR_REBIND_SES") || {
+        # container_ensure returns 1 for several unrelated reasons - a failed
+        # version check, a server that will not start, an ambiguous workspace
+        # label, a cross-session launcher identity, a failed workspace create -
+        # and each already printed its own accurate message. Add only what this
+        # layer actually knows, and name the session mismatch solely when there
+        # IS one, rather than asserting a cause this condition cannot establish.
+        #
+        # A seat with NO herdr pane never reaches the cross-session guard at all:
+        # fm_backend_herdr_launcher_identity returns 2 for it and the placement
+        # falls back to the recorded session's labeled container, which is what
+        # makes a plain ssh or cron reclaim work. Its ambient session still reads
+        # `default` (fm_backend_herdr_session's fallback), so the inequality alone
+        # would fire for EVERY named-session task reclaimed from a plain shell and
+        # send the operator chasing a session mismatch that was never the cause.
+        HERDR_AMBIENT_SES=$(fm_backend_herdr_session)
+        if [ -n "$RELAUNCH_LAUNCHER_PANE_ID" ] && [ "$HERDR_AMBIENT_SES" != "$HERDR_REBIND_SES" ]; then
+          echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; this seat is running in herdr session '$HERDR_AMBIENT_SES', and a reclaim never moves a task to another session" >&2
+        else
+          echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; see the refusal above for what failed" >&2
+        fi
+        exit 1
+      }
+      CONTAINER=${HERDR_CONTAINER_RAW%%$'\t'*}
+      HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
+      HERDR_SES=${CONTAINER%%:*}
+      HERDR_WORKSPACE_ID=${CONTAINER#*:}
+      HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+      read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF
-    if [ -z "$HERDR_TAB_ID" ] || [ -z "$HERDR_PANE_ID" ]; then
-      echo "error: herdr did not return a tab/pane id for $W" >&2
-      exit 1
+      if [ -z "$HERDR_TAB_ID" ] || [ -z "$HERDR_PANE_ID" ]; then
+        echo "error: herdr did not return a tab/pane id for $W" >&2
+        exit 1
+      fi
+      T="$HERDR_SES:$HERDR_PANE_ID"
+      SES=$HERDR_SES
+      WT_TARGET=$T
     fi
-    T="$HERDR_SES:$HERDR_PANE_ID"
-    SES=$HERDR_SES
-    WT_TARGET=$T
   fi
 else
   case "$BACKEND" in
@@ -4872,7 +4902,7 @@ spawn_wait_treehouse_returned() {  # <path>
 spawn_lease_clone_worktree() {
   local errfile leased pool rc=0
   pool=$(fm_treehouse_home_pool "$FM_HOME") || return 1
-  fm_treehouse_pool_check "$FM_HOME" "$PROJ_ABS" "$pool" || return 1
+  fm_treehouse_pool_custody_check "$FM_HOME" "$PROJ_ABS" "$pool" || return 1
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
     {
@@ -4938,6 +4968,7 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+  fm_treehouse_pool_custody_check "$FM_HOME" "$PROJ_ABS" "$HOME" records || exit 1
   pool_refusal_file=$(umask 077; mktemp "$STATE/.fm-treehouse-pool.XXXXXX") || exit 1
   if ! spawn_send_text_line "$WT_TARGET" "bash $(shell_quote "$SCRIPT_DIR/fm-treehouse-pool-check.sh") $(shell_quote "$FM_HOME") $(shell_quote "$PROJ_ABS") $(shell_quote "$pool_refusal_file") && treehouse get"; then
     rm -f -- "$pool_refusal_file"
@@ -5008,6 +5039,12 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # A per-home lease is still a pool slot once its common dir is this clone, so
   # the same claim covers it.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
+    fm_worktree_custody_check "$STATE" "$STATE/$ID.meta" "$WT" "$ID" || exit 1
+    fm_treehouse_slot_owner_state "$WT" "$ID"
+    if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ]; then
+      echo "error: Treehouse pool slot $WT still belongs to task $FM_TREEHOUSE_SLOT_OWNER_ID; retire that stale claim before allocation" >&2
+      exit 1
+    fi
     if ! fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME"; then
       echo "error: could not claim Treehouse pool slot $WT for task $ID; refusing to launch a worker whose slot cannot later be proved to be its own; inspect window $T" >&2
       exit 1

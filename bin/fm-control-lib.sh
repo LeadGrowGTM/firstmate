@@ -304,8 +304,7 @@ fm_control_backend_state_verified() {  # <backend>
 # fm_control_endpoint_absence_verdict: the ONE owner of the per-backend proof
 # that an endpoint reading `missing` is actually GONE rather than merely
 # unreachable from this seat. Call it only for a `missing` raw state. A tmux
-# caller passes the record's `tmux_socket=` and `spawn_gen=` values; every other
-# backend ignores them.
+# caller passes the task record; every other backend ignores it.
 #
 # Prints "<verdict>\t<reason>" - always exactly one TAB, so a caller splits
 # unambiguously with ${raw%%$'\t'*} and ${raw#*$'\t'}. The reason is empty
@@ -333,20 +332,33 @@ fm_control_backend_state_verified() {  # <backend>
 #     passes `--session <session>`, so the recheck starts and reads the session
 #     the RECORD names, through that session's own socket. The answer is about
 #     the task's endpoint and nothing else.
-#   tmux CAN prove it only when every relevant socket is silent or answers
-#     with a server newer than the recorded endpoint, and every live tmux
-#     server process is accounted for by an answering socket.
+#   tmux requires socket and server attribution plus a same-user process-cwd
+#     inventory proving no process remains rooted in the recorded worktree.
+#     A legacy record without a socket must pass the same conservative proof.
 #
 # Both control-plane callers share this one implementation so the proof cannot
 # drift into two answers for the same endpoint.
-fm_control_endpoint_absence_verdict() {  # <backend> <target> [<tmux-socket>] [<spawn-gen>]
-  local backend=${1-} target=${2-} socket=${3-} spawn_gen=${4-}
+fm_control_endpoint_absence_verdict() {  # <backend> <target> [<meta-file>]
+  local backend=${1-} target=${2-} meta=${3-} socket spawn_gen worktree rooted
   local sock candidates probe kind pid started epoch process_inventory process_type process_pid found i
   local -a answering_pids=() answering_sockets=() server_pids=() tmux_pids=()
   fm_backend_source "$backend" \
     || { printf 'unproven\tbackend %s could not be loaded to prove anything about that endpoint' "'$backend'"; return 0; }
   case "$backend" in
     tmux)
+      if [ ! -f "$meta" ] || [ -L "$meta" ] || [ ! -r "$meta" ]; then
+        printf 'unproven\ttmux absence requires a readable regular task record'
+        return 0
+      fi
+      if grep -q '^tmux_socket=' "$meta"; then
+        socket=$(fm_backend_meta_exact_value "$meta" tmux_socket) || socket=
+        case "$socket" in /*) ;; *) printf 'unproven\tthe recorded tmux socket identity is malformed'; return 0 ;; esac
+        case "$socket" in *[$'\n\r\t']*) printf 'unproven\tthe recorded tmux socket identity is malformed'; return 0 ;; esac
+      else
+        socket=
+      fi
+      spawn_gen=$(fm_meta_get "$meta" spawn_gen)
+      worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
       case "$target" in
         *:*:*|'':*|*:'') printf 'unproven\ttmux target %s is not an exact session:window address' "'$target'"; return 0 ;;
         *:*) ;;
@@ -420,7 +432,13 @@ EOF
         printf 'unproven\ttmux process %s exists while no socket answers' "${tmux_pids[0]}"
         return 0
       fi
-      printf 'gone\t'
+      if ! rooted=$(fm_agent_worktree_processes "$worktree" "$spawn_gen"); then
+        printf 'unproven\tprocess absence in the recorded worktree could not be proven'
+      elif [ -n "$rooted" ]; then
+        printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
+      else
+        printf 'gone\tno live process is rooted in the recorded worktree'
+      fi
       ;;
     herdr)
       # Start the RECORDED session's server (only the server - nothing is

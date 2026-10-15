@@ -41,11 +41,15 @@ command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-backend-smoke-$$"
 OUTER_SOCKET=
+HIDDEN_SOCKET=
+ROOTED_PID=
 SHIM_DIR=
 trap cleanup_all EXIT
 
 cleanup_all() {
+  [ -z "$ROOTED_PID" ] || { kill "$ROOTED_PID" 2>/dev/null || true; wait "$ROOTED_PID" 2>/dev/null || true; }
   [ -z "$OUTER_SOCKET" ] || "$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
+  [ -z "$HIDDEN_SOCKET" ] || "$REAL_TMUX" -L "$HIDDEN_SOCKET" kill-server >/dev/null 2>&1 || true
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${SHIM_DIR:-}" ] && rm -rf "$SHIM_DIR"
 }
@@ -188,6 +192,62 @@ state=$(fm_backend_agent_state tmux "$TARGET")
 # Best-effort contract: killing an already-gone window must not error.
 fm_backend_tmux_kill "$TARGET" || fail "fm_backend_tmux_kill on an already-dead target must stay best-effort (never fail)"
 pass "real tmux: kill removes the window and the readable session inventory authoritatively classifies it missing"
+
+# A readable inventory on one socket says nothing about the endpoint on a
+# different socket. Keep both servers private and prove both CLI observations.
+HIDDEN_SOCKET="$SOCKET-hidden"
+"$REAL_TMUX" -L "$HIDDEN_SOCKET" new-session -d -s hidden -n agent \
+  || fail 'could not create the endpoint on the hidden private socket'
+[ "$(fm_backend_agent_state tmux hidden:agent)" = missing ] \
+  || fail 'the current private socket unexpectedly sees the hidden endpoint'
+"$REAL_TMUX" -L "$HIDDEN_SOCKET" has-session -t '=hidden:agent' \
+  || fail 'the recorded private socket lost its live endpoint'
+pass 'real tmux: a second private server can hide a live endpoint from the current socket'
+
+# Exercise the recovery proof through the public control command, with real
+# tmux reads and a real cwd inventory rather than a canned missing verdict.
+PROOF_HOME="$SHIM_DIR/proof-home"
+PROOF_COPY="$SHIM_DIR/recorded-worktree"
+mkdir -p "$PROOF_HOME/state" "$PROOF_COPY/nested"
+RECORDED_SOCKET=$("$REAL_TMUX" -L "$HIDDEN_SOCKET" display-message -p -t hidden:agent '#{socket_path}')
+cat > "$PROOF_HOME/state/recovery.meta" <<EOF
+window=hidden:fm-recovery
+endpoint_task_id=recovery
+tmux_socket=$RECORDED_SOCKET
+worktree=$PROOF_COPY
+project=$ROOT
+harness=codex
+kind=ship
+spawn_gen=s$(date +%s).fixture
+EOF
+proof_out=$(PATH="${PATH#*:}" FM_HOME="$PROOF_HOME" \
+  bash "$ROOT/bin/fm-control.sh" recovery exit 2>&1) \
+  || fail "real missing-endpoint control proof failed: $proof_out"
+case "$proof_out" in *endpoint-gone*) ;; *) fail "control did not confirm endpoint loss: $proof_out" ;; esac
+pass 'real tmux: control proves a missing recorded endpoint gone through its socket and process inventory'
+
+# The process guard must consider a process whose kernel cwd is a descendant
+# of the recorded worktree, even when its command line has no worktree path.
+if [ -d /proc/self/cwd ]; then
+  ROOTED_DIR="$PROOF_COPY/nested"
+  mkdir -p "$ROOTED_DIR"
+  ( cd "$ROOTED_DIR" && : > "$SHIM_DIR/rooted-ready" && exec /bin/sleep 60 ) &
+  ROOTED_PID=$!
+  while [ ! -e "$SHIM_DIR/rooted-ready" ]; do sleep 0.01; done
+  [ "$(readlink "/proc/$ROOTED_PID/cwd")" = "$ROOTED_DIR" ] \
+    || fail 'the kernel did not report the process cwd inside the worktree child'
+  case "$(ps -p "$ROOTED_PID" -o args=)" in
+    *"$ROOTED_DIR"*) fail 'the process fixture leaked the worktree path into its command line' ;;
+  esac
+  if PATH="${PATH#*:}" FM_HOME="$PROOF_HOME" \
+      bash "$ROOT/bin/fm-control.sh" recovery exit > "$SHIM_DIR/rooted-refusal" 2>&1; then
+    fail 'control claimed an orphan process in the preserved copy had stopped'
+  fi
+  grep -q 'live processes still have cwd' "$SHIM_DIR/rooted-refusal" \
+    || fail "control did not identify the surviving process: $(cat "$SHIM_DIR/rooted-refusal")"
+  kill -0 "$ROOTED_PID" 2>/dev/null || fail 'control signaled the surviving process'
+  pass 'real process: kernel cwd identifies a rooted process that command arguments do not'
+fi
 
 # --- container_ensure with a grouped viewer attached ---------------------------
 # A viewer such as an Orca view tab attaches through a grouped session

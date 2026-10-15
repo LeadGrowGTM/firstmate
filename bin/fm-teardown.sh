@@ -96,6 +96,14 @@
 # session-start sweep could still close, while a journal bound to any other pane
 # - or a version 1 attempt whose workspace is still present or unreadable - may
 # name a live quarantined space and is retained for that sweep.
+# --retire-claim performs records-only cleanup of a stale pooled-copy claim.
+# It requires a recovery-grade proof that the old agent is gone and no live
+# process rooted in its copy, under the same project/control/meta locks as
+# ordinary teardown. It archives the original metadata in
+# data/<id>/retired-worktree-claim.meta and preserves the copy, branch, commits,
+# dirty files and hooks. Only this task's own slot marker is released; another
+# holder's marker is untouched. It cannot be combined with --force and never
+# applies to secondmate homes or backend-owned Orca worktrees.
 # data/<id>/ is deliberately left in place: a successor spawn reads brief.md
 # from it.
 # Worktree-slot ownership (teardown-slot-collision): a treehouse pool slot is
@@ -192,7 +200,7 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped]
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped] [--retire-claim]
 #   --only-if-stopped is the automatic sweep guard: under the lifecycle and
 #   metadata locks, accept only a positively dead or missing worker endpoint,
 #   with no open status decision or captain hold. Secondmates, remote records,
@@ -413,12 +421,14 @@ ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
 ONLY_IF_STOPPED=0
+RETIRE_CLAIM=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
     --only-if-stopped) ONLY_IF_STOPPED=1 ;;
+    --retire-claim) RETIRE_CLAIM=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -426,6 +436,17 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+[ "$RETIRE_CLAIM" = 0 ] || [ -z "$FORCE" ] || {
+  echo "error: --retire-claim cannot be combined with --force" >&2
+  exit 2
+}
+if [ "$RETIRE_CLAIM" = 1 ] && [ -f "$STATE/$ID.meta" ]; then
+  if [ "$(fm_meta_get "$STATE/$ID.meta" kind)" = secondmate ] \
+     || [ "$(fm_meta_get "$STATE/$ID.meta" backend)" = orca ]; then
+    echo "REFUSED: --retire-claim applies only to a local pooled worker copy" >&2
+    exit 1
+  fi
+fi
 [ "$ONLY_IF_STOPPED" = 0 ] || [ -z "$FORCE" ] || {
   echo "error: --only-if-stopped cannot discard work with --force" >&2
   exit 2
@@ -2660,6 +2681,7 @@ require_exclusive_worktree_slot_record() {
 
 require_exclusive_task_worktree_slot() {
   local slot
+  [ "$RETIRE_CLAIM" != 1 ] || return 0
   slot=$(teardown_live_slot_path) || return 0
   require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot"
 }
@@ -2718,6 +2740,10 @@ TEARDOWN_SLOT_REASSIGNED_TO=
 TEARDOWN_SLOT_REASSIGNED_HOME=
 require_owned_task_worktree_slot() {
   local slot rc=0
+  if [ "$RETIRE_CLAIM" = 1 ]; then
+    TEARDOWN_SLOT_REASSIGNED=1
+    return 0
+  fi
   # A secondmate home is not a task worktree. A path that is already gone has
   # nothing to protect. Every path that still exists is decided here, including
   # one that is no longer a pool slot of this project because another clone
@@ -3622,6 +3648,68 @@ remove_secondmate_registry_entry() {
   return "$rc"
 }
 
+if [ "$RETIRE_CLAIM" = 1 ]; then
+  if [ "$KIND" = secondmate ] || [ "$BACKEND" = orca ] \
+    || ! fm_treehouse_pool_slot "$PROJ" "$WT"; then
+    echo "REFUSED: --retire-claim requires a recorded local Treehouse pool copy; nothing was changed" >&2
+    exit 1
+  fi
+  fm_control_backend_state_verified "$BACKEND" || {
+    echo "REFUSED: this backend cannot prove the stale claim's agent gone" >&2
+    exit 1
+  }
+  fm_treehouse_slot_owner_state "$WT" "$ID"
+  [ "$FM_TREEHOUSE_SLOT_OWNER" != unsafe ] || {
+    echo "REFUSED: stale claim's slot marker is unreadable or ambiguous; nothing was changed" >&2
+    exit 1
+  }
+  fm_backend_source "$BACKEND" || exit 1
+  if [ "$BACKEND" = tmux ]; then
+    fm_backend_tmux_bind_record "$META" || exit 1
+  fi
+  retirement_state=$(fm_backend_agent_state "$BACKEND" "$T")
+  case "$retirement_state" in
+    missing)
+      retirement_absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" "$META")
+      [ "${retirement_absence%%$'\t'*}" = gone ] || {
+        echo "REFUSED: stale claim's agent absence is unproven: ${retirement_absence#*$'\t'}; nothing was changed" >&2
+        exit 1
+      }
+      ;;
+    dead) ;;
+    *) echo "REFUSED: stale claim's agent is $retirement_state; nothing was changed" >&2; exit 1 ;;
+  esac
+  retirement_processes=$(fm_agent_worktree_processes "$WT" "$(fm_meta_get "$META" spawn_gen)") || {
+    echo "REFUSED: stale claim's process absence is unproven; nothing was changed" >&2
+    exit 1
+  }
+  [ -z "$retirement_processes" ] || {
+    echo "REFUSED: live processes still have cwd in the stale claim's copy; nothing was changed" >&2
+    exit 1
+  }
+  [ ! -L "$DATA/$ID" ] && { [ ! -e "$DATA/$ID" ] || [ -d "$DATA/$ID" ]; } || exit 1
+  mkdir -p "$DATA/$ID" || exit 1
+  retirement_archive="$DATA/$ID/retired-worktree-claim.meta"
+  if [ -L "$retirement_archive" ] \
+    || { [ -e "$retirement_archive" ] && [ ! -f "$retirement_archive" ]; }; then
+    echo "REFUSED: stale claim archive is not a regular file" >&2
+    exit 1
+  fi
+  retirement_tmp=$(mktemp "$DATA/$ID/.retired-worktree-claim.XXXXXX") || exit 1
+  if ! cp "$META" "$retirement_tmp" || ! mv -f "$retirement_tmp" "$retirement_archive"; then
+    rm -f "$retirement_tmp"
+    echo "REFUSED: could not archive the stale worktree claim; nothing was retired" >&2
+    exit 1
+  fi
+  # Release before removing the active record so a failed marker unlink cannot
+  # strand an ownerless claim that guarded teardown can no longer resolve.
+  fm_treehouse_slot_owner_release "$WT" "$ID"
+  fm_treehouse_slot_owner_state "$WT" "$ID"
+  [ "$FM_TREEHOUSE_SLOT_OWNER" != mine ] || {
+    echo "REFUSED: stale claim's own slot marker could not be released; its active record was retained" >&2
+    exit 1
+  }
+fi
 require_exclusive_task_worktree_slot || exit 1
 require_owned_task_worktree_slot || exit 1
 
@@ -3862,7 +3950,9 @@ fi
 
 # Fix 3 (see script header): sweep remote job workers abandoned by an already
 # pruned code root. Best effort - a sweep failure never blocks this teardown.
-"$SCRIPT_DIR/fm-remote-job-reap-orphans.sh" >&2 || true
+if [ "$RETIRE_CLAIM" != 1 ]; then
+  "$SCRIPT_DIR/fm-remote-job-reap-orphans.sh" >&2 || true
+fi
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
 if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
@@ -3968,7 +4058,9 @@ if [ "$BACKEND" = herdr ] \
   fi
 fi
 
-if [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
+if [ "$RETIRE_CLAIM" = 1 ]; then
+  : # Only the stale reservation is retired; its endpoint is left untouched.
+elif [ "$HERDR_PRESENTATION_RETIRE_CANDIDATE" = 1 ]; then
   # The presentation lock was acquired before the worktree return above; a
   # contended lock already refused this teardown while everything was intact.
   if teardown_herdr_session_lock_held "$HERDR_PRESENTATION_SESSION"; then
@@ -4175,7 +4267,9 @@ fi
 if [ -d "$STATE" ]; then
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 fi
-if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
+if [ "$RETIRE_CLAIM" = 1 ]; then
+  echo "teardown $ID complete (stale claim retired; copy $WT preserved; metadata archived at $retirement_archive)"
+elif [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT)"

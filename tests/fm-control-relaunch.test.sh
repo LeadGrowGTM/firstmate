@@ -43,9 +43,13 @@ TMP_ROOT=$(fm_test_tmproot fm-control-relaunch)
 mkdir -p "$TMP_ROOT"
 TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
 TASK_TMPS=()
+ROOTED_PIDS=()
 
 relaunch_cleanup() {
   local d
+  for d in "${ROOTED_PIDS[@]:-}"; do
+    [ -z "$d" ] || { kill "$d" 2>/dev/null || true; wait "$d" 2>/dev/null || true; }
+  done
   for d in "${TASK_TMPS[@]:-}"; do
     [ -n "$d" ] && fm_test_remove_tree "$d"
   done
@@ -71,6 +75,8 @@ if [ "${1:-}" = -S ]; then
   exec "$FM_FAKE_REAL_TMUX" "$@"
 fi
 case "${1:-}" in
+  has-session)
+    [ ! -f "$D/session-missing" ] && [ ! -f "$D/server-dead" ] ; exit $? ;;
   send-keys)
     shift
     literal=0
@@ -118,7 +124,7 @@ case "${1:-}" in
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
-        *socket_path*) printf '%s\n' "$D/socket"; exit 0 ;;
+        *socket_path*) printf '%s/recorded-socket\n' "$D"; exit 0 ;;
         *pane_current_path*)
           if [ -n "${FM_FAKE_CWD_RACE_READY:-}" ]; then
             : > "$FM_FAKE_CWD_RACE_READY"
@@ -154,8 +160,7 @@ case "${1:-}" in
     fi
     [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
   new-session)
-    # Nothing in the relaunch path may ever create a session; recording the
-    # call is how a refusal test proves that.
+    # A destroyed recorded session may be recreated by recovery.
     shift
     ses=
     while [ $# -gt 0 ]; do
@@ -165,6 +170,9 @@ case "${1:-}" in
       esac
     done
     printf '%s\n' "$ses" >> "$D/created-sessions"
+    [ ! -f "$D/session-missing" ] || rm "$D/session-missing"
+    [ ! -f "$D/server-dead" ] || rm "$D/server-dead"
+    printf 'recovery\n' > "$D/windows"
     exit 0 ;;
   new-window)
     # Model the one thing an endpoint re-creation depends on: the window now
@@ -240,7 +248,9 @@ add_ship_task() {
 Exercise relaunch behavior for $id.
 
 ## Firstmate spec
-Preserve the task while replacing its agent process.
+Goal: Preserve the task while replacing its agent process.
+Off-limits: Work outside this private test fixture.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Exercise the relaunch interface using the fixture's stubbed endpoint.
 EOF
   {
     echo "window=$ses:fm-$id"
@@ -422,6 +432,12 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   assert_grep "/exit" "$dir/fake/literal" "the previous agent should have been exited"
   assert_grep "cd -- '$dir/wt'" "$dir/fake/keys" "the replacement launch must enter the recorded worktree"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement should have been launched"
+  [ "$(meta_field "$dir" rl1 tmux_socket)" = "$dir/fake/recorded-socket" ] \
+    || fail "relaunch did not record its tmux socket"
+  out=$(run_control "$dir" rl1 relaunch --note "resume the recorded socket"); rc=$?
+  expect_code 0 "$rc" "a second relaunch should reuse the recorded socket"$'\n'"$out"
+  [ "$(grep -c '^tmux_socket=' "$dir/home/state/rl1.meta")" = 1 ] \
+    || fail "a second relaunch duplicated its socket identity"
   pass "fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree"
 }
 
@@ -2415,16 +2431,19 @@ test_spawn_relaunch_refuses_a_pane_outside_the_worktree() {
 # window.
 strand_endpoint() {  # <case-dir> <id>
   : > "$1/fake/windows"
+  # Real launches record their generation before recovery. Pre-existing
+  # unreadable user services cannot be children of this fixture's launch.
+  printf 'spawn_gen=s%s.%s.%s\n' "$(date +%s)" "$$" "$RANDOM" >> "$1/home/state/$2.meta"
 }
 
-# A tmux `missing` read through this seat's server says nothing about a window
-# on another server, so both verbs refuse unless the window is proven absent
-# from the server it lived on.
-assert_tmux_missing_refuses() {  # <case-dir> <id> <what-was-staged>
-  local dir=$1 id=$2 what=$3 out rc brief_before
+# A missing endpoint may be rebound only after the recovery guards prove that
+# no same-user process is still running from the recorded worktree.
+assert_tmux_missing_refuses() {  # <case-dir> <id> <what-was-staged> [expected-reason]
+  local dir=$1 id=$2 what=$3 expected=${4:-} out rc brief_before
 
   out=$(run_spawn "$dir" "$id" --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "relaunch must refuse a tmux endpoint whose absence cannot be proven ($what)"$'\n'"$out"
+  [ -z "$expected" ] || assert_contains "$out" "$expected" "refusal did not establish $what"
   assert_absent "$dir/fake/created-windows" "a refused relaunch must not create a window ($what)"
   assert_absent "$dir/fake/created-sessions" "a refused relaunch must not create a session ($what)"
   [ ! -s "$dir/fake/literal" ] || fail "a refused relaunch must send nothing into any pane ($what)"
@@ -2460,8 +2479,8 @@ assert_tmux_reclaimed() {  # <case-dir> <id> <what-was-staged>
   [ "$(grep -cx "fm-$id" "$dir/fake/created-windows")" = 1 ] \
     || fail "a reclaim must create exactly one fresh window ($what)"
   [ "$(meta_field "$dir" "$id" window)" = "firstmate:fm-$id" ] \
-    || fail "the record must rebind to the re-created window ($what)"
-  [ "$(meta_field "$dir" "$id" tmux_socket)" = "$dir/fake/socket" ] \
+    || fail "the record must rebind to the re-created window ($what): got $(meta_field "$dir" "$id" window)"
+  [ "$(meta_field "$dir" "$id" tmux_socket)" = "$dir/fake/recorded-socket" ] \
     || fail "the record must name the re-created window's server ($what)"
   [ "$(meta_field "$dir" "$id" worktree)" = "$dir/wt" ] \
     || fail "a reclaim must keep the recorded worktree ($what)"
@@ -2550,8 +2569,8 @@ test_tmux_reclaims_a_legacy_record_no_live_server_holds() {
   dir=$(new_case tmux-legacy rl63)
   add_ship_task "$dir" rl63 claude
   # A legacy record names no socket. Its candidate server started later.
+  printf 'spawn_gen=s%s.%s.%s\n' "$(( $(date +%s) - 2 ))" "$$" "$RANDOM" >> "$dir/home/state/rl63.meta"
   start_real_tmux "$dir" rl63-crashed fmses fm-rl63 >/dev/null
-  printf 'spawn_gen=s%s.%s.%s\n' "$(date +%s)" "$$" "$RANDOM" >> "$dir/home/state/rl63.meta"
   crash_real_tmux "$dir" rl63-crashed
   /bin/sleep 1.1
   start_real_tmux "$dir" rl63-live churchill fm-other >/dev/null
@@ -2628,6 +2647,157 @@ test_tmux_refuses_an_older_candidate_for_a_legacy_record() {
   TMUX_TMPDIR="$dir/tmux-root" tmux -L rl68-live kill-server
   pass "tmux: an older legacy candidate stays unproven"
 }
+
+stage_task_work() {  # <case-dir>
+  local dir=$1 real_treehouse
+  printf 'committed work\n' > "$dir/wt/committed.txt"
+  git -C "$dir/wt" add committed.txt
+  git -C "$dir/wt" -c user.email=t@example.com -c user.name=t commit -qm 'task work'
+  printf 'tracked edit\n' >> "$dir/wt/committed.txt"
+  printf 'untracked work\n' > "$dir/wt/untracked.txt"
+  real_treehouse=$(command -v treehouse || true)
+  [ -n "$real_treehouse" ] || return 0
+  cat > "$dir/fakebin/treehouse" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [ "\$arg" = get ]; then
+    : > "$dir/fake/treehouse-get"
+    exit 99
+  fi
+done
+exec "$real_treehouse" "\$@"
+SH
+  chmod +x "$dir/fakebin/treehouse"
+}
+
+assert_task_work_preserved() {  # <case-dir> <head-before> <status-before>
+  local dir=$1 head=$2 status=$3
+  [ "$(git -C "$dir/wt" rev-parse HEAD)" = "$head" ] || fail 'recovery moved HEAD'
+  [ "$(git -C "$dir/wt" status --porcelain)" = "$status" ] || fail 'recovery changed tracked or untracked work'
+  assert_contains "$(cat "$dir/wt/committed.txt")" 'tracked edit' 'recovery lost the tracked edit'
+  assert_contains "$(cat "$dir/wt/untracked.txt")" 'untracked work' 'recovery lost the untracked file'
+}
+
+assert_relaunch_custody_refusal() {  # <case-dir> <id>
+  local dir=$1 id=$2 verb out rc head status
+  head=$(git -C "$dir/wt" rev-parse HEAD)
+  status=$(git -C "$dir/wt" status --porcelain)
+  cp "$dir/home/state/$id.meta" "$dir/meta-before"
+  cp "$dir/wt/.claude/settings.local.json" "$dir/hook-before"
+  for verb in control spawn; do
+    if [ "$verb" = control ]; then
+      out=$(run_control "$dir" "$id" relaunch --note 'preserve disputed copy'); rc=$?
+    else
+      out=$(run_spawn "$dir" "$id" --relaunch --harness claude); rc=$?
+    fi
+    expect_code 1 "$rc" "$verb must refuse disputed worktree custody: $out"
+    assert_contains "$out" 'custody' "$verb must name the custody dispute"
+    assert_task_work_preserved "$dir" "$head" "$status"
+    cmp -s "$dir/meta-before" "$dir/home/state/$id.meta" || fail "$verb changed task metadata"
+    cmp -s "$dir/hook-before" "$dir/wt/.claude/settings.local.json" || fail "$verb changed harness wiring"
+    [ "$(cat "$dir/fake/command")" = claude ] || fail "$verb stopped the old agent"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$verb touched the endpoint"
+    [ ! -e "$dir/home/state/$id.control-relaunch" ] || fail "$verb recorded a relaunch journal"
+  done
+}
+
+test_relaunch_refuses_another_tasks_canonical_worktree_claim() {
+  local dir id=rl-custody-meta
+  dir=$(new_case custody-meta "$id")
+  add_ship_task "$dir" "$id" claude
+  stage_task_work "$dir"
+  mkdir -p "$dir/wt/.claude"
+  printf 'existing wiring\n' > "$dir/wt/.claude/settings.local.json"
+  ln -s "$dir/wt" "$dir/worktree-alias"
+  printf 'worktree=%s\n' "$dir/worktree-alias" > "$dir/home/state/other-task.meta"
+  assert_relaunch_custody_refusal "$dir" "$id"
+  pass 'both relaunch verbs refuse another task record naming the same canonical worktree'
+}
+
+test_relaunch_refuses_a_conflicting_pooled_slot_owner() {
+  local dir id=rl-custody-slot slot
+  dir=$(new_case custody-slot "$id")
+  add_ship_task "$dir" "$id" claude
+  stage_task_work "$dir"
+  slot="$dir/pool/1/wt"
+  mkdir -p "${slot%/*}"
+  git -C "$dir/proj" worktree move "$dir/wt" "$slot"
+  ln -s "$slot" "$dir/wt"
+  sed "s|^worktree=.*|worktree=$slot|" "$dir/home/state/$id.meta" > "$dir/meta-pool"
+  mv "$dir/meta-pool" "$dir/home/state/$id.meta"
+  printf '%s\n' "$slot" > "$dir/fake/cwd"
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' "$slot" > "$dir/pool/treehouse-state.json"
+  printf 'task=other-task\nhome=%s\n' "$dir/home" > "$dir/pool/1/.fm-slot-owner"
+  mkdir -p "$dir/wt/.claude"
+  printf 'existing wiring\n' > "$dir/wt/.claude/settings.local.json"
+  assert_relaunch_custody_refusal "$dir" "$id"
+  assert_grep 'task=other-task' "$dir/pool/1/.fm-slot-owner" 'relaunch replaced the conflicting slot owner'
+  pass 'both relaunch verbs refuse a conflicting claim in a real same-home pooled slot'
+}
+
+start_rooted_process() {  # <case-dir> <worktree-relative-dir>
+  local dir=$1 sub=$2 pid
+  mkdir -p "$dir/wt/$sub"
+  ( cd "$dir/wt/$sub" && : > "$dir/rooted-ready" && exec /bin/sleep 60 ) &
+  pid=$!
+  ROOTED_PIDS+=("$pid")
+  while [ ! -e "$dir/rooted-ready" ]; do sleep 0.01; done
+  kill -0 "$pid" 2>/dev/null || fail 'rooted process fixture did not start'
+}
+
+test_tmux_missing_refuses_a_live_rooted_process() {
+  local dir id sub
+  for sub in . nested; do
+    id=rl64${sub//./root}
+    dir=$(new_case "rooted-$sub" "$id")
+    add_ship_task "$dir" "$id" claude
+    strand_endpoint "$dir" "$id"
+    start_rooted_process "$dir" "$sub"
+    assert_tmux_missing_refuses "$dir" "$id" "same-user process rooted in $sub" 'live processes still have cwd'
+  done
+  pass 'tmux: a live same-user process rooted in the worktree or child blocks both relaunch paths'
+}
+
+test_tmux_missing_legacy_record_refuses_a_live_rooted_process() {
+  local dir
+  dir=$(new_case tmux-legacy-rooted rl66)
+  add_ship_task "$dir" rl66 claude
+  strand_endpoint "$dir" rl66
+  start_rooted_process "$dir" nested
+  assert_tmux_missing_refuses "$dir" rl66 'legacy record without tmux socket metadata and live rooted process' 'live processes still have cwd'
+  pass 'tmux: missing legacy socket metadata never excuses a live rooted process'
+}
+
+test_tmux_missing_legacy_record_reclaims_without_rooted_process() {
+  local dir out rc=0
+  dir=$(new_case tmux-legacy-clear rl69)
+  add_ship_task "$dir" rl69 claude
+  strand_endpoint "$dir" rl69
+  out=$(run_spawn "$dir" rl69 --relaunch --harness claude) || rc=$?
+  expect_code 0 "$rc" "a legacy record with no rooted process should recover: $out"
+  assert_present "$dir/fake/created-windows" 'legacy recovery did not restore the window'
+  pass 'tmux: a legacy record can recover after process absence is proven'
+}
+
+test_tmux_missing_refuses_unreadable_or_ambiguous_process_inventory() {
+  local dir out rc mode
+  for mode in unreadable ambiguous; do
+    dir=$(new_case "process-$mode" "rl67$mode")
+    add_ship_task "$dir" "rl67$mode" claude
+    strand_endpoint "$dir" "rl67$mode"
+    if [ "$mode" = unreadable ]; then
+      printf '%s\n' '#!/usr/bin/env bash' 'exit 1' > "$dir/fakebin/ps"
+      printf '%s\n' '#!/usr/bin/env bash' 'exit 1' > "$dir/fakebin/lsof"
+    else
+      printf '%s\n' '#!/usr/bin/env bash' 'printf "not-a-pid\\n"' > "$dir/fakebin/ps"
+      printf '%s\n' '#!/usr/bin/env bash' 'printf "not-a-record\\n"' > "$dir/fakebin/lsof"
+    fi
+    chmod +x "$dir/fakebin/ps" "$dir/fakebin/lsof"
+    assert_tmux_missing_refuses "$dir" "rl67$mode" "$mode process inventory"
+  done
+  pass 'tmux: unreadable and ambiguous same-user process inventories fail closed'
+}
+
 
 test_reclaim_refuses_an_unreadable_endpoint() {
   local dir out rc
@@ -2793,7 +2963,9 @@ add_herdr_ship_task() {  # <case-dir> <id> [session] [surviving-pane]
 Exercise a herdr reclaim safely.
 
 ## Firstmate spec
-Keep the recorded endpoint when it outlives its server.
+Goal: Keep the recorded endpoint when it outlives its server.
+Off-limits: Work outside this private test fixture.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Exercise recovery using the fixture's stubbed Herdr command.
 EOF
   {
     echo "window=$ses:%7"
@@ -3410,6 +3582,12 @@ test_tmux_refuses_a_live_server_with_unlinked_socket
 test_tmux_refuses_a_renamed_session_on_a_live_server
 test_tmux_refuses_an_older_server_on_the_recorded_socket
 test_tmux_refuses_an_older_candidate_for_a_legacy_record
+test_relaunch_refuses_another_tasks_canonical_worktree_claim
+test_relaunch_refuses_a_conflicting_pooled_slot_owner
+test_tmux_missing_refuses_a_live_rooted_process
+test_tmux_missing_legacy_record_refuses_a_live_rooted_process
+test_tmux_missing_legacy_record_reclaims_without_rooted_process
+test_tmux_missing_refuses_unreadable_or_ambiguous_process_inventory
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
