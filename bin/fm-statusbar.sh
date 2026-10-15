@@ -336,7 +336,7 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file> [state-d
       jobs=("${jobs[@]:1}")
     fi
   done
-  for id in "${jobs[@]}"; do wait "$id" || true; done
+  for id in "${jobs[@]+"${jobs[@]}"}"; do wait "$id" || true; done
   for meta in "$scratch"/*; do
     [ -f "$meta" ] || continue
     state=$(cat "$meta")
