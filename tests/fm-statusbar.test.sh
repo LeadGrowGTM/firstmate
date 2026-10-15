@@ -700,6 +700,15 @@ config_right=$(tmux show-options -qv -t config-owner status-right)
 case "$config_right" in *"FM_SB_TRACKER_MAIN_CONFIG=$WORK/custom-config"*) ;;
   *) fail "primary status job lost its configured directory" "$config_right" ;;
 esac
+config_hooks=$(tmux show-hooks -g)
+FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$WORK/firstmate/state" \
+  statusbar "$SB" "$SOCKET_PATH" apply config-owner
+[ "$(tmux show-options -qv -t config-owner status-right)" = "$config_right" ] \
+  || fail "ordinary apply replaced the primary config tracker"
+[ "$(tmux show-hooks -g)" = "$config_hooks" ] || fail "ordinary apply replaced the primary config hook"
+tmux new-session -d -t config-owner -s config-later
+[ "$(tmux show-options -qv -t config-later status-right)" = "$config_right" ] \
+  || fail "late configured view lost the primary tracker"
 config_cache_dir="$WORK/config-cache"
 config_key=$(tracker_key "$SOCKET_PATH" "$WORK/firstmate/state" "$WORK/firstmate" "$WORK/custom-config")
 config_cache="$config_cache_dir/statusbar-crew-tracker.$config_key.txt"

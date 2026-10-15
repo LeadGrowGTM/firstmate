@@ -267,6 +267,9 @@ cmd_apply() {
     tmux set-window-option -t "$win" pane-border-status bottom 2>/dev/null || true
     tmux set-window-option -t "$win" pane-border-format "$fmt" 2>/dev/null || true
   done < <(tmux list-windows -t "$ses" -F '#{window_id}' 2>/dev/null)
+  # Pane detail may be refreshed, but an ordinary apply keeps the bound
+  # primary's tracker command and grouped-view hook exactly as installed.
+  if [ "$primary" -eq 0 ] && [ -n "$binding" ]; then return 0; fi
   left='[#S] '
   while read -r sid member_group; do
     [ "$sid" = "$target_sid" ] || [ "$member_group" = "$group" ] || continue
@@ -278,8 +281,6 @@ cmd_apply() {
       tmux set-option -t "$sid" status-left "$left" 2>/dev/null || true
     fi
   done <<<"$sessions"
-  # An ordinary apply must retain the primary's fleet job and hook verbatim.
-  if [ "$primary" -eq 0 ] && [ -n "$binding" ]; then return 0; fi
   group_id=${target_sid#\$}
   job=$(fm_sb_tracker_job)
   job=${job//\\/\\\\}
