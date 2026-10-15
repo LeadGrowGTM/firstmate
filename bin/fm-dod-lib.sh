@@ -215,6 +215,7 @@ fm_ship_rule_one() {  # <no-mistakes|direct-PR|local-only> <task-id> [branch] [<
   esac
 }
 
+# Return 0 when Captain intent or a required spec field is unfilled.
 fm_brief_task_placeholders_present() {  # <file>
   local file=$1 intent spec
   [ -f "$file" ] || return 1
@@ -223,6 +224,7 @@ fm_brief_task_placeholders_present() {  # <file>
   fm_brief_task_heading_present "$file" "## Firstmate spec" || return 1
   spec=$(fm_brief_task_heading_body "$file" "## Firstmate spec")
   printf '%s\n' "$spec" | awk '
+    /^[[:space:]]*[{]FIRSTMATE_SPEC[}][[:space:]]*$/ { bad = 1 }
     /^Goal:/ { goal++; value = substr($0, 6); if (value ~ /^[[:space:]]*$/ || index(value, "{GOAL}")) bad = 1 }
     /^Off-limits:/ { off++; value = substr($0, 12); if (value ~ /^[[:space:]]*$/ || index(value, "{OFF_LIMITS}")) bad = 1 }
     /^Contracts and gates \(follow them; spawned inside a pipeline, move only through its states\):/ {

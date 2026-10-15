@@ -1793,6 +1793,9 @@ test_scout_and_secondmate_scaffold
 test_ship_and_scout_route_surfaces_through_lavish_or_html
 test_scout_lavish_line_follows_presentation_floor
 test_workers_wait_without_spending_turns
+# Every brief is bounded (one goal, off-limits, the contracts and pipeline
+# states that apply where it is spawned) and every Definition of done demands a
+# real end-to-end run with saved evidence.
 test_briefs_are_bounded_and_demand_real_proof() {
   local home mode brief
   home="$TMP_ROOT/bounded-home"

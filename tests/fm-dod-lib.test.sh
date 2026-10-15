@@ -483,6 +483,8 @@ test_unfilled_bounded_lines_are_detected() {
   fm_brief_task_placeholders_present "$f" || fail "missing labeled fields were not detected"
   write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
   fm_brief_task_placeholders_present "$f" && fail "a filled bounded spec was reported unfilled"
+  write "$(printf 'Goal: G.\n{FIRSTMATE_SPEC}\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "an unfilled firstmate spec was not detected"
   write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.')"
   fm_brief_task_placeholders_present "$f" || fail "missing contracts were not detected"
   write "$(printf 'Goal: {GOAL}\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
