@@ -325,10 +325,11 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
 }
 
 fm_sb_tracker_refresh() {
-  local live tmp home mate state label result='' i=0
+  local live primary_windows tmp home mate state label result='' i=0
   local -a mates=(churchill dev napoleon alexander-media ottersec legion)
   tmp="$TRACKER_CACHE.$$"
   live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
+  primary_windows=$(tmux list-windows -a -F '#{@fm_task}|#{@fm_state}' 2>/dev/null) || primary_windows=
   for mate in "${mates[@]}"; do
     if [ "$mate" = churchill ]; then home="$TRACKER_ROOT/firstmate"; else home="$TRACKER_ROOT/fm-homes/$mate"; fi
     fm_sb_tracker_home "$home" "$mate" "$live" "$tmp.$i" &
@@ -339,7 +340,7 @@ fm_sb_tracker_refresh() {
   for mate in "${mates[@]}"; do
     if [ "$mate" = churchill ]; then
       home="$TRACKER_ROOT/firstmate"; label=on
-      printf '%s\n' "$live" | grep -qxF 'firstmate:claude' || label=off
+      printf '%s\n' "$primary_windows" | grep -qxF "firstmate|$home/state" || label=off
     else
       home="$TRACKER_ROOT/firstmate"; label=unknown
       if [ -f "$home/state/$mate.meta" ]; then

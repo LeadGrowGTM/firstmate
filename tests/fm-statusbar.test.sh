@@ -541,6 +541,8 @@ printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/fm-homes/dev/state/d
 printf 'window=firstmate:fm-gone-crew\nkind=ship\n' >"$WORK/fm-homes/dev/state/gone-task.meta"
 printf 'window=firstmate:fm-live-second\nkind=ship\n' >"$WORK/fm-homes/ottersec/state/otter-task.meta"
 printf 'window=firstmate:fm-dev\nkind=secondmate\n' >"$WORK/firstmate/state/dev.meta"
+FM_STATE_OVERRIDE="$WORK/firstmate/state" statusbar "$SB" "$SOCKET_PATH" \
+  label firstmate:fm-demo-task firstmate claude opus high "$WORK/firstmate"
 cat >"$WORK/crew-state-fixture.sh" <<'SH'
 #!/usr/bin/env bash
 [ "$FM_STATE_OVERRIDE" = "$FM_HOME/state" ] || { echo 'state: unknown · source: wrong-home'; exit; }
@@ -561,7 +563,7 @@ i=0
 while [ ! -s "$TRACKER_CACHE_FILE" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
 tracker=$(statusbar "$SB" "$SOCKET_PATH" crew-tracker)
 case "$tracker" in
-  *'churchill:off 1r/0w'*'dev:parked 1r/0w'*'ottersec:unknown 0r/1w'*'legion:unknown 0r/0w'*) ;;
+  *'churchill:on 1r/0w'*'dev:parked 1r/0w'*'ottersec:unknown 0r/1w'*'legion:unknown 0r/0w'*) ;;
   *) fail "tracker did not reconcile per-mate running and waiting crew" "$tracker" ;;
 esac
 case "$tracker" in *website-genie*|*rothschild*) fail "tracker included excluded mates" "$tracker" ;; esac
