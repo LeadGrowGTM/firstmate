@@ -1,0 +1,49 @@
+Generated ship and scout brief, direct CLI output contract:
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:8:Goal: Report the observed result.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:10:Off-limits: Unrelated files.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:11:Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:93:# Definition of done
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:96:It is complete only when proven for real: run the actual existing system, reproduction, or commands your findings rest on, and put the commands you ran and their output in the report.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:103:When the report is complete, append `done [at=<epoch>]: {one-line conclusion}` to the status file and stop.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:108:Goal: Ship the scoped change.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:117:Off-limits: Unrelated files.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:118:Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:127:Keep project edits inside this worktree; write proof to `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/proof.md` and keep scratch output outside it, under `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/` or a temporary directory.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:135:# Definition of done
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/brief.md:139:The task is complete only when committed on your branch `fm/live-scout` and proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/proof.md`. The proof must cover the final delivered revision; rerun it after any code or pipeline fix.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:8:Goal: Example only.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:9:Goal: {GOAL}
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:11:Off-limits: Unrelated files.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:12:Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:17:Tools: treg, lg run - use these, and name any substitute when you hand back
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:38:2. Keep project edits inside this worktree; write proof to `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/proof.md` and keep scratch output outside it, under `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/` or a temporary directory.
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:115:# Definition of done
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md:119:The task is complete only when committed on your branch `fm/live-ship` and proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/proof.md`. The proof must cover the final delivered revision; rerun it after any code or pipeline fix.
+
+Spawn with a filled example before an unresolved Goal field:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-ship/brief.md still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}; fill ## Captain's intent and ## Firstmate spec before spawn
+spawn exit=1; task metadata=absent
+Goal: Example only.
+Goal: {GOAL}
+
+Promote a filled scout without a ship goal:
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-reject/ship-instructions.md still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}; fill ## Captain's intent and ## Firstmate spec before spawn
+promotion exit=1; task kind=scout; instructions=absent
+
+Promoted filled scout, persisted ship contract:
+kind=ship
+8:Goal: Ship the scoped change.
+17:Off-limits: Unrelated files.
+18:Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+27:Keep project edits inside this worktree; write proof to `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/proof.md` and keep scratch output outside it, under `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/` or a temporary directory.
+35:# Definition of done
+39:The task is complete only when committed on your branch `fm/live-scout` and proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in `/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50EMCRV0H5B0ZRHHR3PQM8W/.fm-test-phase/data/live-scout/proof.md`. The proof must cover the final delivered revision; rerun it after any code or pipeline fix.
+
+Promoted ship in a pipeline, persisted applicable contract and state order:
+8:Goal: Ship the reviewed fix.
+17:Off-limits: Unrelated tasks.
+18:Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Campaign contract A; test:running -> test:passed before document:running
+kind=ship
