@@ -82,7 +82,7 @@
 # roughly the same specification - so a report, decision, or PR the intent
 # refers to is written into it as substance, never left as a pointer.
 # bin/fm-brief.sh scaffolds those two `# Task` subsections; bin/fm-spawn.sh and
-# bin/fm-promote.sh refuse leftover `{TASK}` / `{FIRSTMATE_SPEC}` placeholders
+# bin/fm-promote.sh refuse leftover `{TASK}` / `{GOAL}` / `{FIRSTMATE_SPEC}` / `{OFF_LIMITS}` / `{CONTRACTS}` placeholders
 # and a `## Captain's intent` line opening with a Captain label or address
 # through the helpers below. Other mentions of `--intent` point here rather than
 # restating the rule.
@@ -215,16 +215,29 @@ fm_ship_rule_one() {  # <no-mistakes|direct-PR|local-only> <task-id> [branch] [<
   esac
 }
 
-# Return 0 when a Task subsection still consists only of its scaffold
-# placeholder. A missing file and legacy briefs carry no such placeholders.
+# Return 0 when a Task subsection still holds an unfilled scaffold placeholder:
+# an intent that is only `{TASK}`, or a spec line that is only `{FIRSTMATE_SPEC}`,
+# `Goal: {GOAL}`, or `Off-limits: {OFF_LIMITS}`, or that ends in `{CONTRACTS}`.
+# A missing file and legacy
+# briefs carry no such placeholders.
 fm_brief_task_placeholders_present() {  # <file>
   local file=$1 intent spec
   [ -f "$file" ] || return 1
   intent=$(fm_brief_task_heading_body "$file" "## Captain's intent")
   spec=$(fm_brief_task_heading_body "$file" "## Firstmate spec")
   [ "$(printf '%s' "$intent" | tr -d '[:space:]')" = '{TASK}' ] && return 0
-  [ "$(printf '%s' "$spec" | tr -d '[:space:]')" = '{FIRSTMATE_SPEC}' ] && return 0
-  return 1
+  printf '%s\n' "$spec" | awk '
+    { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
+    $0 == "{FIRSTMATE_SPEC}" || $0 == "Goal: {GOAL}" || $0 == "Off-limits: {OFF_LIMITS}" || $0 ~ /[{]CONTRACTS[}]$/ { found = 1 }
+    END { exit !found }
+  '
+}
+
+# The one mandatory prove-it clause, completing the "complete only when" sentence
+# of every ship Definition of done (and so of scout promotion) and of the scout
+# report rule in bin/fm-brief.sh.
+fm_prove_it_clause() {  # <where the evidence goes>
+  printf '%s' "proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in $1."
 }
 
 # Print the words of every provenance-marked line in a legacy `# Task` body.
@@ -402,7 +415,8 @@ EOF
 
 fm_dod_block() {  # <mode> <task-id> [branch] [<forge>] [<base>]
   local mode=$1 id=$2 forge=${4:-none} base=${5:-}
-  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q
+  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove
+  prove=$(fm_prove_it_clause "\`proof.md\` in the proof directory named above")
   fm_forge_valid_for_mode "$forge" "$mode" fm_dod_block || return 1
   fm_base_branch_valid "$base" "$mode" "$forge" fm_dod_block || return 1
   if [ -n "$base" ]; then
@@ -419,7 +433,7 @@ Delivery contract: mode=direct-PR forge=gerrit shape=squash
 Ship branch: $branch
 This task ships **direct-PR** to a Gerrit review server: you publish the change yourself, without the no-mistakes pipeline.
 Gerrit has no pull requests, so there is nothing to open; publishing creates the change.
-The task is complete only when committed on your branch.
+The task is complete only when committed on your branch and $prove
 When it is implemented and committed, publish it.
 EOF
       fm_gerrit_publish_block
@@ -435,7 +449,7 @@ Ship branch: $branch
 This project's review server is Gerrit: it has no pull requests and no forge CI the pipeline can watch, so **no-mistakes runs here as a review pass that ends at a ready branch**, and you then publish that branch as one change.
 Pass \`--skip push,pr,ci\` on every \`no-mistakes axi run\` for this task, and skip nothing else: \`review\`, \`test\`, \`document\`, and \`lint\` are the whole point of the run.
 Those three are the only steps that reach a forge, and skipping them is a supported outcome, not a degraded one.
-The task is complete only when committed on your branch.
+The task is complete only when committed on your branch and $prove
 When you believe it is complete, append \`done [at=<epoch>]: {summary}\` to the status file and stop.
 Firstmate will then instruct you to run /no-mistakes to validate.
 That first \`done:\` is the handoff that starts the pipeline; it is not a request to publish.
@@ -465,7 +479,7 @@ EOF
 Delivery contract: mode=direct-PR
 Ship branch: $branch
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
-The task is complete only when committed on your branch.
+The task is complete only when committed on your branch and $prove
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\` that is ready for review, not a draft$pr_base.
 Before you report done, read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
@@ -481,7 +495,8 @@ EOF
 Delivery contract: mode=local-only
 Ship branch: $branch
 This task ships **local-only**: no remote, no PR, no pipeline.
-The task is complete only when committed on your branch \`$branch\`. Do NOT push, do NOT open a PR, do NOT merge.
+The task is complete only when committed on your branch \`$branch\` and $prove
+Do NOT push, do NOT open a PR, do NOT merge.
 A \`done:\` is accepted when the named head is on this project's shared local branch, not only on a detached copy; the check tests that head, not merely that a branch moved.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done [at=<epoch>]: ready in branch $branch\` to the status file and stop.
@@ -493,7 +508,7 @@ EOF
 # Definition of done
 Delivery contract: mode=no-mistakes
 Ship branch: $branch
-The task is complete only when committed on your branch.
+The task is complete only when committed on your branch and $prove
 When you believe it is complete, append \`done [at=<epoch>]: {summary}\` to the status file and stop.
 Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
 That first \`done:\` is the handoff that starts the pipeline, which owns the push; it is not a request to push from this copy.

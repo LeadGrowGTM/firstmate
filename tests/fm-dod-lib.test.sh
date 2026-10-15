@@ -467,4 +467,22 @@ test_worker_role_names_skill_and_fallback_file() {
 
 test_worker_role_names_skill_and_fallback_file
 
+# Any unfilled bounded-shape line keeps a brief from launching; filled and
+# legacy briefs pass.
+test_unfilled_bounded_lines_are_detected() {
+  local f="$TMP_ROOT/bounded-brief.md" line
+  write() { printf '# Task\n## Captain'"'"'s intent\nDo it.\n\n## Firstmate spec\n%s\n\n# Rules\n' "$1" > "$f"; }
+  write 'Build it.'
+  fm_brief_task_placeholders_present "$f" && fail "a legacy spec was reported unfilled"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" && fail "a filled bounded spec was reported unfilled"
+  for line in 'Goal: {GOAL}' '{FIRSTMATE_SPEC}' 'Off-limits: {OFF_LIMITS}' 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}'; do
+    write "$(printf 'Goal: G.\nBuild it.\n%s' "$line")"
+    fm_brief_task_placeholders_present "$f" || fail "an unfilled line was not detected: $line"
+  done
+  pass "unfilled goal, spec, off-limits, and contracts lines are each detected"
+}
+
+test_unfilled_bounded_lines_are_detected
+
 echo "all fm-dod-lib tests passed"

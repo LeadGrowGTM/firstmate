@@ -57,6 +57,9 @@ fill_brief_subsections() {  # <file> <intent> <spec>
   content=$(cat "$file")
   content=${content//'{TASK}'/$intent}
   content=${content//'{FIRSTMATE_SPEC}'/$spec}
+  content=${content//'{GOAL}'/Ship the change.}
+  content=${content//'{OFF_LIMITS}'/Unrelated scripts.}
+  content=${content//'{CONTRACTS}'/none}
   printf '%s\n' "$content" > "$file"
 }
 
@@ -583,7 +586,7 @@ EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn of an unfilled ship brief should exit non-zero"
-  assert_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "unfilled ship spawn did not name the leftover placeholders"
   assert_contains "$out" "## Captain's intent" \
     "unfilled ship spawn did not name the intent subsection to fill"
@@ -596,7 +599,7 @@ EOF
     "Fix replacement of \`{TASK}\` in Herdr briefs." \
     "Keep literal \`{FIRSTMATE_SPEC}\` examples intact."
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
-  assert_not_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_not_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "a filled ship brief mentioning placeholder tokens was refused as unfilled"
   assert_not_contains "$out" "must contain nonempty" \
     "a filled ship brief mentioning placeholder tokens failed content validation"
@@ -622,7 +625,7 @@ EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
   assert_not_contains "$out" "must contain nonempty" \
     "fenced example headings made a filled legacy Task fail validation"
-  assert_not_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_not_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "fenced example headings made a filled legacy Task look unfilled"
 
   id=delivery-legacy-no-mistakes
@@ -717,7 +720,7 @@ EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --scout)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn of an unfilled scout brief should exit non-zero"
-  assert_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "unfilled scout spawn did not name the leftover placeholders"
   assert_absent "$home/state/$id.meta" "unfilled scout spawn wrote task metadata"
 

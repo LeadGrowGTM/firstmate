@@ -440,6 +440,7 @@ import os, sys
 path = sys.argv[1]
 text = open(path, encoding="utf-8").read()
 text = text.replace("{TASK}", os.environ["TASK_TEXT"], 1).replace("{FIRSTMATE_SPEC}", os.environ["SPEC_TEXT"], 1)
+text = text.replace("{GOAL}", "Add count_notes() once the gate file exists.", 1).replace("{OFF_LIMITS}", "Every file except notes/__init__.py and tests/test_notes.py.", 1).replace("{CONTRACTS}", "none", 1)
 open(path, "w", encoding="utf-8").write(text)
 PY
   (cd "$LAB" && lab_run FM_HOME="$LAB" "$LAB/bin/fm-tasks-axi.sh" add "$WORKER_ID" "lab gated worker" --kind ship --repo notes) >/dev/null || return 1
