@@ -79,6 +79,7 @@ set -eu
 printf 'boat %s\n' "$*" >> "$FIXTURES/calls"
 [ "${1:-}" = --no-update ] || exit 97
 shift
+box=$(cat "$FIXTURES/box-id")
 case "$*" in
   'limits --json')
     file=limits
@@ -89,28 +90,28 @@ case "$*" in
     fi
     ;;
   'list --all --json') file=list ;;
-  'info bx_ahnbu3qr --json')
+  "info $box --json")
     file=info
     [ ! -e "$FIXTURES/resumed" ] || file=ready
     ;;
-  'exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id')
+  "exec $box --json -- cat /proc/sys/kernel/random/boot_id")
     jq -n --arg id "$(cat "$FIXTURES/boot-id")" '{exitCode:0,stdout:($id+"\n")}'
     exit 0
     ;;
-  "usage bx_ahnbu3qr --since $((BOAT_NOW - 86400)) --json") file=usage ;;
-  'resume bx_ahnbu3qr --no-env --ttl 14400 --json'|'resume bx_ahnbu3qr --no-env --ttl 7200 --json')
+  "usage $box --since $((BOAT_NOW - 86400)) --json") file=usage ;;
+  "resume $box --environment fm-code --ttl 14400 --json"|"resume $box --environment fm-code --ttl 7200 --json")
     : > "$FIXTURES/resumed"
     printf '%s\n' '22222222-2222-4222-8222-222222222222' > "$FIXTURES/boot-id"
     printf '{}\n'
     exit 0
     ;;
-  'resume bx_ahnbu3qr --json')
+  "resume $box --json")
     : > "$FIXTURES/resumed"
     printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
     printf '{}\n'
     exit 0
     ;;
-  'stop bx_ahnbu3qr --json') rm -f "$FIXTURES/resumed"; printf '{}\n'; exit 0 ;;
+  "stop $box --json") rm -f "$FIXTURES/resumed"; printf '{}\n'; exit 0 ;;
   *) printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97 ;;
 esac
 [ ! -e "$FIXTURES/$file.fail" ] || exit 124
@@ -119,7 +120,7 @@ SH
 cat > "$BIN/fm-boat-alias-refresh.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
-[ "$*" = 'bx_ahnbu3qr boat-prove' ] || exit 97
+[ "$*" = "$(cat "$FIXTURES/box-id") boat-prove" ] || exit 97
 [ ! -e "$FIXTURES/rotate-on-alias" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
 [ ! -e "$FIXTURES/alias.fail" ]
 SH
@@ -180,7 +181,11 @@ printf 'kind=%s\nproject=%s\n' "$kind" "$2" > "$FM_HOME/state/$1.meta"
 SH
 cat > "$FAKEBIN/gh-axi" <<'SH'
 #!/usr/bin/env bash
-exit 0
+printf 'gh-axi %s\n' "$*" >> "$FIXTURES/calls"
+[ "${1:-}" = api ] && { [ "${2:-}" = user ] || [ "${2:-}" = /user ]; } || exit 97
+[ ! -e "$FIXTURES/github.fail" ] || { printf 'fixture GitHub account unavailable\n' >&2; exit 1; }
+if [ -f "$FIXTURES/github-response" ]; then cat "$FIXTURES/github-response"; exit 0; fi
+jq -r '"api_response:\n  body: fm_boat_identity=\(tojson|@base64)\n  truncated: false"' "$FIXTURES/github-account"
 SH
 cat > "$BIN/fm-captain-hold.sh" <<'SH'
 #!/usr/bin/env bash
@@ -212,7 +217,7 @@ new_case() {
   LOCAL_HOME="$CASE/local"
   REMOTE_HOME="$CASE/remote"
   mkdir -p "$FIXTURES" "$CASE/user-home" "$LOCAL_HOME/data" \
-    "$LOCAL_HOME/state" "$REMOTE_HOME/"{data,state,config,projects}
+    "$LOCAL_HOME/state" "$LOCAL_HOME/config" "$REMOTE_HOME/"{data,state,config,projects}
   printf '%s\n' '- boat-eng - Code overflow (host: boat-prove; root: /home/user/firstmate; home: /home/user/boat-eng; scope: Code only; projects: firstmate, dev-loop; added 2026-10-13)' \
     > "$LOCAL_HOME/data/secondmates.md"
   printf 'boat-eng\n' > "$REMOTE_HOME/.fm-secondmate-home"
@@ -222,7 +227,11 @@ new_case() {
   : > "$FIXTURES/windows"
   printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium"}' \
     > "$FIXTURES/request.json"
-  jq '. + {git_name:"Fixture",git_email:"fixture@example.invalid"}' "$FIXTURES/request.json" > "$FIXTURES/worker-request.json"
+  cp "$FIXTURES/request.json" "$FIXTURES/worker-request.json"
+  printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/config/boat-box-id"
+  cp "$LOCAL_HOME/config/boat-box-id" "$FIXTURES/box-id"
+  printf '%s\n' '{"id":12345,"login":"fixture-boat"}' > "$FIXTURES/github-account"
+  printf '%s\n' '{"id":12345,"login":"fixture-boat"}' > "$REMOTE_HOME/config/boat-github-account.json"
   printf '%s\n' '{"billingStatus":"active","canStart":true,"creditSecondsPerDollar":100000,"creditUsedSeconds":1000,"last24hUsageSeconds":2000,"creditBalanceSeconds":100000,"activeStates":["ready","idle","running"]}' \
     > "$FIXTURES/limits.json"
   printf '%s\n' '{"pageInfo":{"hasMore":false},"sandboxes":[{"id":"bx_ahnbu3qr","state":"stopped"}]}' \
@@ -230,7 +239,7 @@ new_case() {
   printf '%s\n' '{"sandbox":{"id":"bx_ahnbu3qr","type":"default","state":"stopped"}}' \
     > "$FIXTURES/info.json"
   jq -n --argjson end "$((NOW + 14390))" \
-    '{sandbox:{id:"bx_ahnbu3qr",type:"default",state:"ready",archiveAfter:($end|todateiso8601)}}' \
+    '{sandbox:{id:"bx_ahnbu3qr",type:"default",state:"ready",environment:"fm-code",archiveAfter:($end|todateiso8601)}}' \
     > "$FIXTURES/ready.json"
   printf '%s\n' '{"sandboxId":"bx_ahnbu3qr","sandboxType":"default","secondsPerDollar":100000,"billingMultiplier":1,"seconds":3000}' \
     > "$FIXTURES/usage.json"
@@ -270,7 +279,7 @@ run_entry() {
 }
 send_task() { run_entry "$LOCAL_HOME" fm-boat-send.sh --code-only; }
 spawn_task() { run_entry "$REMOTE_HOME" fm-boat-worker.sh spawn "$(cat "$FIXTURES/boot-id")"; }
-seed_receipt() { printf 'bx_ahnbu3qr %s\n' "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-no-env"; }
+seed_receipt() { printf 'bx_ahnbu3qr %s fm-code\n' "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-environment"; }
 
 assert_pre_resume_refusal() {
   expect_code 1 "$CODE" "$1 refusal"
@@ -285,7 +294,7 @@ test_validation() {
     '.home = "/home/user/other"' '.origin = "https://example.invalid/repo"' '.yolo = "on"' \
     '.flags = ["--unsafe"]' '.secrets = {}' '.mode = "local-only"' '.kind = "secondmate"' \
     '.harness = "echo"' '.effort = "unknown"' '.model = ""' '.intent = ""' \
-    '.spec = ""' '.git_name = ""' '.git_email = "invalid"' '.git_name = "Fixture"' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
+    '.spec = ""' '.git_name = ""' '.git_email = "invalid"' '.git_name = "Fixture"' '.git_name = "Fixture" | .git_email = "fixture@example.invalid"' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
     '.intent = "hidden\u0000text"' '.kind = "scout"'; do
     n=$((n + 1))
     new_case "invalid-$n"
@@ -413,91 +422,87 @@ test_worker_start() {
 }
 
 test_ship_prerequisites_and_identity() {
-  new_case sender-project-identity
-  send_task
-  expect_code 0 "$CODE" "controller project identity: $OUT"
-  assert_equals 'Firstmate Local' "$(jq -r .git_name "$FIXTURES/transport.request")" 'effective project name missing'
-  assert_equals firstmate-local@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'effective project email missing'
-  new_case sender-effective-global-fallback
-  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.name
-  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.email
-  send_task
-  expect_code 0 "$CODE" "effective global fallback identity: $OUT"
-  assert_equals Fixture "$(jq -r .git_name "$FIXTURES/transport.request")" 'effective global name missing'
-  assert_equals fixture@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'effective global email missing'
-  new_case sender-scout-identity
-  set_json request '.kind = "scout" | .mode = "scout" | .project = "dev-loop"'
-  send_task
-  expect_code 0 "$CODE" "scout controller identity: $OUT"
-  assert_equals 'Firstmate Local' "$(jq -r .git_name "$FIXTURES/transport.request")" 'scout project name missing'
-  assert_equals firstmate-local@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'scout project email missing'
-  new_case sender-request-identity
-  set_json request '.git_name = "Another User" | .git_email = "another@example.invalid"'
-  send_task
-  assert_pre_resume_refusal 'request identity override'
-  assert_contains "$OUT" 'request must not supply git identity' 'request override diagnostic'
-  new_case sender-cli-identity
-  run_entry "$LOCAL_HOME" fm-boat-send.sh --git-name 'Another User' --git-email another@example.invalid --code-only
-  assert_pre_resume_refusal 'CLI identity override'
-  new_case sender-no-identity
-  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.name
-  git -C "$LOCAL_HOME/projects/firstmate" config --unset user.email
+  local variant
+  new_case sender-without-controller-project
+  mv "$LOCAL_HOME/projects" "$CASE/unused-controller-projects"
   rm "$CASE/user-home/.gitconfig"
   send_task
-  assert_pre_resume_refusal 'missing controller identity'
-  assert_contains "$OUT" 'Git committer name and email' 'missing identity diagnostic'
-  new_case sender-invalid-identity
+  expect_code 0 "$CODE" "sender needs no controller project or identity: $OUT"
+  jq -e 'has("git_name") or has("git_email") | not' "$FIXTURES/transport.request" >/dev/null || fail 'controller identity entered task transport'
+  assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc . "$FIXTURES/transport.request")" 'sender changed raw request'
+  new_case sender-unsafe-local-identity-ignored
   git -C "$LOCAL_HOME/projects/firstmate" config user.name $'Injected\nname'
-  send_task
-  assert_pre_resume_refusal 'unsafe identity'
-  new_case sender-multiple-at-email
   git -C "$LOCAL_HOME/projects/firstmate" config user.email worker@extra@example.invalid
   send_task
-  expect_code 1 "$CODE" 'controller rejects multiple-at email'
-  [ ! -s "$FIXTURES/calls" ] || fail 'multiple-at controller email contacted Boat'
-  new_case worker-multiple-at-email
+  expect_code 0 "$CODE" 'irrelevant controller identity does not gate Boat'
+  for variant in ship scout; do
+    new_case "worker-github-identity-$variant"
+    seed_project firstmate
+    if [ "$variant" = scout ]; then set_json request '.kind = "scout" | .mode = "scout"'; fi
+    spawn_task
+    expect_code 0 "$CODE" "GitHub $variant identity: $OUT"
+    assert_grep 'gh-axi api /user ' "$FIXTURES/calls" 'identity did not come from box GitHub account'
+    grep -Fx 'fixture-boat' "$FIXTURES/spawn.argv" >/dev/null || fail 'GitHub committer name omitted'
+    grep -Fx '12345+fixture-boat@users.noreply.github.com' "$FIXTURES/spawn.argv" >/dev/null || fail 'GitHub noreply identity omitted'
+    assert_equals Fixture "$(git -C "$REMOTE_HOME/projects/firstmate" config user.name)" 'worker changed project clone identity'
+    assert_equals fixture@example.invalid "$(git -C "$REMOTE_HOME/projects/firstmate" config user.email)" 'worker changed project clone email'
+  done
+  new_case worker-quoted-numeric-login
   seed_project firstmate
-  jq '.git_email = "worker@extra@example.invalid"' "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new"
-  mv "$FIXTURES/worker-request.new" "$FIXTURES/worker-request.json"
+  printf '%s\n' '{"id":12345,"login":"123"}' > "$FIXTURES/github-account"
   spawn_task
-  expect_code 1 "$CODE" 'worker rejects multiple-at email'
-  assert_no_grep 'brief ' "$FIXTURES/calls" 'multiple-at email accepted remote backlog intake'
-  new_case worker-no-identity
-  seed_project firstmate
-  jq 'del(.git_name,.git_email)' "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new"
-  mv "$FIXTURES/worker-request.new" "$FIXTURES/worker-request.json"
-  spawn_task
-  expect_code 1 "$CODE" 'worker refuses missing supplied identity'
-  assert_contains "$OUT" 'git committer name and email' 'worker identity diagnostic'
-  assert_no_grep 'brief ' "$FIXTURES/calls" 'missing identity accepted backlog intake'
-  new_case scout-worker-identity
-  seed_project dev-loop
-  set_json request '.kind = "scout" | .mode = "scout" | .project = "dev-loop"'
-  spawn_task
-  expect_code 0 "$CODE" "scout worker identity: $OUT"
-  assert_equals "$(printf '%s\n' task-one "$REMOTE_HOME/projects/dev-loop" \
-    --scout --git-name Fixture --git-email fixture@example.invalid --backend tmux --harness codex --model gpt-6-sol --effort medium)" \
-    "$(cat "$FIXTURES/spawn.argv")" 'scout spawn did not receive paired worktree identity'
-  new_case scout-worker-no-identity
-  seed_project dev-loop
-  set_json request '.kind = "scout" | .mode = "scout" | .project = "dev-loop"'
-  jq 'del(.git_name,.git_email)' "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new"
-  mv "$FIXTURES/worker-request.new" "$FIXTURES/worker-request.json"
-  spawn_task
-  expect_code 1 "$CODE" 'scout refuses missing supplied identity'
-  assert_no_grep 'brief ' "$FIXTURES/calls" 'missing scout identity accepted backlog intake'
+  expect_code 0 "$CODE" "quoted numeric GitHub login: $OUT"
+  grep -Fx '12345+123@users.noreply.github.com' "$FIXTURES/spawn.argv" >/dev/null || fail 'numeric login was not decoded'
+  for variant in ship scout; do
+    new_case "github-other-account-$variant"
+    seed_project firstmate
+    if [ "$variant" = scout ]; then set_json request '.kind = "scout" | .mode = "scout"'; fi
+    printf '%s\n' '{"id":54321,"login":"other-user"}' > "$FIXTURES/github-account"
+    spawn_task
+    expect_code 1 "$CODE" "other GitHub account $variant refusal"
+    assert_contains "$OUT" 'expected fixture-boat (12345); actual other-user (54321)' 'account mismatch diagnostic omitted expected or actual'
+    assert_no_grep 'brief ' "$FIXTURES/calls" "other account $variant reached brief generation"
+    assert_no_grep 'spawn task-one ' "$FIXTURES/calls" "other account $variant reached spawn"
+    assert_no_grep 'task-one' "$REMOTE_HOME/data/backlog.md" "other account $variant reached backlog intake"
+    new_case "github-missing-account-setting-$variant"
+    seed_project firstmate
+    if [ "$variant" = scout ]; then set_json request '.kind = "scout" | .mode = "scout"'; fi
+    rm "$REMOTE_HOME/config/boat-github-account.json"
+    spawn_task
+    expect_code 1 "$CODE" "missing GitHub account setting $variant refusal"
+    assert_contains "$OUT" 'expected Boat GitHub account is missing (config/boat-github-account.json); actual fixture-boat (12345)' 'missing account setting diagnostic omitted actual account'
+    assert_no_grep 'brief ' "$FIXTURES/calls" "missing account setting $variant reached brief generation"
+    assert_no_grep 'spawn task-one ' "$FIXTURES/calls" "missing account setting $variant reached spawn"
+    assert_no_grep 'task-one' "$REMOTE_HOME/data/backlog.md" "missing account setting $variant reached backlog intake"
+  done
+  for variant in unavailable missing-login missing-id invalid-login invalid-id bad-envelope truncated; do
+    new_case "github-$variant"
+    seed_project firstmate
+    case "$variant" in
+      unavailable) : > "$FIXTURES/github.fail" ;;
+      missing-login) printf '%s\n' '{"id":12345}' > "$FIXTURES/github-account" ;;
+      missing-id) printf '%s\n' '{"login":"fixture-boat"}' > "$FIXTURES/github-account" ;;
+      invalid-login) printf '%s\n' '{"id":12345,"login":"bad<login"}' > "$FIXTURES/github-account" ;;
+      invalid-id) printf '%s\n' '{"id":"nope","login":"fixture-boat"}' > "$FIXTURES/github-account" ;;
+      bad-envelope) printf 'api_response:\n  body: fm_boat_identity=broken\n  truncated: false\n' > "$FIXTURES/github-response" ;;
+      truncated) jq -r '"api_response:\n  body: fm_boat_identity=\(tojson|@base64)\n  truncated: true"' "$FIXTURES/github-account" > "$FIXTURES/github-response" ;;
+    esac
+    spawn_task
+    expect_code 1 "$CODE" "GitHub $variant refusal"
+    assert_no_grep 'brief ' "$FIXTURES/calls" "$variant reached brief generation"
+    assert_no_grep 'spawn task-one ' "$FIXTURES/calls" "$variant reached spawn"
+    assert_no_grep 'task-one' "$REMOTE_HOME/data/backlog.md" "$variant reached backlog intake"
+  done
   new_case worker-no-gh-axi
   seed_project firstmate
-  # Shadow command discovery, leaving all other real tools available.
   mkdir -p "$CASE/no-gh"
-  # The wrapper is sourced through BASH_ENV only in this isolated child.
   printf 'command() { if [ "$*" = "-v gh-axi" ]; then return 1; fi; builtin command "$@"; }\n' > "$CASE/no-gh/bash-env"
   OUT=$(BASH_ENV="$CASE/no-gh/bash-env" env -u TMUX FM_HOME="$REMOTE_HOME" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" FIXTURES="$FIXTURES" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 "$BIN/fm-boat-worker.sh" spawn "$(cat "$FIXTURES/boot-id")" < "$FIXTURES/worker-request.json" 2>&1)
   CODE=$?
   expect_code 1 "$CODE" 'worker refuses missing gh-axi'
   assert_contains "$OUT" 'gh-axi installed' 'missing gh-axi diagnostic'
   assert_no_grep 'brief ' "$FIXTURES/calls" 'missing gh-axi accepted backlog intake'
-  pass 'ships and scouts use the controller project identity and ships preflight gh-axi'
+  pass 'ships and scouts derive box GitHub noreply identity without PC Git configuration'
 }
 
 test_whole_timer_reservation() {
@@ -573,7 +578,7 @@ test_sender_success_and_timer() {
     mv "$FIXTURES/ready.new" "$FIXTURES/ready.json"
     send_task
     expect_code 0 "$CODE" "$plan dispatch: $OUT"
-    assert_grep "boat --no-update resume bx_ahnbu3qr --no-env --ttl $ttl --json" \
+    assert_grep "boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl $ttl --json" \
       "$FIXTURES/calls" "$plan explicit safe resume"
     if [ -n "$REAL_TIMEOUT" ]; then
       grep -Fx 120 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan resume was not bounded"
@@ -581,9 +586,9 @@ test_sender_success_and_timer() {
     fi
     assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
       "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
-    assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc 'del(.git_name,.git_email)' "$FIXTURES/transport.request")" 'transport changed task fields'
+    assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc . "$FIXTURES/transport.request")" 'transport changed task fields'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
-    assert_equals 'bx_ahnbu3qr 22222222-2222-4222-8222-222222222222' "$(cat "$LOCAL_HOME/state/.boat-no-env")" 'successful no-env resume receipt'
+    assert_equals 'bx_ahnbu3qr 22222222-2222-4222-8222-222222222222 fm-code' "$(cat "$LOCAL_HOME/state/.boat-environment")" 'successful environment resume receipt'
   done
   new_case already-running
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
@@ -598,14 +603,14 @@ test_sender_success_and_timer() {
   FIXTURES="$FIXTURES" BOAT_NOW="$NOW" "$FAKEBIN/boat" --no-update resume bx_ahnbu3qr --json >/dev/null
   : > "$FIXTURES/calls"
   send_task
-  expect_code 1 "$CODE" 'plain resume must invalidate old no-env receipt'
-  assert_contains "$OUT" 'no current --no-env resume receipt' 'stale instance refusal explanation'
+  expect_code 1 "$CODE" 'plain resume must invalidate old environment receipt'
+  assert_contains "$OUT" 'no current fm-code environment receipt' 'stale instance refusal explanation'
   assert_no_grep '^on ' "$FIXTURES/calls" 'plain-resumed box received a worker'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'plain-resumed box was stopped by refusal'
   new_case running-no-receipt
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
   send_task
-  expect_code 1 "$CODE" 'running box with no no-env receipt'
+  expect_code 1 "$CODE" 'running box with no environment receipt'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'running box with no receipt stopped existing work'
   assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'running box with no receipt reached transport'
   new_case timer-missing
@@ -613,7 +618,7 @@ test_sender_success_and_timer() {
   send_task
   expect_code 1 "$CODE" 'missing auto-stop timer'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'missing timer must stop box'
-  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'failed resumed box retained no-env receipt'
+  assert_absent "$LOCAL_HOME/state/.boat-environment" 'failed resumed box retained environment receipt'
   assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'missing timer reached transport'
   new_case timer-too-long
   jq --argjson end "$((NOW + 14401))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
@@ -629,7 +634,7 @@ test_sender_success_and_timer() {
   expect_code 255 "$CODE" 'uncertain remote launch preserves transport exit'
   assert_equals 1 "$(grep -c '^on ' "$FIXTURES/calls")" 'uncertain launch was retried'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'uncertain remote launch stopped running work'
-  pass 'Boat resumes only the approved box without env, preserves timers, and sends once through fm-on'
+  pass 'Boat resumes only the approved box with fm-code, preserves timers, and sends once through fm-on'
 }
 
 test_running_quota_and_route() {
@@ -667,7 +672,7 @@ test_prepare_before_route() {
   rm "$LOCAL_HOME/data/secondmates.md"
   run_entry "$LOCAL_HOME" fm-boat-send.sh --prepare --code-only
   expect_code 0 "$CODE" "prepare before route registration: $OUT"
-  assert_grep 'boat --no-update resume bx_ahnbu3qr --no-env' "$FIXTURES/calls" 'prepare did not safely resume'
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code' "$FIXTURES/calls" 'prepare did not safely resume'
   assert_grep 'alias bx_ahnbu3qr boat-prove' "$FIXTURES/calls" 'prepare did not refresh alias'
   assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'prepare dispatched without route'
   : > "$FIXTURES/calls"
@@ -685,7 +690,7 @@ test_teardown_stop() {
   expect_code 0 "$CODE" "last task teardown: $OUT"
   assert_grep 'teardown task-one' "$FIXTURES/calls" 'ordinary remote teardown was not called'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'last task did not stop approved box'
-  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'stopped box retained no-env receipt'
+  assert_absent "$LOCAL_HOME/state/.boat-environment" 'stopped box retained environment receipt'
   assert_absent "$REMOTE_HOME/state/task-one.meta" 'last task record remained'
   new_case another-task-remains
   seed_receipt
@@ -742,7 +747,7 @@ test_teardown_stop() {
   new_case teardown-no-receipt
   seed_worker task-one ship firstmate 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
-  expect_code 1 "$CODE" 'teardown without no-env receipt'
+  expect_code 1 "$CODE" 'teardown without environment receipt'
   assert_no_grep 'on boat-eng' "$FIXTURES/calls" 'teardown without receipt contacted remote'
   pass 'last-task teardown stops only the approved box after ordinary cleanup succeeds'
 }
@@ -755,7 +760,7 @@ test_confirmed_prelaunch_refusal_stop() {
   expect_code 1 "$CODE" 'confirmed prelaunch no-mistakes refusal'
   assert_contains "$OUT" 'has not been proven' 'remote refusal was not preserved'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'confirmed empty refusal left newly resumed box on'
-  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'refused box kept its receipt'
+  assert_absent "$LOCAL_HOME/state/.boat-environment" 'refused box kept its receipt'
   assert_no_grep '^spawn ' "$FIXTURES/calls" 'prelaunch refusal spawned a worker'
   new_case running-refusal-empty
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
@@ -785,7 +790,7 @@ test_native_spawn_refusal_stop() {
   assert_grep 'spawn task-one ' "$FIXTURES/calls" 'native spawn was not attempted'
   assert_grep 'on boat-eng fm-boat-worker.sh idle' "$FIXTURES/calls" 'native refusal did not check locked inventory'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'empty native refusal left newly resumed box on'
-  assert_absent "$LOCAL_HOME/state/.boat-no-env" 'empty native refusal kept no-env receipt'
+  assert_absent "$LOCAL_HOME/state/.boat-environment" 'empty native refusal kept environment receipt'
   new_case native-refusal-endpoint
   seed_project firstmate
   : > "$FIXTURES/use-real-worker"
@@ -826,7 +831,7 @@ test_existing_backlog_row() {
     : > "$FIXTURES/calls"
     spawn_task
     if [ "$variant" = matching ]; then
-      expect_code 0 "$CODE" 'matching queued row remains reusable'
+      expect_code 0 "$CODE" "matching queued row remains reusable: $OUT"
       assert_grep 'Implement the requested fix' "$REMOTE_HOME/data/task-one/brief.md" 'matching row did not rewrite brief'
     else
       expect_code 1 "$CODE" "$variant row refusal"
@@ -906,7 +911,7 @@ test_remote_cap_and_merge_authority() {
   spawn_task
   expect_code 0 "$CODE" "remote dispatch: $OUT"
   assert_equals "$(printf '%s\n' task-one "$REMOTE_HOME/projects/firstmate" \
-    --mode direct-PR --yolo off --git-name Fixture --git-email fixture@example.invalid --backend tmux --harness codex --model gpt-6-sol --effort medium)" \
+    --mode direct-PR --yolo off --git-name fixture-boat --git-email 12345+fixture-boat@users.noreply.github.com --backend tmux --harness codex --model gpt-6-sol --effort medium)" \
     "$(cat "$FIXTURES/spawn.argv")" 'remote spawn forces merge authority off with selected profile'
   assert_grep 'Implement the requested fix' "$REMOTE_HOME/data/task-one/brief.md" 'intent omitted from remote brief'
   assert_grep 'Use existing helpers' "$REMOTE_HOME/data/task-one/brief.md" 'spec omitted from remote brief'
@@ -1032,6 +1037,71 @@ test_instance_changes_at_action_boundary() {
   pass 'instance changes refuse remote work and later Boat stops'
 }
 
+test_box_config_and_environment() {
+  local variant
+  for variant in absent directory symlink unsafe multiple whitespace blank-lines; do
+    new_case "box-config-$variant"
+    case "$variant" in
+      absent) rm "$LOCAL_HOME/config/boat-box-id" ;;
+      directory) rm "$LOCAL_HOME/config/boat-box-id"; mkdir "$LOCAL_HOME/config/boat-box-id" ;;
+      symlink) rm "$LOCAL_HOME/config/boat-box-id"; ln -s "$FIXTURES/box-id" "$LOCAL_HOME/config/boat-box-id" ;;
+      unsafe) printf 'bx_../bad\n' > "$LOCAL_HOME/config/boat-box-id" ;;
+      multiple) printf 'bx_ahnbu3qr\nbx_23456789\n' > "$LOCAL_HOME/config/boat-box-id" ;;
+      whitespace) printf ' bx_ahnbu3qr\n' > "$LOCAL_HOME/config/boat-box-id" ;;
+      blank-lines) printf 'bx_ahnbu3qr\n\n' > "$LOCAL_HOME/config/boat-box-id" ;;
+    esac
+    send_task
+    expect_code 1 "$CODE" "$variant configured box refuses"
+    [ ! -s "$FIXTURES/calls" ] || fail "$variant config contacted Boat"
+  done
+  new_case replacement-configured-box
+  printf 'bx_23456789\n' > "$LOCAL_HOME/config/boat-box-id"
+  cp "$LOCAL_HOME/config/boat-box-id" "$FIXTURES/box-id"
+  set_json info '.sandbox.id = "bx_23456789"'
+  set_json ready '.sandbox.id = "bx_23456789"'
+  set_json list '.sandboxes[0].id = "bx_23456789"'
+  set_json usage '.sandboxId = "bx_23456789"'
+  send_task
+  expect_code 0 "$CODE" "approved replacement box dispatch: $OUT"
+  assert_grep 'boat --no-update resume bx_23456789 --environment fm-code --ttl 14400 --json' "$FIXTURES/calls" 'configured replacement did not resume'
+  assert_no_grep 'bx_ahnbu3qr' "$FIXTURES/calls" 'sender still used previous box id'
+  assert_equals 'bx_23456789 22222222-2222-4222-8222-222222222222 fm-code' "$(cat "$LOCAL_HOME/state/.boat-environment")" 'replacement receipt not bound to new box'
+  for variant in missing wrong protected; do
+    new_case "resumed-environment-$variant"
+    case "$variant" in
+      missing) set_json ready 'del(.sandbox.environment)' ;;
+      wrong) set_json ready '.sandbox.environment = "base"' ;;
+      protected) set_json ready '.sandbox.noEnv = true' ;;
+    esac
+    send_task
+    expect_code 1 "$CODE" "$variant resumed environment refuses"
+    assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" "$variant environment dispatched a worker"
+    assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" "$variant environment left newly resumed box on"
+  done
+  new_case running-wrong-environment
+  set_json ready '.sandbox.environment = "base"'
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  seed_receipt
+  send_task
+  expect_code 1 "$CODE" 'running wrong environment refuses'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'wrong running environment dispatched'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'wrong running environment stopped existing work'
+  new_case legacy-no-env-receipt
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  printf 'bx_ahnbu3qr %s\n' "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-no-env"
+  send_task
+  expect_code 1 "$CODE" 'legacy no-env receipt does not authorize environment dispatch'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'legacy no-env receipt reached transport'
+  new_case receipt-wrong-environment
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  printf 'bx_ahnbu3qr %s base\n' "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-environment"
+  send_task
+  expect_code 1 "$CODE" 'receipt must bind fm-code'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'wrong receipt environment reached transport'
+  pass 'configured box and current fm-code environment are required for dispatch'
+}
+
+test_box_config_and_environment
 test_independent_resume_before_refusal
 test_instance_changes_at_action_boundary
 test_same_id_orphan_retry

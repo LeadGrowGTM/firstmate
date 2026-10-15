@@ -13,21 +13,24 @@
 # home marked boat-eng. Provision it with fm-remote-home-seed.sh, using only
 # allowlisted project origins and a new charter, not an existing mate's home.
 #
-# The one approved box is bx_ahnbu3qr. Reads are fresh, bounded limits, list,
-# info, and rolling-24-hour usage calls. Unavailable readings or exhausted caps
-# refuse dispatch.
+# config/boat-box-id must be a regular non-symlink file in a non-symlink config
+# directory, containing exactly one bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}
+# (with an optional final newline). Missing or invalid selection refuses before
+# Boat contact. Reads are fresh, bounded limits, list, info, and rolling-24-hour
+# usage calls. Unavailable readings or exhausted caps refuse dispatch.
 # The remaining auto-stop window (full timer on resume) is reserved
 # below $20/month, 60000 account seconds/day, and 43000 box seconds/day ($0.43).
-# Resume uses --no-env and an explicit timer (4 hours paid, 2 hours trial).
-# A receipt binds that no-env resume to the current box instance, so an
-# independently resumed instance cannot authorize a later dispatch.
+# Resume uses --environment fm-code and an explicit timer (4 hours paid,
+# 2 hours trial). state/.boat-environment binds the selected box id, boot
+# instance, and fm-code. The old .boat-no-env receipt cannot authorize a send.
+# Running metadata must name environment fm-code; a present noEnv flag must
+# be false. Permanently no-env boxes refuse dispatch.
 # A running box must already have a readable timer within that budget window;
 # this command never extends it. No box creation/deletion/sharing, billing,
-# plan, credit, environment injection, or merge command exists here.
+# plan, credit, environment editing, or merge command exists here.
 #
-# Every dispatched worker carries the effective Git identity of this
-# controller's firstmate project. An absent or invalid pair refuses before
-# Boat contact; --prepare does not dispatch a worker.
+# Requests never carry Git identity or credentials. The worker derives its
+# identity from the GitHub connection injected on the box by fm-code.
 # Dispatch returns success only after the remote worker confirms fresh status.
 # FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh.
 # On transport failure, remote completion is unknown: reconcile the SAME task
@@ -43,7 +46,6 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_HOME=${FM_HOME:?FM_HOME is required}
 BOAT_BIN=${FM_BOAT_BIN:-boat}
-BOX=bx_ahnbu3qr
 ROUTE=boat-eng
 # shellcheck source=bin/fm-secondmate-registry-lib.sh
 . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
@@ -65,8 +67,14 @@ else
   [ "$#" -eq 1 ] && [ "$1" = --code-only ] || die 'explicit --code-only attestation required'
 fi
 for tool in jq "$BOAT_BIN"; do command -v "$tool" >/dev/null || die "$tool is required"; done
+BOX_CONFIG="$FM_HOME/config/boat-box-id"
+[ -d "$FM_HOME/config" ] && [ ! -L "$FM_HOME/config" ] &&
+  [ -f "$BOX_CONFIG" ] && [ ! -L "$BOX_CONFIG" ] || die 'safe config/boat-box-id is required'
+[ "$(wc -c < "$BOX_CONFIG")" -le 12 ] || die 'invalid config/boat-box-id'
+BOX=$(jq -Rser 'select(test("\\Abx_[23456789abcdefghjkmnpqrstuvwxyz]{8}\\n?\\z")) | rtrimstr("\n")' "$BOX_CONFIG") || die 'invalid config/boat-box-id'
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-boat-send.XXXXXX")
 SEND_LOCK=
+# shellcheck disable=SC2329 # Invoked by the EXIT trap.
 cleanup() { rm -rf -- "$TMP"; [ -z "$SEND_LOCK" ] || fm_lock_release "$SEND_LOCK" || true; }
 trap cleanup EXIT
 if [ -z "$TEARDOWN_ID" ]; then
@@ -74,35 +82,24 @@ if [ -z "$TEARDOWN_ID" ]; then
   [ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
   # Both ends use the same validator; no remote contact occurs before validation.
   "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
-  jq -e '(has("git_name") or has("git_email")) | not' "$TMP/request" >/dev/null || die 'request must not supply git identity'
-  if [ "$PREPARE" -eq 0 ]; then
-    PROJECT_DIR="$FM_HOME/projects/firstmate"
-    [ -d "$PROJECT_DIR" ] || die 'controller firstmate project is unavailable'
-    GIT_NAME=$(git -C "$PROJECT_DIR" config user.name || true)
-    GIT_EMAIL=$(git -C "$PROJECT_DIR" config user.email || true)
-    [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'controller firstmate Git committer name and email are required'
-    jq --arg name "$GIT_NAME" --arg email "$GIT_EMAIL" '. + {git_name:$name,git_email:$email}' "$TMP/request" > "$TMP/identified"
-    mv "$TMP/identified" "$TMP/request"
-    "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request" || die 'controller firstmate Git committer identity is invalid'
-  fi
 fi
 LOCK_PATH="$FM_HOME/state/.boat-send.lock"
 fm_lock_acquire_wait "$LOCK_PATH" || die 'Boat send lock unavailable'
 SEND_LOCK="$LOCK_PATH"
-NO_ENV_RECEIPT="$FM_HOME/state/.boat-no-env"
+ENV_RECEIPT="$FM_HOME/state/.boat-environment"
 boat_instance() {
   fm_run_timed 45 "$BOAT_BIN" --no-update exec "$BOX" --json -- cat /proc/sys/kernel/random/boot_id > "$TMP/instance" 2>/dev/null || return 1
   jq -er 'select(.exitCode == 0) | .stdout | select(type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\n?$")) | rtrimstr("\n")' "$TMP/instance"
 }
 receipt_matches() {
-  [ -f "$NO_ENV_RECEIPT" ] && [ ! -L "$NO_ENV_RECEIPT" ] &&
-    [ "$(cat "$NO_ENV_RECEIPT")" = "$BOX $1" ]
+  [ -f "$ENV_RECEIPT" ] && [ ! -L "$ENV_RECEIPT" ] &&
+    [ "$(cat "$ENV_RECEIPT")" = "$BOX $1 fm-code" ]
 }
 stop_current_instance() {
   local current
   current=$(boat_instance) && [ "$current" = "$instance" ] && receipt_matches "$current" || return 1
   fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null || return 1
-  rm -f -- "$NO_ENV_RECEIPT"
+  rm -f -- "$ENV_RECEIPT"
 }
 REG="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
 if [ "$PREPARE" -eq 0 ]; then
@@ -113,7 +110,7 @@ if [ "$PREPARE" -eq 0 ]; then
 fi
 if [ -n "$TEARDOWN_ID" ]; then
   instance=$(boat_instance) || die 'approved box instance is unavailable'
-  receipt_matches "$instance" || die 'approved box has no current --no-env resume receipt'
+  receipt_matches "$instance" || die 'selected box has no current fm-code environment receipt'
   remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh teardown "$TEARDOWN_ID" "$instance") || die 'remote Boat teardown failed; reconcile before stopping'
   case "$remaining" in
     'boat-tasks-remaining: yes') printf 'teardown: %s; other Boat tasks remain\n' "$TEARDOWN_ID" ;;
@@ -140,8 +137,9 @@ read_boat() {
 }
 read_boat info "$BOX"
 STATE=$(jq -r '.sandbox.state // empty' "$TMP/info")
+jq -e '.sandbox.noEnv == true' "$TMP/info" >/dev/null 2>&1 && stop_refuse 'permanently no-env boxes cannot use fm-code; select an environment-capable box'
 if [ "$STATE" = stopped ]; then
-  rm -f -- "$NO_ENV_RECEIPT"
+  rm -f -- "$ENV_RECEIPT"
 fi
 read_boat limits
 read_boat list --all
@@ -173,16 +171,23 @@ TTL=$(jq -nr --slurpfile l "$TMP/limits" --slurpfile b "$TMP/list" \
   else $ttl end' 2> "$TMP/reason") || stop_refuse 'Boat safety or spend reservation failed'
 case "$STATE" in
   stopped)
-    fm_run_timed 120 "$BOAT_BIN" --no-update resume "$BOX" --no-env --ttl "$TTL" --json > "$TMP/resume" || stop_refuse 'Boat resume failed'
+    fm_run_timed 120 "$BOAT_BIN" --no-update resume "$BOX" --environment fm-code --ttl "$TTL" --json > "$TMP/resume" || stop_refuse 'Boat resume failed'
     STOP_ON_REFUSAL=1
     instance=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable'
-    [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] && [ ! -L "$NO_ENV_RECEIPT" ] || stop_refuse 'unsafe no-env receipt path'
-    printf '%s %s\n' "$BOX" "$instance" > "$NO_ENV_RECEIPT"
+    if ! { [ -d "$FM_HOME/state" ] && [ ! -L "$FM_HOME/state" ] && [ ! -L "$ENV_RECEIPT" ] &&
+      { [ ! -e "$ENV_RECEIPT" ] || [ -f "$ENV_RECEIPT" ]; }; }; then
+      stop_refuse 'unsafe environment receipt path'
+    fi
+    printf '%s %s fm-code\n' "$BOX" "$instance" > "$ENV_RECEIPT"
     read_boat info "$BOX"
     ;;
   ready|idle|running) ;;
   *) stop_refuse 'box is in an unsupported state' ;;
 esac
+jq -e --arg box "$BOX" '
+  .sandbox | .id == $box and .environment == "fm-code" and
+  ((has("noEnv") | not) or .noEnv == false)
+' "$TMP/info" >/dev/null 2>&1 || stop_refuse 'box metadata does not prove the fm-code environment; permanently no-env boxes cannot be used'
 jq -e --argjson ttl "$TTL" --argjson now "$(date +%s)" '
   .sandbox | .type == "default" and
   (.state == "ready" or .state == "idle" or .state == "running") and
@@ -197,7 +202,7 @@ if [ "$STATE" = stopped ]; then
   fi
 else
   instance=$current
-  receipt_matches "$instance" || stop_refuse 'running box has no current --no-env resume receipt'
+  receipt_matches "$instance" || stop_refuse 'running box has no current fm-code environment receipt'
 fi
 FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" boat-prove || stop_refuse 'SSH refresh or hydration failed'
 if [ "$PREPARE" -eq 1 ]; then
