@@ -221,6 +221,27 @@ test_configured_default_model_has_no_realized_model() {
   pass "omitted model leaves realized model absent"
 }
 
+test_scheduled_plan_sets_class_beside_unrelated_dispatch() {
+  local rec id out status
+  id=profile-scheduled-plan
+  rec=$(make_spawn_case profile-scheduled-plan codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"unrelated","use":{"harness":"grok","model":"grok-4.7","effort":"high"}}]}' > "$HOME_DIR/config/crew-dispatch.json"
+  printf '%s\n' '{"authorized":true,"reasoning_class":"strong/approved","profiles":[{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong/approved"},{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong/approved"}]}' > "$CASE_DIR/plan.json"
+  out=$(FM_SCHEDULED_WORKER_PLAN="$CASE_DIR/plan.json" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6-sol --effort high 2>&1)
+  status=$?
+  expect_code 1 "$status" "unlisted scheduled profile must refuse before launch: $out"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "unlisted scheduled profile published task metadata"
+  out=$(FM_SCHEDULED_WORKER_PLAN="$CASE_DIR/plan.json" run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort high)
+  status=$?
+  expect_code 0 "$status" "scheduled profile should launch beside unrelated dispatch"$'\n'"$out"
+  assert_grep 'reasoning_class=strong/approved' "$HOME_DIR/state/$id.meta" "scheduled plan class missing"
+  ! grep -q '^dispatch_rule=' "$HOME_DIR/state/$id.meta" || fail "scheduled plan was recorded as a crew rule"
+  pass "scheduled plan records its class beside unrelated crew dispatch"
+}
+
 make_seeded_secondmate_home() {
   local home=$1 id=$2
   mkdir -p "$home/bin" "$home/data"
@@ -290,6 +311,7 @@ test_no_profile_keeps_claude_profile_defaults() {
   expect_code 0 "$status" "claude spawn without profile flags should succeed"
   assert_contains "$out" "spawned $id harness=claude" "spawn did not report claude"
   assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
+  ! grep -q '^fallback_reason=' "$HOME_DIR/state/$id.meta" || fail "fresh unconfigured spawn fabricated a fallback reason"
 
   launch=$(cat "$LAUNCH_LOG")
   expected=$(claude_expected_launch "$launch" "$HOME_DIR" "$id" '--allow-dangerously-skip-permissions --permission-mode auto')
@@ -2818,6 +2840,7 @@ test_unrealizable_reasoning_class_refuses_before_launch
 test_invalid_dispatch_receipt_fields_refuse_before_launch
 test_non_typed_provider_hints_do_not_block_spawn_or_inject_metadata
 test_configured_default_model_has_no_realized_model
+test_scheduled_plan_sets_class_beside_unrelated_dispatch
 test_no_profile_keeps_claude_profile_defaults
 test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home

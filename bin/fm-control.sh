@@ -1027,7 +1027,7 @@ resolve_relaunch_profile() {
     # shellcheck source=bin/fm-dispatch-profile-lib.sh
     . "$SCRIPT_DIR/fm-dispatch-profile-lib.sh"
     fm_dispatch_profile_check "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/crew-dispatch.json" "$META" \
-      "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" "" "$NOTE" || return 1
+      "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" "" "$NOTE" "${FM_SCHEDULED_WORKER_PLAN:-}" || return 1
   fi
   if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
     local executable=

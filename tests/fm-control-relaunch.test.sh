@@ -944,6 +944,41 @@ test_configured_equivalent_fallback_records_realized_profile_and_reason() {
   pass "declared equivalent fallback records the rule, class, realized profile, provider and reason"
 }
 
+test_scheduled_plan_continuation_ignores_unrelated_crew_dispatch() {
+  local dir id out rc
+  id=rl-scheduled-plan
+  dir=$(new_case scheduled-plan "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/home/config" "$dir/home/state/scheduled-worker/occ"
+  printf '%s\n' '{"rules":[{"when":"unrelated","use":{"harness":"grok","model":"grok-4.7","effort":"high"}}]}' > "$dir/home/config/crew-dispatch.json"
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=xhigh/' "$dir/home/state/$id.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/$id.meta"
+  printf '%s\n' 'spawn_gen=gen-1' >> "$dir/home/state/$id.meta"
+  jq -n --arg project "$dir/proj" '{version:1,authorized:true,occurrence:"occ",task:"rl-scheduled-plan",project:$project,backend:"tmux",mode:"no-mistakes",yolo:"off",reasoning_class:"strong/approved",profiles:[{harness:"claude",model:"opus",effort:"xhigh",reasoning_class:"strong/approved"},{harness:"codex",model:"gpt-6.1-sol",effort:"high",reasoning_class:"strong/approved"}]}' > "$dir/plan.json"
+  jq -S . "$dir/plan.json" > "$dir/home/state/scheduled-worker/occ/plan.json"
+  jq -n --slurpfile plan "$dir/plan.json" '{version:1,phase:"live-worker",attempt:1,tried:[$plan[0].profiles[0]],observed_at:0,action:"spawn",profile:$plan[0].profiles[0],spawn_gen:"gen-1"}' > "$dir/home/state/scheduled-worker/occ/journal.json"
+  jq -n --slurpfile plan "$dir/plan.json" --argjson now "$(date +%s)" '{profile:$plan[0].profiles[1],observed_at:$now,evidence:"both listed profiles checked"}' > "$dir/selection.json"
+  printf '%s\n' '{"kind":"usage-exhausted","spawn_gen":"gen-1","evidence":"current generation exhausted"}' > "$dir/proof.json"
+  printf '%s\n' 'Continue after exhaustion.' > "$dir/note.txt"
+  fm_fake_exit0 "$dir/fakebin" codex
+  printf codex > "$dir/fake/becomes"
+  mkdir -p "$dir/user-home"
+  out=$(env -u TMUX -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION -u HERDR_SOCKET_PATH \
+    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" \
+    FM_DATA_OVERRIDE="$dir/home/data" FM_CONFIG_OVERRIDE="$dir/home/config" \
+    FM_FAKE_DIR="$dir/fake" TMUX_TMPDIR="$dir/tmux-root" HOME="$dir/user-home" \
+    CLAUDE_CONFIG_DIR='' FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    "$ROOT/bin/fm-scheduled-worker.sh" "$dir/plan.json" "$dir/selection.json" \
+    --exhaustion "$dir/proof.json" --note-file "$dir/note.txt" 2>&1); rc=$?
+  expect_code 0 "$rc" "scheduled continuation should use its authorized plan"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" harness)" = codex ] || fail "scheduled continuation did not launch the selected harness"
+  [ "$(meta_field "$dir" "$id" reasoning_class)" = strong/approved ] || fail "scheduled continuation lost its authorized class"
+  [ "$(jq -r .phase "$dir/home/state/scheduled-worker/occ/journal.json")" = live-worker ] || fail "scheduled continuation was not published"
+  assert_grep '/exit' "$dir/fake/literal" "scheduled continuation did not stop the prior worker"
+  pass "scheduled plan authorizes continuation beside unrelated crew dispatch"
+}
+
 test_leading_option_relaunch_notes_reach_replacement() {
   local dir id out rc note variant
   for variant in option markdown; do
@@ -3271,6 +3306,7 @@ test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop
 test_fallback_policy_changes
 test_configured_fallback_refuses_an_omitted_effort_before_stop
 test_configured_equivalent_fallback_records_realized_profile_and_reason
+test_scheduled_plan_continuation_ignores_unrelated_crew_dispatch
 test_leading_option_relaunch_notes_reach_replacement
 test_explicit_default_clears_same_harness_profile
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop

@@ -2798,7 +2798,7 @@ if [ "$KIND" != secondmate ]; then
     exit 1
   }
   fm_dispatch_profile_check "$CONFIG/crew-dispatch.json" "${RELAUNCH_META:-}" \
-    "$HARNESS" "$MODEL" "$EFFORT" "$DISPATCH_RULE" "$FALLBACK_REASON" || exit 1
+    "$HARNESS" "$MODEL" "$EFFORT" "$DISPATCH_RULE" "$FALLBACK_REASON" "${FM_SCHEDULED_WORKER_PLAN:-}" || exit 1
   if [ "$RAW_LAUNCH" = 1 ] && jq -e '.source != null' <<< "$FM_DISPATCH_PROFILE_RECEIPT" >/dev/null; then
     echo "error: a raw command cannot prove the configured dispatch profile; use the canonical --harness launch" >&2
     exit 1

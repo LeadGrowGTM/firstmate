@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Concrete dispatch-policy guard shared by spawn and control's pre-stop check.
 # fm_dispatch_profile_check <config-file> <prior-meta-or-empty> <harness>
-#   <model> <effort> <rule-or-empty> <reason-or-empty>
+#   <model> <effort> <rule-or-empty> <reason-or-empty> <scheduled-plan-or-empty>
 # Returns a JSON receipt in FM_DISPATCH_PROFILE_RECEIPT; no writes or routing.
 # docs/configuration.md "Crew dispatch profiles" owns the policy and schema.
 # The rule argument is a JSON rule key.
@@ -35,8 +35,17 @@ fm_dispatch_realized_effort() {
 
 fm_dispatch_profile_check() {
   local config=$1 prior=$2 harness=$3 model=${4:-default} effort=${5:-default}
-  local rule=$6 reason=$7 old_h='' old_m=default old_e=default source='' class='' prior_reason='' receipt
+  local rule=$6 reason=$7 scheduled_plan=${8:-} scheduled=false
+  local old_h='' old_m=default old_e=default source='' class='' prior_reason='' receipt
   FM_DISPATCH_PROFILE_RECEIPT='{}'
+  if [ -n "$scheduled_plan" ]; then
+    [ -f "$scheduled_plan" ] && [ ! -L "$scheduled_plan" ] || {
+      echo "error: scheduled worker plan is unavailable: $scheduled_plan" >&2
+      return 1
+    }
+    config=$scheduled_plan
+    scheduled=true
+  fi
   if [ -n "$prior" ]; then
     old_h=$(fm_meta_get "$prior" harness)
     old_m=$(fm_meta_get "$prior" model); old_m=${old_m:-default}
@@ -56,11 +65,11 @@ fm_dispatch_profile_check() {
     fi
     # Unconfigured manual replacements retain the existing control contract.
     FM_DISPATCH_PROFILE_RECEIPT=$(jq -cn --argjson source "${source:-null}" --arg class "$class" \
-      --arg reason "${reason:-explicit-profile-change}" --argjson prior_reason "${prior_reason:-null}" --argjson changed "$changed" \
-      '{source:$source, class:$class, reason:(if $changed == 1 then $reason else ($prior_reason // $reason) end)}') || return 1
+      --arg reason "$reason" --argjson prior_reason "${prior_reason:-null}" --argjson changed "$changed" \
+      '{source:$source, class:$class, reason:(if $changed == 1 then (if $reason == "" then "explicit-profile-change" else $reason end) else ($prior_reason // (if $reason == "" then null else $reason end)) end)}') || return 1
     return 0
   fi
-  receipt=$(jq -ce --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" --arg h "$harness" --arg m "$model" --arg e "$effort" \
+  receipt=$(jq -ce --argjson scheduled "$scheduled" --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" --arg h "$harness" --arg m "$model" --arg e "$effort" \
     --arg oh "$old_h" --arg om "$old_m" --arg oe "$old_e" \
     --argjson source "${source:-null}" --arg old_class "$class" \
     --arg rule "$rule" --arg reason "$reason" --argjson prior_reason "${prior_reason:-null}" --argjson changed "$changed" '
@@ -68,16 +77,24 @@ fm_dispatch_profile_check() {
     def matches($h; $m; $e): .harness == $h and (.model // "default") == $m and (.effort // "default") == $e;
     def safe_provider: if (.provider | type) == "string" and (.provider | test($provider_re)) then .provider else "" end;
     (if $rule == "" then null else ($rule | fromjson) end) as $selected_rule |
-    if type != "object" or ((.rules // []) | type) != "array" then error("malformed dispatch configuration") else . end |
-    [(.rules // []) | to_entries[] | . as $entry | $entry.value |
-      if type != "object" or (.when | type) != "string" or (.when | length) == 0 then error("rule needs when and use")
-      else {key:{rule:("rule_" + (($entry.key + 1) | tostring))}, items:(.use | profiles)} end]
-    + (if has("default") then [{key:{default:true},items:(.default | profiles)}] else [] end) as $groups |
+    (if $scheduled then
+      .reasoning_class as $plan_class |
+      if type != "object" or .authorized != true or (.reasoning_class | type) != "string"
+        or (.profiles | type) != "array" or (.profiles | length) == 0
+        or any(.profiles[]; .reasoning_class != $plan_class)
+      then error("invalid scheduled worker plan") else [{key:null,items:.profiles}] end
+     else
+      if type != "object" or ((.rules // []) | type) != "array" then error("malformed dispatch configuration") else . end |
+      [(.rules // []) | to_entries[] | . as $entry | $entry.value |
+        if type != "object" or (.when | type) != "string" or (.when | length) == 0 then error("rule needs when and use")
+        else {key:{rule:("rule_" + (($entry.key + 1) | tostring))}, items:(.use | profiles)} end]
+      + (if has("default") then [{key:{default:true},items:(.default | profiles)}] else [] end)
+     end) as $groups |
     if any($groups[]; (.items | length) == 0) or any($groups[].items[];
       type != "object" or (.harness | type) != "string" or (.harness | length) == 0
       or (has("model") and ((.model | type) != "string" or (.model | length) == 0))
       or (has("effort") and ((.effort | type) != "string" or (.effort | length) == 0))
-      or (has("reasoning_class") and ((.reasoning_class | type) != "string" or (.reasoning_class | test("^[A-Za-z0-9][A-Za-z0-9._-]*\\z")) == false)))
+      or (has("reasoning_class") and ((.reasoning_class | type) != "string" or (.reasoning_class | test(if $scheduled then "^[A-Za-z0-9][A-Za-z0-9._/-]*\\z" else "^[A-Za-z0-9][A-Za-z0-9._-]*\\z" end)) == false)))
     then error("malformed dispatch profiles or reasoning_class") else . end |
     (if $source != null then [$groups[] | select(.key == $source)]
      elif $changed == 1 then [$groups[] | select(any(.items[]; matches($oh;$om;$oe)))]
@@ -86,6 +103,7 @@ fm_dispatch_profile_check() {
     if ($sets | length) > 1 then error("ambiguous dispatch rule; select --dispatch-rule at intake")
     elif $changed == 1 and ($sets | length) != 1 then error("fallback has no uniquely recorded dispatch rule")
     elif $rule != "" and ($sets | length) != 1 then error("unknown dispatch rule")
+    elif $scheduled and ($sets | length) == 0 then error("scheduled worker profile is not listed in the authorized plan")
     elif ($sets | length) == 0 then {source:$source,class:$old_class,reason:($prior_reason // ($reason | if . == "" then "explicit-profile" else . end))}
     else $sets[0] as $set |
       [$set.items[] | select(matches($h;$m;$e))] as $next |
