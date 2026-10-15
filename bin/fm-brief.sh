@@ -6,10 +6,16 @@
 # fills before dispatch: `{TASK}` under `## Captain's intent` (the captain's
 # own ask plus the context needed to read it, including the substance of any
 # report, decision, or PR the ask refers to, without added speaker labels or
-# direct address) and `{FIRSTMATE_SPEC}`
-# under `## Firstmate spec` (build instructions, which are never the captain's
-# intent). bin/fm-dod-lib.sh owns the no-mistakes `--intent` contract those
-# subsections feed; bin/fm-spawn.sh refuses leftover placeholders and a
+# direct address) and `## Firstmate spec`, which keeps every brief bounded:
+# `Goal: {GOAL}` (the task's one goal),
+# `{FIRSTMATE_SPEC}` (build instructions, which are never the captain's intent),
+# `Off-limits: {OFF_LIMITS}` (what the task must not touch), and a
+# `Contracts and gates ...: {CONTRACTS}` line (the campaign contracts and gates
+# that apply where the worker is spawned, including the states of any pipeline
+# it runs inside, or `none`); the Definition
+# of done is the done test and stopping point. bin/fm-dod-lib.sh owns the
+# no-mistakes `--intent` contract those subsections feed and the prove-it step
+# every Definition of done carries; bin/fm-spawn.sh refuses unfilled required task fields and a
 # `## Captain's intent` line opening with a Captain label or address. Secondmate
 # charters still use a single `{TASK}` charter fill. Firstmate may adjust other
 # sections when the task genuinely deviates (e.g. working an existing external
@@ -35,7 +41,7 @@
 #   Set FM_SECONDMATE_SCOPE='<scope>' to write a routing scope distinct from the charter text.
 #   --herdr-lab is mandatory when the task will issue Herdr lifecycle commands.
 #   It adds the hard isolation contract backed by bin/fm-herdr-lab.sh.
-#   The flag must be explicit because {TASK} and {FIRSTMATE_SPEC} are filled
+#   The flag must be explicit because the task and Firstmate spec are filled
 #   after scaffolding and the caller-supplied repo string cannot reliably
 #   identify this repo. Briefs made without it carry a loud declaration so an
 #   omitted contract cannot be silent.
@@ -631,7 +637,10 @@ IFS= read -r -d '' TASK_SECTION <<'EOF' || true
 {TASK}
 
 ## Firstmate spec
+Goal: {GOAL}
 {FIRSTMATE_SPEC}
+Off-limits: {OFF_LIMITS}
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
 EOF
 TASK_SECTION=${TASK_SECTION%$'\n'}
 if [ -n "$FM_TASK_TYPE_SECTION" ]; then
@@ -746,14 +755,15 @@ $WAIT_BLOCK$SUB_AGENT_BLOCK$INBOX_SECTION
 
 # Definition of done
 Write your findings to \`$DATA/$ID/report.md\`.
-The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
+The report must stand alone: what you did, what you found, the evidence (file:line references and the proof below), and what you recommend.
+It is complete only when $(fm_prove_it_clause scout "the report")
 $LAVISH_LINE
 Before reporting done, read and follow \`$FM_ROOT/.agents/skills/captain-hold-lifecycle/SKILL.md\` and pass its shared completion gate for the report and any visual review.
 When the report is complete, append \`done [at=<epoch>]: {one-line conclusion}\` to the status file and stop.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 append_brief_include
-print_scaffold_result "scaffolded: $BRIEF (scout; replace {TASK} and {FIRSTMATE_SPEC})"
+print_scaffold_result "scaffolded: $BRIEF (scout; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})"
 exit 0
 fi
 
@@ -796,7 +806,7 @@ If the top-level path is the primary checkout or not the worktree you were launc
 
 # Rules
 $RULE1
-2. Keep project edits inside this worktree; keep proof and scratch output outside it, under \`$DATA/$ID/\` or a temporary directory.
+2. Keep project edits inside this worktree; write proof to \`$FM_HOME/data/$ID/proof.md\` and keep scratch output outside it, under \`$DATA/$ID/\` or a temporary directory.
    Outside the worktree, write only that task material and the status and steering-inbox records authorized below.
    Leave the worktree clean before reporting done.
 $TOOLS_RULE
@@ -832,7 +842,7 @@ $DOD
 EOF
 append_brief_include
 if [ "$FORGE" = none ]; then
-  print_scaffold_result "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK} and {FIRSTMATE_SPEC})"
+  print_scaffold_result "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})"
 else
-  print_scaffold_result "scaffolded: $BRIEF (ship, mode=$MODE forge=$FORGE shape=$SHAPE; replace {TASK} and {FIRSTMATE_SPEC})"
+  print_scaffold_result "scaffolded: $BRIEF (ship, mode=$MODE forge=$FORGE shape=$SHAPE; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})"
 fi

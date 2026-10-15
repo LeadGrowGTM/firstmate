@@ -1640,6 +1640,7 @@ The scaffold never picks a different type.
       "use": "<one line>",
       "skills": ["<skill name or repo-relative path>"],
       "agents": ["<agent name or repo-relative path>"],
+      "tools": ["<tool or CLI name>"],
       "check": "<command>",
       "hand_back": "<one line>",
       "model": "<optional model token>",
@@ -1656,6 +1657,7 @@ The scaffold never picks a different type.
 | `name` | Required lowercase slug (`^[a-z0-9]+(-[a-z0-9]+)*$`). |
 | `use` | Required one line saying when to pick this type. |
 | `skills`, `agents` | Optional arrays of names or repo-relative paths the worker resolves in the project, never absolute paths and never copied text. |
+| `tools` | Optional array of the named tools or CLIs the worker uses for this type, in the same form; the brief tells the worker to name any substitute when it hands back. |
 | `check` | Optional one-line command, omitted when the type has no check. |
 | `hand_back` | Required one line describing what the worker hands back. |
 | `touch` | Required one-line boundary, recorded in the brief and not enforced. |

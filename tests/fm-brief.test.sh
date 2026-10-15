@@ -1509,7 +1509,7 @@ EOF
   out=$(FM_HOME="$home_a" "$ROOT/bin/fm-brief.sh" type-off some-proj --mode no-mistakes 2>&1) \
     || fail "scaffold without a catalog exited non-zero: $out"
   brief_a="$home_a/data/type-off/brief.md"
-  assert_equals "scaffolded: $brief_a (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})" "$out" \
+  assert_equals "scaffolded: $brief_a (ship, mode=no-mistakes; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})" "$out" \
     "a scaffold without a catalog printed more than the scaffold line"
   assert_no_grep '## Task type' "$brief_a" "a scaffold without a catalog rendered a task type"
   assert_no_grep 'type-profile:' "$brief_a" "a scaffold without a catalog wrote a type profile into the brief"
@@ -1517,7 +1517,7 @@ EOF
   out=$(FM_HOME="$home_b" "$ROOT/bin/fm-brief.sh" type-idle some-proj --mode no-mistakes 2>&1) \
     || fail "scaffold with an unread catalog exited non-zero: $out"
   brief_b="$home_b/data/type-idle/brief.md"
-  assert_equals "scaffolded: $brief_b (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})" "$out" \
+  assert_equals "scaffolded: $brief_b (ship, mode=no-mistakes; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})" "$out" \
     "an unread catalog changed the scaffold line"
   assert_no_grep '## Task type' "$brief_b" "an unread catalog rendered a task type"
 
@@ -1581,7 +1581,7 @@ test_task_type_renders_and_surfaces_model_and_effort() {
   out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-ship gtm-orchestrator --mode direct-PR --type list-build 2>&1) \
     || fail "a valid type did not scaffold: $out"
   brief="$home/data/type-ship/brief.md"
-  assert_equals "$(printf '%s\n%s' "scaffolded: $brief (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})" "type-profile: model=claude-sonnet-5 effort=low")" "$out" \
+  assert_equals "$(printf '%s\n%s' "scaffolded: $brief (ship, mode=direct-PR; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})" "type-profile: model=claude-sonnet-5 effort=low")" "$out" \
     "model and effort were not surfaced on the scaffold line"
   assert_grep '## Task type' "$brief" "the brief has no task type section"
   assert_grep 'Name: list-build' "$brief" "the brief omitted the type name"
@@ -1596,12 +1596,12 @@ test_task_type_renders_and_surfaces_model_and_effort() {
   intent=$(fm_brief_task_heading_body "$brief" "## Captain's intent")
   spec=$(fm_brief_task_heading_body "$brief" "## Firstmate spec")
   assert_equals '{TASK}' "$intent" "the task type section was pulled into Captain's intent"
-  assert_equals '{FIRSTMATE_SPEC}' "$spec" "the task type section was pulled into Firstmate spec"
+  assert_equals "$(printf '%s\n%s\n%s\n%s' 'Goal: {GOAL}' '{FIRSTMATE_SPEC}' 'Off-limits: {OFF_LIMITS}' 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}')" "$spec" "the task type section was pulled into Firstmate spec"
 
   out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-scout other-proj --scout --type copy-draft 2>&1) \
     || fail "an unrestricted type did not scaffold a scout: $out"
   brief="$home/data/type-scout/brief.md"
-  assert_equals "$(printf '%s\n%s' "scaffolded: $brief (scout; replace {TASK} and {FIRSTMATE_SPEC})" "type-profile: effort=medium")" "$out" \
+  assert_equals "$(printf '%s\n%s' "scaffolded: $brief (scout; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})" "type-profile: effort=medium")" "$out" \
     "an effort-only type did not surface effort alone"
   assert_grep 'Name: copy-draft' "$brief" "the scout brief omitted the type"
   assert_no_grep 'Effort:' "$brief" "the scout brief restated the effort beside the type-profile line"
@@ -1793,6 +1793,82 @@ test_scout_and_secondmate_scaffold
 test_ship_and_scout_route_surfaces_through_lavish_or_html
 test_scout_lavish_line_follows_presentation_floor
 test_workers_wait_without_spending_turns
+# Every brief is bounded (one goal, off-limits, the contracts and pipeline
+# states that apply where it is spawned) and every Definition of done demands a
+# real end-to-end run with saved evidence.
+test_briefs_are_bounded_and_demand_real_proof() {
+  local home mode brief
+  home="$TMP_ROOT/bounded-home"
+  mkdir -p "$home/data" "$home/config"
+  for mode in no-mistakes direct-PR local-only; do
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "bp-$mode" some-proj --mode "$mode" >/dev/null 2>&1 \
+      || fail "$mode ship scaffold exited non-zero"
+  done
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" bp-scout some-proj --scout >/dev/null 2>&1 \
+    || fail "scout scaffold exited non-zero"
+  for mode in no-mistakes direct-PR local-only scout; do
+    brief="$home/data/bp-$mode/brief.md"
+    assert_equals 1 "$(grep -c '^Goal: {GOAL}$' "$brief")" "$mode: the one-goal line is missing or duplicated"
+    assert_equals 1 "$(grep -c '^Off-limits: {OFF_LIMITS}$' "$brief")" "$mode: the off-limits line is missing or duplicated"
+    assert_equals 1 "$(grep -c '^Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}$' "$brief")" \
+      "$mode: the contracts-and-pipeline-states line is missing or duplicated"
+    if [ "$mode" = scout ]; then
+      assert_grep 'proven for real: run the actual existing system, reproduction, or commands your findings rest on' "$brief" \
+        "scout: the Definition of done does not scope proof to existing evidence"
+    else
+      assert_grep "proven for real: run the actual thing end to end as its user would, not only its tests" "$brief" \
+        "$mode: the Definition of done does not demand a real run"
+      assert_grep 'The proof must cover the final delivered revision; rerun it after any code or pipeline fix.' "$brief" \
+        "$mode: the proof could be stale after a change"
+    fi
+  done
+  for mode in no-mistakes direct-PR local-only; do
+    assert_grep "and their output in \`$home/data/bp-$mode/proof.md\`." "$home/data/bp-$mode/brief.md" \
+      "$mode: the ship proof has no evidence destination"
+    assert_grep "write proof to \`$home/data/bp-$mode/proof.md\`" "$home/data/bp-$mode/brief.md" \
+      "$mode: the ship rules name a different proof destination"
+  done
+  for mode in no-mistakes direct-PR; do
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "bp-gerrit-$mode" some-proj --mode "$mode" --forge gerrit >/dev/null 2>&1 \
+      || fail "$mode Gerrit scaffold exited non-zero"
+    assert_grep "and their output in \`$home/data/bp-gerrit-$mode/proof.md\`." "$home/data/bp-gerrit-$mode/brief.md" \
+      "$mode Gerrit: the ship proof has no durable destination"
+  done
+  assert_grep "After publishing, rerun the actual thing end to end on this copy's published HEAD and replace \`$home/data/bp-gerrit-no-mistakes/proof.md\`" \
+    "$home/data/bp-gerrit-no-mistakes/brief.md" "no-mistakes Gerrit: final proof can predate a fix round"
+  assert_grep "After publishing, rerun the actual thing end to end on this copy's published HEAD and replace \`$home/data/bp-gerrit-direct-PR/proof.md\`" \
+    "$home/data/bp-gerrit-direct-PR/brief.md" "direct-PR Gerrit: final proof can predate the publish rewrite"
+  assert_grep "and their output in the report." "$home/data/bp-scout/brief.md" "scout: the proof is not put in the report"
+  assert_grep 'Do NOT push, do NOT open a PR, do NOT merge.' "$home/data/bp-local-only/brief.md" \
+    "local-only: the no-push rule was lost"
+  pass "fm-brief: ship and scout briefs are bounded and demand real proof"
+}
+
+# A type may name the tools its worker uses; the line is omitted when it names
+# none, and an absolute path is refused before any brief is written.
+test_task_type_tools_render_and_validate() {
+  local home out
+  home="$TMP_ROOT/type-tools"
+  mkdir -p "$home/data" "$home/config"
+  printf '%s\n' '{"types":[{"name":"t","use":"U.","tools":["treg","lg run"],"hand_back":"H.","touch":"T."},{"name":"bare","use":"U.","hand_back":"H.","touch":"T."}]}' \
+    > "$home/config/task-types.json"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" tt-ship some-proj --mode no-mistakes --type t >/dev/null 2>&1 \
+    || fail "a type with tools did not scaffold"
+  assert_grep 'Tools: treg, lg run - use these, and name any substitute when you hand back' "$home/data/tt-ship/brief.md" \
+    "the named tools were not rendered"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" tt-bare some-proj --mode no-mistakes --type bare >/dev/null 2>&1 \
+    || fail "a type without tools did not scaffold"
+  assert_no_grep 'Tools:' "$home/data/tt-bare/brief.md" "an empty Tools line was rendered"
+  printf '%s\n' '{"types":[{"name":"t","use":"U.","tools":["/usr/bin/x"],"hand_back":"H.","touch":"T."}]}' \
+    > "$home/config/task-types.json"
+  if out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" tt-abs some-proj --mode no-mistakes --type t 2>&1); then
+    fail "an absolute tool path was accepted: $out"
+  fi
+  assert_contains "$out" "type 't' tools must be names or repo-relative paths" "the absolute tool path refusal was not explained"
+  assert_absent "$home/data/tt-abs/brief.md" "a brief was written despite the refused catalog"
+  pass "fm-brief: task-type tools are rendered, omitted when empty, and validated"
+}
+
 test_wait_no_turns_absent_keeps_the_previous_brief
 test_home_brief_include_is_appended_last
 test_base_branch_is_rendered_and_bounded
@@ -1808,3 +1884,5 @@ test_task_type_renders_and_surfaces_model_and_effort
 test_task_type_refuses_unknown_malformed_and_wrong_project
 test_task_type_list_and_example
 test_ship_and_scout_briefs_grant_bounded_sub_agents
+test_briefs_are_bounded_and_demand_real_proof
+test_task_type_tools_render_and_validate

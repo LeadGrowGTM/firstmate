@@ -81,7 +81,7 @@ def take_projects(where):
       end)
   end;
 
-def allowed: ["name", "use", "skills", "agents", "check", "hand_back", "model", "effort", "touch", "projects"];
+def allowed: ["name", "use", "skills", "agents", "tools", "check", "hand_back", "model", "effort", "touch", "projects"];
 
 def one_type($i):
   if type != "object" then
@@ -110,6 +110,8 @@ def one_type($i):
                 | if ($skills.ok | not) then $skills
                   else (pointers($where; "agents")) as $agents
                   | if ($agents.ok | not) then $agents
+                    else (pointers($where; "tools")) as $tools
+                    | if ($tools.ok | not) then $tools
                     else (take_model($where)) as $model
                     | if ($model.ok | not) then $model
                       else (take_effort($where)) as $effort
@@ -123,6 +125,7 @@ def one_type($i):
                                use: $use.value,
                                skills: $skills.items,
                                agents: $agents.items,
+                               tools: $tools.items,
                                check: $check.value,
                                hand_back: $hand.value,
                                model: $model.value,
@@ -138,6 +141,7 @@ def one_type($i):
               end
             end
           end
+        end
         end
       end
   end;
@@ -174,6 +178,7 @@ def lines:
   ["## Task type", "Name: \(.name)", "Use: \(.use)"]
   + (if (.skills | length) > 0 then ["Skills: \(.skills | join(", "))"] else [] end)
   + (if (.agents | length) > 0 then ["Agents: \(.agents | join(", "))"] else [] end)
+  + (if (.tools | length) > 0 then ["Tools: \(.tools | join(", ")) - use these, and name any substitute when you hand back"] else [] end)
   + (if .check != "" then ["Check: \(.check)"] else [] end)
   + ["Hand back: \(.hand_back)", "May touch: \(.touch)"];
 
