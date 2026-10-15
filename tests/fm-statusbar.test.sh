@@ -77,6 +77,10 @@ tmux new-session -d -t firstmate -s orca-view -x 150 -y 20
 tmux new-session -d -s unrelated -x 150 -y 20 "sleep 600"
 SOCKET_PATH=$(tmux display-message -p -t firstmate '#{socket_path}')
 [ -n "$SOCKET_PATH" ] || fail "scratch server did not expose its private socket"
+TRACKER_SOCKET_KEY=$(printf '%s' "$SOCKET_PATH" | cksum)
+TRACKER_SOCKET_KEY=${TRACKER_SOCKET_KEY%% *}
+TRACKER_CACHE_FILE="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+TRACKER_ATTEMPT_FILE="$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt.$TRACKER_SOCKET_KEY"
 if statusbar "$SB" >/dev/null 2>&1; then fail "statusbar helper accepted a missing socket"; fi
 if statusbar "$SB" '' label firstmate:bare refused claude opus high /tmp >/dev/null 2>&1; then
   fail "statusbar helper accepted an empty socket"
@@ -487,7 +491,7 @@ bound=$(FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" fle
 [ "$bound" = 'crew 1 | 2nd 1' ] || fail "fleet used ambient home instead of session state" "$bound"
 tmux set-option -u -t fleet-later 'status-format[0]'
 mkdir -p "$FM_SB_TRACKER_CACHE_DIR"
-printf 'churchill:on 1r/0w\n' >"$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt"
+printf 'churchill:on 1r/0w\n' >"$TRACKER_CACHE_FILE"
 fleet_render=$(render fleet-later 100 'churchill:on 1r/0w')
 case "$fleet_render" in *'churchill:on 1r/0w'*) ;; *) fail "tracker job failed to render on its private socket" "$fleet_render" ;; esac
 case "$fleet_render" in *DO_NOT_DISPLAY*) fail "fleet exposed an unrelated metadata value" ;; esac
@@ -527,6 +531,8 @@ pass "secondmate startup and other homes preserve primary fleet ownership"
 # Public tracker interface reads each home's recorded tasks and current-state
 # helper, while preserving the rendered cache between refreshes.
 export FM_SB_TRACKER_CACHE_DIR="$WORK/tracker-proof-cache"
+TRACKER_CACHE_FILE="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+TRACKER_ATTEMPT_FILE="$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt.$TRACKER_SOCKET_KEY"
 mkdir -p "$WORK/firstmate/state" "$WORK/fm-homes/dev/state" \
   "$WORK/fm-homes/napoleon/state" "$WORK/fm-homes/alexander-media/state" \
   "$WORK/fm-homes/ottersec/state" "$WORK/fm-homes/legion/state"
@@ -548,11 +554,11 @@ esac
 SH
 export FM_SB_CREW_STATE_SCRIPT="$WORK/crew-state-fixture.sh"
 export FM_SB_EXPECTED_SOCKET="$SOCKET_PATH"
-rm -f "$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt" "$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt"
+rm -f "$TRACKER_CACHE_FILE" "$TRACKER_ATTEMPT_FILE"
 tracker=$(FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" crew-tracker)
 [ "$tracker" = 'crew: loading' ] || fail "cold tracker did not return immediately" "$tracker"
 i=0
-while [ ! -s "$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+while [ ! -s "$TRACKER_CACHE_FILE" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
 tracker=$(statusbar "$SB" "$SOCKET_PATH" crew-tracker)
 case "$tracker" in
   *'churchill:off 1r/0w'*'dev:parked 1r/0w'*'ottersec:unknown 0r/1w'*'legion:unknown 0r/0w'*) ;;
@@ -560,6 +566,18 @@ case "$tracker" in
 esac
 case "$tracker" in *website-genie*|*rothschild*) fail "tracker included excluded mates" "$tracker" ;; esac
 pass "tracker refreshes all six homes through current-state reads"
+other_socket=$("$REAL_TMUX" -L "$OUTER" display-message -p '#{socket_path}')
+other_key=$(printf '%s' "$other_socket" | cksum)
+other_key=${other_key%% *}
+other_cache="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$other_key.txt"
+[ "$other_cache" != "$TRACKER_CACHE_FILE" ] || fail "two tmux servers shared a tracker cache path"
+other_tracker=$(statusbar "$SB" "$other_socket" crew-tracker)
+[ "$other_tracker" = 'crew: loading' ] || fail "another tmux server reused the first server's tracker" "$other_tracker"
+i=0
+while [ ! -s "$other_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s "$other_cache" ] || fail "another tmux server did not refresh its own cache"
+[ "$(cat "$TRACKER_CACHE_FILE")" = "$tracker" ] || fail "another tmux server overwrote the first cache"
+pass "tracker caches are isolated by tmux socket"
 
 # --- persistent config: preserve user settings and survive server restart ---
 config="$WORK/user tmux.conf"

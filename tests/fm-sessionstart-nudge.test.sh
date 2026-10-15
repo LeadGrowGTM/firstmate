@@ -1136,10 +1136,12 @@ META
     || fail "session start overwrote the spawned account"
   [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -wqv -t fleet:primary @fm_provider)" = codex ] \
     || fail "session start overwrote the spawned provider"
-  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" = '#{E:pane-border-format}' ] \
-    || fail "session start did not format its primary pane's fleet"
-  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t unrelated status-right)" != '#{E:pane-border-format}' ] \
-    || fail "session start formatted an unrelated session"
+  case "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" in
+    *crew-tracker*) ;; *) fail "session start did not format its primary pane's fleet" ;;
+  esac
+  case "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t unrelated status-right)" in
+    *crew-tracker*) fail "session start formatted an unrelated session" ;;
+  esac
   long_task=secondmate-task-id-longer-than-forty-characters-123456
   PATH="$root/bin:$RUN_PATH" tmux new-window -d -t fleet: -n long 'sleep 600'
   pane=$(PATH="$root/bin:$RUN_PATH" tmux display-message -p -t fleet:long '#{pane_id}')
@@ -1199,12 +1201,15 @@ META
   PATH="$root/bin:$RUN_PATH" tmux set-option -t firstmate status-right ''
   out=$(unset TMUX_PANE; RUN_PATH="$root/bin:$RUN_PATH" run_hook "$root" --source startup </dev/null)
   assert_not_contains "$out" 'READ-ONLY SESSION' "detached statusbar fixture lost its lock"
-  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t firstmate status-right)" = '#{E:pane-border-format}' ] \
-    || fail "detached startup missed the firstmate session"
-  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" != '#{E:pane-border-format}' ] \
-    || fail "detached startup formatted an older recorded task session"
-  [ "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t unrelated status-right)" != '#{E:pane-border-format}' ] \
-    || fail "detached startup formatted an unrelated session"
+  case "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t firstmate status-right)" in
+    *crew-tracker*) ;; *) fail "detached startup missed the firstmate session" ;;
+  esac
+  case "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t fleet status-right)" in
+    *crew-tracker*) fail "detached startup formatted an older recorded task session" ;;
+  esac
+  case "$(PATH="$root/bin:$RUN_PATH" tmux show-options -qv -t unrelated status-right)" in
+    *crew-tracker*) fail "detached startup formatted an unrelated session" ;;
+  esac
   "$real_tmux" -L "$socket" kill-server
   pass "session start preserves spawn facts and targets the primary or detached fleet"
 }

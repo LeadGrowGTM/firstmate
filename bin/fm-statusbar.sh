@@ -52,11 +52,14 @@ USAGE_CACHE="$STATE/statusbar-usage.txt"
 USAGE_ATTEMPT="$STATE/.statusbar-usage-attempt"
 USAGE_LOCK="$STATE/.statusbar-usage.lock"
 USAGE_TTL=60
-TRACKER_ROOT=${FM_SB_TRACKER_ROOT:-${FM_ROOT%/*}}
+TRACKER_ROOT=${FM_SB_TRACKER_ROOT:-}
+if [ -z "$TRACKER_ROOT" ]; then
+  case "$FM_HOME" in
+    */fm-homes/*) TRACKER_ROOT=${FM_HOME%%/fm-homes/*} ;;
+    *) TRACKER_ROOT=${FM_HOME%/*} ;;
+  esac
+fi
 TRACKER_CACHE_DIR=${FM_SB_TRACKER_CACHE_DIR:-$TRACKER_ROOT/firstmate/state}
-TRACKER_CACHE="$TRACKER_CACHE_DIR/statusbar-crew-tracker.txt"
-TRACKER_ATTEMPT="$TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt"
-TRACKER_LOCK="$TRACKER_CACHE_DIR/.statusbar-crew-tracker.lock"
 TRACKER_TTL=30
 TRACKER_CREW_STATE=${FM_SB_CREW_STATE_SCRIPT:-$SCRIPT_DIR/fm-crew-state.sh}
 SELF="$SCRIPT_DIR/fm-statusbar.sh"
@@ -66,6 +69,11 @@ if [ "${1:-}" = --socket ]; then
   FM_SB_SOCKET=$2
   shift 2
 fi
+TRACKER_SOCKET_KEY=$(printf '%s' "${FM_SB_SOCKET:-default}" | cksum)
+TRACKER_SOCKET_KEY=${TRACKER_SOCKET_KEY%% *}
+TRACKER_CACHE="$TRACKER_CACHE_DIR/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+TRACKER_ATTEMPT="$TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt.$TRACKER_SOCKET_KEY"
+TRACKER_LOCK="$TRACKER_CACHE_DIR/.statusbar-crew-tracker.lock.$TRACKER_SOCKET_KEY"
 # Explicit server addressing also reaches status jobs outside their caller's
 # shell. Never let a named preview query the default tmux server.
 tmux() {
