@@ -53,24 +53,24 @@ USAGE_ATTEMPT="$STATE/.statusbar-usage-attempt"
 USAGE_LOCK="$STATE/.statusbar-usage.lock"
 USAGE_TTL=60
 TRACKER_ROOT=${FM_SB_TRACKER_ROOT:-}
-if [ -z "$TRACKER_ROOT" ]; then
-  case "$FM_HOME" in
-    */fm-homes/*) TRACKER_ROOT=${FM_HOME%%/fm-homes/*} ;;
-    *) TRACKER_ROOT=${FM_HOME%/*} ;;
-  esac
-fi
 TRACKER_MAIN_HOME=${FM_SB_TRACKER_MAIN_HOME:-}
 if [ -z "$TRACKER_MAIN_HOME" ]; then
-  case "$FM_HOME" in
-    */fm-homes/*) TRACKER_MAIN_HOME=$TRACKER_ROOT/firstmate ;;
-    *)
-      if [ -n "${FM_SB_TRACKER_ROOT:-}" ]; then
-        TRACKER_MAIN_HOME=$TRACKER_ROOT/firstmate
-      else
-        TRACKER_MAIN_HOME=$FM_HOME
-      fi
-      ;;
-  esac
+  if [ -e "$FM_HOME/.fm-secondmate-parent" ] || [ -L "$FM_HOME/.fm-secondmate-parent" ]; then
+    TRACKER_MAIN_HOME=$(. "$SCRIPT_DIR/fm-wake-lib.sh"; fm_firstmate_root_home "$FM_HOME") || exit 1
+  elif [ -n "$TRACKER_ROOT" ]; then
+    TRACKER_MAIN_HOME=$TRACKER_ROOT/firstmate
+  else
+    TRACKER_MAIN_HOME=$FM_HOME
+  fi
+fi
+if [ -z "$TRACKER_ROOT" ]; then TRACKER_ROOT=${TRACKER_MAIN_HOME%/*}; fi
+TRACKER_MAIN_STATE=${FM_SB_TRACKER_MAIN_STATE:-}
+if [ -z "$TRACKER_MAIN_STATE" ]; then
+  if [ "$FM_HOME" = "$TRACKER_MAIN_HOME" ]; then
+    TRACKER_MAIN_STATE=$STATE
+  else
+    TRACKER_MAIN_STATE=$TRACKER_MAIN_HOME/state
+  fi
 fi
 TRACKER_CACHE_DIR=${FM_SB_TRACKER_CACHE_DIR:-$TRACKER_MAIN_HOME/state}
 TRACKER_TTL=30
@@ -187,13 +187,14 @@ fm_sb_format() {
 }
 
 fm_sb_tracker_job() {
-  local root_q main_q cache_q state_q
+  local root_q main_q main_state_q cache_q state_q
   printf -v root_q '%q' "$TRACKER_ROOT"
   printf -v main_q '%q' "$TRACKER_MAIN_HOME"
+  printf -v main_state_q '%q' "$TRACKER_MAIN_STATE"
   printf -v cache_q '%q' "$TRACKER_CACHE_DIR"
   printf -v state_q '%q' "$TRACKER_CREW_STATE"
-  printf '#(env FM_SB_TRACKER_ROOT=%s FM_SB_TRACKER_MAIN_HOME=%s FM_SB_TRACKER_CACHE_DIR=%s FM_SB_CREW_STATE_SCRIPT=%s bash "%s" --socket "#{socket_path}" crew-tracker)' \
-    "$root_q" "$main_q" "$cache_q" "$state_q" "$SELF"
+  printf '#(env FM_SB_TRACKER_ROOT=%s FM_SB_TRACKER_MAIN_HOME=%s FM_SB_TRACKER_MAIN_STATE=%s FM_SB_TRACKER_CACHE_DIR=%s FM_SB_CREW_STATE_SCRIPT=%s bash "%s" --socket "#{socket_path}" crew-tracker)' \
+    "$root_q" "$main_q" "$main_state_q" "$cache_q" "$state_q" "$SELF"
 }
 
 cmd_sync() {
@@ -299,13 +300,14 @@ cmd_fleet() {
 
 # Run current-state reads only for task metadata with a live tmux window (or a
 # non-tmux backend). Parallel reads are capped at four and each has a hard bound.
-fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
-  local home=$1 mate=$2 live=$3 output=$4 meta id kind backend win state running=0 waiting=0 unknown=0 suffix=
+fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file> [state-dir]
+  local home=$1 mate=$2 live=$3 output=$4 state_dir=${5:-$1/state}
+  local meta id kind backend win state running=0 waiting=0 unknown=0 suffix=
   local -a jobs=()
   local scratch="${output}.tasks"
-  [ -d "$home/state" ] || { printf '%s ?r/?w\n' "$mate" >"$output"; return 0; }
+  [ -d "$state_dir" ] || { printf '%s ?r/?w\n' "$mate" >"$output"; return 0; }
   mkdir -p "$scratch" || return 1
-  for meta in "$home/state"/*.meta; do
+  for meta in "$state_dir"/*.meta; do
     [ -f "$meta" ] || continue
     id=${meta##*/}; id=${id%.meta}
     kind=$(sed -n 's/^kind=//p' "$meta" | head -1)
@@ -316,7 +318,7 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
       if [ -z "$win" ] || ! printf '%s\n' "$live" | grep -qxF -- "$win"; then continue; fi
     fi
     (
-      fm_run_timed 3 env FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+      fm_run_timed 3 env FM_HOME="$home" FM_STATE_OVERRIDE="$state_dir" \
         FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
         FM_PROJECTS_OVERRIDE="$home/projects" TMUX="${FM_SB_SOCKET:+$FM_SB_SOCKET,0,0}" \
         FM_CREW_STATE_NO_FORGE=1 FM_CREW_STATE_NM_TIMEOUT=1 \
@@ -347,7 +349,7 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file>
 }
 
 fm_sb_tracker_refresh() {
-  local live primary_windows tmp home mate label result='' i=0
+  local live primary_windows tmp home mate label state_dir result='' i=0
   local -a mates=(churchill dev napoleon alexander-media ottersec legion)
   tmp="$TRACKER_CACHE.$$"
   live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
@@ -355,22 +357,24 @@ fm_sb_tracker_refresh() {
   for mate in "${mates[@]}"; do
     if [ "$mate" = churchill ]; then
       home="$TRACKER_MAIN_HOME"
+      state_dir=$TRACKER_MAIN_STATE
     else
-      home=$(sed -n 's/^home=//p' "$TRACKER_MAIN_HOME/state/$mate.meta" 2>/dev/null | tail -1)
+      home=$(sed -n 's/^home=//p' "$TRACKER_MAIN_STATE/$mate.meta" 2>/dev/null | tail -1)
       [ -n "$home" ] || home="$TRACKER_ROOT/fm-homes/$mate"
+      state_dir=$home/state
     fi
     fm_run_timed 27 bash "$SELF" --socket "$FM_SB_SOCKET" \
-      crew-tracker-home "$home" "$mate" "$live" "$tmp.$i" &
+      crew-tracker-home "$home" "$mate" "$live" "$tmp.$i" "$state_dir" &
     if [ "$mate" = churchill ]; then
       label=on
-      printf '%s\n' "$primary_windows" | grep -qxF "firstmate|$home/state" || label=off
+      printf '%s\n' "$primary_windows" | grep -qxF "${home##*/}|$state_dir" || label=off
       printf '%s\n' "$label" >"$tmp.label.$i"
     else
       (
         label=unknown
-        if [ -f "$TRACKER_MAIN_HOME/state/$mate.meta" ]; then
+        if [ -f "$TRACKER_MAIN_STATE/$mate.meta" ]; then
           label=$(fm_run_timed 7 env FM_HOME="$TRACKER_MAIN_HOME" \
-            FM_STATE_OVERRIDE="$TRACKER_MAIN_HOME/state" \
+            FM_STATE_OVERRIDE="$TRACKER_MAIN_STATE" \
             FM_DATA_OVERRIDE="$TRACKER_MAIN_HOME/data" \
             FM_CONFIG_OVERRIDE="$TRACKER_MAIN_HOME/config" \
             FM_PROJECTS_OVERRIDE="$TRACKER_MAIN_HOME/projects" \
@@ -420,6 +424,7 @@ cmd_crew_tracker() {
   (
     trap 'rmdir "$TRACKER_LOCK" 2>/dev/null' EXIT
     FM_SB_TRACKER_ROOT="$TRACKER_ROOT" FM_SB_TRACKER_MAIN_HOME="$TRACKER_MAIN_HOME" \
+      FM_SB_TRACKER_MAIN_STATE="$TRACKER_MAIN_STATE" \
       FM_SB_TRACKER_CACHE_DIR="$TRACKER_CACHE_DIR" \
       FM_SB_CREW_STATE_SCRIPT="$TRACKER_CREW_STATE" \
       fm_run_timed 35 bash "$SELF" --socket "${FM_SB_SOCKET:-$(tmux display-message -p '#{socket_path}' 2>/dev/null)}" crew-tracker-refresh >/dev/null 2>&1 || true
