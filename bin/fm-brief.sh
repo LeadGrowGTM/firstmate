@@ -15,7 +15,7 @@
 # it runs inside, or `none`); the Definition
 # of done is the done test and stopping point. bin/fm-dod-lib.sh owns the
 # no-mistakes `--intent` contract those subsections feed and the prove-it step
-# every Definition of done carries; bin/fm-spawn.sh refuses leftover placeholders and a
+# every Definition of done carries; bin/fm-spawn.sh refuses unfilled required task fields and a
 # `## Captain's intent` line opening with a Captain label or address. Secondmate
 # charters still use a single `{TASK}` charter fill. Firstmate may adjust other
 # sections when the task genuinely deviates (e.g. working an existing external
@@ -41,7 +41,7 @@
 #   Set FM_SECONDMATE_SCOPE='<scope>' to write a routing scope distinct from the charter text.
 #   --herdr-lab is mandatory when the task will issue Herdr lifecycle commands.
 #   It adds the hard isolation contract backed by bin/fm-herdr-lab.sh.
-#   The flag must be explicit because {TASK} and {FIRSTMATE_SPEC} are filled
+#   The flag must be explicit because the task and Firstmate spec are filled
 #   after scaffolding and the caller-supplied repo string cannot reliably
 #   identify this repo. Briefs made without it carry a loud declaration so an
 #   omitted contract cannot be silent.

@@ -82,7 +82,7 @@
 # roughly the same specification - so a report, decision, or PR the intent
 # refers to is written into it as substance, never left as a pointer.
 # bin/fm-brief.sh scaffolds those two `# Task` subsections; bin/fm-spawn.sh and
-# bin/fm-promote.sh refuse leftover `{TASK}` / `{GOAL}` / `{FIRSTMATE_SPEC}` / `{OFF_LIMITS}` / `{CONTRACTS}` placeholders
+# bin/fm-promote.sh refuse unfilled Captain intent and required labeled spec fields
 # and a `## Captain's intent` line opening with a Captain label or address
 # through the helpers below. Other mentions of `--intent` point here rather than
 # restating the rule.
