@@ -230,6 +230,47 @@ test_no_git_flags_leave_config_unchanged() {
   pass "ordinary spawn leaves Git config unchanged"
 }
 
+test_reused_slot_drops_prior_worker_identity() {
+  local kind requested rec id out status ident key
+  for kind in ship scout; do
+    for requested in no yes; do
+      id="settle-reused-$kind-$requested-z10"
+      rec=$(make_settle_case "settle-reused-$kind-$requested" "$id" 0)
+      read_settle_record "$rec"
+      git -C "$PROJ_DIR" config --local user.name 'Current Operator'
+      git -C "$PROJ_DIR" config --local user.email 'current@example.invalid'
+      git -C "$WT_DIR" config --local extensions.worktreeConfig true
+      git -C "$WT_DIR" config --worktree user.name 'Prior Boat Worker'
+      git -C "$WT_DIR" config --worktree user.email 'prior@example.invalid'
+      set --
+      [ "$kind" != scout ] || set -- --scout
+      if [ "$requested" = yes ]; then
+        out=$(run_settle_spawn "$id" "$@" --git-name 'Controller Worker' --git-email 'controller@example.invalid')
+      else
+        out=$(run_settle_spawn "$id" "$@")
+      fi
+      status=$?
+      expect_code 0 "$status" "reused $kind spawn with requested identity $requested should succeed"$'\n'"$out"
+      ident=$(env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL git -C "$WT_DIR" var GIT_COMMITTER_IDENT)
+      if [ "$requested" = yes ]; then
+        case "$ident" in
+        'Controller Worker <controller@example.invalid> '*) ;;
+        *) fail "reused $kind worktree did not use the controller identity: $ident" ;;
+        esac
+      else
+        case "$ident" in
+        'Current Operator <current@example.invalid> '*) ;;
+        *) fail "reused $kind worktree kept the previous worker identity: $ident" ;;
+        esac
+        for key in user.name user.email; do
+          [ -z "$(git -C "$WT_DIR" config --worktree --get "$key" || true)" ] || fail "reused $kind worktree retained $key"
+        done
+      fi
+    done
+  done
+  pass "reused ship and scout slots use the requested or current project identity"
+}
+
 # A single stale first read (the exact incident) must not be accepted: the
 # loop should keep polling until two consecutive reads agree, landing on the
 # real settled worktree instead.
@@ -346,5 +387,6 @@ test_scout_git_identity_is_worktree_scoped
 test_git_identity_flag_validation
 test_git_identity_refuses_unsafe_common_config
 test_no_git_flags_leave_config_unchanged
+test_reused_slot_drops_prior_worker_identity
 
 echo "# all fm-spawn-worktree-settle tests passed"
