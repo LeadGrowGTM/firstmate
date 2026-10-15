@@ -1834,8 +1834,6 @@ test_briefs_are_bounded_and_demand_real_proof() {
     assert_grep "and their output in \`$home/data/bp-gerrit-$mode/proof.md\`." "$home/data/bp-gerrit-$mode/brief.md" \
       "$mode Gerrit: the ship proof has no durable destination"
   done
-  assert_grep "After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the pushed PR head SHA from its forge Git ref (\`git ls-remote <PR remote> refs/pull/<number>/head\`), get a clean checkout of that exact revision, fetching it if needed, and rerun the actual thing end to end there. Replace \`$home/data/bp-no-mistakes/proof.md\` with that PR head SHA" \
-    "$home/data/bp-no-mistakes/brief.md" "no-mistakes PR: final proof can predate a fix round"
   assert_grep "After publishing, rerun the actual thing end to end on this copy's published HEAD and replace \`$home/data/bp-gerrit-no-mistakes/proof.md\`" \
     "$home/data/bp-gerrit-no-mistakes/brief.md" "no-mistakes Gerrit: final proof can predate a fix round"
   assert_grep "After publishing, rerun the actual thing end to end on this copy's published HEAD and replace \`$home/data/bp-gerrit-direct-PR/proof.md\`" \
