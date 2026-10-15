@@ -1428,7 +1428,19 @@ SH
     cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 case "\$*" in *'#{pane_current_path}'*) printf '%s\n' '$case_dir/wt'; exit 0 ;; esac
-case "\$*" in *'-S -0'*) printf 'working [at=1791892800]: brief consumed\n' >> '$home/state/task-one.status' ;; esac
+case "\${1:-}" in
+  send-keys)
+    case " \$* " in
+      *' -l '*) : > '$case_dir/launch-pending' ;;
+      *' Enter '*)
+        if [ -e '$case_dir/launch-pending' ]; then
+          printf 'working [at=1791892800]: brief consumed\n' >> '$home/state/task-one.status'
+          rm '$case_dir/launch-pending'
+        fi
+        ;;
+    esac
+    ;;
+esac
 case "\${1:-}" in display-message) printf 'firstmate\n' ;; esac
 exit 0
 SH
