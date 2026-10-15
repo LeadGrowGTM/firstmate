@@ -516,6 +516,18 @@ FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" apply --primary 
 [ "$(tmux show-hooks -g)" = "$hooks" ] || fail "same-home reapply replaced group hook"
 pass "group ownership is write-once even through an unbound late view"
 
+tmux new-session -d -s legacy-owner -n old 'sleep 600'
+tmux set-option -t legacy-owner @fm_fleet_state "$FLEET_STATE"
+tmux set-option -t legacy-owner status-right '#{E:pane-border-format}'
+FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$FLEET_STATE" \
+  statusbar "$SB" "$SOCKET_PATH" apply --primary legacy-owner
+legacy_right=$(tmux show-options -qv -t legacy-owner status-right)
+case "$legacy_right" in *crew-tracker*) ;; *) fail "bound legacy session did not migrate to the tracker" "$legacy_right" ;; esac
+tmux new-session -d -t legacy-owner -s legacy-later
+[ "$(tmux show-options -qv -t legacy-later status-right)" = "$legacy_right" ] \
+  || fail "migrated legacy group kept an old late-view hook"
+pass "explicit primary apply migrates an existing legacy fleet binding"
+
 
 mkdir -p "$WORK/second-home/state"
 touch "$WORK/second-home/.fm-secondmate-home"
@@ -587,6 +599,18 @@ case "$tracker" in
 esac
 case "$tracker" in *website-genie*|*rothschild*) fail "tracker included excluded mates" "$tracker" ;; esac
 pass "tracker refreshes all six homes through current-state reads"
+mkdir -p "$WORK/fail-inventory-bin"
+cat >"$WORK/fail-inventory-bin/tmux" <<SH
+#!/usr/bin/env bash
+case " \$* " in *' list-windows '*) exit 1 ;; esac
+exec "$REAL_TMUX" "\$@"
+SH
+chmod +x "$WORK/fail-inventory-bin/tmux"
+if PATH="$WORK/fail-inventory-bin:$PATH" statusbar "$SB" "$SOCKET_PATH" crew-tracker-refresh >/dev/null; then
+  fail "failed tmux inventory was treated as an empty fleet"
+fi
+[ "$(cat "$TRACKER_CACHE_FILE")" = "$tracker" ] || fail "failed inventory replaced valid cached counts"
+pass "failed tmux inventory preserves the last valid crew summary"
 for i in 1 2 3 4 5 6 7 8; do
   printf 'window=firstmate:fm-live-second\nkind=ship\n' >"$WORK/custom-dev/state/slow-task-$i.meta"
 done

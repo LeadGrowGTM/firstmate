@@ -240,8 +240,8 @@ cmd_sync() {
 }
 
 cmd_apply() {
-  local ses fmt win group group_id sid member_group target_sid primary=0 left hook binding peer_binding sessions job
-  if [ "${1:-}" = --primary ]; then primary=1; shift; fi
+  local ses fmt win group group_id sid member_group target_sid primary=0 requested_primary=0 left hook binding peer_binding sessions job legacy_right
+  if [ "${1:-}" = --primary ]; then primary=1; requested_primary=1; shift; fi
   ses=${1:-}
   [ "$#" -eq 1 ] && [ -n "$ses" ] || { echo 'usage: fm-statusbar.sh apply [--primary] <session>' >&2; return 2; }
   command -v tmux >/dev/null 2>&1 || return 0
@@ -260,6 +260,10 @@ cmd_apply() {
   done <<<"$sessions"
   if [ -n "$binding" ] || [ -e "$FM_HOME/.fm-secondmate-home" ]; then
     primary=0
+    if [ "$requested_primary" -eq 1 ] && [ -n "$binding" ] && [ ! -e "$FM_HOME/.fm-secondmate-home" ]; then
+      legacy_right=$(tmux show-options -qv -t "$target_sid" status-right 2>/dev/null) || legacy_right=
+      [ "$legacy_right" != '#{E:pane-border-format}' ] || primary=1
+    fi
   fi
   fmt=$(fm_sb_format)
   while IFS= read -r win; do
@@ -376,8 +380,8 @@ fm_sb_tracker_refresh() {
   local live primary_windows tmp home mate label state_dir data_dir config_dir projects_dir remote result='' i=0
   local -a mates=(churchill dev napoleon alexander-media ottersec legion)
   tmp="$TRACKER_CACHE.$$"
-  live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
-  primary_windows=$(tmux list-windows -a -F '#{@fm_task}|#{@fm_state}' 2>/dev/null) || primary_windows=
+  live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || return 1
+  primary_windows=$(tmux list-windows -a -F '#{@fm_task}|#{@fm_state}' 2>/dev/null) || return 1
   for mate in "${mates[@]}"; do
     if [ "$mate" = churchill ]; then
       home="$TRACKER_MAIN_HOME"
