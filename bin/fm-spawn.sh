@@ -5682,7 +5682,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -5711,6 +5711,7 @@ preserve_relaunch_meta() {
   fi
   printf '%s\n' "$FM_DISPATCH_PROFILE_RECEIPT" | jq -r '
     (if .source != null then "dispatch_rule=" + (.source | tojson) else empty end),
+    (if .rule_fingerprint != null then "dispatch_rule_fingerprint=" + .rule_fingerprint else empty end),
     (if (.class // "") != "" then "reasoning_class=" + .class else empty end),
     (if (.provider // "") != "" then "dispatch_provider=" + .provider else empty end),
     (if .reason != null then "fallback_reason=" + (.reason | tojson) else empty end)'

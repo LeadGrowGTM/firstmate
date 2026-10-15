@@ -1526,11 +1526,12 @@ This single-provider table is separate from the frozen legacy mapping used by `f
 - Except for `ultra`, which refuses unsupported profiles under the native-effort contract above, an effort value the chosen harness does not accept is recorded as `effort=` in task meta for traceability but omitted from the launch flags.
 - Bootstrap reports unsupported harness/model/effort combinations as a `CREW_DISPATCH` diagnostic when they are visible in the file.
 
-Spawn records the uniquely selected profile set as JSON-encoded `dispatch_rule` (`{"rule":"rule_1"}` for the first rule or `{"default":true}`), its optional `reasoning_class` and `dispatch_provider`, and the JSON-encoded `fallback_reason` in task metadata.
+Spawn records the uniquely selected profile set as JSON-encoded `dispatch_rule` (`{"rule":"rule_1"}` for the first rule or `{"default":true}`), a SHA-256 `dispatch_rule_fingerprint` of its condition and use list (or the default use list), its optional `reasoning_class` and `dispatch_provider`, and the JSON-encoded `fallback_reason` in task metadata.
 An ambiguous set requires an explicit selector at intake; scripts never choose among natural-language rules.
 An explicit profile outside the configuration remains an intake override, with no recorded rule authorizing subsequent fallback.
 Ship and scout relaunches preserve the recorded model and effort when omitted, including direct spawn relaunches, and preserve the chosen class and fallback rationale on an unchanged profile.
 A configured replacement must be listed in that same rule in the current configuration; removing the rule or its configuration cannot authorize a replacement.
+For records with a rule fingerprint, changing or reordering that rule refuses relaunch before stopping the worker, even when the replacement remains listed at the saved position.
 Different models or adapters require matching declared `reasoning_class` labels, rather than treating equal effort tokens as evidence of equal model capability.
 Without declared labels, the same adapter and model may retain or increase its explicit effort, but may not lower it or replace it with an unknown default.
 Legacy task records recover a rule only when their recorded profile identifies exactly one current set; ambiguous or unlisted records refuse fallback.

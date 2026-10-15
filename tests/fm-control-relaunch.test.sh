@@ -915,7 +915,7 @@ test_configured_fallback_refuses_an_omitted_effort_before_stop() {
 }
 
 test_configured_equivalent_fallback_records_realized_profile_and_reason() {
-  local dir out rc reason=$'provider quota exhausted\nuse declared equivalent'
+  local dir out rc fingerprint reason=$'provider quota exhausted\nuse declared equivalent'
   dir=$(new_case equivalent rl-equivalent)
   add_ship_task "$dir" rl-equivalent claude
   mkdir -p "$dir/home/config"
@@ -928,6 +928,8 @@ test_configured_equivalent_fallback_records_realized_profile_and_reason() {
   out=$(run_control "$dir" rl-equivalent relaunch --harness codex --model gpt-6.1-sol --effort high --note "$reason"); rc=$?
   expect_code 0 "$rc" "declared equivalent fallback should succeed"$'\n'"$out"
   [ "$(meta_field "$dir" rl-equivalent dispatch_rule)" = '{"rule":"rule_1"}' ] || fail "fallback lost its rule"
+  fingerprint=$(meta_field "$dir" rl-equivalent dispatch_rule_fingerprint)
+  [[ $fingerprint =~ ^[0-9a-f]{64}$ ]] || fail "fallback lost its rule fingerprint"
   [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "fallback lost its chosen class"
   [ "$(meta_field "$dir" rl-equivalent dispatch_provider)" = codex ] || fail "fallback lost provider"
   [ "$(meta_field "$dir" rl-equivalent harness)" = codex ] || fail "fallback lost realized harness"
@@ -939,9 +941,40 @@ test_configured_equivalent_fallback_records_realized_profile_and_reason() {
   assert_contains "$(cat "$dir/fake/literal")" 'model_reasoning_effort="high"' "fallback did not realize the effort"
   out=$(run_control "$dir" rl-equivalent relaunch --note "resume the same profile"); rc=$?
   expect_code 0 "$rc" "unchanged fallback profile should relaunch"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-equivalent dispatch_rule_fingerprint)" = "$fingerprint" ] || fail "unchanged relaunch changed the rule fingerprint"
   [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "unchanged relaunch lost its class"
   [ "$(meta_field "$dir" rl-equivalent fallback_reason | jq -r .)" = "$reason" ] || fail "unchanged relaunch replaced the fallback reason with its progress note"
   pass "declared equivalent fallback records the rule, class, realized profile, provider and reason"
+}
+
+test_reordered_rule_refuses_before_stop() {
+  local dir id out rc canonical fingerprint
+  id=rl-rule-reordered
+  dir=$(new_case rule-reordered "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/home/config"
+  printf '%s\n' '{"rules":[{"when":"first tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong"}]},{"when":"second tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"grok","model":"grok-4.7","effort":"high","reasoning_class":"strong"}]}]}' > "$dir/home/config/crew-dispatch.json"
+  canonical=$(jq -cS '.rules[0] | [.when, .use]' "$dir/home/config/crew-dispatch.json")
+  fingerprint=$(printf '%s' "$canonical" | shasum -a 256)
+  fingerprint=${fingerprint%% *}
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=xhigh/' "$dir/home/state/$id.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/$id.meta"
+  printf '%s\n' 'dispatch_rule={"rule":"rule_1"}' "dispatch_rule_fingerprint=$fingerprint" 'reasoning_class=strong' >> "$dir/home/state/$id.meta"
+  jq '.rules |= reverse' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp"
+  mv "$dir/config.tmp" "$dir/home/config/crew-dispatch.json"
+  cp "$dir/home/state/$id.meta" "$dir/meta.before"
+  fm_fake_exit0 "$dir/fakebin" grok
+  out=$(run_control "$dir" "$id" relaunch --harness grok --model grok-4.7 --effort high --note "quota fallback"); rc=$?
+  expect_code 1 "$rc" "reordered rule should refuse before stopping the worker"$'\n'"$out"
+  assert_contains "$out" "dispatch rule changed since launch for task $id" "reordered rule refusal did not name the task"
+  cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "reordered rule refusal changed task metadata"
+  [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "reordered rule refusal stopped the worker"
+  printf zsh > "$dir/fake/command"
+  out=$(run_spawn "$dir" "$id" --relaunch --harness grok --model grok-4.7 --effort high --fallback-reason="quota fallback"); rc=$?
+  expect_code 1 "$rc" "direct relaunch should refuse the reordered rule"$'\n'"$out"
+  assert_contains "$out" "dispatch rule changed since launch for task $id" "direct refusal did not name the task"
+  cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "direct refusal changed task metadata"
+  pass "control and direct relaunch refuse a reordered rule"
 }
 
 test_scheduled_plan_continuation_ignores_unrelated_crew_dispatch() {
@@ -3306,6 +3339,7 @@ test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop
 test_fallback_policy_changes
 test_configured_fallback_refuses_an_omitted_effort_before_stop
 test_configured_equivalent_fallback_records_realized_profile_and_reason
+test_reordered_rule_refuses_before_stop
 test_scheduled_plan_continuation_ignores_unrelated_crew_dispatch
 test_leading_option_relaunch_notes_reach_replacement
 test_explicit_default_clears_same_harness_profile

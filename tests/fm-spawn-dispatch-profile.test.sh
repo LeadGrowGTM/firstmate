@@ -81,7 +81,7 @@ enable_dispatch_profile() {
 }
 
 test_selected_dispatch_rule_and_class_are_recorded() {
-  local rec id out status reason=$'codex provider quota\ndeclared strong alternative'
+  local rec id out status fingerprint reason=$'codex provider quota\ndeclared strong alternative'
   id=profile-class-receipt
   rec=$(make_spawn_case profile-class-receipt codex "$id")
   read_case_record "$rec"
@@ -107,6 +107,8 @@ test_selected_dispatch_rule_and_class_are_recorded() {
   status=$?
   expect_code 0 "$status" "selected rule should launch"$'\n'"$out"
   assert_grep 'dispatch_rule={"rule":"rule_1"}' "$HOME_DIR/state/$id.meta" "selected rule missing"
+  fingerprint=$(sed -n 's/^dispatch_rule_fingerprint=//p' "$HOME_DIR/state/$id.meta")
+  [[ $fingerprint =~ ^[0-9a-f]{64}$ ]] || fail "selected rule fingerprint missing or malformed"
   assert_grep 'reasoning_class=strong' "$HOME_DIR/state/$id.meta" "selected class missing"
   assert_grep 'realized_model=gpt-6.1-sol' "$HOME_DIR/state/$id.meta" "realized model missing"
   assert_grep 'realized_effort=xhigh' "$HOME_DIR/state/$id.meta" "realized effort missing"

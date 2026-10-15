@@ -33,10 +33,35 @@ fm_dispatch_realized_effort() {
   printf default
 }
 
+fm_dispatch_rule_fingerprint() {
+  local canonical hash
+  canonical=$(jq -ceS --argjson source "$2" '
+    def listed: if type == "array" then . elif type == "object" then [.] else empty end;
+    if $source == {default:true} then
+      if has("default") then ["default", (.default | listed)] else empty end
+    elif ($source.rule | type) == "string" and ($source.rule | test("^rule_[1-9][0-9]*$")) then
+      (.rules // [])[($source.rule | ltrimstr("rule_") | tonumber) - 1] |
+      select(type == "object") | [.when, (.use | listed)]
+    else empty end
+  ' "$1") || return 1
+  if command -v shasum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$canonical" | shasum -a 256) || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$canonical" | sha256sum) || return 1
+  else
+    echo 'error: SHA-256 tool is required for dispatch rule fingerprints' >&2
+    return 1
+  fi
+  hash=${hash%% *}
+  [[ $hash =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+  printf '%s' "$hash"
+}
+
 fm_dispatch_profile_check() {
   local config=$1 prior=$2 harness=$3 model=${4:-default} effort=${5:-default}
   local rule=$6 reason=$7 scheduled_plan=${8:-} scheduled=false
-  local old_h='' old_m=default old_e=default source='' class='' prior_reason='' receipt
+  local old_h='' old_m=default old_e=default source='' class='' prior_reason='' prior_fingerprint=''
+  local current_fingerprint='' selected_source='' task='' receipt
   FM_DISPATCH_PROFILE_RECEIPT='{}'
   if [ -n "$scheduled_plan" ]; then
     [ -f "$scheduled_plan" ] && [ ! -L "$scheduled_plan" ] || {
@@ -53,10 +78,23 @@ fm_dispatch_profile_check() {
     source=$(fm_meta_get "$prior" dispatch_rule)
     class=$(fm_meta_get "$prior" reasoning_class)
     prior_reason=$(fm_meta_get "$prior" fallback_reason)
+    prior_fingerprint=$(fm_meta_get "$prior" dispatch_rule_fingerprint)
   fi
   local changed=0
   if [ -n "$prior" ] && { [ "$harness" != "$old_h" ] || [ "$model" != "$old_m" ] || [ "$effort" != "$old_e" ]; }; then
     changed=1
+  fi
+  if [ -n "$prior_fingerprint" ] && [ "$scheduled" = false ]; then
+    task=$(fm_meta_get "$prior" endpoint_task_id)
+    task=${task:-${prior##*/}}
+    if [ -z "$source" ] || [ ! -f "$config" ] || ! current_fingerprint=$(fm_dispatch_rule_fingerprint "$config" "$source"); then
+      echo "error: dispatch rule changed since launch for task $task; refusing relaunch" >&2
+      return 1
+    fi
+    if [ "$current_fingerprint" != "$prior_fingerprint" ]; then
+      echo "error: dispatch rule changed since launch for task $task; refusing relaunch" >&2
+      return 1
+    fi
   fi
   if [ ! -f "$config" ]; then
     if [ -n "$rule" ] || { [ "$changed" = 1 ] && [ -n "$source" ]; }; then
@@ -125,6 +163,20 @@ fm_dispatch_profile_check() {
       end
     end
   ' "$config") || return 1
+  if [ "$scheduled" = false ]; then
+    selected_source=$(jq -c '.source // empty' <<< "$receipt") || return 1
+    if [ -n "$selected_source" ]; then
+      if [ -z "$current_fingerprint" ] || [ "$selected_source" != "$source" ]; then
+        current_fingerprint=$(fm_dispatch_rule_fingerprint "$config" "$selected_source") || {
+          [ -n "$prior" ] && [ -z "$prior_fingerprint" ] || return 1
+          current_fingerprint=''
+        }
+      fi
+      if [ -n "$current_fingerprint" ]; then
+        receipt=$(jq -c --arg fingerprint "$current_fingerprint" '. + {rule_fingerprint:$fingerprint}' <<< "$receipt") || return 1
+      fi
+    fi
+  fi
   # shellcheck disable=SC2034 # Public receipt consumed by the sourcing caller.
   FM_DISPATCH_PROFILE_RECEIPT=$receipt
   if { [ "$changed" = 1 ] || [ "$(jq -r '.class // ""' <<< "$receipt")" != "" ]; } \
