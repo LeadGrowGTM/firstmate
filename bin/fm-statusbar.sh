@@ -54,12 +54,17 @@ USAGE_LOCK="$STATE/.statusbar-usage.lock"
 USAGE_TTL=60
 TRACKER_ROOT=${FM_SB_TRACKER_ROOT:-}
 TRACKER_MAIN_HOME=${FM_SB_TRACKER_MAIN_HOME:-}
+case "${1:-}" in --socket) tracker_sub=${3:-} ;; *) tracker_sub=${1:-} ;; esac
 if [ -z "$TRACKER_MAIN_HOME" ]; then
-  if [ -e "$FM_HOME/.fm-secondmate-parent" ] || [ -L "$FM_HOME/.fm-secondmate-parent" ]; then
-    TRACKER_MAIN_HOME=$(. "$SCRIPT_DIR/fm-wake-lib.sh"; fm_firstmate_root_home "$FM_HOME") || exit 1
-  elif [ -n "$TRACKER_ROOT" ]; then
+  if [ "$tracker_sub" = theme ] || [ "$tracker_sub" = apply ] ||
+    [ "$tracker_sub" = crew-tracker ] || [ "$tracker_sub" = crew-tracker-refresh ]; then
+    if [ -e "$FM_HOME/.fm-secondmate-parent" ] || [ -L "$FM_HOME/.fm-secondmate-parent" ]; then
+      TRACKER_MAIN_HOME=$(. "$SCRIPT_DIR/fm-wake-lib.sh"; fm_firstmate_root_home "$FM_HOME") || exit 1
+    fi
+  fi
+  if [ -z "$TRACKER_MAIN_HOME" ] && [ -n "$TRACKER_ROOT" ]; then
     TRACKER_MAIN_HOME=$TRACKER_ROOT/firstmate
-  else
+  elif [ -z "$TRACKER_MAIN_HOME" ]; then
     TRACKER_MAIN_HOME=$FM_HOME
   fi
 fi
@@ -72,7 +77,7 @@ if [ -z "$TRACKER_MAIN_STATE" ]; then
     TRACKER_MAIN_STATE=$TRACKER_MAIN_HOME/state
   fi
 fi
-TRACKER_CACHE_DIR=${FM_SB_TRACKER_CACHE_DIR:-$TRACKER_MAIN_HOME/state}
+TRACKER_CACHE_DIR=${FM_SB_TRACKER_CACHE_DIR:-$TRACKER_MAIN_STATE}
 TRACKER_TTL=30
 TRACKER_CREW_STATE=${FM_SB_CREW_STATE_SCRIPT:-$SCRIPT_DIR/fm-crew-state.sh}
 SELF="$SCRIPT_DIR/fm-statusbar.sh"
@@ -85,7 +90,7 @@ fi
 if [ "${1:-}" = crew-tracker ] && [ -z "$FM_SB_SOCKET" ]; then
   FM_SB_SOCKET=$(command tmux display-message -p '#{socket_path}' 2>/dev/null) || FM_SB_SOCKET=
 fi
-TRACKER_SOCKET_KEY=$(printf '%s' "${FM_SB_SOCKET:-default}" | cksum)
+TRACKER_SOCKET_KEY=$(printf '%s\037%s' "${FM_SB_SOCKET:-default}" "$TRACKER_MAIN_STATE" | cksum)
 TRACKER_SOCKET_KEY=${TRACKER_SOCKET_KEY%% *}
 TRACKER_CACHE="$TRACKER_CACHE_DIR/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
 TRACKER_ATTEMPT="$TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt.$TRACKER_SOCKET_KEY"

@@ -77,8 +77,12 @@ tmux new-session -d -t firstmate -s orca-view -x 150 -y 20
 tmux new-session -d -s unrelated -x 150 -y 20 "sleep 600"
 SOCKET_PATH=$(tmux display-message -p -t firstmate '#{socket_path}')
 [ -n "$SOCKET_PATH" ] || fail "scratch server did not expose its private socket"
-TRACKER_SOCKET_KEY=$(printf '%s' "$SOCKET_PATH" | cksum)
-TRACKER_SOCKET_KEY=${TRACKER_SOCKET_KEY%% *}
+tracker_key() {  # <socket> <main-state>
+  local key
+  key=$(printf '%s\037%s' "$1" "$2" | cksum)
+  printf '%s' "${key%% *}"
+}
+TRACKER_SOCKET_KEY=$(tracker_key "$SOCKET_PATH" "$WORK/firstmate/state")
 TRACKER_CACHE_FILE="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
 TRACKER_ATTEMPT_FILE="$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt.$TRACKER_SOCKET_KEY"
 if statusbar "$SB" >/dev/null 2>&1; then fail "statusbar helper accepted a missing socket"; fi
@@ -546,7 +550,7 @@ FM_STATE_OVERRIDE="$WORK/firstmate/state" statusbar "$SB" "$SOCKET_PATH" \
   label firstmate:fm-demo-task firstmate claude opus high "$WORK/firstmate"
 cat >"$WORK/crew-state-fixture.sh" <<'SH'
 #!/usr/bin/env bash
-if [ "$1" = override-task ]; then
+if [ "$1" = override-task ] || [ "$1" = override-waiting ]; then
   [ "$FM_STATE_OVERRIDE" = "${FM_SB_EXPECTED_OVERRIDE_STATE:-}" ] || { echo 'state: unknown · source: wrong-override'; exit; }
 else
   [ "$FM_STATE_OVERRIDE" = "$FM_HOME/state" ] || { echo 'state: unknown · source: wrong-home'; exit; }
@@ -561,7 +565,7 @@ case "$1" in
 esac
 case "$1" in
   main-task|dev-task|override-task) echo 'state: working · source: pane' ;;
-  otter-task|dev) echo 'state: parked · source: status-log' ;;
+  otter-task|dev|override-waiting) echo 'state: parked · source: status-log' ;;
   *) echo 'state: unknown · source: none' ;;
 esac
 SH
@@ -598,8 +602,7 @@ unset FM_SB_SLOW_MATE_PROBES
 rm -f "$WORK/custom-dev/state"/slow-task-*.meta
 pass "concurrent slow mate probes publish a summary inside the refresh deadline"
 other_socket=$("$REAL_TMUX" -L "$OUTER" display-message -p '#{socket_path}')
-other_key=$(printf '%s' "$other_socket" | cksum)
-other_key=${other_key%% *}
+other_key=$(tracker_key "$other_socket" "$WORK/firstmate/state")
 other_cache="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$other_key.txt"
 [ "$other_cache" != "$TRACKER_CACHE_FILE" ] || fail "two tmux servers shared a tracker cache path"
 other_tracker=$(statusbar "$SB" "$other_socket" crew-tracker)
@@ -626,7 +629,8 @@ printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/operator/state/main-
 FM_STATE_OVERRIDE="$WORK/operator/state" statusbar "$SB" "$SOCKET_PATH" \
   label firstmate:fm-demo-task operator claude opus high "$WORK/operator"
 operator_cache_dir="$WORK/operator-cache"
-operator_cache="$operator_cache_dir/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+operator_key=$(tracker_key "$SOCKET_PATH" "$WORK/operator/state")
+operator_cache="$operator_cache_dir/statusbar-crew-tracker.$operator_key.txt"
 operator=$(FM_HOME="$WORK/operator" FM_STATE_OVERRIDE="$WORK/operator/state" \
   FM_SB_TRACKER_ROOT='' FM_SB_TRACKER_CACHE_DIR="$operator_cache_dir" \
   statusbar "$SB" "$SOCKET_PATH" crew-tracker)
@@ -653,7 +657,8 @@ case "$override_right" in *"FM_SB_TRACKER_MAIN_STATE=$WORK/override-state"*) ;;
   *) fail "primary status job lost its bound state directory" "$override_right" ;;
 esac
 override_cache_dir="$WORK/override-cache"
-override_cache="$override_cache_dir/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+override_key=$(tracker_key "$SOCKET_PATH" "$WORK/override-state")
+override_cache="$override_cache_dir/statusbar-crew-tracker.$override_key.txt"
 override=$(FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$WORK/override-state" \
   FM_SB_TRACKER_ROOT="$WORK" FM_SB_TRACKER_CACHE_DIR="$override_cache_dir" \
   statusbar "$SB" "$SOCKET_PATH" crew-tracker)
@@ -664,6 +669,22 @@ while [ ! -s "$override_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1))
 override=$(cat "$override_cache")
 case "$override" in *'churchill:on 1r/0w'*) ;; *) fail "tracker ignored the primary state override" "$override" ;; esac
 pass "tracker carries the primary session's configured state directory"
+
+mkdir -p "$WORK/override-state-b"
+export FM_SB_EXPECTED_OVERRIDE_STATE="$WORK/override-state-b"
+printf 'window=override-owner:primary\nkind=ship\n' >"$WORK/override-state-b/override-waiting.meta"
+override_b_key=$(tracker_key "$SOCKET_PATH" "$WORK/override-state-b")
+override_b_cache="$override_cache_dir/statusbar-crew-tracker.$override_b_key.txt"
+override_b=$(FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$WORK/override-state-b" \
+  FM_SB_TRACKER_ROOT="$WORK" FM_SB_TRACKER_CACHE_DIR="$override_cache_dir" \
+  statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+[ "$override_b" = 'crew: loading' ] || fail "second primary state reused the first state's cache" "$override_b"
+i=0
+while [ ! -s "$override_b_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s "$override_b_cache" ] || fail "second primary state did not publish"
+override_b=$(cat "$override_b_cache")
+case "$override_b" in *'churchill:off 0r/1w'*) ;; *) fail "second primary state borrowed another state's counts" "$override_b" ;; esac
+pass "tracker cache keys include the selected primary state"
 
 leased_home="$WORK/pool/45/dev"
 mkdir -p "$leased_home/state"
@@ -679,6 +700,13 @@ while [ ! -s "$leased_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); 
 leased=$(cat "$leased_cache")
 case "$leased" in *'churchill:on 1r/0w'*) ;; *) fail "tracker treated a leased secondmate as the main home" "$leased" ;; esac
 pass "tracker resolves a leased secondmate's recorded local parent"
+
+mkdir -p "$WORK/bad-parent-home"
+printf 'schema=broken\n' >"$WORK/bad-parent-home/.fm-secondmate-parent"
+unrelated=$(printf '%s' '{"model":{"display_name":"Opus"}}' | \
+  FM_HOME="$WORK/bad-parent-home" bash "$SB" claude-line --task intact)
+[ "$unrelated" = 'Opus ? | intact' ] || fail "bad parent binding broke unrelated statusbar command" "$unrelated"
+pass "unrelated statusbar commands do not resolve tracker ancestry"
 
 # --- persistent config: preserve user settings and survive server restart ---
 config="$WORK/user tmux.conf"
