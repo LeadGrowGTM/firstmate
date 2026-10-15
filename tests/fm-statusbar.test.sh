@@ -68,6 +68,8 @@ SH
 chmod +x "$WORK/bin/tmux" "$WORK/bin/quota-axi"
 export PATH="$WORK/bin:$PATH"
 export FM_STATE_OVERRIDE="$WORK/state"
+export FM_SB_TRACKER_ROOT="$WORK"
+export FM_SB_TRACKER_CACHE_DIR="$WORK/tracker-cache"
 
 tmux new-session -d -s firstmate -x 150 -y 20 -n fm-demo-task "sleep 600" || fail "scratch server did not start"
 tmux new-window -d -t firstmate: -n bare "sleep 600"
@@ -117,13 +119,13 @@ if out=$(statusbar "$SB" "$SOCKET_PATH" apply 2>&1); then fail "apply accepted a
 [ "$(tmux show-options -wqv -t orca-view:fm-demo-task pane-border-status)" = bottom ] || fail "view window did not get the detail line"
 [ -z "$(tmux show-options -wqv -t unrelated pane-border-status)" ] || fail "an ungrouped window was changed"
 [ "$(tmux show-options -qv -t firstmate 'status-format[0]')" = 'CUSTOM #{window_name}' ] || fail "apply replaced a custom status line"
-[ "$(tmux show-options -qv -t firstmate status-right)" = '#{E:pane-border-format}' ] || fail "firstmate status-right missed the pane detail line"
-[ "$(tmux show-options -qv -t orca-view status-right)" = '#{E:pane-border-format}' ] || fail "view status-right missed the pane detail line"
-[ "$(tmux show-options -qv -t orca-view status-right-length)" = 200 ] || fail "view status-right truncates the detail line"
-[ "$(tmux show-options -qv -t unrelated status-right)" != '#{E:pane-border-format}' ] || fail "unrelated status-right was changed"
+case "$(tmux show-options -qv -t firstmate status-right)" in *crew-tracker*) ;; *) fail "firstmate status-right missed the crew tracker" ;; esac
+case "$(tmux show-options -qv -t orca-view status-right)" in *crew-tracker*) ;; *) fail "view status-right missed the crew tracker" ;; esac
+[ "$(tmux show-options -qv -t orca-view status-right-length)" = 200 ] || fail "view status-right truncates the crew tracker"
+case "$(tmux show-options -qv -t unrelated status-right)" in *crew-tracker*) fail "unrelated status-right was changed" ;; esac
 tmux new-session -d -t firstmate -s orca-later -x 150 -y 20
 [ "$(tmux show-options -wqv -t orca-later:fm-demo-task pane-border-status)" = bottom ] || fail "late view lost the detail line"
-[ "$(tmux show-options -qv -t orca-later status-right)" = '#{E:pane-border-format}' ] || fail "late view status-right missed the pane detail line"
+case "$(tmux show-options -qv -t orca-later status-right)" in *crew-tracker*) ;; *) fail "late view status-right missed the crew tracker" ;; esac
 pass "apply preserves custom status and covers current and later grouped views"
 
 tmux new-session -d -s rename-base -n rename-task 'sleep 600'
@@ -131,7 +133,7 @@ tmux new-session -d -t rename-base -s rename-view
 tmux rename-session -t rename-base renamed-base
 statusbar "$SB" "$SOCKET_PATH" apply renamed-base
 tmux new-session -d -t renamed-base -s renamed-later
-[ "$(tmux show-options -qv -t renamed-later status-right)" = '#{E:pane-border-format}' ] || fail "renamed group late view missed the detail line"
+case "$(tmux show-options -qv -t renamed-later status-right)" in *crew-tracker*) ;; *) fail "renamed group late view missed the crew tracker" ;; esac
 pass "renamed groups still format later views"
 
 statusbar "$SB" "$SOCKET_PATH" usage firstmate:fm-demo-task >/dev/null
@@ -160,15 +162,11 @@ case "$wide" in
 esac
 status_bar=$("$REAL_TMUX" -L "$OUTER" capture-pane -p | tail -1)
 case "$status_bar" in
-*'u cl:default32%'*'fm-demo-task'*'opus-5-5[1m] high'*'firstmate/17'*) ;;
-*) fail "view status bar did not show the active pane detail" "$status_bar" ;;
+*'crew: loading'|*'churchill:'*) ;;
+*) fail "view status bar did not show the crew tracker" "$status_bar" ;;
 esac
 tmux select-window -t orca-view:fable
-active_status=$(tmux display-message -p -t orca-view '#{E:status-right}')
-case "$active_status" in
-*fable*'| fable high | fable'*) pass "status-right follows the active pane" ;;
-*) fail "status-right did not follow the active pane" "$active_status" ;;
-esac
+case "$(tmux show-options -wqv -t orca-view:fable pane-border-format)" in *'@fm_task'*) pass "pane detail still follows the active pane" ;; *) fail "pane detail format was lost" ;; esac
 tmux select-window -t orca-view:fm-demo-task
 
 tmux split-window -h -d -t firstmate:fm-demo-task "sleep 600"
@@ -474,23 +472,26 @@ printf 'window=firstmate:fm-live-crew\nkind=ship\nsecret=DO_NOT_DISPLAY\n' >"$FL
 printf 'window=firstmate:fm-live-second\nkind=secondmate\n' >"$FLEET_STATE/second-a.meta"
 FM_STATE_OVERRIDE="$FLEET_STATE" statusbar "$SB" "$SOCKET_PATH" apply --primary firstmate
 left=$(tmux show-options -t firstmate -v status-left)
-case "$left" in *"fleet"*) pass "apply --primary puts the fleet count in status-left" ;; *) fail "status-left lacks fleet count" "$left" ;; esac
-other=$(tmux show-options -t orca-later -v status-left)
-case "$other" in *"fleet"*) pass "grouped view session shares the fleet count" ;; *) fail "view session lacks fleet count" "$other" ;; esac
+right=$(tmux show-options -t firstmate -v status-right)
+case "$right" in *"crew-tracker"*) pass "apply --primary puts the crew tracker in status-right" ;; *) fail "status-right lacks crew tracker" "$right" ;; esac
+other=$(tmux show-options -t orca-later -v status-right)
+case "$other" in *"crew-tracker"*) pass "grouped view session shares the crew tracker" ;; *) fail "view session lacks crew tracker" "$other" ;; esac
 
 # fm-spawn's ordinary apply must preserve the established primary hook.
 hooks=$(tmux show-hooks -g)
 statusbar "$SB" "$SOCKET_PATH" apply firstmate
 [ "$(tmux show-hooks -g)" = "$hooks" ] || fail "ordinary apply replaced the primary hook"
 tmux new-session -d -t firstmate -s fleet-later
-[ "$(tmux show-options -t fleet-later -v status-left)" = "$left" ] || fail "late view lost fleet count"
+[ "$(tmux show-options -t fleet-later -v status-right)" = "$right" ] || fail "late view lost crew tracker"
 bound=$(FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" fleet firstmate)
 [ "$bound" = 'crew 1 | 2nd 1' ] || fail "fleet used ambient home instead of session state" "$bound"
 tmux set-option -u -t fleet-later 'status-format[0]'
-fleet_render=$(render fleet-later 100 'crew 1 | 2nd 1')
-case "$fleet_render" in *'crew 1 | 2nd 1'*) ;; *) fail "fleet job failed to render on its private socket" "$fleet_render" ;; esac
+mkdir -p "$FM_SB_TRACKER_CACHE_DIR"
+printf 'churchill:on 1r/0w\n' >"$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt"
+fleet_render=$(render fleet-later 100 'churchill:on 1r/0w')
+case "$fleet_render" in *'churchill:on 1r/0w'*) ;; *) fail "tracker job failed to render on its private socket" "$fleet_render" ;; esac
 case "$fleet_render" in *DO_NOT_DISPLAY*) fail "fleet exposed an unrelated metadata value" ;; esac
-pass "fleet count survives startup, ordinary spawn apply and a late view"
+pass "crew tracker survives ordinary spawn apply and a late view"
 [ "$(tmux show-options -qv -t fleet-later @fm_fleet_state)" = "$FLEET_STATE" ] || fail "late view did not copy its peer's binding"
 # Simulate a view created before binding inheritance was available.
 tmux set-option -u -t fleet-later @fm_fleet_state
@@ -513,15 +514,48 @@ touch "$WORK/second-home/.fm-secondmate-home"
 # Exercise the public boundary even if a caller mistakenly requests ownership.
 FM_HOME="$WORK/second-home" FM_STATE_OVERRIDE="$WORK/second-home/state" statusbar "$SB" "$SOCKET_PATH" apply --primary firstmate
 [ "$(tmux show-options -qv -t firstmate @fm_fleet_state)" = "$FLEET_STATE" ] || fail "secondmate overwrote main fleet state"
-[ "$(tmux show-options -qv -t firstmate status-left)" = "$left" ] || fail "secondmate replaced main fleet job"
+[ "$(tmux show-options -qv -t firstmate status-right)" = "$right" ] || fail "secondmate replaced main tracker job"
 FM_STATE_OVERRIDE="$WORK/wrong-state" statusbar "$SB" "$SOCKET_PATH" apply --primary firstmate
 [ "$(tmux show-options -qv -t firstmate @fm_fleet_state)" = "$FLEET_STATE" ] || fail "different home stole main fleet state"
 tmux new-session -d -s second-only -n second 'sleep 600'
 FM_HOME="$WORK/second-home" FM_STATE_OVERRIDE="$WORK/second-home/state" statusbar "$SB" "$SOCKET_PATH" apply --primary second-only
 [ -z "$(tmux show-options -qv -t second-only @fm_fleet_state)" ] || fail "secondmate claimed an unbound session"
 tmux new-session -d -t firstmate -s after-second
-[ "$(tmux show-options -qv -t after-second status-left)" = "$left" ] || fail "secondmate lost main fleet hook"
+[ "$(tmux show-options -qv -t after-second status-right)" = "$right" ] || fail "secondmate lost main tracker hook"
 pass "secondmate startup and other homes preserve primary fleet ownership"
+
+# Public tracker interface reads each home's recorded tasks and current-state
+# helper, while preserving the rendered cache between refreshes.
+export FM_SB_TRACKER_CACHE_DIR="$WORK/tracker-proof-cache"
+mkdir -p "$WORK/firstmate/state" "$WORK/fm-homes/dev/state" \
+  "$WORK/fm-homes/napoleon/state" "$WORK/fm-homes/alexander-media/state" \
+  "$WORK/fm-homes/ottersec/state" "$WORK/fm-homes/legion/state"
+printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/firstmate/state/main-task.meta"
+printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/fm-homes/dev/state/dev-task.meta"
+printf 'window=firstmate:fm-gone-crew\nkind=ship\n' >"$WORK/fm-homes/dev/state/gone-task.meta"
+printf 'window=firstmate:fm-live-second\nkind=ship\n' >"$WORK/fm-homes/ottersec/state/otter-task.meta"
+printf 'window=firstmate:fm-dev\nkind=secondmate\n' >"$WORK/firstmate/state/dev.meta"
+cat >"$WORK/crew-state-fixture.sh" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  main-task|dev-task) echo 'state: working · source: pane' ;;
+  otter-task|dev) echo 'state: parked · source: status-log' ;;
+  *) echo 'state: unknown · source: none' ;;
+esac
+SH
+export FM_SB_CREW_STATE_SCRIPT="$WORK/crew-state-fixture.sh"
+rm -f "$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt" "$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt"
+tracker=$(statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+[ "$tracker" = 'crew: loading' ] || fail "cold tracker did not return immediately" "$tracker"
+i=0
+while [ ! -s "$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.txt" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+tracker=$(statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+case "$tracker" in
+  *'churchill:off 1r/0w'*'dev:parked 1r/0w'*'ottersec:unknown 0r/1w'*'legion:unknown 0r/0w'*) ;;
+  *) fail "tracker did not reconcile per-mate running and waiting crew" "$tracker" ;;
+esac
+case "$tracker" in *website-genie*|*rothschild*) fail "tracker included excluded mates" "$tracker" ;; esac
+pass "tracker refreshes all six homes through current-state reads"
 
 # --- persistent config: preserve user settings and survive server restart ---
 config="$WORK/user tmux.conf"
@@ -551,8 +585,8 @@ while "$REAL_TMUX" -L "$SOCKET" has-session 2>/dev/null && [ "$i" -lt 50 ]; do s
 # No label, apply, or theme call: startup must load the snippet itself.
 "$REAL_TMUX" -L "$SOCKET" -f "$space_config" new-session -d -s restarted -x 120 -y 10 "sleep 600" || fail "configured server failed to start"
 [ "$(tmux show-options -gqv status-style)" = 'bg=colour234,fg=colour250' ] || fail "theme did not survive server restart"
-[ "$(tmux show-options -gqv status-right)" = '#{E:pane-border-format}' ] || fail "restart lost the status format"
-[ "$(tmux show-options -gqv status-left)" = '' ] || fail "restart kept the stock session bar"
+case "$(tmux show-options -gqv status-right)" in *crew-tracker*) ;; *) fail "restart lost the crew tracker" ;; esac
+[ "$(tmux show-options -gqv status-left)" = '[#S] ' ] || fail "restart lost the session label"
 statusbar "$WORK/installed repo/bin/fm-statusbar.sh" "$SOCKET_PATH" label restarted persist codex gpt-6-sol high /home/u/project
 printf 'codex\tdefault\t32\n' >"$WORK/state/statusbar-usage.txt"
 # The fixture uses codex-home; seed the account that labeling actually chose.
@@ -561,10 +595,10 @@ printf 'codex\tcodex-home\t32\n' >>"$WORK/state/statusbar-usage.txt"
 # from another home's environment.
 other=$(FM_STATE_OVERRIDE="$WORK/other" statusbar "$SB" "$SOCKET_PATH" usage restarted)
 [ "$other" = 'u cx:codex-home32%' ] || fail "status job read another home's quota cache" "$other"
-restarted=$(render restarted 120 'u cx:codex-home32%')
-case "$restarted" in *'u cx:codex-home32%'*persist*'gpt-6-sol high'*project*) ;;
-*) fail "restart render missed required fields" "$restarted" ;; esac
-pass "startup snippet handles spaces, uses the right socket and shows restored labels"
+restarted=$(render restarted 120 'legion:unknown')
+case "$restarted" in *'ottersec:unknown'*'legion:unknown'*) ;;
+*) fail "restart render missed the crew tracker" "$restarted" ;; esac
+pass "startup snippet handles spaces, uses the right socket and shows the crew tracker"
 tmux source-file "$ROOT/bin/fm-statusbar.tmux"
 [ "$(tmux show-options -gqv status-style)" = 'bg=colour234,fg=colour250' ] || fail "repeat source changed theme"
 pass "theme can be sourced repeatedly"
