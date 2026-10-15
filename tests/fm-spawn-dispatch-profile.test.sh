@@ -80,6 +80,66 @@ enable_dispatch_profile() {
     > "$home/config/crew-dispatch.json"
 }
 
+test_selected_dispatch_rule_and_class_are_recorded() {
+  local rec id out status reason=$'codex provider quota\ndeclared strong alternative'
+  id=profile-class-receipt
+  rec=$(make_spawn_case profile-class-receipt codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"hard tasks","use":{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong","provider":"codex"}},{"when":"other tasks","use":{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong"}}]}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh)
+  status=$?
+  expect_code 1 "$status" "ambiguous rule must refuse at intake"
+  assert_contains "$out" "ambiguous dispatch rule" "missing rule-selection diagnostic"
+  assert_absent "$HOME_DIR/state/$id.meta" "ambiguous intake should not publish metadata"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh --dispatch-rule "hard tasks" --fallback-reason "$reason")
+  status=$?
+  expect_code 0 "$status" "selected rule should launch"$'\n'"$out"
+  assert_grep 'dispatch_rule={"when":"hard tasks"}' "$HOME_DIR/state/$id.meta" "selected rule missing"
+  assert_grep 'reasoning_class=strong' "$HOME_DIR/state/$id.meta" "selected class missing"
+  assert_grep 'realized_model=gpt-6.1-sol' "$HOME_DIR/state/$id.meta" "realized model missing"
+  assert_grep 'realized_effort=xhigh' "$HOME_DIR/state/$id.meta" "realized effort missing"
+  [ "$(sed -n 's/^fallback_reason=//p' "$HOME_DIR/state/$id.meta" | jq -r .)" = "$reason" ] || fail "reason did not survive JSON encoding"
+  pass "intake records the explicitly selected rule, class, provider and realized axes"
+}
+
+test_unrealizable_reasoning_class_refuses_before_launch() {
+  local rec id out status
+  id=profile-class-unrealizable
+  rec=$(make_spawn_case profile-class-unrealizable grok "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"default":{"harness":"grok","model":"grok-4.7","effort":"xhigh","reasoning_class":"strong"}}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness grok --model grok-4.7 --effort xhigh)
+  status=$?
+  expect_code 1 "$status" "a declared class cannot silently omit unsupported effort"
+  assert_contains "$out" "cannot realize effort 'xhigh'" "missing unrealized-effort refusal"
+  assert_absent "$HOME_DIR/state/$id.meta" "unrealizable class should not publish metadata"
+  [ ! -s "$LAUNCH_LOG" ] || fail "unrealizable class sent launch input"
+  pass "a configured class refuses an effort the adapter would omit"
+}
+
+test_invalid_dispatch_receipt_fields_refuse_before_launch() {
+  local rec id out status field
+  for field in reasoning_class provider; do
+    id="profile-invalid-$field"
+    rec=$(make_spawn_case "$id" codex "$id")
+    read_case_record "$rec"
+    jq -n --arg field "$field" \
+      '{default:({harness:"codex",model:"gpt-6.1-sol",effort:"xhigh",reasoning_class:"strong"} + {($field):"strong\nmodel=gpt-6-sol"})}' \
+      > "$HOME_DIR/config/crew-dispatch.json"
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+      "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh)
+    status=$?
+    expect_code 1 "$status" "$field cannot inject a metadata line"
+    assert_contains "$out" "malformed dispatch profiles" "missing malformed-$field refusal"
+    assert_absent "$HOME_DIR/state/$id.meta" "invalid $field should not publish metadata"
+    [ ! -s "$LAUNCH_LOG" ] || fail "invalid $field sent launch input"
+    pass "an invalid $field refuses before launch or task publication"
+  done
+}
+
 make_seeded_secondmate_home() {
   local home=$1 id=$2
   mkdir -p "$home/bin" "$home/data"
@@ -2653,6 +2713,9 @@ SH
 }
 
 test_worker_launch_delivers_role_scope
+test_selected_dispatch_rule_and_class_are_recorded
+test_unrealizable_reasoning_class_refuses_before_launch
+test_invalid_dispatch_receipt_fields_refuse_before_launch
 test_no_profile_keeps_claude_profile_defaults
 test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home

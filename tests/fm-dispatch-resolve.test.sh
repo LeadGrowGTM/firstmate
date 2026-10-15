@@ -222,6 +222,8 @@ assert_contains "$out" 'dispatch-resolve:' "TOON block header"
 assert_contains "$out" '  status: clear' "clear status"
 assert_contains "$out" '  rule: rule_4 (A simple bug fix with a stated root cause.)   confidence: 0.9' "rule and confidence line"
 assert_contains "$out" "  profile: --harness 'cursor' --model 'cursor-grok-4.6-medium'" "argmax picks the highest spendPriority"
+assert_contains "$out" "--dispatch-rule '{\"when\":\"A simple bug fix with a stated root cause.\"}'" "profile carries the exact resolved rule"
+assert_contains "$out" "--fallback-reason 'rule matched; provider=cursor; spendPriority=" "profile carries quota-selection rationale"
 assert_contains "$out" 'candidate: claude:sonnet  provider=claude  scope=all_models  remaining=79%  spendPriority=-0.4627  runway=projected_exhaustion  -> eligible' "every candidate is accounted for"
 assert_contains "$out" 'candidate: kimi:kimi-code/k3  provider=kimi  -> eligible, unranked: provider kimi unmeasured (unknown): disclosed uncertainty' "unmeasured provider stays listed as eligible and unranked"
 assert_contains "$out" '  note: 1 eligible candidate(s) unranked (kimi)' "clear results flag eligible unranked candidates once"
@@ -360,9 +362,12 @@ assert_equals '1' "$(grep -c '^  profile:' <<<"$out")" "dynamic fields cannot in
 assert_not_contains "$out" $'\n  profile: injected' "control characters are flattened in line output"
 profile_line=$(grep '^  profile:' <<<"$out")
 eval "set -- ${profile_line#  profile: }"
-assert_equals '4' "$#" "shell-safe profile output preserves four argument boundaries"
+assert_equals '8' "$#" "shell-safe profile output preserves all argument boundaries"
 assert_equals 'cursor' "$2" "shell-safe profile output preserves the selected harness"
 assert_equals 'foo --harness grok   profile: injected' "$4" "shell-safe profile output keeps model flags inside one argument"
+assert_equals '--dispatch-rule' "$5" "shell-safe profile output names the rule selector"
+assert_equals '{"when":"Bug fix\n  profile: injected"}' "$6" "rule selector preserves the exact configured rule"
+assert_equals '--fallback-reason' "$7" "shell-safe profile output names the rationale"
 cp "$BASE_RULES" "$RULES"
 pass "rules snapshots and shell quoting preserve the profile protocol"
 
@@ -971,6 +976,8 @@ for bad in \
   '{"rules":[{"when":"x","use":{"harness":"claude"},"floor":{"scope":"model:fable","min_percent":20}}]}|rule floor needs scope, min_percent 0..100, and provider matching ^[a-z0-9]+(-[a-z0-9]+)*\z' \
   '{"rules":[{"when":"x","use":{"harness":"claude"},"floor":{"scope":"model:fable","min_percent":20,"provider":"CLAUDE"}}]}|rule floor needs scope, min_percent 0..100, and provider matching ^[a-z0-9]+(-[a-z0-9]+)*\z' \
   '{"rules":[{"when":"x","use":{"harness":"claude","provider":""}}]}|each use profile needs harness; model, effort, and floor must be well formed, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\z when present' \
+  '{"rules":[{"when":"x","use":{"harness":"claude","reasoning_class":3}}]}|each use profile needs harness; model, effort, and floor must be well formed, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\z when present' \
+  '{"rules":[{"when":"x","use":{"harness":"claude","reasoning_class":"strong\n"}}]}|each use profile needs harness; model, effort, and floor must be well formed, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\z when present' \
   '{"rules":[{"when":"x","use":{"harness":"claude","provider":" claude"}}]}|each use profile needs harness; model, effort, and floor must be well formed, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\z when present' \
   '{"rules":[{"when":"x","use":{"harness":"claude","provider":"claude\n"}}]}|each use profile needs harness; model, effort, and floor must be well formed, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\z when present' \
   '{"rules":[{"when":"x","use":{"harness":"codex","floor":{"scope":"all_models","min_percent":20,"provider":"claude"}}}]}|each use profile needs harness; model, effort, and floor must be well formed, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\z when present' \

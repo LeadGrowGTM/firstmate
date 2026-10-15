@@ -807,6 +807,156 @@ test_same_harness_relaunch_keeps_the_profile_axes() {
   pass "fm-control relaunch: a same-harness relaunch keeps the profile axes it was running with"
 }
 
+test_direct_spawn_relaunch_keeps_the_profile_axes() {
+  local dir out rc
+  dir=$(new_case directprofile rl-direct-profile)
+  add_ship_task "$dir" rl-direct-profile claude
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=high/' \
+    "$dir/home/state/rl-direct-profile.meta" > "$dir/home/state/rl-direct-profile.meta.tmp"
+  mv "$dir/home/state/rl-direct-profile.meta.tmp" "$dir/home/state/rl-direct-profile.meta"
+  printf zsh > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl-direct-profile --relaunch); rc=$?
+  expect_code 0 "$rc" "direct relaunch should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-direct-profile model)" = opus ] || fail "direct relaunch lost recorded model"
+  [ "$(meta_field "$dir" rl-direct-profile effort)" = high ] || fail "direct relaunch lost recorded effort"
+  assert_contains "$(cat "$dir/fake/literal")" "--model 'opus'" "direct relaunch lost model flag"
+  assert_contains "$(cat "$dir/fake/literal")" "--effort 'high'" "direct relaunch lost effort flag"
+  pass "direct spawn relaunch preserves recorded model and effort"
+}
+
+test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop() {
+  local dir out rc variant
+  for variant in unlisted weaker; do
+    dir=$(new_case "fallback-$variant" "rl-$variant")
+    add_ship_task "$dir" "rl-$variant" codex
+    printf codex > "$dir/fake/command"
+    fm_fake_exit0 "$dir/fakebin" codex
+    mkdir -p "$dir/home/config"
+    printf '%s\n' '{"rules":[{"when":"hard tasks","use":[{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong"}]}],"default":{"harness":"codex","model":"gpt-6-sol","effort":"high","reasoning_class":"workhorse"}}' > "$dir/home/config/crew-dispatch.json"
+    if [ "$variant" = weaker ]; then
+      jq '.rules[0].use += [.default]' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp"
+      mv "$dir/config.tmp" "$dir/home/config/crew-dispatch.json"
+    fi
+    sed 's/^model=default$/model=gpt-6.1-sol/; s/^effort=default$/effort=xhigh/' \
+      "$dir/home/state/rl-$variant.meta" > "$dir/meta.tmp"
+    mv "$dir/meta.tmp" "$dir/home/state/rl-$variant.meta"
+    cp "$dir/home/state/rl-$variant.meta" "$dir/meta.before"
+    cp "$dir/home/data/rl-$variant/brief.md" "$dir/brief.before"
+    out=$(run_control "$dir" "rl-$variant" relaunch --model gpt-6-sol --effort high --note "quota exhausted"); rc=$?
+    expect_code 1 "$rc" "unauthorized fallback should refuse"$'\n'"$out"
+    if [ "$variant" = unlisted ]; then
+      assert_contains "$out" "not listed for the recorded dispatch rule" "missing same-rule refusal"
+    else
+      assert_contains "$out" "lower or change the recorded reasoning class" "missing class refusal"
+    fi
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-$variant.meta" || fail "fallback refusal changed metadata"
+    cmp -s "$dir/brief.before" "$dir/home/data/rl-$variant/brief.md" || fail "fallback refusal changed brief"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "fallback refusal stopped the worker"
+    # The spawn interface cannot bypass the same guard once an agent is gone.
+    printf zsh > "$dir/fake/command"
+    out=$(run_spawn "$dir" "rl-$variant" --relaunch --model gpt-6-sol --effort high --fallback-reason "quota exhausted"); rc=$?
+    expect_code 1 "$rc" "direct spawn should enforce the fallback policy"$'\n'"$out"
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-$variant.meta" || fail "direct fallback refusal changed metadata"
+  done
+  pass "control and direct spawn refuse unlisted or weaker configured fallbacks before mutation"
+}
+
+test_fallback_policy_changes() {
+  local dir out rc variant id
+  for variant in rule-removed config-removed reclassified lower-effort ambiguous-legacy; do
+    id="rl-policy-$variant"
+    dir=$(new_case "$variant" "$id")
+    add_ship_task "$dir" "$id" codex
+    printf codex > "$dir/fake/command"
+    fm_fake_exit0 "$dir/fakebin" codex
+    mkdir -p "$dir/home/config"
+    printf '%s\n' '{"rules":[{"when":"hard tasks","use":[{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong"}]}]}' > "$dir/home/config/crew-dispatch.json"
+    sed 's/^model=default$/model=gpt-6.1-sol/; s/^effort=default$/effort=xhigh/' "$dir/home/state/$id.meta" > "$dir/meta.tmp"
+    mv "$dir/meta.tmp" "$dir/home/state/$id.meta"
+    if [ "$variant" != ambiguous-legacy ]; then
+      printf '%s\n' 'dispatch_rule={"when":"hard tasks"}' >> "$dir/home/state/$id.meta"
+    fi
+    [ "$variant" != reclassified ] || printf '%s\n' reasoning_class=strong >> "$dir/home/state/$id.meta"
+    case "$variant" in
+      rule-removed) jq '{default:.rules[0].use}' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+      config-removed) rm "$dir/home/config/crew-dispatch.json" ;;
+      reclassified) jq '.rules[0].use |= map(.reasoning_class="workhorse")' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+      lower-effort) jq '.rules[0].use |= map(del(.reasoning_class))' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+      ambiguous-legacy) jq '.default=.rules[0].use' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+    esac
+    [ ! -f "$dir/config.tmp" ] || mv "$dir/config.tmp" "$dir/home/config/crew-dispatch.json"
+    cp "$dir/home/state/$id.meta" "$dir/meta.before"
+    out=$(run_control "$dir" "$id" relaunch --effort high --note "quota fallback"); rc=$?
+    expect_code 1 "$rc" "$variant must refuse fallback"$'\n'"$out"
+    cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "$variant changed metadata"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$variant stopped the worker"
+    pass "$variant refuses before stopping or changing metadata"
+  done
+}
+
+test_configured_fallback_refuses_an_omitted_effort_before_stop() {
+  local dir out rc
+  dir=$(new_case omitted-effort rl-omitted-effort)
+  add_ship_task "$dir" rl-omitted-effort grok
+  printf grok > "$dir/fake/command"
+  fm_fake_exit0 "$dir/fakebin" grok
+  mkdir -p "$dir/home/config"
+  printf '%s\n' '{"default":[{"harness":"grok","model":"grok-4.7","effort":"high"},{"harness":"grok","model":"grok-4.7","effort":"xhigh"}]}' > "$dir/home/config/crew-dispatch.json"
+  sed 's/^model=default$/model=grok-4.7/; s/^effort=default$/effort=high/' \
+    "$dir/home/state/rl-omitted-effort.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/rl-omitted-effort.meta"
+  cp "$dir/home/state/rl-omitted-effort.meta" "$dir/meta.before"
+  out=$(run_control "$dir" rl-omitted-effort relaunch --effort xhigh --note "quota fallback"); rc=$?
+  expect_code 1 "$rc" "a higher token that realizes default must refuse"$'\n'"$out"
+  assert_contains "$out" "cannot realize effort 'xhigh'" "missing omitted-effort refusal"
+  cmp -s "$dir/meta.before" "$dir/home/state/rl-omitted-effort.meta" || fail "omitted-effort refusal changed metadata"
+  [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "omitted-effort refusal stopped the worker"
+  pass "configured fallback refuses an effort the adapter would omit before stopping"
+}
+
+test_configured_equivalent_fallback_records_realized_profile_and_reason() {
+  local dir out rc reason=$'provider quota exhausted\nuse declared equivalent'
+  dir=$(new_case equivalent rl-equivalent)
+  add_ship_task "$dir" rl-equivalent claude
+  mkdir -p "$dir/home/config"
+  printf '%s\n' '{"rules":[{"when":"hard tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong","provider":"codex"}]}]}' > "$dir/home/config/crew-dispatch.json"
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=xhigh/' \
+    "$dir/home/state/rl-equivalent.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/rl-equivalent.meta"
+  fm_fake_exit0 "$dir/fakebin" codex
+  printf codex > "$dir/fake/becomes"
+  out=$(run_control "$dir" rl-equivalent relaunch --harness codex --model gpt-6.1-sol --effort high --note "$reason"); rc=$?
+  expect_code 0 "$rc" "declared equivalent fallback should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-equivalent dispatch_rule)" = '{"when":"hard tasks"}' ] || fail "fallback lost its rule"
+  [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "fallback lost its chosen class"
+  [ "$(meta_field "$dir" rl-equivalent dispatch_provider)" = codex ] || fail "fallback lost provider"
+  [ "$(meta_field "$dir" rl-equivalent realized_harness)" = codex ] || fail "fallback lost realized harness"
+  [ "$(meta_field "$dir" rl-equivalent realized_model)" = gpt-6.1-sol ] || fail "fallback lost realized model"
+  [ "$(meta_field "$dir" rl-equivalent realized_effort)" = high ] || fail "fallback lost realized effort"
+  [ "$(meta_field "$dir" rl-equivalent fallback_reason | jq -r .)" = "$reason" ] || fail "fallback lost multiline reason"
+  assert_contains "$(cat "$dir/fake/literal")" "--model 'gpt-6.1-sol'" "fallback did not realize the model"
+  assert_contains "$(cat "$dir/fake/literal")" 'model_reasoning_effort="high"' "fallback did not realize the effort"
+  out=$(run_control "$dir" rl-equivalent relaunch --note "resume the same profile"); rc=$?
+  expect_code 0 "$rc" "unchanged fallback profile should relaunch"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "unchanged relaunch lost its class"
+  [ "$(meta_field "$dir" rl-equivalent fallback_reason | jq -r .)" = "$reason" ] || fail "unchanged relaunch replaced the fallback reason with its progress note"
+  pass "declared equivalent fallback records the rule, class, realized profile, provider and reason"
+}
+
+test_explicit_default_clears_same_harness_profile() {
+  local dir out rc
+  dir=$(new_case clearprofile rl-clear-profile)
+  add_ship_task "$dir" rl-clear-profile claude
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=high/' \
+    "$dir/home/state/rl-clear-profile.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/rl-clear-profile.meta"
+  out=$(run_control "$dir" rl-clear-profile relaunch --model default --effort default --note "clear profile"); rc=$?
+  expect_code 0 "$rc" "explicit default should clear both axes"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-clear-profile model)" = default ] || fail "explicit default restored the old model"
+  [ "$(meta_field "$dir" rl-clear-profile effort)" = default ] || fail "explicit default restored the old effort"
+  pass "explicit default still clears a same-harness model and effort"
+}
+
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop() {
   local dir out rc id=rl-ultra
   dir=$(new_case native-ultra "$id")
@@ -1064,7 +1214,9 @@ test_secondmate_relaunch_holds_off_the_watcher_auto_relaunch() {
   local dir home out rc hook
   dir=$(new_case watcher-race sm9)
   home="$dir/home"
-  mkdir -p "$home/data/sm9"
+  mkdir -p "$home/data/sm9" "$home/config"
+  # This race tests a Claude relaunch, independently of the host's harness.
+  printf 'claude\n' > "$home/config/secondmate-harness"
   printf '# secondmate brief\n' > "$home/data/sm9/brief.md"
   fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
   mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" \
@@ -3091,6 +3243,12 @@ test_harness_switch_does_not_carry_the_old_profile_axes
 test_harness_switch_resolves_a_prefixed_recorded_harness
 test_prefixed_recorded_harness_requires_explicit_replacement
 test_same_harness_relaunch_keeps_the_profile_axes
+test_direct_spawn_relaunch_keeps_the_profile_axes
+test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop
+test_fallback_policy_changes
+test_configured_fallback_refuses_an_omitted_effort_before_stop
+test_configured_equivalent_fallback_records_realized_profile_and_reason
+test_explicit_default_clears_same_harness_profile
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop
 test_signed_out_worker_account_pin_refuses_before_stop
 test_worker_account_pin_follows_the_relaunch

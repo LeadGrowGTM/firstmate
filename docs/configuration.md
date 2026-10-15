@@ -1434,7 +1434,7 @@ Choose a cap that covers the workers running at once plus the finished work stil
 
 `config/crew-dispatch.json` is an optional local, gitignored file containing natural-language rules that firstmate reads before dispatching a crewmate or scout.
 Firstmate chooses the best matching rule with judgment; shell scripts do not match the natural-language rules.
-Firstmate resolves the rule's profile object or array under `AGENTS.md` section 4 and `quota-array-dispatch`, then passes only concrete `--harness`, `--model`, and `--effort` flags to `fm-spawn.sh`.
+Firstmate resolves the rule's profile object or array under `AGENTS.md` section 4 and `quota-array-dispatch`, then passes concrete `--harness`, `--model`, and `--effort` flags to `fm-spawn.sh`; its help owns the optional rule selector and fallback-reason flags.
 
 **Spawn requirements**
 
@@ -1476,6 +1476,7 @@ This section is the single owner of the canonical schema and its per-field seman
 | `use` and optional top-level `default` | Accept one profile object or a non-empty array of profile objects; the single-object form remains fully backward-compatible. |
 | Profile `harness` | Required in every profile. |
 | Profile `model` and `effort`; rule `why` | Optional. |
+| Profile `reasoning_class` | Optional non-empty label containing letters, digits, dots, underscores, or plain dashes, beginning with a letter or digit; matching labels declare equivalent reasoning classes across profiles. |
 
 **Fields applied only by typed resolution**
 
@@ -1524,6 +1525,23 @@ This single-provider table is separate from the frozen legacy mapping used by `f
 - If no dispatch rule fits, firstmate resolves `default` through the same object-or-array path before falling back to `config/crew-harness`.
 - Except for `ultra`, which refuses unsupported profiles under the native-effort contract above, an effort value the chosen harness does not accept is recorded as `effort=` in task meta for traceability but omitted from the launch flags.
 - Bootstrap reports unsupported harness/model/effort combinations as a `CREW_DISPATCH` diagnostic when they are visible in the file.
+
+Spawn records the uniquely selected profile set as JSON-encoded `dispatch_rule`, its optional `reasoning_class` and `dispatch_provider`, and the JSON-encoded `fallback_reason` in task metadata.
+An ambiguous set requires an explicit selector at intake; scripts never choose among natural-language rules.
+An explicit profile outside the configuration remains an intake override, with no recorded rule authorizing subsequent fallback.
+Ship and scout relaunches preserve the recorded model and effort when omitted, including direct spawn relaunches, and preserve the chosen class and fallback rationale on an unchanged profile.
+A configured replacement must be listed in that same rule in the current configuration; removing the rule or its configuration cannot authorize a replacement.
+Different models or adapters require matching declared `reasoning_class` labels, rather than treating equal effort tokens as evidence of equal model capability.
+Without declared labels, the same adapter and model may retain or increase its explicit effort, but may not lower it or replace it with an unknown default.
+Legacy task records recover a rule only when their recorded profile identifies exactly one current set; ambiguous or unlisted records refuse fallback.
+Control checks the same guard before stopping an agent and uses its progress note as the fallback reason; direct spawn replacements require an explicit reason.
+This guard does not select a fallback or change quota/account policy.
+Unconfigured manual replacements and configured secondmate pins retain their existing control contracts.
+
+`realized_harness`, `realized_model`, and `realized_effort` record the axes actually supplied by the canonical launch mapping: omitted axes record `default`, and raw-command model and effort record `unknown`.
+These fields describe the launch request, not unobservable model substitutions inside a vendor service.
+A declared reasoning class or configured fallback refuses an effort the adapter would omit, and a raw command cannot claim a configured profile.
+Public-interface regression coverage lives in `tests/fm-spawn-dispatch-profile.test.sh` and `tests/fm-control-relaunch.test.sh`.
 
 See [`docs/examples/crew-dispatch.json`](examples/crew-dispatch.json) for a starting point to copy into local `config/crew-dispatch.json`; its Pi default declares the `claude` provider required for typed resolution of that Anthropic model.
 
