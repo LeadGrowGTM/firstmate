@@ -1530,7 +1530,7 @@ Spawn records the uniquely selected profile set as JSON-encoded `dispatch_rule` 
 An ambiguous set requires an explicit selector at intake; scripts never choose among natural-language rules.
 An explicit profile outside the configuration remains an intake override, with no recorded rule authorizing subsequent fallback.
 Ship and scout relaunches preserve the recorded model and effort when omitted, including direct spawn relaunches, and preserve the chosen class and fallback rationale on an unchanged profile.
-A configured replacement must be listed in that same rule in the current configuration; removing the rule or its configuration cannot authorize a replacement.
+A crew-dispatch replacement must be listed in that same rule in the current configuration; removing the rule or its configuration cannot authorize a replacement.
 For records with a rule fingerprint, changing or reordering that rule refuses relaunch before stopping the worker, even when the replacement remains listed at the saved position.
 Different models or adapters require matching declared `reasoning_class` labels, rather than treating equal effort tokens as evidence of equal model capability.
 Without declared labels, the same adapter and model may retain or increase its explicit effort, but may not lower it or replace it with an unknown default.
@@ -1840,6 +1840,7 @@ No qualifying option, or two equally probable qualifying options, produces `ambi
 | `error` | API, network, malformed response metadata, rendering, or quota-axi failure. |
 
 Every result above exits 0.
+For a `clear` result, the `profile:` line also identifies the selected rule and carries a rationale with the resolver note, provider, and `spendPriority` for the spawn receipt.
 
 - Response probabilities must contain exactly every offered choice, use numeric values from 0 through 1, and sum to approximately 1 within 0.01.
 - Only a usage or configuration error exits 2: an unreadable brief, an existing but unreadable or malformed canonical rules file, or missing `jq`, each reported and never selected around.
