@@ -354,7 +354,7 @@ fm_sb_tracker_home() {  # <home> <mate-id> <live-windows> <output-file> [state-d
 }
 
 fm_sb_tracker_refresh() {
-  local live primary_windows tmp home mate label state_dir result='' i=0
+  local live primary_windows tmp home mate label state_dir remote result='' i=0
   local -a mates=(churchill dev napoleon alexander-media ottersec legion)
   tmp="$TRACKER_CACHE.$$"
   live=$(tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
@@ -363,13 +363,20 @@ fm_sb_tracker_refresh() {
     if [ "$mate" = churchill ]; then
       home="$TRACKER_MAIN_HOME"
       state_dir=$TRACKER_MAIN_STATE
+      remote=
     else
       home=$(sed -n 's/^home=//p' "$TRACKER_MAIN_STATE/$mate.meta" 2>/dev/null | tail -1)
       [ -n "$home" ] || home="$TRACKER_ROOT/fm-homes/$mate"
       state_dir=$home/state
+      remote=$(sed -n '/^remote_host=./p; /^remote_backend=./p; /^window=remote:/p' \
+        "$TRACKER_MAIN_STATE/$mate.meta" 2>/dev/null | head -1)
     fi
-    fm_run_timed 27 bash "$SELF" --socket "$FM_SB_SOCKET" \
-      crew-tracker-home "$home" "$mate" "$live" "$tmp.$i" "$state_dir" &
+    if [ -n "$remote" ]; then
+      printf '%s ?r/?w\n' "$mate" >"$tmp.$i"
+    else
+      fm_run_timed 27 bash "$SELF" --socket "$FM_SB_SOCKET" \
+        crew-tracker-home "$home" "$mate" "$live" "$tmp.$i" "$state_dir" &
+    fi
     if [ "$mate" = churchill ]; then
       label=on
       printf '%s\n' "$primary_windows" | grep -qxF "${home##*/}|$state_dir" || label=off

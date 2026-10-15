@@ -701,6 +701,21 @@ leased=$(cat "$leased_cache")
 case "$leased" in *'churchill:on 1r/0w'*) ;; *) fail "tracker treated a leased secondmate as the main home" "$leased" ;; esac
 pass "tracker resolves a leased secondmate's recorded local parent"
 
+cp "$WORK/firstmate/state/dev.meta" "$WORK/dev-local.meta"
+printf 'window=remote:dev\nkind=secondmate\nhome=%s\nremote_backend=herdr\nremote_host=example.invalid\n' \
+  "$WORK/custom-dev" >"$WORK/firstmate/state/dev.meta"
+remote_cache_dir="$WORK/remote-cache"
+remote_cache="$remote_cache_dir/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
+remote=$(FM_SB_TRACKER_CACHE_DIR="$remote_cache_dir" statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+[ "$remote" = 'crew: loading' ] || fail "remote-mate tracker did not start a fresh refresh" "$remote"
+i=0
+while [ ! -s "$remote_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s "$remote_cache" ] || fail "remote-mate tracker did not publish"
+remote=$(cat "$remote_cache")
+case "$remote" in *'dev:parked ?r/?w'*) ;; *) fail "remote mate borrowed local workers at the same home path" "$remote" ;; esac
+cp "$WORK/dev-local.meta" "$WORK/firstmate/state/dev.meta"
+pass "remote mate crew stays unknown despite a matching local home path"
+
 mkdir -p "$WORK/bad-parent-home"
 printf 'schema=broken\n' >"$WORK/bad-parent-home/.fm-secondmate-parent"
 unrelated=$(printf '%s' '{"model":{"display_name":"Opus"}}' | \
