@@ -6487,7 +6487,9 @@ spawn_orca_wait_launch_consumed() {
   done
 }
 SPAWN_LAUNCH_ATTEMPTED=1
-SPAWN_LAUNCH_SENT=1
+# Source-mode Orca cleanup must conservatively arbitrate file consumption on
+# a failed transport; other backends record delivery only after a successful send.
+[ "$ORCA_LAUNCH_ENV_ENABLED" != 1 ] || SPAWN_LAUNCH_SENT=1
 # errexit is on here: a failed send still exits, and Orca source mode first
 # removes the credential-bearing file the pane never received.
 LAUNCH_SOURCE_TEXT=". $(shell_quote "$LAUNCH_FILE")"
@@ -6501,6 +6503,7 @@ if ! spawn_send_literal "$T" "$LAUNCH_SOURCE_TEXT"; then
   [ "$ORCA_LAUNCH_ENV_ENABLED" != 1 ] || spawn_orca_launch_send_fail
   exit 1
 fi
+SPAWN_LAUNCH_SENT=1
 sleep 0.3
 if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   HERDR_PROJECTION_ABORT_CLEANUP=0
