@@ -43,7 +43,7 @@
 # (one second apart; FM_BOAT_START_POLLS and FM_BOAT_START_INTERVAL override).
 # Codex directory-trust text is not auto-answered; missing start proof leaves
 # the task intact for same-id reconciliation, never retry.
-# Scout teardown requires a controller-reviewed completion inventory; refusal
+# Scout teardown requires a completed captain-hold inventory; refusal
 # prints the exact controller command rather than manufacturing --none consent.
 # Ships require gh-axi; every worker requires a valid supplied Git identity before backlog intake;
 # fm-spawn.sh applies the identity only to the isolated worker worktree.

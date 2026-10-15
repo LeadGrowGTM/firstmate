@@ -612,7 +612,8 @@ FM_HOME=<controller-home> bin/fm-on.sh boat-eng fm-captain-hold.sh complete <tas
 ```
 
 Use `--none` only after confirming there are no unresolved calls; otherwise pass the durable held task ids as defined by `fm-captain-hold.sh --help`.
-Teardown refuses with that controller command when the inventory has not been completed, preserving both the scout and the box.
+Teardown requires a completed `fm-captain-hold.sh` inventory for the origin task id under the same trust model as local scouts; it does not verify who recorded the inventory.
+When the inventory is incomplete, teardown refuses and prints the controller command, preserving both the scout and the box.
 It stops the approved box when both Boat task records and worker endpoints are gone.
 There is no twenty-minute idle monitor: if teardown does not complete, the box runs until its auto-stop timer expires.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.
