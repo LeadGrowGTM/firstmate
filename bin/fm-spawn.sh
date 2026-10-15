@@ -4998,7 +4998,7 @@ elif [ "$RELAUNCH" -eq 1 ]; then
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fm_treehouse_pool_custody_check "$FM_HOME" "$PROJ_ABS" "$HOME" records || exit 1
   pool_refusal_file=$(umask 077; mktemp "$STATE/.fm-treehouse-pool.XXXXXX") || exit 1
-  if ! spawn_send_text_line "$WT_TARGET" "bash $(shell_quote "$SCRIPT_DIR/fm-treehouse-pool-check.sh") $(shell_quote "$FM_HOME") $(shell_quote "$PROJ_ABS") $(shell_quote "$pool_refusal_file") && treehouse get"; then
+  if ! spawn_send_text_line "$WT_TARGET" "bash $(shell_quote "$SCRIPT_DIR/fm-treehouse-pool-check.sh") $(shell_quote "$FM_HOME") $(shell_quote "$PROJ_ABS") $(shell_quote "$pool_refusal_file") $(shell_quote "$STATE") && treehouse get"; then
     rm -f -- "$pool_refusal_file"
     exit 1
   fi

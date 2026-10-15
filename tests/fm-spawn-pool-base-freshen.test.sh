@@ -969,6 +969,79 @@ SH
   pass 'provider pool markers from sibling clones block both allocation preflights'
 }
 
+test_state_override_pane_preflight_blocks_retained_claim() {
+  local rec id=pool-override-new-r1 old=pool-override-old-r1 state provider out status survivor
+  local before_head before_reflog before_status
+  rec=$(make_case state-override-custody "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/user-home/.config/treehouse"
+  printf 'root = "%s"\n' "$CASE_DIR" > "$HOME_DIR/user-home/.config/treehouse/config.toml"
+  provider=$(FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" bash -c \
+    '. "$1"; fm_treehouse_pool_check "$2" "$3" "$4"; printf "%s" "$FM_TREEHOUSE_POOL_RESOLVED"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home") \
+    || fail 'the private provider pool could not be resolved'
+  mkdir -p "$provider/1"
+  git -C "$PROJECT_DIR" worktree move "$POOL_DIR" "$provider/1/project"
+  POOL_DIR="$provider/1/project"
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' "$POOL_DIR" \
+    > "$provider/treehouse-state.json"
+  state="$CASE_DIR/override-state"
+  mkdir -p "$state"
+  fm_write_meta "$state/$old.meta" "window=firstmate:fm-$old" \
+    "endpoint_task_id=$old" "worktree=$POOL_DIR" "project=$PROJECT_DIR" "kind=scout"
+  printf 'preserve tracked work\n' >> "$POOL_DIR/README.md"
+  printf 'preserve untracked work\n' > "$POOL_DIR/untracked.txt"
+  before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  before_reflog=$(git -C "$POOL_DIR" reflog)
+  before_status=$(git -C "$POOL_DIR" status --porcelain)
+  (cd "$POOL_DIR" && exec /bin/sleep 60) &
+  survivor=$!
+  printf '%s\n' "$survivor" > "$CASE_DIR/process-pids"
+  /bin/sleep 0.1
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = send-keys ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *fm-treehouse-pool-check.sh*'&& treehouse get'*)
+        : > "$FM_TEST_PANE_ENTERED"
+        kill "$FM_TEST_EXIT_PID"
+        /bin/sleep 0.1
+        bash -c "$arg"
+        exit $?
+        ;;
+    esac
+  done
+fi
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+  cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = get ]; then : > "$FM_TEST_PROVIDER_ENTERED"; fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/treehouse"
+  out=$(FM_TEST_STATE_OVERRIDE="$state" FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" \
+    FM_TEST_EXIT_PID="$survivor" FM_TEST_PANE_ENTERED="$CASE_DIR/pane-entered" \
+    FM_TEST_PROVIDER_ENTERED="$CASE_DIR/provider-entered" run_spawn "$id" --scout)
+  status=$?
+  kill "$survivor" 2>/dev/null || true
+  wait "$survivor" 2>/dev/null || true
+  [ "$status" -ne 0 ] || fail 'spawn accepted a retained claim in the overridden state directory'
+  assert_present "$CASE_DIR/pane-entered" 'spawn did not reach the pane preflight'
+  assert_absent "$CASE_DIR/provider-entered" 'pane entered the provider despite the retained claim'
+  assert_contains "$out" 'still reserved' 'pane preflight did not refuse the retained claim'
+  assert_grep "worktree=$POOL_DIR" "$state/$old.meta" 'pane preflight changed the old record'
+  assert_absent "$state/$id.meta" 'refused spawn published a new record'
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] || fail 'refused spawn moved HEAD'
+  [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] || fail 'refused spawn changed the reflog'
+  [ "$(git -C "$POOL_DIR" status --porcelain)" = "$before_status" ] || fail 'refused spawn changed preserved work'
+  pass 'pane preflight honors the resolved state override before provider acquisition'
+}
+
 # The spawn side of the slot-owner claim that bin/fm-teardown.sh later reads:
 # a launched task's claim names it, a slot that cannot be claimed refuses before
 # anything is published, and an abort while the allocation lock is still held
@@ -1160,6 +1233,7 @@ test_pool_custody_refuses_before_refresh_or_claim
 test_returned_pool_copy_rechecks_custody_before_refresh
 test_returned_pool_copy_rechecks_process_evidence
 test_provider_pool_marker_from_sibling_clone_blocks_allocation
+test_state_override_pane_preflight_blocks_retained_claim
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
 test_named_base_branch_starts_from_that_branch
