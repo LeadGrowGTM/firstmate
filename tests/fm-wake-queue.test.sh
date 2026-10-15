@@ -1080,7 +1080,7 @@ test_secondmate_spawned_hooks_gate_the_drain_ring() {
     || fail "the claude secondmate spawn failed: $out"
   grep -Fx 'window=firstmate:fm-mate' "$state/mate.meta" >/dev/null \
     || fail "the spawned secondmate record names an unexpected window: $(cat "$state/mate.meta")"
-  settings="$sub/.claude/settings.local.json"
+  settings="$state/mate.claude-settings.json"
   [ -f "$settings" ] || fail "the spawned claude secondmate has no busy-state hooks"
   printf '100\t7\tcheck\trouted\tcheck: routed row\n' > "$sub/state/.wake-queue"
   install_secondmate_alive_tmux "$fakebin"
