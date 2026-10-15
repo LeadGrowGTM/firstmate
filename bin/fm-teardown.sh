@@ -1919,13 +1919,18 @@ cleanup_stale_lock_for_safety_check() {
 }
 
 # Return a worktree/home via `treehouse return --force`, tolerating a transient or
-# stale git index.lock left by a killed crew process. See the script header.
+# stale git index.lock left by a killed crew process. The optional fifth
+# argument cleans authorized scratch only after each attempt's safety check.
+# See the script header.
 teardown_treehouse_return() {
-  local dir=$1 cd_dir=$2 label=$3 post_cleanup_check=${4:-}
+  local dir=$1 cd_dir=$2 label=$3 post_cleanup_check=${4:-} pre_return_cleanup=${5:-}
   local out lock attempt=0 max_retries lock_desc
 
   if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$post_cleanup_check" ]; then
     "$post_cleanup_check" || return 1
+  fi
+  if [ -n "$pre_return_cleanup" ]; then
+    "$pre_return_cleanup" "$dir" || return 1
   fi
   # Capture stdout+stderr so non-lock failures stay visible and lock failures can
   # be matched by signature even when the lock file is already gone mid-check.
@@ -1957,6 +1962,9 @@ teardown_treehouse_return() {
     if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$post_cleanup_check" ]; then
       "$post_cleanup_check" || return 1
     fi
+    if [ -n "$pre_return_cleanup" ]; then
+      "$pre_return_cleanup" "$dir" || return 1
+    fi
     if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
       [ -n "$out" ] && printf '%s\n' "$out"
       echo "teardown: $label return succeeded on retry; lock cleared on its own" >&2
@@ -1983,6 +1991,9 @@ teardown_treehouse_return() {
           echo "teardown: $label return aborted after stale-lock cleanup because safety checks failed" >&2
           return 1
         fi
+      fi
+      if [ -n "$pre_return_cleanup" ]; then
+        "$pre_return_cleanup" "$dir" || return 1
       fi
       if out=$( ( cd "$cd_dir" && treehouse return --force "$dir" ) 2>&1 ); then
         [ -n "$out" ] && printf '%s\n' "$out"
@@ -3944,12 +3955,13 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
     || { [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; }; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
+  pre_return_cleanup=
   if [ "$KIND" = scout ] || [ "$FORCE" = "--force" ]; then
-    teardown_scrub_scratch_copy "$WT" || exit 1
+    pre_return_cleanup=teardown_scrub_scratch_copy
   fi
   wt_pool_slot=0
   fm_treehouse_pool_slot "$PROJ" "$WT" && wt_pool_slot=1
-  teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
+  teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" "$pre_return_cleanup" || {
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
     exit 1
   }
