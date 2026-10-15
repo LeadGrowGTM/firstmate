@@ -1881,7 +1881,8 @@ test_secondmate_launch_override_keys_ride_the_settings() {
     launch=$(cat "$LAUNCH_LOG")
     settings=$(claude_settings_json_arg "$launch")
     printf '%s' "$settings" | jq -e --argjson want "$want" \
-      '.feedbackDrafts == "off" and (. | del(.feedbackDrafts, .attribution)) == $want' >/dev/null \
+      '.feedbackDrafts == "off" and (.hooks.UserPromptSubmit | type) == "array"
+       and (. | del(.feedbackDrafts, .attribution, .hooks, .statusLine)) == $want' >/dev/null \
       || fail "override file $n launch settings differ from $want: $settings"
   done <<'EOF'
 {"skillOverrides":{"kun":"off"}}|{"skillOverrides":{"kun":"off"}}
