@@ -948,18 +948,26 @@ test_configured_equivalent_fallback_records_realized_profile_and_reason() {
 }
 
 test_reordered_rule_refuses_before_stop() {
-  local dir id out rc canonical fingerprint
+  local dir id out rc fingerprint
   id=rl-rule-reordered
   dir=$(new_case rule-reordered "$id")
   add_ship_task "$dir" "$id" claude
   mkdir -p "$dir/home/config"
   printf '%s\n' '{"rules":[{"when":"first tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong"}]},{"when":"second tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"grok","model":"grok-4.7","effort":"high","reasoning_class":"strong"}]}]}' > "$dir/home/config/crew-dispatch.json"
-  canonical=$(jq -cS '.rules[0] | [.when, .use]' "$dir/home/config/crew-dispatch.json")
-  fingerprint=$(printf '%s' "$canonical" | shasum -a 256)
-  fingerprint=${fingerprint%% *}
-  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=xhigh/' "$dir/home/state/$id.meta" > "$dir/meta.tmp"
-  mv "$dir/meta.tmp" "$dir/home/state/$id.meta"
-  printf '%s\n' 'dispatch_rule={"rule":"rule_1"}' "dispatch_rule_fingerprint=$fingerprint" 'reasoning_class=strong' >> "$dir/home/state/$id.meta"
+  unlink "$dir/home/state/$id.meta"
+  : > "$dir/fake/windows"
+  printf zsh > "$dir/fake/command"
+  fm_fake_exit0 "$dir/fakebin" treehouse
+  out=$(run_spawn "$dir" "$id" "$dir/proj" --harness claude --model opus --effort xhigh \
+    --mode no-mistakes --yolo off --dispatch-rule '{"rule":"rule_1"}'); rc=$?
+  expect_code 0 "$rc" "configured spawn should publish the selected rule"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" dispatch_rule)" = '{"rule":"rule_1"}' ] || fail "spawn did not record the selected rule"
+  fingerprint=$(meta_field "$dir" "$id" dispatch_rule_fingerprint)
+  [[ $fingerprint =~ ^[0-9a-f]{64}$ ]] || fail "spawn did not record the rule fingerprint"
+  printf '%s' "$(meta_field "$dir" "$id" worktree)" > "$dir/fake/cwd"
+  printf '%s' "$(meta_field "$dir" "$id" window | cut -d: -f1)" > "$dir/fake/session-name"
+  : > "$dir/fake/literal"
+  : > "$dir/fake/keys"
   jq '.rules |= reverse' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp"
   mv "$dir/config.tmp" "$dir/home/config/crew-dispatch.json"
   cp "$dir/home/state/$id.meta" "$dir/meta.before"

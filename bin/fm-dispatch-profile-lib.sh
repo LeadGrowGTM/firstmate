@@ -35,7 +35,7 @@ fm_dispatch_realized_effort() {
 
 fm_dispatch_rule_fingerprint() {
   local canonical hash
-  canonical=$(jq -ceS --argjson source "$2" '
+  canonical=$(jq -ceS --argjson source "$1" '
     def listed: if type == "array" then . elif type == "object" then [.] else empty end;
     if $source == {default:true} then
       if has("default") then ["default", (.default | listed)] else empty end
@@ -43,7 +43,7 @@ fm_dispatch_rule_fingerprint() {
       (.rules // [])[($source.rule | ltrimstr("rule_") | tonumber) - 1] |
       select(type == "object") | [.when, (.use | listed)]
     else empty end
-  ' "$1") || return 1
+  ') || return 1
   if command -v shasum >/dev/null 2>&1; then
     hash=$(printf '%s' "$canonical" | shasum -a 256) || return 1
   elif command -v sha256sum >/dev/null 2>&1; then
@@ -61,7 +61,7 @@ fm_dispatch_profile_check() {
   local config=$1 prior=$2 harness=$3 model=${4:-default} effort=${5:-default}
   local rule=$6 reason=$7 scheduled_plan=${8:-} scheduled=false
   local old_h='' old_m=default old_e=default source='' class='' prior_reason='' prior_fingerprint=''
-  local current_fingerprint='' selected_source='' task='' receipt
+  local config_snapshot='' has_config=false current_fingerprint='' selected_source='' task='' receipt
   FM_DISPATCH_PROFILE_RECEIPT='{}'
   if [ -n "$scheduled_plan" ]; then
     [ -f "$scheduled_plan" ] && [ ! -L "$scheduled_plan" ] || {
@@ -70,6 +70,10 @@ fm_dispatch_profile_check() {
     }
     config=$scheduled_plan
     scheduled=true
+  fi
+  if [ -f "$config" ]; then
+    config_snapshot=$(<"$config") || return 1
+    has_config=true
   fi
   if [ -n "$prior" ]; then
     old_h=$(fm_meta_get "$prior" harness)
@@ -87,7 +91,7 @@ fm_dispatch_profile_check() {
   if [ -n "$prior_fingerprint" ] && [ "$scheduled" = false ]; then
     task=$(fm_meta_get "$prior" endpoint_task_id)
     task=${task:-${prior##*/}}
-    if [ -z "$source" ] || [ ! -f "$config" ] || ! current_fingerprint=$(fm_dispatch_rule_fingerprint "$config" "$source"); then
+    if [ -z "$source" ] || [ "$has_config" = false ] || ! current_fingerprint=$(fm_dispatch_rule_fingerprint "$source" <<< "$config_snapshot"); then
       echo "error: dispatch rule changed since launch for task $task; refusing relaunch" >&2
       return 1
     fi
@@ -96,7 +100,11 @@ fm_dispatch_profile_check() {
       return 1
     fi
   fi
-  if [ ! -f "$config" ]; then
+  if [ "$has_config" = false ]; then
+    if [ "$scheduled" = true ]; then
+      echo "error: scheduled worker plan is unavailable: $config" >&2
+      return 1
+    fi
     if [ -n "$rule" ] || { [ "$changed" = 1 ] && [ -n "$source" ]; }; then
       echo "error: dispatch fallback requires the recorded rule in $config; no configuration is available" >&2
       return 1
@@ -162,12 +170,12 @@ fm_dispatch_profile_check() {
         else error("fallback would lower or change the recorded reasoning class; declare equivalent reasoning_class profiles in the same rule") end
       end
     end
-  ' "$config") || return 1
+  ' <<< "$config_snapshot") || return 1
   if [ "$scheduled" = false ]; then
     selected_source=$(jq -c '.source // empty' <<< "$receipt") || return 1
     if [ -n "$selected_source" ]; then
       if [ -z "$current_fingerprint" ] || [ "$selected_source" != "$source" ]; then
-        current_fingerprint=$(fm_dispatch_rule_fingerprint "$config" "$selected_source") || {
+        current_fingerprint=$(fm_dispatch_rule_fingerprint "$selected_source" <<< "$config_snapshot") || {
           [ -n "$prior" ] && [ -z "$prior_fingerprint" ] || return 1
           current_fingerprint=''
         }
