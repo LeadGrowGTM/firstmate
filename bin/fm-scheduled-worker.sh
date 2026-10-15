@@ -192,9 +192,11 @@ if [ "$ACTION" = spawn ]; then
   ARGS+=(--branch-prefix "$(jq -r '.branch_prefix // "fm/"' "$PLAN")")
   BASE=$(jq -r '.base_branch // empty' "$PLAN")
   [ -z "$BASE" ] || ARGS+=(--base-branch "$BASE")
-  FM_SPAWN_OUTCOME_FILE=$RECEIPT "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$(jq -r .project "$PLAN")" "${ARGS[@]}" || RC=$?
+  FM_SPAWN_OUTCOME_FILE=$RECEIPT FM_SCHEDULED_WORKER_PLAN=$DIR/plan.json \
+    "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$(jq -r .project "$PLAN")" "${ARGS[@]}" || RC=$?
 else
-  FM_SPAWN_OUTCOME_FILE=$RECEIPT "$SCRIPT_DIR/fm-control.sh" "$ID" relaunch "${ARGS[@]}" --expected-spawn-gen "$GEN" --note-file "$NOTE" || RC=$?
+  FM_SPAWN_OUTCOME_FILE=$RECEIPT FM_SCHEDULED_WORKER_PLAN=$DIR/plan.json \
+    "$SCRIPT_DIR/fm-control.sh" "$ID" relaunch "${ARGS[@]}" --expected-spawn-gen "$GEN" --note-file "$NOTE" || RC=$?
 fi
 if ! safe_file "$RECEIPT" || ! jq -e --arg task "$ID" --argjson code "$RC" '
   .version == 1 and .task == $task and .exit_code == $code and

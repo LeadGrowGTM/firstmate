@@ -59,6 +59,10 @@
 #   steering inbox. This never rewrites a project's instruction files or a
 #   secondmate's charter.
 #        fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>]
+#   --dispatch-rule <JSON-key> disambiguates a fresh launch's configured
+#   profile set; --fallback-reason <text> records the provider/quota rationale.
+#   Configured replacements must belong to the recorded rule and preserve the
+#   reasoning class (bin/fm-dispatch-profile-lib.sh), including direct relaunch.
 #   --relaunch launches a replacement agent for an EXISTING task into that
 #   task's own recorded worktree, reusing its recorded endpoint when that
 #   endpoint still exists, instead of creating either from scratch. It is
@@ -93,7 +97,7 @@
 #   only a shell that will not go refuses.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
-#   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
+#   --model <name> and --effort <default|low|medium|high|xhigh|max|ultra> are concrete profile
 #   axes chosen by firstmate at intake. They are only threaded into harnesses whose
 #   installed CLIs were verified to support that axis; unsupported axes are omitted
 #   from that harness's launch rather than guessed. Ultra is the explicit
@@ -757,6 +761,8 @@ KIND_SET=0
 HARNESS_ARG=
 MODEL=
 EFFORT=
+DISPATCH_RULE=
+FALLBACK_REASON=
 BACKEND_ARG=
 MODE=
 YOLO=
@@ -803,6 +809,8 @@ for a in "$@"; do
       EFFORT=$a
       EFFORT_SET=1
       ;;
+    dispatch-rule) DISPATCH_RULE=$a ;;
+    fallback-reason) FALLBACK_REASON=$a ;;
     backend)
       BACKEND_ARG=$a
       BACKEND_SET=1
@@ -853,6 +861,10 @@ for a in "$@"; do
     KIND_SET=1
     ;;
   --relaunch) RELAUNCH=1 ;;
+  --dispatch-rule) want_value='dispatch-rule' ;;
+  --dispatch-rule=*) DISPATCH_RULE=${a#--dispatch-rule=} ;;
+  --fallback-reason) want_value='fallback-reason' ;;
+  --fallback-reason=*) FALLBACK_REASON=${a#--fallback-reason=} ;;
   --herdr-resume-lock-wait) HERDR_RESUME_LOCK_WAIT=1 ;;
   --harness) want_value=harness ;;
   --harness=*)
@@ -986,9 +998,9 @@ if [ "$TRACEPARENT_SET" -eq 1 ]; then
   }
 fi
 case "$EFFORT" in
-'' | low | medium | high | xhigh | max | ultra) ;;
+'' | default | low | medium | high | xhigh | max | ultra) ;;
 *)
-  echo "error: --effort must be one of low, medium, high, xhigh, max, ultra" >&2
+  echo "error: --effort must be one of default, low, medium, high, xhigh, max, ultra" >&2
   exit 1
   ;;
 esac
@@ -1729,6 +1741,8 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ -z "$HARNESS_ARG" ] || shared_args+=(--harness "$HARNESS_ARG")
   [ -z "$MODEL" ] || shared_args+=(--model "$MODEL")
   [ -z "$EFFORT" ] || shared_args+=(--effort "$EFFORT")
+  [ -z "$DISPATCH_RULE" ] || shared_args+=(--dispatch-rule "$DISPATCH_RULE")
+  [ -z "$FALLBACK_REASON" ] || shared_args+=("--fallback-reason=$FALLBACK_REASON")
   [ -z "$BACKEND_ARG" ] || shared_args+=(--backend "$BACKEND_ARG")
   # One delivery contract applies to every pair in a batch, exactly like the shared
   # harness. Each pair still re-validates it against its own brief, so a batch
@@ -2104,6 +2118,12 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: task $ID has no recorded harness; pass --harness to relaunch it" >&2
     exit 1
   }
+  # Direct callers get the same profile preservation as the control plane.
+  # A deliberate harness change still requires axes native to the new adapter.
+  if [ "$ARG3" = "$RELAUNCH_PRIOR_HARNESS" ]; then
+    [ "$MODEL_SET" -eq 1 ] || MODEL=$(fm_meta_get "$RELAUNCH_META" model)
+    [ "$EFFORT_SET" -eq 1 ] || EFFORT=$(fm_meta_get "$RELAUNCH_META" effort)
+  fi
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
   '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin)
@@ -2768,6 +2788,22 @@ if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
     fi
   fi
 fi
+# Check configured profile changes before provisioning or retiring any wiring.
+# shellcheck source=bin/fm-dispatch-profile-lib.sh
+. "$SCRIPT_DIR/fm-dispatch-profile-lib.sh"
+FM_DISPATCH_PROFILE_RECEIPT='{}'
+if [ "$KIND" != secondmate ]; then
+  [ "$RELAUNCH" -eq 0 ] || [ -z "$DISPATCH_RULE" ] || {
+    echo "error: --relaunch reuses the recorded dispatch rule; --dispatch-rule cannot override it" >&2
+    exit 1
+  }
+  fm_dispatch_profile_check "$CONFIG/crew-dispatch.json" "${RELAUNCH_META:-}" \
+    "$HARNESS" "$MODEL" "$EFFORT" "$DISPATCH_RULE" "$FALLBACK_REASON" "${FM_SCHEDULED_WORKER_PLAN:-}" || exit 1
+  if [ "$RAW_LAUNCH" = 1 ] && jq -e '.source != null' <<< "$FM_DISPATCH_PROFILE_RECEIPT" >/dev/null; then
+    echo "error: a raw command cannot prove the configured dispatch profile; use the canonical --harness launch" >&2
+    exit 1
+  fi
+fi
 # Ultra is an explicit native capability, never a Pi thinking-level alias.
 # Validate the fully resolved profile before worktree or endpoint provisioning.
 if [ "$EFFORT" = ultra ]; then
@@ -3001,40 +3037,29 @@ model_flag_for_harness() {
 
 effort_flag_for_harness() {
   local harness=$1 effort=$2 model=${3:-}
-  [ -n "$effort" ] && [ "$effort" != default ] || return 0
+  effort=$(fm_dispatch_realized_effort "$harness" "$model" "$effort")
+  [ "$effort" != default ] || return 0
   case "$harness" in
   claude)
-    case "$effort" in
-    low | medium | high | xhigh | max) printf -- '--effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--effort %s ' "$(shell_quote "$effort")"
     ;;
   codex)
     # The installed codex config schema uses model_reasoning_effort. The
     # installed model catalog supports max for gpt-5.6-luna; keep that level
     # scoped to the model whose catalog entry advertises it.
-    case "$effort" in
-    low | medium | high | xhigh) printf -- '-c %s ' "$(shell_quote "model_reasoning_effort=\"$effort\"")" ;;
-    max)
-      [ "$model" = gpt-5.6-luna ] || return 0
-      printf -- '-c %s ' "$(shell_quote 'model_reasoning_effort="max"')"
-      ;;
-    esac
+    printf -- '-c %s ' "$(shell_quote "model_reasoning_effort=\"$effort\"")"
     ;;
   grok)
     # grok exposes both --effort and --reasoning-effort; firstmate's profile
     # axis is the reasoning knob. As of grok 0.2.99, --reasoning-effort accepts
     # only low|medium|high and rejects both xhigh and max, so omit those rather
     # than passing a known-bad value.
-    case "$effort" in
-    low | medium | high) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")"
     ;;
   agy)
     # agy 1.2.0 --effort accepts exactly low|medium|high, so xhigh and max are
     # omitted rather than passed as known-bad values (record-and-omit).
-    case "$effort" in
-    low | medium | high) printf -- '--effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--effort %s ' "$(shell_quote "$effort")"
     ;;
   pi | pi-signed)
     # Pi 0.80.6 accepts the full shared effort vocabulary, including max, through
@@ -3044,15 +3069,13 @@ effort_flag_for_harness() {
       "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$harness" "$model" "$effort" || return 1
       printf -- '--codex-effort %s ' "$(shell_quote ultra)"
       ;;
-    low | medium | high | xhigh | max) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
+    *) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
     esac
     ;;
   omp)
     # omp 18.1.11 --thinking accepts off|minimal|low|medium|high|xhigh|max|auto,
     # a superset of the shared vocabulary, so every level maps straight across.
-    case "$effort" in
-    low | medium | high | xhigh | max) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--thinking %s ' "$(shell_quote "$effort")"
     ;;
   opencode)
     # opencode's interactive `opencode --prompt` launch has no effort flag
@@ -3072,12 +3095,6 @@ effort_flag_for_harness() {
     # and is likewise omitted. The fragment lands inside the launch's
     # single-quoted assignment, so a literal quote in the model id must close and
     # reopen that quoting.
-    [ -n "$model" ] && [ "$model" != default ] || return 0
-    case "${model%%/*}:$effort" in
-    anthropic:high | anthropic:max) ;;
-    openai:low | openai:medium | openai:high | openai:xhigh) ;;
-    *) return 0 ;;
-    esac
     local model_json
     model_json=$(json_escape "$model")
     model_json=${model_json//\'/\'\\\'\'}
@@ -3094,9 +3111,7 @@ effort_flag_for_harness() {
     # here leaves muse on its own high default. muse's extra none/minimal
     # levels sit below firstmate's shared vocabulary and are deliberately
     # unreachable rather than remapped onto low.
-    case "$effort" in
-    low | medium | high | xhigh | max) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")"
     ;;
     # rovo has no --effort flag on `run`; its effort mapping rides
     # --config-override, but that flag is single-value (see
@@ -3192,8 +3207,9 @@ rovo_config_override_flag() {
   data_real=$(cd "$data_dir" && pwd -P) || return 1
   state_real=$(cd "$state_dir" && pwd -P) || return 1
   agent_json=
-  case "$effort" in
-  low | medium | high | max) agent_json="\"agent\":{\"efficiencyLevel\":\"$(json_escape "$effort")\"}," ;;
+  case "$(fm_dispatch_realized_effort rovo default "$effort")" in
+  default) ;;
+  *) agent_json="\"agent\":{\"efficiencyLevel\":\"$(json_escape "$effort")\"}," ;;
   esac
   paths_json=$(printf '"%s","%s","%s"' \
     "$(json_escape "$data_real/$id")" \
@@ -5666,7 +5682,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -5686,6 +5702,19 @@ preserve_relaunch_meta() {
   [ -z "$BASE_BRANCH" ] || echo "base_branch=$BASE_BRANCH"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    echo "realized_model=unknown"
+    echo "realized_effort=unknown"
+  else
+    [ -z "$MODEL" ] || [ "$MODEL" = default ] || echo "realized_model=$MODEL"
+    echo "realized_effort=$(fm_dispatch_realized_effort "$HARNESS" "$MODEL" "$EFFORT")"
+  fi
+  printf '%s\n' "$FM_DISPATCH_PROFILE_RECEIPT" | jq -r '
+    (if .source != null then "dispatch_rule=" + (.source | tojson) else empty end),
+    (if .rule_fingerprint != null then "dispatch_rule_fingerprint=" + .rule_fingerprint else empty end),
+    (if (.class // "") != "" then "reasoning_class=" + .class else empty end),
+    (if (.provider // "") != "" then "dispatch_provider=" + .provider else empty end),
+    (if .reason != null then "fallback_reason=" + (.reason | tojson) else empty end)'
   # The worker account pin, only when this home declares one, so an unpinned
   # task record stays byte-identical.
   [ -z "$WORKER_ACCOUNT" ] || echo "account=$WORKER_ACCOUNT_DECLARED"

@@ -90,6 +90,9 @@
 #              The same pre-stop refusal applies to this home's worker tool
 #              exclusions (bin/fm-exclude-tools-lib.sh): a malformed list, or a
 #              replacement runtime that cannot hide the listed tools.
+#              Configured ship/scout profile replacements also pass the shared
+#              dispatch-policy guard before stopping; --note records their
+#              fallback rationale, and --relaunch keeps the recorded rule.
 #              --note is required for a ship or scout, whose replacement
 #              inherits the local copy but none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
@@ -1020,6 +1023,12 @@ resolve_relaunch_profile() {
   if [ "$TARGET_EFFORT" = ultra ]; then
     "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" || return 1
   fi
+  if [ "$KIND" != secondmate ]; then
+    # shellcheck source=bin/fm-dispatch-profile-lib.sh
+    . "$SCRIPT_DIR/fm-dispatch-profile-lib.sh"
+    fm_dispatch_profile_check "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/crew-dispatch.json" "$META" \
+      "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" "" "$NOTE" "${FM_SCHEDULED_WORKER_PLAN:-}" || return 1
+  fi
   if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
     local executable=
     case "$TARGET_HARNESS" in
@@ -1254,9 +1263,8 @@ do_relaunch() {
   # per-task harness wiring before arming the new one, so nothing to do here.
   RELAUNCH_TX="${BASHPID:-$$}.$(date -u +%Y%m%dT%H%M%SZ).$RANDOM"
   journal_write launching "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
-  spawn_args=("$ID" --relaunch --harness "$TARGET_HARNESS")
-  [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
-  [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
+  spawn_args=("$ID" --relaunch --harness "$TARGET_HARNESS" --model "$TARGET_MODEL" --effort "$TARGET_EFFORT")
+  [ -z "$NOTE" ] || spawn_args+=("--fallback-reason=$NOTE")
   local child_outcome=
   if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
     child_outcome="$STATE/.${ID}.${RELAUNCH_TX}.outcome.json"
