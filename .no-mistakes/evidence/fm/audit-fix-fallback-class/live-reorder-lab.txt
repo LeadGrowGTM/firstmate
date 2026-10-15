@@ -1,0 +1,21 @@
+configured spawn:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.sSw1db
+spawned nm-reorder-718774 harness=codex kind=scout window=primary:fm-nm-reorder-718774 worktree=/tmp/fm-pool.FGMLQL/.treehouse/probe-26cb8b/1/probe
+recorded rule and fingerprint:
+dispatch_rule={"rule":"rule_1"}
+dispatch_rule_fingerprint=a94693ccec06c0ee3ec7d8bbedb55dc0ec4b99bbbcb5e500cf71d322ac6f9887
+worker before exit: node
+worker after /exit: bash
+direct relaunch after rule reorder:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.sSw1db
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 11s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: dispatch rule changed since launch for task nm-reorder-718774; refusing relaunch
+refused as expected
+receipt unchanged after direct reorder refusal
+worker remains agent-free: bash

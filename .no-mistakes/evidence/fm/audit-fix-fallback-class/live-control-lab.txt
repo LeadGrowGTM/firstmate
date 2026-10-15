@@ -1,0 +1,36 @@
+invalid reasoning class spawn:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.ackAVw
+jq: error (at <stdin>:1): malformed dispatch profiles or reasoning_class
+refused as expected
+no task receipt published
+unrealizable configured effort spawn:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.ackAVw
+error: codex cannot realize effort 'max' for 'gpt-6.1-sol'; refusing the configured reasoning class or fallback
+refused as expected
+no task receipt published
+configured spawn:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.ackAVw
+spawned nm-control-886555 harness=codex kind=scout window=primary:fm-nm-control-886555 worktree=/tmp/fm-pool.mlCYhh/.treehouse/probe-758931/1/probe
+worker after /exit: bash
+control equivalent-class relaunch:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.ackAVw
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.ackAVw
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 12s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+relaunched nm-control-886555 harness=codex from=codex model=gpt-6.1-sol effort=xhigh backend=tmux endpoint=primary:fm-nm-control-886555 worktree=/tmp/fm-pool.mlCYhh/.treehouse/probe-758931/1/probe
+replacement receipt:
+harness=codex
+model=gpt-6.1-sol
+effort=xhigh
+realized_model=gpt-6.1-sol
+realized_effort=xhigh
+dispatch_rule={"default":true}
+reasoning_class=strong
+dispatch_provider=codex
+fallback_reason="provider=codex; equivalent strong alternative"
+worker after control relaunch: node

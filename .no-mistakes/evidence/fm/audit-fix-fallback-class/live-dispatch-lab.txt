@@ -1,0 +1,41 @@
+lab primary command: node
+spawn attempt:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.itLvqO
+spawned nm-dispatch-326485 harness=codex kind=scout window=primary:fm-nm-dispatch-326485 worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50CQ6GZMH5PHB8XBMXQQTT3/.nm-pool-326485/.treehouse/probe-e847b9/1/probe
+published receipt:
+window=primary:fm-nm-dispatch-326485
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M50CQ6GZMH5PHB8XBMXQQTT3/.nm-pool-326485/.treehouse/probe-e847b9/1/probe
+harness=codex
+model=gpt-6.1-sol
+effort=high
+realized_model=gpt-6.1-sol
+realized_effort=high
+dispatch_rule={"rule":"rule_1"}
+dispatch_rule_fingerprint=1535935adecb425a75721f53c51f16ee3006600038fecb7087bd083ea62e7404
+reasoning_class=strong
+dispatch_provider=codex
+fallback_reason="provider=codex; quota room; chosen strong class"
+worker checkout is in worktree-local pool
+unlisted model control relaunch attempt:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.itLvqO
+jq: error (at <stdin>:1): fallback profile is not listed for the recorded dispatch rule
+refused as expected
+task receipt unchanged after refusal
+unlisted model direct relaunch attempt:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.itLvqO
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 7s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: task nm-dispatch-326485's endpoint reads 'alive'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh nm-dispatch-326485 exit)
+refused as expected
+task receipt unchanged after direct refusal
+reorder rule then attempt relaunch:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.itLvqO
+error: dispatch rule changed since launch for task nm-dispatch-326485; refusing relaunch
+refused as expected
+task receipt unchanged after reorder refusal
+worker pane command: node

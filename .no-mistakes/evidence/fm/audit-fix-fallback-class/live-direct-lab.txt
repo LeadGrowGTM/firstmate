@@ -1,0 +1,32 @@
+configured spawn:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.P9AJbG
+spawned nm-direct-605536 harness=codex kind=scout window=primary:fm-nm-direct-605536 worktree=/tmp/fm-pool.XxQnVc/.treehouse/probe-a438f8/1/probe
+worker before exit: node
+worker after /exit: bash
+direct lower-class relaunch:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.P9AJbG
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 9s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+jq: error (at <stdin>:1): fallback would lower or change the recorded reasoning class; declare equivalent reasoning_class profiles in the same rule
+refused as expected
+receipt unchanged after refusal
+direct equivalent-class relaunch:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.P9AJbG
+WARNING: watcher still down (same stale episode; last beat: 11s ago, grace 300s) - full banner already printed this episode.
+spawned nm-direct-605536 harness=codex kind=scout window=primary:fm-nm-direct-605536 worktree=/tmp/fm-pool.XxQnVc/.treehouse/probe-a438f8/1/probe
+replacement receipt:
+harness=codex
+model=gpt-6.1-sol
+effort=xhigh
+realized_model=gpt-6.1-sol
+realized_effort=xhigh
+dispatch_rule={"default":true}
+reasoning_class=strong
+dispatch_provider=codex
+fallback_reason="provider=codex; equivalent strong alternative"
+worker after equivalent relaunch: node

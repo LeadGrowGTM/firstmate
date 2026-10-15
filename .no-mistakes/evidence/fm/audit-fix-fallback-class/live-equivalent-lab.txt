@@ -1,0 +1,13 @@
+lab primary command: node
+configured spawn:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.wGclWq
+spawned nm-equivalent-490012 harness=codex kind=scout window=primary:fm-nm-equivalent-490012 worktree=/tmp/fm-pool.RJ4MfG/.treehouse/probe-e05dbe/1/probe
+listed lower-class control relaunch:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.wGclWq
+jq: error (at <stdin>:1): fallback would lower or change the recorded reasoning class; declare equivalent reasoning_class profiles in the same rule
+refused as expected
+task receipt unchanged after lower-class refusal
+declared equivalent-class control relaunch:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.wGclWq
+error: task nm-equivalent-490012's composer state is 'unknown', not proven empty; refusing to type the /quit exit command because it could concatenate onto existing text. Clear the composer, then retry 'relaunch'
+error: relaunch of nm-equivalent-490012 failed while stopping the old agent, which is still running; its original instructions were restored
