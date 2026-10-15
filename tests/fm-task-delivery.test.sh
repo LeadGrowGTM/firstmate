@@ -48,7 +48,7 @@ write_brief() {  # <home> <id> [<recorded-mode>]
   local home=$1 id=$2 mode=${3:-}
   mkdir -p "$home/data/$id"
   {
-    printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nExercise the delivery contract.\n\n## Firstmate spec\nVerify the selected delivery behavior.\n\n# Definition of done\n'
+    printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nExercise the delivery contract.\n\n## Firstmate spec\nGoal: Verify the delivery contract.\nVerify the selected delivery behavior.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n\n# Definition of done\n'
     [ -z "$mode" ] || printf 'Delivery contract: mode=%s\n' "$mode"
   } > "$home/data/$id/brief.md"
 }
@@ -713,6 +713,9 @@ Fix the migrated dispatch boundary.
 
 ## Firstmate spec
 Preserve the existing compatibility path.
+Goal: Preserve the dispatch boundary.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 
 # Definition of done
 Delivery contract: mode=no-mistakes
@@ -751,6 +754,9 @@ Delivery contract: mode=no-mistakes
 Unrelated notes must not become task intent.
 ## Firstmate spec
 Unrelated notes must not satisfy task validation.
+Goal: Keep the unrelated note separate.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
   status=$?
@@ -824,6 +830,9 @@ Keep this Firstmate constraint out of captain intent.
 Unrelated notes are not the original ask.
 ## Firstmate spec
 Unrelated notes are not the task specification.
+Goal: Keep the unrelated note separate.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
@@ -870,6 +879,9 @@ Ship the parser without losing detailed requirements.
 
 ## Firstmate spec
 Keep this opening requirement.
+Goal: Preserve the parser requirements.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 
 ### Acceptance criteria
 Keep this nested requirement too.
@@ -963,7 +975,7 @@ EOF
   words=$(printf '%s\n' "Keep the literal example \`Captain, hello\` in the documentation." \
     "Stop composing Captain:, Captain's words:, Captain's ask:, and Captain's intent: into PR bodies.")
   write_brief "$home" intent-literal no-mistakes
-  printf '# Task\n## Captain'"'"'s intent\n%s\n\n## Firstmate spec\nDo not paraphrase.\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' "$words" > "$home/data/intent-literal/brief.md"
+  printf '# Task\n## Captain'"'"'s intent\n%s\n\n## Firstmate spec\nGoal: Preserve the request.\nDo not paraphrase.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' "$words" > "$home/data/intent-literal/brief.md"
   out=$(run_spawn "$home" "$fakebin" intent-literal "$proj" claude --mode no-mistakes --yolo off)
   assert_not_contains "$out" "operator-address line" "labels mentioned mid-line were refused as address"
   authorized=$(awk '$0 == "## Captain intent authorized for --intent" { emit=1; next } emit { print }' "$home/data/intent-literal/launch-brief.md")
@@ -974,7 +986,7 @@ EOF
     n=$((n + 1))
     id="intent-addressed-$n"
     write_brief "$home" "$id" no-mistakes
-    printf '# Task\n## Captain'"'"'s intent\nKeep the original request intact.\n  %s preserve its provenance.\n\n## Firstmate spec\nDo not paraphrase.\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' \
+    printf '# Task\n## Captain'"'"'s intent\nKeep the original request intact.\n  %s preserve its provenance.\n\n## Firstmate spec\nGoal: Preserve the request.\nDo not paraphrase.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' \
       "$marker" > "$home/data/$id/brief.md"
     out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
     status=$?
@@ -991,7 +1003,7 @@ EOF
   id='intent-addressed-promote'
   printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$home/state/$id.meta"
   write_brief "$home" "$id"
-  printf '# Task\n## Captain'"'"'s intent\nCaptain: investigate the refusal.\n\n## Firstmate spec\nReproduce it first.\n' > "$home/data/$id/brief.md"
+  printf '# Task\n## Captain'"'"'s intent\nCaptain: investigate the refusal.\n\n## Firstmate spec\nGoal: Reproduce the refusal.\nReproduce it first.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n' > "$home/data/$id/brief.md"
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode no-mistakes --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion of addressed intent should be refused"
@@ -1675,8 +1687,8 @@ EOF
   pass "fm-project-mode: --branch-prefix resolves order-independently and defaults to the legacy fm/ prefix"
 }
 
-test_placeholder_examples_do_not_block_delivery() {
-  local rec home proj fakebin id out meta content field filled unfilled
+test_required_labeled_fields_gate_delivery() {
+  local rec home proj fakebin id out meta content field filled unfilled variant
   rec=$(make_home placeholder-examples)
   IFS='|' read -r home proj fakebin <<EOF
 $rec
@@ -1689,29 +1701,10 @@ EOF
 Ship the example-safe change.
 
 ## Firstmate spec
-Goal: Example of a filled goal.
-Implement this example of a filled spec.
-Off-limits: Example of filled off-limits.
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): example
-Goal: Ship the example-safe change. <!-- fm:goal -->
-Implement the requested behavior. <!-- fm:spec -->
-Off-limits: Unrelated files. <!-- fm:off-limits -->
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none <!-- fm:contracts -->
-
-~~~text
-Goal: {GOAL}
-{FIRSTMATE_SPEC}
-Off-limits: {OFF_LIMITS}
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
-~~~
-    Goal: {GOAL}
-    {FIRSTMATE_SPEC}
-    Off-limits: {OFF_LIMITS}
-    Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
-Goal: {GOAL}
-{FIRSTMATE_SPEC}
-Off-limits: {OFF_LIMITS}
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
+Goal: Ship the example-safe change.
+Implement the requested behavior.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   done
   printf '# Definition of done\nDelivery contract: mode=direct-PR\n' >> "$home/data/example-ship/brief.md"
@@ -1720,25 +1713,34 @@ EOF
     "spawn rejected examples in a filled ship spec"
   assert_present "$home/data/example-ship/launch-brief.md" "spawn did not render the example-safe ship brief"
 
-  for field in goal spec off-limits contracts; do
-    id="unfilled-$field"
-    mkdir -p "$home/data/$id"
-    content=$(cat "$home/data/example-ship/brief.md")
-    case "$field" in
-      goal) filled='Goal: Ship the example-safe change. <!-- fm:goal -->'; unfilled='Goal: {GOAL} <!-- fm:goal -->' ;;
-      spec) filled='Implement the requested behavior. <!-- fm:spec -->'; unfilled='{FIRSTMATE_SPEC} <!-- fm:spec -->' ;;
-      off-limits) filled='Off-limits: Unrelated files. <!-- fm:off-limits -->'; unfilled='Off-limits: {OFF_LIMITS} <!-- fm:off-limits -->' ;;
-      contracts) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none <!-- fm:contracts -->'; unfilled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS} <!-- fm:contracts -->' ;;
-    esac
-    printf '%s\n' "${content/"$filled"/"$unfilled"}" > "$home/data/$id/brief.md"
-    out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
-    assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
-      "spawn accepted an unfilled $field after filled-looking examples"
+  for field in goal off-limits contracts; do
+    for variant in placeholder empty missing; do
+      id="unfilled-$field-$variant"
+      mkdir -p "$home/data/$id"
+      content=$(cat "$home/data/example-ship/brief.md")
+      case "$field:$variant" in
+        goal:placeholder) filled='Goal: Ship the example-safe change.'; unfilled='Goal: {GOAL}' ;;
+        goal:empty) filled='Goal: Ship the example-safe change.'; unfilled='Goal: ' ;;
+        goal:missing) filled='Goal: Ship the example-safe change.'; unfilled='' ;;
+        off-limits:placeholder) filled='Off-limits: Unrelated files.'; unfilled='Off-limits: {OFF_LIMITS}' ;;
+        off-limits:empty) filled='Off-limits: Unrelated files.'; unfilled='Off-limits: ' ;;
+        off-limits:missing) filled='Off-limits: Unrelated files.'; unfilled='' ;;
+        contracts:placeholder) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none'; unfilled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}' ;;
+        contracts:empty) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none'; unfilled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): ' ;;
+        contracts:missing) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none'; unfilled='' ;;
+      esac
+      content=${content/"$filled"/"$unfilled"}
+      [ "$variant" != placeholder ] || content=${content/"## Firstmate spec"/"## Firstmate spec"$'\n'"$filled"}
+      printf '%s\n' "$content" > "$home/data/$id/brief.md"
+      out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
+      assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
+        "spawn accepted $variant $field after filled-looking examples"
+    done
   done
 
   id=unfilled-promotion
   mkdir -p "$home/data/$id"
-  cp "$home/data/unfilled-goal/brief.md" "$home/data/$id/brief.md"
+  cp "$home/data/unfilled-goal-placeholder/brief.md" "$home/data/$id/brief.md"
   printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$home/state/$id.meta"
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
     --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
@@ -1751,7 +1753,7 @@ EOF
     --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   assert_contains "$out" 'promoted example-scout to ship' "promotion rejected examples in a filled scout spec"
   assert_grep 'kind=ship' "$meta" "example-safe scout did not promote"
-  pass "fm-spawn/fm-promote: examples do not masquerade as unfilled scaffold fields"
+  pass "fm-spawn/fm-promote: required labeled fields gate delivery"
 }
 
 test_ship_spawn_requires_a_valid_delivery_contract
@@ -1779,6 +1781,6 @@ test_spawn_notices_a_ship_branch_against_the_registry_prefix
 test_spawn_refuses_a_registry_forge_it_cannot_read
 test_promotion_carries_the_forge_binding
 test_spawn_and_promote_require_filled_task_subsections
-test_placeholder_examples_do_not_block_delivery
+test_required_labeled_fields_gate_delivery
 test_project_mode_resolves_branch_prefix
 echo "# all fm-task-delivery tests passed"

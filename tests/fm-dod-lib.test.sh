@@ -400,6 +400,9 @@ Fix the hub bug.
 
 ## Firstmate spec
 Reproduce it first.
+Goal: Fix the hub bug.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 
 # Setup
 You are in a disposable git worktree of proj, at a detached HEAD on a clean copy of its base branch.
@@ -472,24 +475,29 @@ test_worker_role_names_skill_and_fallback_file() {
 
 test_worker_role_names_skill_and_fallback_file
 
-# Any unfilled bounded-shape line keeps a brief from launching; filled and
-# legacy briefs pass.
+# Required labeled fields must have filled values.
 test_unfilled_bounded_lines_are_detected() {
   local f="$TMP_ROOT/bounded-brief.md"
   write() { printf '# Task\n## Captain'"'"'s intent\nDo it.\n\n## Firstmate spec\n%s\n\n# Rules\n' "$1" > "$f"; }
   write 'Build it.'
-  fm_brief_task_placeholders_present "$f" && fail "a legacy spec was reported unfilled"
+  fm_brief_task_placeholders_present "$f" || fail "missing labeled fields were not detected"
   write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
   fm_brief_task_placeholders_present "$f" && fail "a filled bounded spec was reported unfilled"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.')"
+  fm_brief_task_placeholders_present "$f" || fail "missing contracts were not detected"
   write "$(printf 'Goal: {GOAL}\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
   fm_brief_task_placeholders_present "$f" || fail "an unfilled goal was not detected"
-  write "$(printf 'Goal: G.\n{FIRSTMATE_SPEC}\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
-  fm_brief_task_placeholders_present "$f" || fail "an unfilled spec was not detected"
   write "$(printf 'Goal: G.\nBuild it.\nOff-limits: {OFF_LIMITS}\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
   fm_brief_task_placeholders_present "$f" || fail "unfilled off-limits were not detected"
   write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}')"
   fm_brief_task_placeholders_present "$f" || fail "unfilled contracts were not detected"
-  pass "unfilled goal, spec, off-limits, and contracts lines are each detected"
+  write "$(printf 'Goal: \nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "an empty goal was not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: \nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "empty off-limits were not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): ')"
+  fm_brief_task_placeholders_present "$f" || fail "empty contracts were not detected"
+  pass "missing, empty, and unfilled required labeled fields are detected"
 }
 
 test_unfilled_bounded_lines_are_detected

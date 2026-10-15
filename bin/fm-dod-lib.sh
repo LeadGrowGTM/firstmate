@@ -219,78 +219,18 @@ fm_brief_task_placeholders_present() {  # <file>
   local file=$1 intent spec
   [ -f "$file" ] || return 1
   intent=$(fm_brief_task_heading_body "$file" "## Captain's intent")
-  spec=$(fm_brief_task_heading_body "$file" "## Firstmate spec")
   [ "$(printf '%s' "$intent" | tr -d '[:space:]')" = '{TASK}' ] && return 0
+  fm_brief_task_heading_present "$file" "## Firstmate spec" || return 1
+  spec=$(fm_brief_task_heading_body "$file" "## Firstmate spec")
   printf '%s\n' "$spec" | awk '
-    {
-      scan = $0
-      spaces = 0
-      while (spaces < 3 && substr(scan, 1, 1) == " ") {
-        scan = substr(scan, 2)
-        spaces++
-      }
-      marker = substr(scan, 1, 1)
-      marker_len = 0
-      if (marker == "`" || marker == "~") {
-        while (substr(scan, marker_len + 1, 1) == marker) marker_len++
-      }
-      if (marker_len >= 3) {
-        if (!fenced) {
-          fenced = 1
-          fence_marker = marker
-          fence_len = marker_len
-        } else if (marker == fence_marker && marker_len >= fence_len && substr(scan, marker_len + 1) ~ /^[[:space:]]*$/) {
-          fenced = 0
-        }
-        next
-      }
-      if (fenced || $0 ~ /^(    |\t)/) next
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", scan)
-      if (scan == "") next
-      if (index(scan, "<!-- fm:goal -->")) {
-        tagged = 1
-        goal_tags++
-        if (scan == "Goal: {GOAL} <!-- fm:goal -->") found = 1
-        next
-      }
-      if (index(scan, "<!-- fm:spec -->")) {
-        tagged = 1
-        spec_tags++
-        if (scan == "{FIRSTMATE_SPEC} <!-- fm:spec -->") found = 1
-        next
-      }
-      if (index(scan, "<!-- fm:off-limits -->")) {
-        tagged = 1
-        off_tags++
-        if (scan == "Off-limits: {OFF_LIMITS} <!-- fm:off-limits -->") found = 1
-        next
-      }
-      if (index(scan, "<!-- fm:contracts -->")) {
-        tagged = 1
-        contracts_tags++
-        if (scan == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS} <!-- fm:contracts -->") found = 1
-        next
-      }
-      if (scan ~ /^Goal:/) {
-        if (!goal_seen++ && scan == "Goal: {GOAL}") legacy_found = 1
-        next
-      }
-      if (scan ~ /^Off-limits:/) {
-        if (!off_seen++ && scan == "Off-limits: {OFF_LIMITS}") legacy_found = 1
-        next
-      }
-      if (index(scan, "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): ") == 1) {
-        if (!contracts_seen++ && scan == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}") legacy_found = 1
-        next
-      }
-      if (!spec_seen++) {
-        if (scan == "{FIRSTMATE_SPEC}") legacy_found = 1
-      }
+    /^Goal:/ { goal++; value = substr($0, 6); if (value ~ /^[[:space:]]*$/ || index(value, "{GOAL}")) bad = 1 }
+    /^Off-limits:/ { off++; value = substr($0, 12); if (value ~ /^[[:space:]]*$/ || index(value, "{OFF_LIMITS}")) bad = 1 }
+    /^Contracts and gates \(follow them; spawned inside a pipeline, move only through its states\):/ {
+      contracts++
+      value = substr($0, index($0, ":") + 1)
+      if (value ~ /^[[:space:]]*$/ || index(value, "{CONTRACTS}")) bad = 1
     }
-    END {
-      if (tagged) exit !(found || goal_tags != 1 || spec_tags != 1 || off_tags != 1 || contracts_tags != 1)
-      exit !legacy_found
-    }
+    END { exit !(bad || !goal || !off || !contracts) }
   '
 }
 
