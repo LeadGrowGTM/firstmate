@@ -4923,7 +4923,7 @@ spawn_lease_clone_worktree() {
 }
 
 spawn_allocated_copy_custody_check() {  # <worktree>
-  local copy=$1 pane_pid= processes marker pane_capture line
+  local copy=$1 pane_pid='' processes marker pane_capture line
   fm_worktree_custody_check "$STATE" "$STATE/$ID.meta" "$copy" "$ID" || return 1
   if fm_treehouse_pool_slot "$PROJ_ABS" "$copy"; then
     fm_treehouse_slot_owner_state "$copy" "$ID" "$FM_HOME"

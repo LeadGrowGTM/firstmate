@@ -856,7 +856,7 @@ SH
 }
 
 test_returned_pool_copy_rechecks_process_evidence() {
-  local rec id=process-worker variant out status survivor= launch_log
+  local rec id=process-worker variant out status survivor='' launch_log
   for variant in survivor unreadable; do
     rec=$(make_case "returned-process-$variant" "$id")
     read_case_record "$rec"

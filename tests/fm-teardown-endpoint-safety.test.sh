@@ -1607,9 +1607,10 @@ test_retire_claim_preserves_archives_across_task_id_reuse() {
   git -C "$dir/project" worktree add -q --detach "$dir/pool/2/project"
   printf '{"worktrees":[{"name":"1","path":"%s"},{"name":"2","path":"%s"}]}\n' \
     "$dir/pool/1/project" "$dir/pool/2/project" > "$dir/pool/treehouse-state.json"
-  out=$(fm_test_run_spawn "$dir/home" "$dir/pool/2/project" "$dir/fakebin" \
-    "$id" "$dir/project" --mode no-mistakes --yolo off)
-  [ "$?" -eq 0 ] || fail "public spawn could not reuse the retired ID: $out"
+  if ! out=$(fm_test_run_spawn "$dir/home" "$dir/pool/2/project" "$dir/fakebin" \
+    "$id" "$dir/project" --mode no-mistakes --yolo off); then
+    fail "public spawn could not reuse the retired ID: $out"
+  fi
   git -C "$dir/pool/2/project" switch -q -c "fm/$id-second"
   second_record=$(cat "$dir/home/state/$id.meta")
   [ "$second_record" != "$first_record" ] || fail 'respawn did not publish a new claim'

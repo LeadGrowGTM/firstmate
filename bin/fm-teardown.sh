@@ -4279,11 +4279,11 @@ retirement_prepare() {
     return 1
   fi
   if [ -e "$retirement_archive" ] || [ -L "$retirement_archive" ]; then
-    [ -f "$retirement_archive" ] && [ ! -L "$retirement_archive" ] \
-      && cmp -s "$retirement_tmp" "$retirement_archive" || {
-        rm -f "$retirement_tmp"
-        return 1
-      }
+    if [ ! -f "$retirement_archive" ] || [ -L "$retirement_archive" ] \
+      || ! cmp -s "$retirement_tmp" "$retirement_archive"; then
+      rm -f "$retirement_tmp"
+      return 1
+    fi
     rm -f "$retirement_tmp"
   else
     if ! mv -f "$retirement_tmp" "$retirement_archive"; then
