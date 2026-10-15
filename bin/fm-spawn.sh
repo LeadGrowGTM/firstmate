@@ -2048,7 +2048,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
     esac
   fi
   case "$RELAUNCH_STATE" in
-    dead) ;;
+    dead)
+      RELAUNCH_ABSENCE=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
+      if [ "${RELAUNCH_ABSENCE%%$'\t'*}" != clear ]; then
+        echo "error: task $ID's dead endpoint is not safe to relaunch: ${RELAUNCH_ABSENCE#*$'\t'}" >&2
+        exit 1
+      fi
+      ;;
     missing) RELAUNCH_REBIND=1 ;;
     *)
       echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
@@ -3515,6 +3521,13 @@ if [ "$RELAUNCH" = 1 ] && [ "$KIND" != secondmate ]; then
       mine|absent) ;;
       *) echo "error: task $ID's recorded pool copy has conflicting or unreadable custody; refusing to relaunch" >&2; exit 1 ;;
     esac
+  fi
+fi
+if [ "$RELAUNCH" = 1 ] && [ "$RELAUNCH_STATE" = dead ]; then
+  RELAUNCH_ABSENCE=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
+  if [ "${RELAUNCH_ABSENCE%%$'\t'*}" != clear ]; then
+    echo "error: task $ID's dead endpoint is not safe to relaunch: ${RELAUNCH_ABSENCE#*$'\t'}" >&2
+    exit 1
   fi
 fi
 if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then

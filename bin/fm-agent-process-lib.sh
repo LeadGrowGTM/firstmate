@@ -121,7 +121,7 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
 # Linux uses kernel cwd links, including descendants in subdirectories. macOS
 # uses the bounded cwd-only lsof inventory, never a recursive file-tree walk.
 fm_agent_worktree_processes() {  # <worktree> [<excluded-pane-pid>] -> pids (empty means none)
-  local worktree=$1 excluded_pid=${2:-} out pid path line parent
+  local worktree=$1 excluded_pid=${2:-} out pid path line
   [ -d "$worktree" ] || return 1
   worktree=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
   case "$excluded_pid" in ''|*[!0-9]*) excluded_pid= ;; esac
@@ -154,15 +154,8 @@ try:
             if fields[0] == "Z":
                 continue
             raise RuntimeError(f"cannot read live process {pid}'s cwd")
-        if cwd == root or cwd.startswith(root + "/"):
-            ancestor = pid
-            while excluded and ancestor != excluded:
-                stat = (Path("/proc") / ancestor / "stat").read_text()
-                ancestor = stat.rsplit(")", 1)[1].split()[1]
-                if ancestor == "0":
-                    break
-            if not excluded or ancestor != excluded:
-                print(pid)
+        if (cwd == root or cwd.startswith(root + "/")) and pid != excluded:
+            print(pid)
 except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, IndexError) as error:
     print(f"process absence unproven: {error}", file=sys.stderr)
     sys.exit(1)
@@ -181,13 +174,7 @@ PY
             path=${line#n}
             case "$path" in
               "$worktree"|"$worktree"/*)
-                parent=$pid
-                while [ -n "$excluded_pid" ] && [ "$parent" != "$excluded_pid" ] && [ "$parent" != 0 ]; do
-                  parent=$(ps -p "$parent" -o ppid= 2>/dev/null) || return 1
-                  parent=${parent//[[:space:]]/}
-                  case "$parent" in ''|*[!0-9]*) return 1 ;; esac
-                done
-                [ -n "$excluded_pid" ] && [ "$parent" = "$excluded_pid" ] || printf '%s\n' "$pid"
+                [ -n "$excluded_pid" ] && [ "$pid" = "$excluded_pid" ] || printf '%s\n' "$pid"
                 ;;
             esac
             ;;

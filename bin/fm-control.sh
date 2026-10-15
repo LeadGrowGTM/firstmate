@@ -1237,6 +1237,13 @@ do_relaunch() {
     SM_LIVENESS_LOCK="$STATE/.secondmate-liveness-$ID.lock"
   fi
   safe_checkpoint
+  state=$(agent_state)
+  if [ "$state" = dead ]; then
+    local dead_process_verdict
+    dead_process_verdict=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$T" "$META")
+    [ "${dead_process_verdict%%$'\t'*}" = clear ] \
+      || die "task $ID's dead endpoint is not safe to relaunch: ${dead_process_verdict#*$'\t'}"
+  fi
   if [ "$KIND" != secondmate ]; then
     local project custody_lock custody_status=0
     project=$(fm_meta_get "$META" project)

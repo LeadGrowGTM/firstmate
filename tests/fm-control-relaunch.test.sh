@@ -124,6 +124,7 @@ case "${1:-}" in
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
+        *pane_pid*) [ ! -f "$D/pane-pid" ] || { cat "$D/pane-pid"; exit 0; } ;;
         *socket_path*) printf '%s/recorded-socket\n' "$D"; exit 0 ;;
         *pane_current_path*)
           if [ -n "${FM_FAKE_CWD_RACE_READY:-}" ]; then
@@ -2786,6 +2787,38 @@ test_tmux_missing_refuses_a_live_rooted_process() {
   pass 'tmux: a live same-user process rooted in the worktree or child blocks both relaunch paths'
 }
 
+test_tmux_dead_checks_background_descendants() {
+  local dir id=rl-dead-process out rc=0 shell_pid child_pid brief_before
+  dir=$(new_case dead-process "$id")
+  add_ship_task "$dir" "$id" claude
+  printf 'zsh' > "$dir/fake/command"
+  mkfifo "$dir/idle-fifo"
+  ( cd "$dir/wt" && exec bash -c 'sleep 60 & child=$!; printf "%s\n" "$child" > "$1"; wait "$child"; read -r line < "$2"' _ "$dir/child-pid" "$dir/idle-fifo" ) &
+  shell_pid=$!
+  ROOTED_PIDS+=("$shell_pid")
+  while [ ! -s "$dir/child-pid" ]; do sleep 0.01; done
+  child_pid=$(cat "$dir/child-pid")
+  ROOTED_PIDS+=("$child_pid")
+  printf '%s\n' "$shell_pid" > "$dir/fake/pane-pid"
+  printf '%s\n%s\n' "$shell_pid" "$child_pid" > "$dir/fake/process-pids"
+  brief_before=$(cat "$dir/home/data/$id/brief.md")
+  out=$(run_spawn "$dir" "$id" --relaunch --harness claude) || rc=$?
+  expect_code 1 "$rc" "direct relaunch accepted a background worker: $out"
+  assert_contains "$out" 'live processes still have cwd' 'direct relaunch missed the background worker'
+  rc=0
+  out=$(run_control "$dir" "$id" relaunch --note 'continue') || rc=$?
+  expect_code 1 "$rc" "control relaunch accepted a background worker: $out"
+  [ "$(cat "$dir/home/data/$id/brief.md")" = "$brief_before" ] || fail 'dead endpoint refusal changed the brief'
+  assert_absent "$dir/fake/created-windows" 'dead endpoint refusal opened a window'
+  kill "$child_pid" 2>/dev/null || true
+  /bin/sleep 0.1
+  printf '%s\n' "$shell_pid" > "$dir/fake/process-pids"
+  rc=0
+  out=$(run_spawn "$dir" "$id" --relaunch --harness claude) || rc=$?
+  expect_code 0 "$rc" "a lone idle pane shell should permit relaunch: $out"
+  pass 'tmux: dead panes reject background descendants and permit an idle shell'
+}
+
 test_tmux_missing_legacy_record_refuses_a_live_rooted_process() {
   local dir
   dir=$(new_case tmux-legacy-rooted rl66)
@@ -3652,6 +3685,7 @@ test_tmux_refuses_an_older_candidate_for_a_legacy_record
 test_relaunch_refuses_another_tasks_canonical_worktree_claim
 test_relaunch_refuses_a_conflicting_pooled_slot_owner
 test_tmux_missing_refuses_a_live_rooted_process
+test_tmux_dead_checks_background_descendants
 test_tmux_missing_legacy_record_refuses_a_live_rooted_process
 test_tmux_missing_legacy_record_reclaims_without_rooted_process
 test_tmux_missing_refuses_unreadable_or_ambiguous_process_inventory

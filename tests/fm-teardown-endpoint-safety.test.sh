@@ -1455,7 +1455,8 @@ run_retire_claim() {  # <case> <id> [extra flags]
   FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
   FM_RUNTIME_LOG="$dir/runtime.log" FM_TEST_RUN_STATUS="$dir/run.status" \
   FM_TEST_RUN_OVERVIEW="$dir/run.overview" FM_TEST_GLOBAL_STATUS="$dir/global.status" \
-  FM_TEST_REAL_PS="$(command -v ps)" FM_TEST_PROCESS_PIDS="$dir/process-pids" PATH="$dir/fakebin:$PATH" \
+  FM_TEST_REAL_PS="$(command -v ps)" FM_TEST_REAL_TASKS_AXI="$(command -v tasks-axi)" \
+  FM_TEST_PROCESS_PIDS="$dir/process-pids" PATH="$dir/fakebin:$PATH" \
     "$TEARDOWN" "$id" --retire-claim "$@"
 }
 
@@ -1507,6 +1508,7 @@ SH
   cat > "$dir/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
+  *'-o pid=,command='*) printf 'remote sweep called\n' >> "$FM_RUNTIME_LOG"; exit 0 ;;
   *'-o stat= -o comm= -o args='*) "$FM_TEST_REAL_PS" "$@" | awk '!/tmux: (server|client)/' ;;
   *'-o pid='*) printf '%s\n' "$PPID"; [ ! -f "$FM_TEST_PROCESS_PIDS" ] || cat "$FM_TEST_PROCESS_PIDS" ;;
   *) exec "$FM_TEST_REAL_PS" "$@" ;;
@@ -1560,6 +1562,7 @@ test_retire_claim_archives_only_the_gone_agents_record() {
 
   run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
     || fail "a definitively gone agent could not retire its old claim: $(cat "$dir/retire.err")"
+  assert_no_grep 'remote sweep called' "$dir/runtime.log" 'retirement swept unrelated remote jobs'
   assert_absent "$dir/home/state/$id.meta" "retirement left the active task record"
   archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
   assert_present "$archive" \
@@ -1656,6 +1659,77 @@ test_retire_claim_archives_without_spawn_generation() {
     [ "$(cat "$archive")" = "$second_record" ] || fail 'second legacy archive changed the claim'
   done
   pass 'legacy claims use distinct timestamp archives when spawn generation is absent'
+}
+
+test_retire_claim_restores_partial_backlog_transitions() {
+  local dir id mode rc before archive backup
+  for mode in done reopen remove rollback; do
+    id="retire-partial-$mode"
+    dir=$(make_retire_claim_case "retire-partial-$mode" "$id")
+    printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
+    tasks-axi add "$id" 'retirement fixture task' --kind ship --file "$dir/home/data/backlog.md" >/dev/null
+    tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    if [ "$mode" = reopen ]; then
+      tasks-axi hold "$id" --reason 'captain answer pending' --kind captain --file "$dir/home/data/backlog.md" >/dev/null
+    fi
+    before="$dir/original.meta"
+    cp "$dir/home/state/$id.meta" "$before"
+    printf '%s\n' "$mode" > "$dir/fail-mode"
+    cat > "$dir/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "${1:-}" = "$mode" ]; then printf 'injected %s failure\n' "$mode" >&2; exit 1; fi
+exec "$FM_TEST_REAL_TASKS_AXI" "$@"
+SH
+    cat > "$dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "$mode" = remove ] || [ "$mode" = rollback ]; then
+  for arg in "$@"; do
+    case "$arg" in */state/retire-partial-*.meta)
+      /bin/rm "$@"
+      exit 1
+      ;;
+    esac
+  done
+fi
+exec /bin/rm "$@"
+SH
+    cat > "$dir/fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "$mode" = rollback ]; then
+  for arg in "$@"; do
+    case "$arg" in */state/retire-partial-rollback.meta) exit 1 ;; esac
+  done
+fi
+exec /bin/mv "$@"
+SH
+    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mv"
+    rc=0
+    run_retire_claim "$dir" "$id" > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "$mode: injected retirement failure was accepted"
+    if [ "$mode" = rollback ]; then
+      assert_absent "$dir/home/state/$id.meta" 'rollback failure unexpectedly restored the task record'
+      archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+      backup=$(printf '%s\n' "$dir/home/data/$id"/.retired-worktree-record.*)
+      cmp -s "$before" "$archive" || fail 'rollback failure lost the archival record'
+      cmp -s "$before" "$backup" || fail 'rollback failure lost the exact recovery copy'
+      cp "$backup" "$dir/home/state/$id.meta"
+    else
+      cmp -s "$before" "$dir/home/state/$id.meta" || fail "$mode: exact task record was not restored"
+    fi
+    assert_present "$dir/pool/1/.fm-slot-owner" "$mode: own marker was not restored"
+    assert_present "$dir/worktree/.git-hooks/pre-commit" "$mode: task hook was removed"
+    if [ "$mode" != rollback ] && compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+      fail "$mode: failed retirement discarded its rollback record"
+    fi
+    rm "$dir/fail-mode"
+    run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
+      || fail "$mode: retirement retry failed: $(cat "$dir/retry.err")"
+    assert_absent "$dir/home/state/$id.meta" "$mode: retry retained task record"
+  done
+  pass 'retirement restores exact records and markers after partial backlog transitions'
 }
 
 test_retire_claim_refuses_unsafe_identity_and_options() {
@@ -2215,6 +2289,7 @@ test_absent_recorded_slot_still_holds_project_lock
 test_retire_claim_archives_only_the_gone_agents_record
 test_retire_claim_preserves_archives_across_task_id_reuse
 test_retire_claim_archives_without_spawn_generation
+test_retire_claim_restores_partial_backlog_transitions
 test_retire_claim_refuses_live_agent
 test_retire_claim_refuses_unsafe_identity_and_options
 test_retire_claim_preserves_tasktmp_and_retries_after_refusals

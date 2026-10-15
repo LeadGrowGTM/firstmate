@@ -457,6 +457,26 @@ EOF
   esac
 }
 
+fm_control_dead_endpoint_process_verdict() {
+  local backend=$1 target=$2 meta=$3 worktree pane_pid pane_comm rooted
+  [ "$backend" = tmux ] || { printf 'clear\t'; return 0; }
+  fm_backend_source tmux || { printf 'unproven\ttmux backend could not be loaded'; return 0; }
+  worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
+  pane_pid=$(tmux display-message -p -t "$target" '#{pane_pid}' 2>/dev/null) || pane_pid=
+  case "$pane_pid" in ''|*[!0-9]*) pane_pid= ;; esac
+  if [ -n "$pane_pid" ]; then
+    pane_comm=$(ps -p "$pane_pid" -o comm= 2>/dev/null) || pane_comm=
+    [ "$(fm_agent_process_classify_name "$pane_comm")" = shell ] || pane_pid=
+  fi
+  if ! rooted=$(fm_agent_worktree_processes "$worktree" "$pane_pid"); then
+    printf 'unproven\tprocess absence in the recorded worktree could not be proven'
+  elif [ -n "$rooted" ]; then
+    printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
+  else
+    printf 'clear\t'
+  fi
+}
+
 # A .claude/settings.local.json that never invokes fm-busy-event.sh was not
 # written by firstmate, so it is the operator's and firstmate never removes or
 # replaces it.

@@ -4252,6 +4252,7 @@ fi
 # ordering, the row returns to Queued with its deliverable recorded.
 retirement_archive_created=0
 retirement_owner_released=0
+retirement_backup=
 retirement_prepare() {
   [ ! -L "$DATA/$ID" ] && { [ ! -e "$DATA/$ID" ] || [ -d "$DATA/$ID" ]; } || return 1
   mkdir -p "$DATA/$ID" || return 1
@@ -4268,6 +4269,11 @@ retirement_prepare() {
     done
   fi
   retirement_tmp=$(mktemp "$DATA/$ID/.retired-worktree-claim.XXXXXX") || return 1
+  retirement_backup=$(mktemp "$DATA/$ID/.retired-worktree-record.XXXXXX") || { rm -f "$retirement_tmp"; return 1; }
+  if ! cp "$META" "$retirement_backup"; then
+    rm -f "$retirement_tmp"
+    return 1
+  fi
   if ! cp "$META" "$retirement_tmp"; then
     rm -f "$retirement_tmp"
     return 1
@@ -4305,11 +4311,30 @@ retirement_prepare() {
   esac
 }
 retirement_rollback() {
-  local rc=0
+  local rc=0 restore_tmp=
+  if [ -n "$retirement_backup" ] && [ -f "$retirement_backup" ]; then
+    if [ -e "$META" ] || [ -L "$META" ]; then
+      cmp -s "$retirement_backup" "$META" || rc=1
+    else
+      restore_tmp=$(mktemp "$STATE/.$ID.retirement-restore.XXXXXX") || rc=1
+      if [ "$rc" = 0 ]; then
+        cp "$retirement_backup" "$restore_tmp" \
+          && fm_backlog_atomic_transition publish "$restore_tmp" "$META" "task record" "$STATE" \
+          || rc=1
+      fi
+      [ "$rc" != 0 ] || cmp -s "$retirement_backup" "$META" || rc=1
+      [ -z "$restore_tmp" ] || rm -f "$restore_tmp"
+    fi
+  elif [ ! -f "$META" ] || [ -L "$META" ]; then
+    rc=1
+  fi
   if [ "$retirement_owner_released" = 1 ]; then
     fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME" || rc=1
   fi
-  [ "$retirement_archive_created" = 0 ] || rm -f "$retirement_archive" || rc=1
+  if [ "$rc" = 0 ]; then
+    [ "$retirement_archive_created" = 0 ] || rm -f "$retirement_archive" || rc=1
+    [ -z "$retirement_backup" ] || rm -f "$retirement_backup" || rc=1
+  fi
   [ "$rc" = 0 ] || echo "error: could not restore the stale claim after retirement refused" >&2
   return "$rc"
 }
@@ -4352,6 +4377,9 @@ else
 fi
 if [ "$KIND" = secondmate ]; then
   fm_secondmate_retirement_clear "$ID" || exit 1
+fi
+if [ "$RETIRE_CLAIM" = 1 ] && [ -n "$retirement_backup" ]; then
+  rm -f "$retirement_backup"
 fi
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
