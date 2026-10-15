@@ -993,7 +993,8 @@ test_raw_secondmate_launch_writes_no_busy_wiring() {
     state="$case_dir/primary/state"
     sm="$case_dir/sm"
     launch=$(cat "$case_dir/launch.log")
-    assert_contains "$launch" "$raw" "raw $harness secondmate did not launch the raw command"
+    assert_contains "$launch" "$harness " "raw $harness secondmate did not launch the named harness"
+    assert_contains "$launch" "--fm-raw-flag" "raw $harness secondmate dropped the raw launch flag"
     assert_absent "$state/$id.busy-gen" "raw $harness secondmate armed a busy generation"
     assert_absent "$state/$id.busy-state" "raw $harness secondmate seeded a busy record"
     assert_absent "$state/$id.claude-settings.json" "raw $harness secondmate wrote Claude hook settings"
