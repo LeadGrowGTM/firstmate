@@ -137,7 +137,7 @@ jq -es '
   ((keys - ["git_name","git_email"]) == ["effort","harness","id","intent","kind","mode","model","project","spec"]) and
   ((has("git_name") | not) and (has("git_email") | not) or
    ((.git_name | type == "string" and test("^[^\u0000-\u001f\u007f<>]+$") and test("[^ ]")) and
-    (.git_email | type == "string" and test("^[^\u0000-\u0020\u007f<>]+@[^\u0000-\u0020\u007f<>]+$")))) and
+    (.git_email | type == "string" and test("^[^\u0000-\u0020\u007f<>@]+@[^\u0000-\u0020\u007f<>@]+$")))) and
   (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
   (.project == "firstmate" or .project == "dev-loop") and
   ((.kind == "ship" and (.mode == "direct-PR" or .mode == "no-mistakes")) or
@@ -235,16 +235,29 @@ if [ -f "$STATUS" ]; then STATUS_LINES=$(wc -l < "$STATUS"); fi
 "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}" >&2
 # A spawned pane is not proof that the brief was consumed. Only a new worker
 # declaration counts.
+# shellcheck source=bin/fm-classify-lib.sh
+. "$SCRIPT_DIR/fm-classify-lib.sh"
 polls=${FM_BOAT_START_POLLS:-120}
 interval=${FM_BOAT_START_INTERVAL:-1}
 case "$polls" in ''|*[!0-9]*|0) die 'invalid Boat start poll limit' ;; esac
 for ((poll=0; poll<polls; poll++)); do
-  if [ -f "$STATUS" ] && tail -n "+$((STATUS_LINES + 1))" "$STATUS" |
-    grep -Eq '^(failed|blocked|needs-decision) \[at=[0-9]+\].*: '; then
-    die "worker $ID declared a failure or decision before start confirmation; reconcile its status"
+  started=0
+  refused=0
+  if [ -f "$STATUS" ]; then
+    fresh=$(tail -n "+$((STATUS_LINES + 1))" "$STATUS")
+    while IFS= read -r line; do
+      case "$line" in *': '*) ;; *) continue ;; esac
+      status_line_at_epoch "$line" >/dev/null || continue
+      status_verb=''
+      status_line_verb "$line" status_verb
+      case "$status_verb" in
+        failed|blocked|needs-decision) refused=1 ;;
+        working|paused|done) started=1 ;;
+      esac
+    done <<< "$fresh"
   fi
-  if [ -f "$STATUS" ] && tail -n "+$((STATUS_LINES + 1))" "$STATUS" |
-    grep -Eq '^(working|paused|done) \[at=[0-9]+\].*: '; then
+  [ "$refused" -eq 0 ] || die "worker $ID declared a failure or decision before start confirmation; reconcile its status"
+  if [ "$started" -eq 1 ]; then
     printf 'boat-started: %s (fresh worker status)\n' "$ID"
     break
   fi

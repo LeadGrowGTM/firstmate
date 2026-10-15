@@ -171,7 +171,9 @@ fi
 printf '%s\n' "$@" > "$FIXTURES/spawn.argv"
 kind=ship
 for arg in "$@"; do [ "$arg" != --scout ] || kind=scout; done
-if [ ! -e "$FIXTURES/no-start" ] && [ ! -e "$FIXTURES/trust" ]; then
+if [ -e "$FIXTURES/spawn-status" ]; then
+  cat "$FIXTURES/spawn-status" >> "$FM_HOME/state/$1.status"
+elif [ ! -e "$FIXTURES/no-start" ] && [ ! -e "$FIXTURES/trust" ]; then
   printf 'working [at=1791892800]: brief consumed\n' >> "$FM_HOME/state/$1.status"
 fi
 printf 'kind=%s\nproject=%s\n' "$kind" "$2" > "$FM_HOME/state/$1.meta"
@@ -355,10 +357,14 @@ test_running_reservation_and_start() {
 
 test_worker_start() {
   local variant
-  for variant in status trust stale quoted quoted-no-op quoted-exact negative; do
+  for variant in status key-before-at at-before-key failed-key-before-at needs-decision-key-before-at trust stale quoted quoted-no-op quoted-exact negative; do
     new_case "start-$variant"
     seed_project firstmate
     case "$variant" in
+      key-before-at) printf 'working [key=start] [at=1791892800]: brief consumed\n' > "$FIXTURES/spawn-status" ;;
+      at-before-key) printf 'working [at=1791892800] [key=start]: brief consumed\n' > "$FIXTURES/spawn-status" ;;
+      failed-key-before-at) printf 'failed [key=start] [at=1791892800]: launch failed\n' > "$FIXTURES/spawn-status" ;;
+      needs-decision-key-before-at) printf 'needs-decision [key=start] [at=1791892800]: choose path\n' > "$FIXTURES/spawn-status" ;;
       trust) : > "$FIXTURES/trust" ;;
       stale) : > "$FIXTURES/no-start"; printf 'working [at=1]: old\n' > "$REMOTE_HOME/state/task-one.status" ;;
       quoted) : > "$FIXTURES/quoted-trust"; : > "$FIXTURES/no-start" ;;
@@ -368,9 +374,14 @@ test_worker_start() {
     esac
     spawn_task
     case "$variant" in
-      status)
+      status|key-before-at|at-before-key)
         expect_code 0 "$CODE" "worker $variant start: $OUT"
         assert_contains "$OUT" 'boat-started: task-one' 'missing positive start proof'
+        ;;
+      failed-*|needs-decision-*)
+        expect_code 1 "$CODE" "worker $variant refuses start"
+        assert_contains "$OUT" 'declared a failure or decision before start confirmation' 'missing immediate refusal'
+        if [[ "$OUT" == *boat-started:* ]]; then fail 'failure was treated as start proof'; fi
         ;;
       *)
         expect_code 1 "$CODE" "worker $variant refuses success"
@@ -378,13 +389,14 @@ test_worker_start() {
         [ -e "$REMOTE_HOME/state/task-one.meta" ] || fail 'unconfirmed launch lost metadata'
         ;;
     esac
-    if [ "$variant" != status ]; then
+    case "$variant" in trust|stale|quoted|quoted-no-op|quoted-exact|negative)
       assert_contains "$OUT" 'worker task-one did not prove start with a fresh status' 'missing start refusal'
       assert_contains "$OUT" 'Codex folder-trust prompt is a known cause' 'missing trust diagnostic'
       assert_contains "$OUT" 'Inspect: fm-on.sh boat-eng fm-peek.sh task-one' 'missing inspect command'
       assert_contains "$OUT" 'fm-on.sh boat-eng fm-send.sh task-one --key Enter' 'missing conditional answer command'
       assert_contains "$OUT" 'Then inspect: fm-on.sh boat-eng fm-peek.sh task-one' 'missing follow-up inspect command'
-    fi
+      ;;
+    esac
     assert_no_grep 'capture ' "$FIXTURES/calls" 'worker still gated start on viewport capture'
     assert_no_grep 'key ' "$FIXTURES/calls" 'viewport text received Enter without modal proof'
   done
@@ -438,6 +450,18 @@ test_ship_prerequisites_and_identity() {
   git -C "$LOCAL_HOME/projects/firstmate" config user.name $'Injected\nname'
   send_task
   assert_pre_resume_refusal 'unsafe identity'
+  new_case sender-multiple-at-email
+  git -C "$LOCAL_HOME/projects/firstmate" config user.email worker@extra@example.invalid
+  send_task
+  expect_code 1 "$CODE" 'controller rejects multiple-at email'
+  [ ! -s "$FIXTURES/calls" ] || fail 'multiple-at controller email contacted Boat'
+  new_case worker-multiple-at-email
+  seed_project firstmate
+  jq '.git_email = "worker@extra@example.invalid"' "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new"
+  mv "$FIXTURES/worker-request.new" "$FIXTURES/worker-request.json"
+  spawn_task
+  expect_code 1 "$CODE" 'worker rejects multiple-at email'
+  assert_no_grep 'brief ' "$FIXTURES/calls" 'multiple-at email accepted remote backlog intake'
   new_case worker-no-identity
   seed_project firstmate
   jq 'del(.git_name,.git_email)' "$FIXTURES/worker-request.json" > "$FIXTURES/worker-request.new"
