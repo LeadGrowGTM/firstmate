@@ -102,7 +102,8 @@ A tmux window or server, or a Herdr pane or workspace, can disappear during a se
 The task's worktree, branch, commits, and uncommitted changes all survive that; only its terminal does not.
 
 Tmux and Herdr support preserved-copy reclaim through the same relaunch command.
-Allocation and relaunch check recorded custody under the project allocation lock; another task record or conflicting slot marker refuses before the copy is refreshed or a replacement starts.
+Allocation checks idle recorded custody before Treehouse acquisition and checks the returned copy again before Firstmate's base refresh or worker launch.
+Relaunch checks recorded custody under the project allocation lock before replacing the agent.
 
 Two endpoint verdicts are agent-free, and both license a relaunch:
 
@@ -161,7 +162,7 @@ The worktree and the task's records are unaffected either way.
 ### Retiring a stale pool claim
 
 A record for a proven-stopped worker can be retired through the records-only `--retire-claim` teardown path.
-The original metadata is archived with the task material and the copy, branch, commits, dirty files, and hooks survive.
+The original metadata is archived with the task material; the worktree and remaining task artifacts, including hooks and the steering inbox, stay in place.
 Another holder's slot marker remains untouched.
 Retirement refuses a surviving process under the copy or recorded task temp root, an attributable active validation run, and a same-id marker whose home cannot be proved to match.
 `bin/fm-teardown.sh`'s header and help own the command, proof requirements, locking, and incompatible options.
