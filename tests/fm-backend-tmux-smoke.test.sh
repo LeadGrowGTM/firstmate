@@ -44,7 +44,6 @@ OUTER_SOCKET=
 HIDDEN_SOCKET=
 ROOTED_PID=
 SHIM_DIR=
-trap cleanup_all EXIT
 
 cleanup_all() {
   [ -z "$ROOTED_PID" ] || { kill "$ROOTED_PID" 2>/dev/null || true; wait "$ROOTED_PID" 2>/dev/null || true; }
@@ -57,11 +56,18 @@ cleanup_all() {
 # A `tmux` shim on PATH that transparently redirects every call to the private
 # socket, so bin/backends/tmux.sh's bare `tmux ...` invocations never touch the
 # host's real sessions.
-SHIM_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-backend-smoke.XXXXXX")
-TMUX_TMPDIR=${TMUX_TMPDIR:-$SHIM_DIR/tmux-tmp}
-mkdir -p "$TMUX_TMPDIR"
-chmod 700 "$TMUX_TMPDIR"
+SMOKE_TMP_PARENT=${TMPDIR:-/tmp}
+if [ -n "${FM_TEST_TMUX_REAL:-}" ] && [ "$REAL_TMUX" != "$FM_TEST_TMUX_REAL" ] &&
+   [ "${TMUX_TMPDIR:-}" = "${REAL_TMUX%/bin/tmux}/s" ]; then
+  SMOKE_TMP_PARENT=$TMUX_TMPDIR
+fi
+SHIM_DIR=$(mktemp -d "$SMOKE_TMP_PARENT/fm-backend-smoke.XXXXXX") || exit 1
+[ -d "$SHIM_DIR" ] && [ ! -L "$SHIM_DIR" ] || exit 1
+TMUX_TMPDIR="$SHIM_DIR/tmux-tmp"
 export TMUX_TMPDIR
+unset TMUX TMUX_PANE || exit 1
+trap cleanup_all EXIT
+mkdir -m 700 -- "$TMUX_TMPDIR" || fail 'could not create the private tmux socket directory'
 PS_SHIM_DIR="$SHIM_DIR/ps-bin"
 mkdir -p "$PS_SHIM_DIR"
 FM_TEST_PRIVATE_PIDS="$SHIM_DIR/private-pids"
