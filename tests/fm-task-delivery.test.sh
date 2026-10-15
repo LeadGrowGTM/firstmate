@@ -1738,7 +1738,7 @@ EOF
     done
   done
 
-  id=unfilled-promotion
+  id='unfilled-promotion'
   mkdir -p "$home/data/$id"
   cp "$home/data/unfilled-goal-placeholder/brief.md" "$home/data/$id/brief.md"
   printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$home/state/$id.meta"
