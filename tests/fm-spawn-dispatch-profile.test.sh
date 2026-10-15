@@ -2019,6 +2019,78 @@ test_skill_overrides_never_reach_workers() {
   pass "skill overrides never reach a ship worker launch"
 }
 
+test_claude_plugin_directories_are_home_scoped() {
+  local rec id sm plugin out status launch args_log
+  id=profile-claude-plugins-z41
+  rec=$(make_spawn_case profile-claude-plugins claude "$id")
+  read_case_record "$rec"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "a home without plugin configuration should launch"$'\n'"$out"
+  assert_not_contains "$(cat "$LAUNCH_LOG")" "--plugin-dir" "a home without plugin configuration received a plugin"
+  plugin="$CASE_DIR/plugin with space & symbol"
+  mkdir -p "$plugin" "$HOME_DIR/config"
+  printf '["%s"]\n' "$plugin" > "$HOME_DIR/config/claude-plugin-dirs.json"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "Claude ship with a plugin directory should launch"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--plugin-dir '$plugin'" "the ship lost its home plugin"
+  cat > "$FAKEBIN_DIR/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FM_TEST_CLAUDE_ARGS_LOG"
+SH
+  chmod +x "$FAKEBIN_DIR/claude"
+  args_log="$CASE_DIR/claude-args.log"
+  FM_TEST_CLAUDE_ARGS_LOG="$args_log" PATH="$FAKEBIN_DIR:$PATH" bash -c "$launch" \
+    || fail "the emitted Claude launch failed"
+  awk -v want="$plugin" '$0 == "--plugin-dir" { if (getline > 0 && $0 == want) found = 1 } END { exit !found }' "$args_log" \
+    || fail "Claude received a corrupted plugin directory argument"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --scout)
+  status=$?
+  expect_code 0 "$status" "Claude scout with a plugin directory should launch"$'\n'"$out"
+  assert_contains "$(cat "$LAUNCH_LOG")" "--plugin-dir '$plugin'" "the scout lost its home plugin"
+
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  status=$?
+  expect_code 0 "$status" "a second mate without its own setting should launch"$'\n'"$out"
+  assert_not_contains "$(cat "$LAUNCH_LOG")" "--plugin-dir" "the primary home's plugin leaked to its second mate"
+
+  mkdir -p "$sm/config"
+  printf '["%s"]\n' "$plugin" > "$sm/config/claude-plugin-dirs.json"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  status=$?
+  expect_code 0 "$status" "a second mate with its own plugin should launch"$'\n'"$out"
+  assert_contains "$(cat "$LAUNCH_LOG")" "--plugin-dir '$plugin'" "the second mate lost its own plugin"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "claude --model haiku 'A positional prompt'")
+  status=$?
+  expect_code 0 "$status" "raw Claude ship with a plugin should launch"$'\n'"$out"
+  assert_contains "$(cat "$LAUNCH_LOG")" "--plugin-dir '$plugin'" "the raw Claude launch lost its plugin"
+  pass "Claude plugin directories reach ships, scouts, raw launches, and only the second mate's own home"
+}
+
+test_claude_plugin_directories_invalid_file_is_skipped() {
+  local rec id out status bad
+  id=profile-claude-plugins-invalid-z42
+  rec=$(make_spawn_case profile-claude-plugins-invalid claude "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/config"
+  for bad in '[]' '["relative"]' '["/missing/plugin"]' '{"path":"/tmp"}' '{not-json'; do
+    printf '%s\n' "$bad" > "$HOME_DIR/config/claude-plugin-dirs.json"
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+    status=$?
+    expect_code 0 "$status" "invalid plugin file should not block launch"$'\n'"$out"
+    assert_contains "$out" "skipped $HOME_DIR/config/claude-plugin-dirs.json" "invalid file had no note"
+    assert_not_contains "$(cat "$LAUNCH_LOG")" "--plugin-dir" "invalid plugin path reached Claude"
+  done
+  pass "invalid Claude plugin directory settings are skipped as a whole"
+}
+
 test_active_dispatch_profile_does_not_block_secondmate_launch() {
   local rec id sm out status
   id=profile-secondmate-z16
@@ -2735,6 +2807,8 @@ test_raw_secondmate_skill_overrides_reach_claude
 test_raw_secondmate_existing_settings_merge_skill_overrides
 test_raw_ship_existing_settings_keeps_launch_arguments
 test_skill_overrides_never_reach_workers
+test_claude_plugin_directories_are_home_scoped
+test_claude_plugin_directories_invalid_file_is_skipped
 test_active_dispatch_profile_does_not_block_secondmate_launch
 test_opt_in_production_launch_receipts
 test_production_late_launch_receipt

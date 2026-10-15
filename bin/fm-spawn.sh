@@ -5907,6 +5907,31 @@ if [ "$HARNESS" = claude ]; then
     fi
   fi
   LAUNCH=${LAUNCH/__CLAUDESETTINGS__/"$(shell_quote "$CLAUDE_SETTINGS")"}
+  # A second mate reads its own home; ships and scouts read the spawning home.
+  claude_plugin_file=$CONFIG/claude-plugin-dirs.json
+  [ "$KIND" != secondmate ] || claude_plugin_file=$WT/config/claude-plugin-dirs.json
+  if [ -f "$claude_plugin_file" ]; then
+    claude_plugin_flags=
+    if claude_plugin_json=$(jq -ces '
+      if length != 1 or (.[0] | type) != "array" or (.[0] | length) == 0
+      then error("expected one nonempty array") else .[0] end
+      | if all(.[]; type == "string" and startswith("/") and (explode | all(.[]; . >= 32 and . != 127)))
+        then . else error("expected absolute paths without control characters") end' "$claude_plugin_file" 2>/dev/null); then
+      mapfile -t claude_plugin_paths < <(printf '%s\n' "$claude_plugin_json" | jq -r '.[]')
+      for claude_plugin_path in "${claude_plugin_paths[@]}"; do
+        if [ ! -d "$claude_plugin_path" ]; then
+          claude_plugin_flags=
+          break
+        fi
+        claude_plugin_flags="$claude_plugin_flags--plugin-dir $(shell_quote "$claude_plugin_path") "
+      done
+    fi
+    if [ -n "$claude_plugin_flags" ]; then
+      LAUNCH="${LAUNCH%%--disallowedTools *}${claude_plugin_flags}--disallowedTools ${LAUNCH#*--disallowedTools }"
+    else
+      echo "note: skipped $claude_plugin_file: expected a nonempty JSON array of existing absolute plugin directories" >&2
+    fi
+  fi
 fi
 if [ "$HARNESS" = rovo ]; then
   ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT" "$DATA" "$STATE" "$ID") || {

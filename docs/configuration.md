@@ -1284,6 +1284,16 @@ Firstmate reads but never edits the override file; existing Claude launch wiring
 The file is per home because each second mate can use different settings, and it is not inherited from the primary home.
 [`fm-spawn.sh`](../bin/fm-spawn.sh) owns the delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
 
+## Claude plugin directories (config/claude-plugin-dirs.json)
+
+The optional local, gitignored `config/claude-plugin-dirs.json` contains a nonempty JSON array of absolute plugin directory paths, such as `["/home/user/fm-home/data/plugins/example"]`.
+For each Claude ship, scout, or relaunch, Firstmate reads the spawning home's file and adds one session-only `--plugin-dir` flag per directory.
+For a Claude second-mate launch or relaunch, Firstmate reads the second mate's own home instead.
+The directories must exist at launch time; an unreadable or invalid file, a missing directory, or a path containing control characters skips the entire file with one note on stderr.
+An absent file and every non-Claude launch remain unchanged.
+This setting does not install plugins into either Claude account and does not change `config/skill-overrides.json` or user-level skill availability.
+[`fm-spawn.sh`](../bin/fm-spawn.sh) owns delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
+
 ## Project capacity (config/project-capacity)
 
 The optional local, gitignored `config/project-capacity` tells Firstmate how many workers a project can run at once on this machine, for a project whose machine-local resource - a heavy test suite, a local editor stack, a device - only serves a few workers at a time.
