@@ -163,6 +163,7 @@ The worktree and the task's records are unaffected either way.
 A record for a proven-stopped worker can be retired through the records-only `--retire-claim` teardown path.
 The original metadata is archived with the task material and the copy, branch, commits, dirty files, and hooks survive.
 Another holder's slot marker remains untouched.
+Retirement refuses a surviving process under the copy or recorded task temp root, an attributable active validation run, and a same-id marker whose home cannot be proved to match.
 `bin/fm-teardown.sh`'s header and help own the command, proof requirements, locking, and incompatible options.
 This retirement closes the task's reservation; ordinary teardown continues to enforce landed-work checks whenever it owns and returns the copy.
 

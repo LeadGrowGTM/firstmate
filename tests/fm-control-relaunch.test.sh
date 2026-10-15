@@ -2732,7 +2732,11 @@ test_relaunch_refuses_a_conflicting_pooled_slot_owner() {
   printf 'existing wiring\n' > "$dir/wt/.claude/settings.local.json"
   assert_relaunch_custody_refusal "$dir" "$id"
   assert_grep 'task=other-task' "$dir/pool/1/.fm-slot-owner" 'relaunch replaced the conflicting slot owner'
-  pass 'both relaunch verbs refuse a conflicting claim in a real same-home pooled slot'
+  mkdir -p "$dir/sibling-home"
+  printf 'task=%s\nhome=%s\n' "$id" "$dir/sibling-home" > "$dir/pool/1/.fm-slot-owner"
+  assert_relaunch_custody_refusal "$dir" "$id"
+  assert_grep "home=$dir/sibling-home" "$dir/pool/1/.fm-slot-owner" 'relaunch replaced a same-id sibling-home owner'
+  pass 'both relaunch verbs refuse conflicting task ids and same-id sibling-home claims'
 }
 
 start_rooted_process() {  # <case-dir> <worktree-relative-dir>

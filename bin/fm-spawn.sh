@@ -1584,7 +1584,7 @@ spawn_abort_cleanup() {
     fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
     SPAWN_SLOT_CLAIMED=0
     if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
-      fm_treehouse_slot_owner_release "$WT" "$ID" || true
+      fm_treehouse_slot_owner_release "$WT" "$ID" "$FM_HOME" || true
     else
       echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it" >&2
     fi
@@ -3510,7 +3510,7 @@ fi
 if [ "$RELAUNCH" = 1 ] && [ "$KIND" != secondmate ]; then
   fm_worktree_custody_check "$STATE" "$RELAUNCH_META" "$RELAUNCH_WT" "$ID" || exit 1
   if fm_treehouse_pool_slot "$PROJ_ABS" "$RELAUNCH_WT"; then
-    fm_treehouse_slot_owner_state "$RELAUNCH_WT" "$ID"
+    fm_treehouse_slot_owner_state "$RELAUNCH_WT" "$ID" "$FM_HOME"
     case "$FM_TREEHOUSE_SLOT_OWNER" in
       mine|absent) ;;
       *) echo "error: task $ID's recorded pool copy has conflicting or unreadable custody; refusing to relaunch" >&2; exit 1 ;;
@@ -5040,8 +5040,8 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # the same claim covers it.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
     fm_worktree_custody_check "$STATE" "$STATE/$ID.meta" "$WT" "$ID" || exit 1
-    fm_treehouse_slot_owner_state "$WT" "$ID"
-    if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ]; then
+    fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+    if [ "$FM_TREEHOUSE_SLOT_OWNER" != absent ] && [ "$FM_TREEHOUSE_SLOT_OWNER" != mine ]; then
       echo "error: Treehouse pool slot $WT still belongs to task $FM_TREEHOUSE_SLOT_OWNER_ID; retire that stale claim before allocation" >&2
       exit 1
     fi

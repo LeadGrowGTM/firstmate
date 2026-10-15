@@ -1246,7 +1246,7 @@ do_relaunch() {
       || die "another allocation or cleanup holds task $ID's shared project lock"
     fm_worktree_custody_check "$STATE" "$META" "$WT" "$ID" || custody_status=1
     if fm_treehouse_pool_slot "$project" "$WT"; then
-      fm_treehouse_slot_owner_state "$WT" "$ID"
+      fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
       case "$FM_TREEHOUSE_SLOT_OWNER" in mine|absent) ;; *) custody_status=1 ;; esac
     fi
     fm_lock_release "$custody_lock"
