@@ -60,6 +60,20 @@ boat_runtime() {
   [ "$(fm_backend_name)" = tmux ] || die 'Boat worker inventory requires the tmux backend'
   fm_backend_source tmux || die 'Boat tmux adapter unavailable'
 }
+boat_codex_trust_dialog() {
+  local command
+  command=$(fm_backend_tmux_current_command "$1") || return 1
+  [ "$command" = codex ] || return 1
+  printf '%s\n' "$2" | awk '
+    /^[[:space:]]*$/ { next }
+    { n++
+      if (n == 1 && $0 ~ /^[[:space:]]*(Do you trust the contents of this directory\?|Trust this folder\?)[[:space:]]*$/) question = 1
+      if (n == 2 && $0 ~ /^[[:space:]]*[›❯>][[:space:]]*(1\.[[:space:]]*)?Yes, (I trust this folder|allow Codex to work in this folder)[[:space:]]*$/) yes = 1
+      if (n == 3 && $0 ~ /^[[:space:]]*(2\.[[:space:]]*)?No, exit[[:space:]]*$/) no = 1
+    }
+    END { exit !(n == 3 && question && yes && no) }
+  '
+}
 boat_worker_count() { # [new task id, refused if its endpoint already exists]
   local meta id records='' windows status=0
   for meta in "$FM_HOME/state/"*.meta; do
@@ -252,15 +266,8 @@ for ((poll=0; poll<polls; poll++)); do
     break
   fi
   pane=$(fm_backend_tmux_visible_capture "=firstmate:=fm-$ID") || die "worker start unconfirmed: viewport unavailable for $ID; reconcile the existing task before retry"
-  if [ "$harness" = codex ] && printf '%s\n' "$pane" |
-    grep -Eq '^[[:space:]]*(Do you trust the contents of this directory\?|Trust this folder\?)[[:space:]]*$'; then
+  if [ "$harness" = codex ] && boat_codex_trust_dialog "=firstmate:=fm-$ID" "$pane"; then
     trust_seen=1
-  fi
-  if [ "$harness" = codex ] &&
-    printf '%s\n' "$pane" | grep -Eq '^[[:space:]]*(Do you trust the contents of this directory\?|Trust this folder\?)[[:space:]]*$' &&
-    printf '%s\n' "$pane" | grep -Eq '^[[:space:]]*[›❯>][[:space:]]*(1\.[[:space:]]*)?Yes, (I trust this folder|allow Codex to work in this folder)[[:space:]]*$' &&
-    printf '%s\n' "$pane" | grep -Eq '^[[:space:]]*(2\.[[:space:]]*)?No, exit[[:space:]]*$' &&
-    ! printf '%s\n' "$pane" | grep -Fq 'FIRSTMATE_OP:'; then
     if [ "$trust_answered" -eq 0 ]; then
       fm_backend_tmux_send_key "=firstmate:=fm-$ID" Enter || die "Codex folder-trust dialog could not be answered for $ID"
       trust_answered=1
