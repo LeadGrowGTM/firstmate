@@ -1547,6 +1547,11 @@ test_retire_claim_archives_only_the_gone_agents_record() {
   original=$(cat "$dir/home/state/$id.meta")
   before_head=$(git -C "$dir/worktree" rev-parse HEAD)
   before_reflog=$(git -C "$dir/worktree" reflog)
+  mkdir -p "$dir/home/state/$id.git-hooks" "$dir/home/state/$id.inbox"
+  printf 'keep state hook\n' > "$dir/home/state/$id.git-hooks/commit-msg"
+  printf 'keep steering request\n' > "$dir/home/state/$id.inbox/pending"
+  printf 'keep progress\n' > "$dir/home/state/$id.progress"
+  chmod 500 "$dir/home/state/$id.git-hooks"
   fm_write_meta "$dir/home/state/$other.meta" \
     "window=firstmate:fm-$other" "endpoint_task_id=$other" \
     "worktree=$dir/other-worktree" "project=$dir/project" "kind=scout"
@@ -1567,6 +1572,12 @@ test_retire_claim_archives_only_the_gone_agents_record() {
     "retirement changed another task's slot marker"
   assert_present "$dir/worktree/sentinel" "retirement altered worktree files"
   assert_present "$dir/worktree/.git-hooks/pre-commit" "retirement removed a hook"
+  [ "$(cat "$dir/home/state/$id.git-hooks/commit-msg")" = 'keep state hook' ] \
+    || fail 'retirement changed the state hook contents'
+  [ "$(cat "$dir/home/state/$id.inbox/pending")" = 'keep steering request' ] \
+    || fail 'retirement changed the steering inbox contents'
+  [ "$(cat "$dir/home/state/$id.progress")" = 'keep progress' ] \
+    || fail 'retirement changed the progress record'
   [ "$(git -C "$dir/worktree" config --local --get core.hooksPath)" = "$dir/worktree/.git-hooks" ] \
     || fail "retirement changed the worktree hook configuration"
   [ "$(git -C "$dir/worktree" symbolic-ref --short HEAD)" = "fm/$id" ] \
