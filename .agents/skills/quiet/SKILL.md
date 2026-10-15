@@ -25,7 +25,7 @@ For captain-held rechecks under quiet, see [architecture](../../../docs/architec
    On Pi or pi-signed, enter nothing: the attended branch already keeps routine wakes out of this conversation (the `afk` skill's step 2); tell the captain so.
    Everywhere else run `bin/fm-afk-launch.sh quiet-check`; its header's QUIET MODE owns what each result means.
    - Exit 0: enter nothing - no record, no flag, no daemon, and `/quiet off` then needs nothing either.
-     Tell the captain in `AGENTS.md` section 9 language that supervision here already works that way: routine fleet events stay off this conversation, while decisions, failures, credentials, and review-ready work still reach them.
+     Tell the captain using `captain-voice` that supervision here already works that way: routine fleet events stay off this conversation, while decisions, failures, credentials, and review-ready work still reach them.
      When its line says the supervision session is paused, say instead that routine updates reach them until it recovers, and when it next retries.
    - Exit 2: an away record is live, so the captain has returned: run the `afk` skill's return and clear its catch-up gate, then run `quiet-check` again and follow its new result.
    - Exit 1: go on to step 1; if it printed a line, first tell the captain plainly what keeps supervision from already being quiet here.
@@ -43,7 +43,7 @@ For captain-held rechecks under quiet, see [architecture](../../../docs/architec
    mode from the record `enter` wrote.
    Keep `FM_AFK_MODE=quiet` on a quiet refresh: an `/afk` entry, even without new words, replaces a quiet record with an away record and starts hold-for-return.
 
-2. **Acknowledge** in `AGENTS.md` section 9 language: "Captain, quiet mode is
+2. **Acknowledge** using `captain-voice`: "Captain, quiet mode is
    active; I will batch routine updates and surface only decisions, failures,
    credentials, or review-ready work - ordinary chat will not exit this, say
    `/quiet off` when you want normal per-wake responses back."

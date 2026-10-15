@@ -15,6 +15,15 @@ Load this before changing firstmate's shared, tracked material, as defined by `A
 It exists because `AGENTS.md` grew from 585 to 958 lines between its last two restructures, entirely from conditional detail added inline instead of routed to its right home.
 Applying the rules below on every change is what keeps that from happening again.
 
+## Operating the shared template
+
+`AGENTS.md` section 1 keeps inline the shared-path list, the delegate-while-crew-is-live rule, the no-mistakes ship path, the co-author ban, and the Artifact-tool ban; this section owns the remaining detail.
+This repo is a shared template, so the captain-private paths named there stay gitignored and never ship through a tracked change.
+Consult current `gh-axi` and `chrome-devtools-axi` help rather than memorizing flags.
+Present visual, report, or review pages through compatible Lavish using `bin/fm-lavish-open.sh` or a local HTML page, never the claude.ai Artifact tool or cloud-published claude.ai Docs, which `bin/fm-spawn.sh` disables for standard and direct or leading-assignment raw Claude launches.
+Env-wrapped and compound raw Claude commands are outside that launch-time denial.
+Report files on disk, plain-text bootstrap diagnostics, scout text reports when Lavish is unavailable, and chat text remain available.
+
 ## Knowledge-placement decision tree
 
 Before writing a new fact anywhere in this repo, ask where it belongs, in this order.

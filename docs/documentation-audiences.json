@@ -133,6 +133,14 @@
       "audience": "agent-runtime"
     },
     {
+      "path": ".agents/skills/captain-voice/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/crewmate-briefs/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": ".agents/skills/decision-hold-lifecycle/SKILL.md",
       "audience": "agent-runtime"
     },
@@ -606,6 +614,10 @@
     },
     {
       "path": ".agents/skills/session-start-recovery/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/ship-intake/SKILL.md",
       "audience": "agent-runtime"
     },
     {

@@ -25,7 +25,9 @@ The target window's harness is recorded as `harness=` in `state/<id>.meta`.
 ## Session-start reconciliation for a dead ordinary direct report
 
 This procedure covers ordinary `kind=ship` and `kind=scout` direct reports.
-Load `secondmate-provisioning` instead for `kind=secondmate` recovery.
+Load `secondmate-provisioning` instead for `kind=secondmate` recovery, reconciling only that secondmate and never its whole child tree from the main home.
+Reconcile only this home's recorded direct reports and their recorded backend inventory, and claim no other home's work.
+Each secondmate reconciles work already in its own home and then idles; recovery never authorizes it to invent work.
 
 For a REMOTE secondmate, `fm-crew-state` and `fm-peek` read the actual remote endpoint over `fm-on.sh`, and `fm-send` reports a delivered-with-pending-confirmation steer as delivered (their headers own the contracts); an `unknown-remote` read or unreachable-host failure means the remote state could not be read, never that the mate is dead or the send failed.
 Recover a genuinely stuck remote mate only through `bin/fm-spawn.sh <id> --secondmate`, never raw herdr pane close/kill surgery, which strands the endpoint binding.
@@ -77,4 +79,4 @@ Escalate in order:
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; modern harnesses auto-compact and keep going.
    The worktree and commits persist, so relaunch is cheap.
-5. If a second relaunch fails too, write `failed` to the backlog and tell the captain the plain failure, preserved work, and consequence using `AGENTS.md` section 9; do not mention metadata, harness, window, or worktree unless the path itself is needed for action.
+5. If a second relaunch fails too, write `failed` to the backlog and tell the captain the plain failure, preserved work, and consequence using `captain-voice`; do not mention metadata, harness, window, or worktree unless the path itself is needed for action.
