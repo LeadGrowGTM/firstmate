@@ -2802,6 +2802,8 @@ devin)
   ;;
 commandcode)
   COMMANDCODE_BIN=$(command -v commandcode) || {
+    FM_LAUNCH_OUTCOME=worker-unavailable
+    FM_LAUNCH_OUTCOME_REASON="selected-executable-missing"
     echo "error: commandcode executable not found on PATH" >&2
     exit 1
   }

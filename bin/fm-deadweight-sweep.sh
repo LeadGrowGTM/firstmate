@@ -184,10 +184,13 @@ for meta in "$STATE"/*.meta; do
   FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-teardown.sh" "$id" --only-if-stopped \
     > "$TMP/teardown" 2>&1 || rc=$?
   case "$rc" in
-    0)
+    0|4)
       workers=$((workers + 1))
       if [ "$had_copy" = 1 ] && [ ! -e "$worker_copy" ] && [ ! -L "$worker_copy" ]; then
         copies=$((copies + 1))
+      fi
+      if [ "$rc" = 4 ]; then
+        note "cleaned $id: $(reason "$TMP/teardown")"
       fi
       ;;
     3)

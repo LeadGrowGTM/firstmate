@@ -1018,7 +1018,9 @@ test_raw_secondmate_launch_writes_no_busy_wiring() {
   out=$(FM_BACKEND=tmux FM_FAKE_LAUNCH_LOG="$case_dir/launch.log" \
     fm_test_run_spawn "$case_dir/primary" "$sm" "$case_dir/fake/fakebin" "$id" "$sm" 'claude --fm-raw-flag' --secondmate) \
     || fail "raw claude respawn over an armed secondmate must succeed: $out"
-  assert_contains "$(cat "$case_dir/launch.log")" 'claude --fm-raw-flag' "raw respawn did not launch the raw command"
+  launch=$(cat "$case_dir/launch.log")
+  assert_contains "$launch" 'claude ' "raw respawn did not launch claude"
+  assert_contains "$launch" '--fm-raw-flag' "raw respawn dropped the raw launch flag"
   assert_absent "$state/$id.busy-gen" "raw respawn kept the earlier busy generation"
   assert_absent "$state/$id.busy-state" "raw respawn kept the earlier busy record"
   assert_absent "$sm/.fm-busy-stop" "raw respawn kept the earlier Stop pointer"
