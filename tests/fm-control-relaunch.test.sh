@@ -193,6 +193,10 @@ case "${1:-}" in
     printf '%s\n' "$name" >> "$D/created-windows"
     printf '@9\n'
     exit 0 ;;
+  kill-window)
+    printf '%s\n' "$*" >> "$D/killed-windows"
+    : > "$D/windows"
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -211,6 +215,9 @@ if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] &&
     BEGIN { while ((getline pid < file) > 0) keep[pid]=1 }
     $1 in keep { print }
   '
+elif [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] && [ "$#" -eq 4 ]; then
+  printf '%s\n' "$$"
+  [ ! -f "$FM_FAKE_DIR/process-pids" ] || cat "$FM_FAKE_DIR/process-pids"
 else
   exec /bin/ps "$@"
 fi
@@ -2532,6 +2539,22 @@ test_tmux_reclaims_a_window_whose_recorded_server_died() {
   pass "tmux: a window whose recorded server died is reclaimed in place with its work intact"
 }
 
+test_tmux_rebind_abort_closes_unlaunched_window() {
+  local dir id=rl-rebind-abort out rc=0 before
+  dir=$(new_case tmux-rebind-abort "$id")
+  add_ship_task "$dir" "$id" claude
+  strand_endpoint "$dir" "$id"
+  before=$(cat "$dir/home/state/$id.meta")
+  printf '%s' "$dir/proj" > "$dir/fake/cwd"
+  out=$(run_spawn "$dir" "$id" --relaunch --harness claude) || rc=$?
+  expect_code 1 "$rc" "a rebound pane outside the recorded copy must refuse: $out"
+  assert_grep "fm-$id" "$dir/fake/created-windows" 'rebind did not create the replacement window'
+  assert_grep "=firstmate:=fm-$id" "$dir/fake/killed-windows" "abort did not close its unlaunched replacement window: $out"
+  [ "$(cat "$dir/home/state/$id.meta")" = "$before" ] || fail 'abort changed the original task record'
+  assert_absent "$dir/home/state/$id.control-relaunch" 'spawn abort wrote a control transaction'
+  pass 'tmux: aborted rebind closes its unlaunched window and preserves the task record'
+}
+
 test_tmux_reclaims_when_a_new_server_reuses_the_recorded_socket() {
   local dir sock
   dir=$(new_case tmux-reused rl61)
@@ -2745,6 +2768,7 @@ start_rooted_process() {  # <case-dir> <worktree-relative-dir>
   ( cd "$dir/wt/$sub" && : > "$dir/rooted-ready" && exec /bin/sleep 60 ) &
   pid=$!
   ROOTED_PIDS+=("$pid")
+  printf '%s\n' "$pid" >> "$dir/fake/process-pids"
   while [ ! -e "$dir/rooted-ready" ]; do sleep 0.01; done
   kill -0 "$pid" 2>/dev/null || fail 'rooted process fixture did not start'
 }
@@ -2800,6 +2824,44 @@ test_tmux_missing_refuses_unreadable_or_ambiguous_process_inventory() {
     assert_tmux_missing_refuses "$dir" "rl67$mode" "$mode process inventory"
   done
   pass 'tmux: unreadable and ambiguous same-user process inventories fail closed'
+}
+
+test_tmux_missing_refuses_unreadable_prior_generation_survivor() {
+  local dir id=rl-prior-generation worker out rc=0
+  [ "$(uname -s)" = Linux ] || { echo 'skip - nondumpable process needs Linux'; return 0; }
+  dir=$(new_case prior-generation "$id")
+  add_ship_task "$dir" "$id" claude
+  python3 - "$dir/wt" "$dir/worker-ready" <<'PY' &
+import ctypes
+import os
+from pathlib import Path
+import sys
+import time
+
+os.chdir(sys.argv[1])
+if ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) != 0:
+    sys.exit(1)
+Path(sys.argv[2]).touch()
+time.sleep(60)
+PY
+  worker=$!
+  ROOTED_PIDS+=("$worker")
+  printf '%s\n' "$worker" >> "$dir/fake/process-pids"
+  for _ in $(seq 1 100); do
+    [ ! -e "$dir/worker-ready" ] || break
+    kill -0 "$worker" 2>/dev/null || fail 'nondumpable worker fixture exited'
+    /bin/sleep 0.01
+  done
+  assert_present "$dir/worker-ready" 'nondumpable worker fixture did not start'
+  ! readlink "/proc/$worker/cwd" >/dev/null 2>&1 || fail 'worker cwd remained readable, so the fixture cannot prove this case'
+  /bin/sleep 3
+  strand_endpoint "$dir" "$id"
+  out=$(run_control "$dir" "$id" exit) || rc=$?
+  expect_code 1 "$rc" "a prior-generation unreadable survivor must block endpoint absence: $out"
+  assert_contains "$out" 'process absence' 'the refusal must name unproven process absence'
+  kill -0 "$worker" 2>/dev/null || fail 'control signaled the surviving worker'
+  assert_present "$dir/home/state/$id.meta" 'control removed the record for a surviving worker'
+  pass 'tmux: a prior-generation nondumpable survivor blocks endpoint absence proof'
 }
 
 
@@ -3578,6 +3640,7 @@ test_spawn_relaunch_refuses_contradicting_flags
 test_spawn_relaunch_refuses_an_unrecorded_task
 test_spawn_relaunch_refuses_a_pane_outside_the_worktree
 test_tmux_reclaims_a_window_whose_recorded_server_died
+test_tmux_rebind_abort_closes_unlaunched_window
 test_tmux_reclaims_when_a_new_server_reuses_the_recorded_socket
 test_tmux_refuses_a_window_its_recorded_live_server_still_holds
 test_tmux_reclaims_a_legacy_record_no_live_server_holds
@@ -3592,6 +3655,7 @@ test_tmux_missing_refuses_a_live_rooted_process
 test_tmux_missing_legacy_record_refuses_a_live_rooted_process
 test_tmux_missing_legacy_record_reclaims_without_rooted_process
 test_tmux_missing_refuses_unreadable_or_ambiguous_process_inventory
+test_tmux_missing_refuses_unreadable_prior_generation_survivor
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server

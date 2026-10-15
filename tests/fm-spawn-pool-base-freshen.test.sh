@@ -757,6 +757,65 @@ test_pool_custody_refuses_before_refresh_or_claim() {
   done
 }
 
+test_provider_pool_marker_from_sibling_clone_blocks_allocation() {
+  local rec id=pool-cross-clone-r1 provider sibling marker before_head out status launch_log
+  rec=$(make_case cross-clone "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/user-home/.config/treehouse"
+  printf 'root = "%s"\n' "$CASE_DIR" > "$HOME_DIR/user-home/.config/treehouse/config.toml"
+  provider=$(FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" bash -c \
+    '. "$1"; fm_treehouse_pool_check "$2" "$3" "$4"; printf "%s" "$FM_TREEHOUSE_POOL_RESOLVED"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home") \
+    || fail 'the private provider pool could not be resolved'
+  sibling="$CASE_DIR/sibling/project"
+  mkdir -p "${sibling%/*}" "$provider/29"
+  git clone --quiet "file://$CASE_DIR/origin.git" "$sibling"
+  git -C "$sibling" worktree add --quiet --detach "$provider/29/project" HEAD
+  printf '{"worktrees":[{"name":"29","path":"%s"}]}\n' "$provider/29/project" \
+    > "$provider/treehouse-state.json"
+  marker="$provider/29/.fm-slot-owner"
+  printf 'task=old-task\nhome=%s\n' "$CASE_DIR/other-home" > "$marker"
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = send-keys ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *fm-treehouse-pool-check.sh*'&& treehouse get'*) bash -c "$arg"; exit $? ;;
+    esac
+  done
+fi
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  cat > "$FAKEBIN_DIR/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] && [ "$#" -eq 4 ]; then
+  printf '%s\n' "$$"
+else
+  exec /bin/ps "$@"
+fi
+SH
+  chmod +x "$FAKEBIN_DIR/ps"
+  before_head=$(git -C "$provider/29/project" rev-parse HEAD)
+  launch_log="$CASE_DIR/launch.log"
+  out=$(FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn allocated while a sibling clone retained a provider slot marker: $out"
+  assert_contains "$out" 'slot claim' 'spawn did not name the provider marker refusal'
+  assert_absent "$HOME_DIR/state/$id.meta" 'refused spawn published task metadata'
+  [ ! -s "$launch_log" ] || fail 'spawn launched a worker after the provider marker refusal'
+  [ "$(git -C "$provider/29/project" rev-parse HEAD)" = "$before_head" ] \
+    || fail 'refused spawn moved the sibling clone copy'
+  assert_grep 'task=old-task' "$marker" 'refused spawn changed the sibling claim'
+  out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
+    bash "$ROOT/bin/fm-treehouse-pool-check.sh" "$HOME_DIR" "$PROJECT_DIR" "$CASE_DIR/refusal" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail 'pane preflight accepted the sibling clone marker'
+  assert_contains "$out" 'slot claim' 'pane preflight did not name the marker refusal'
+  pass 'provider pool markers from sibling clones block both allocation preflights'
+}
+
 # The spawn side of the slot-owner claim that bin/fm-teardown.sh later reads:
 # a launched task's claim names it, a slot that cannot be claimed refuses before
 # anything is published, and an abort while the allocation lock is still held
@@ -945,6 +1004,7 @@ test_scout_base_branch_refused_on_gerrit_forge() {
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
 test_pool_custody_refuses_before_refresh_or_claim
+test_provider_pool_marker_from_sibling_clone_blocks_allocation
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
 test_named_base_branch_starts_from_that_branch

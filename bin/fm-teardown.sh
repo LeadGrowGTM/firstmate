@@ -3701,14 +3701,46 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
     }
   done
   if [ "$KIND" = ship ]; then
-    retirement_run=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi status) || {
-      echo "REFUSED: stale claim's validation run state is unproven; nothing was changed" >&2
+    retirement_branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+      echo "REFUSED: stale claim's validation branch is unproven; nothing was changed" >&2
       exit 1
     }
-    if task_status_is_own_parked_run "$WT" "$retirement_run" 1; then
-      echo "REFUSED: no-mistakes run $TASK_RUN_ID for $ID is still active; nothing was changed" >&2
+    retirement_overview=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi) || {
+      echo "REFUSED: stale claim's validation run inventory is unproven; nothing was changed" >&2
       exit 1
-    fi
+    }
+    retirement_choice=$(fm_nm_select_run "$retirement_branch" "$retirement_overview" "$WT" "$NM_TEARDOWN_TIMEOUT")
+    case "$retirement_choice" in
+      absent) ;;
+      selected\|*)
+        IFS='|' read -r _ retirement_run_id retirement_run_status _ <<< "$retirement_choice"
+        retirement_run=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi status --run "$retirement_run_id") || {
+          echo "REFUSED: stale claim's selected validation run is unreadable; nothing was changed" >&2
+          exit 1
+        }
+        [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" id)")" = "$retirement_run_id" ] \
+          && [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" branch)")" = "$retirement_branch" ] \
+          && { [ "$(fm_nm_run_status_class "$retirement_run_status")" = live ] \
+            && fm_nm_run_is_active "$retirement_run" \
+            || [ "$(fm_nm_run_status_class "$retirement_run_status")" = terminal ] \
+            && ! fm_nm_run_is_active "$retirement_run"; } || {
+          echo "REFUSED: stale claim's selected validation run identity or state is unproven; nothing was changed" >&2
+          exit 1
+        }
+        if fm_nm_run_is_active "$retirement_run"; then
+          if task_status_is_own_parked_run "$WT" "$retirement_run" 1; then
+            echo "REFUSED: no-mistakes run $TASK_RUN_ID for $ID is still active; nothing was changed" >&2
+          else
+            echo "REFUSED: stale claim's active validation run attribution is unproven; nothing was changed" >&2
+          fi
+          exit 1
+        fi
+        ;;
+      *)
+        echo "REFUSED: stale claim's validation run inventory is unproven: $retirement_choice; nothing was changed" >&2
+        exit 1
+        ;;
+    esac
   fi
 fi
 require_exclusive_task_worktree_slot || exit 1

@@ -432,7 +432,7 @@ EOF
         printf 'unproven\ttmux process %s exists while no socket answers' "${tmux_pids[0]}"
         return 0
       fi
-      if ! rooted=$(fm_agent_worktree_processes "$worktree" "$spawn_gen"); then
+      if ! rooted=$(fm_agent_worktree_processes "$worktree"); then
         printf 'unproven\tprocess absence in the recorded worktree could not be proven'
       elif [ -n "$rooted" ]; then
         printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"

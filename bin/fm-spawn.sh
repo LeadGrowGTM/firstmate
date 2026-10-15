@@ -4151,56 +4151,46 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # session from a seat that is not in it would silently relocate the task
     # onto another herdr server - an identity change, published as a
     # self-consistent but wrong record.
-    if [ "$BACKEND" = tmux ]; then
-      SES=${RELAUNCH_TARGET%%:*}
-      if ! tmux has-session -t "=$SES" 2>/dev/null; then
-        tmux new-session -d -s "$SES" -n recovery -c "$PROJ_ABS" || exit 1
+    HERDR_REBIND_SES=${RELAUNCH_TARGET%%:*}
+    HERDR_CONTAINER_RAW=$(HERDR_PANE_ID="$RELAUNCH_LAUNCHER_PANE_ID" \
+      fm_backend_herdr_container_ensure "$PROJ_ABS" launcher-home "$HERDR_REBIND_SES") || {
+      # container_ensure returns 1 for several unrelated reasons - a failed
+      # version check, a server that will not start, an ambiguous workspace
+      # label, a cross-session launcher identity, a failed workspace create -
+      # and each already printed its own accurate message. Add only what this
+      # layer actually knows, and name the session mismatch solely when there
+      # IS one, rather than asserting a cause this condition cannot establish.
+      #
+      # A seat with NO herdr pane never reaches the cross-session guard at all:
+      # fm_backend_herdr_launcher_identity returns 2 for it and the placement
+      # falls back to the recorded session's labeled container, which is what
+      # makes a plain ssh or cron reclaim work. Its ambient session still reads
+      # `default` (fm_backend_herdr_session's fallback), so the inequality alone
+      # would fire for EVERY named-session task reclaimed from a plain shell and
+      # send the operator chasing a session mismatch that was never the cause.
+      HERDR_AMBIENT_SES=$(fm_backend_herdr_session)
+      if [ -n "$RELAUNCH_LAUNCHER_PANE_ID" ] && [ "$HERDR_AMBIENT_SES" != "$HERDR_REBIND_SES" ]; then
+        echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; this seat is running in herdr session '$HERDR_AMBIENT_SES', and a reclaim never moves a task to another session" >&2
+      else
+        echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; see the refusal above for what failed" >&2
       fi
-      T="$SES:$W"
-      WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
-      WT_TARGET=$WID
-    else
-      HERDR_REBIND_SES=${RELAUNCH_TARGET%%:*}
-      HERDR_CONTAINER_RAW=$(HERDR_PANE_ID="$RELAUNCH_LAUNCHER_PANE_ID" \
-        fm_backend_herdr_container_ensure "$PROJ_ABS" launcher-home "$HERDR_REBIND_SES") || {
-        # container_ensure returns 1 for several unrelated reasons - a failed
-        # version check, a server that will not start, an ambiguous workspace
-        # label, a cross-session launcher identity, a failed workspace create -
-        # and each already printed its own accurate message. Add only what this
-        # layer actually knows, and name the session mismatch solely when there
-        # IS one, rather than asserting a cause this condition cannot establish.
-        #
-        # A seat with NO herdr pane never reaches the cross-session guard at all:
-        # fm_backend_herdr_launcher_identity returns 2 for it and the placement
-        # falls back to the recorded session's labeled container, which is what
-        # makes a plain ssh or cron reclaim work. Its ambient session still reads
-        # `default` (fm_backend_herdr_session's fallback), so the inequality alone
-        # would fire for EVERY named-session task reclaimed from a plain shell and
-        # send the operator chasing a session mismatch that was never the cause.
-        HERDR_AMBIENT_SES=$(fm_backend_herdr_session)
-        if [ -n "$RELAUNCH_LAUNCHER_PANE_ID" ] && [ "$HERDR_AMBIENT_SES" != "$HERDR_REBIND_SES" ]; then
-          echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; this seat is running in herdr session '$HERDR_AMBIENT_SES', and a reclaim never moves a task to another session" >&2
-        else
-          echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; see the refusal above for what failed" >&2
-        fi
-        exit 1
-      }
-      CONTAINER=${HERDR_CONTAINER_RAW%%$'\t'*}
-      HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
-      HERDR_SES=${CONTAINER%%:*}
-      HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
-      read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
+      exit 1
+    }
+    CONTAINER=${HERDR_CONTAINER_RAW%%$'\t'*}
+    HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
+    HERDR_SES=${CONTAINER%%:*}
+    HERDR_WORKSPACE_ID=${CONTAINER#*:}
+    HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+    read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF
-      if [ -z "$HERDR_TAB_ID" ] || [ -z "$HERDR_PANE_ID" ]; then
-        echo "error: herdr did not return a tab/pane id for $W" >&2
-        exit 1
-      fi
-      T="$HERDR_SES:$HERDR_PANE_ID"
-      SES=$HERDR_SES
-      WT_TARGET=$T
+    if [ -z "$HERDR_TAB_ID" ] || [ -z "$HERDR_PANE_ID" ]; then
+      echo "error: herdr did not return a tab/pane id for $W" >&2
+      exit 1
     fi
+    T="$HERDR_SES:$HERDR_PANE_ID"
+    SES=$HERDR_SES
+    WT_TARGET=$T
   fi
 else
   case "$BACKEND" in

@@ -1900,7 +1900,7 @@ fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
 # selected copy is screened again by fm_worktree_custody_check before refresh.
 # An unreadable candidate inventory refuses rather than guessing the pool safe.
 fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [records]
-  local home=$1 project=$2 user=$3 pool='' state_dir meta field path processes inventory line known recorded
+  local home=$1 project=$2 user=$3 pool='' state_dir meta field path processes inventory line marker slot candidate
   # Before the pane enters Treehouse, scan this clone's existing pooled copies.
   # Inside the pane (or a durable lease), also validate the actual provider root.
   if [ "${4:-}" != records ]; then
@@ -1943,7 +1943,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
         else
           fm_treehouse_pool_slot "$project" "$path" || continue
         fi
-        processes=$(fm_agent_worktree_processes "$path" "$(fm_meta_get "$meta" spawn_gen)") || {
+        processes=$(fm_agent_worktree_processes "$path") || {
           printf 'REFUSED: cannot prove the recorded pool copy %s unavailable to allocation\n' "$path" >&2
           return 1
         }
@@ -1953,6 +1953,39 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
       done
     done
   done
+  if [ -n "$pool" ]; then
+    for marker in "$pool"/*/.fm-slot-owner; do
+      [ -e "$marker" ] || [ -L "$marker" ] || continue
+      [ -f "$marker" ] && [ ! -L "$marker" ] || {
+        printf 'REFUSED: pool copy has unreadable custody: %s\n' "$marker" >&2
+        return 1
+      }
+      slot=${marker%/.fm-slot-owner}
+      path=
+      for candidate in "$slot"/*; do
+        [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
+        path=$candidate
+        break
+      done
+      [ -n "$path" ] || {
+        printf 'REFUSED: pool slot %s has a claim but no readable copy\n' "$slot" >&2
+        return 1
+      }
+      fm_treehouse_slot_owner_state "$path" '' ''
+      [ "$FM_TREEHOUSE_SLOT_OWNER" = other ] || {
+        printf 'REFUSED: pool slot %s has unreadable custody\n' "$slot" >&2
+        return 1
+      }
+      processes=$(fm_agent_worktree_processes "$slot") || {
+        printf 'REFUSED: pool slot %s has a retained claim and unproven process state\n' "$slot" >&2
+        return 1
+      }
+      [ -n "$processes" ] && continue
+      printf 'REFUSED: idle pool slot %s still carries a slot claim; reconcile it before allocation\n' "$slot" >&2
+      return 1
+    done
+    return 0
+  fi
   # A surviving slot marker is a reservation even when its task record is no
   # longer reachable. Screen these before the provider can reset the copy.
   inventory=$(git -C "$project" worktree list --porcelain) || return 1
@@ -1970,18 +2003,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
       printf 'REFUSED: pool copy %s has unreadable custody; no allocation was attempted\n' "$path" >&2
       return 1
     }
-    # Reuse a reachable holder's timestamp rather than treating its unreadable
-    # pre-existing user services as possible task processes a second time.
-    known=
-    for recorded in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
-      [ "$recorded" -ef "$FM_TREEHOUSE_SLOT_OWNER_HOME/state" ] || continue
-      meta="$recorded/$FM_TREEHOUSE_SLOT_OWNER_ID.meta"
-      case "$FM_TREEHOUSE_SLOT_OWNER_ID" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
-      [ -f "$meta" ] && [ ! -L "$meta" ] || continue
-      known=$(fm_meta_get "$meta" spawn_gen)
-      [ -z "$known" ] || break
-    done
-    processes=$(fm_agent_worktree_processes "$path" "$known") || {
+    processes=$(fm_agent_worktree_processes "$path") || {
       printf 'REFUSED: pool copy %s has a retained slot claim and unproven process state\n' "$path" >&2
       return 1
     }

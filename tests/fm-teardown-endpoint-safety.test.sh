@@ -1453,6 +1453,7 @@ run_retire_claim() {  # <case> <id> [extra flags]
   shift 2
   FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
   FM_RUNTIME_LOG="$dir/runtime.log" FM_TEST_RUN_STATUS="$dir/run.status" \
+  FM_TEST_RUN_OVERVIEW="$dir/run.overview" FM_TEST_GLOBAL_STATUS="$dir/global.status" \
   FM_TEST_REAL_PS="$(command -v ps)" FM_TEST_PROCESS_PIDS="$dir/process-pids" PATH="$dir/fakebin:$PATH" \
     "$TEARDOWN" "$id" --retire-claim "$@"
 }
@@ -1472,9 +1473,28 @@ make_retire_claim_case() {  # <name> <id>
   git -C "$dir/worktree" config --local core.hooksPath "$dir/worktree/.git-hooks"
   cat > "$dir/fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
-[ "$#" -eq 2 ] && [ "$1" = axi ] && [ "$2" = status ] || exit 1
-printf 'no-mistakes <%s> <%s>\n' "$1" "$2" >> "$FM_RUNTIME_LOG"
-[ ! -f "$FM_TEST_RUN_STATUS" ] || cat "$FM_TEST_RUN_STATUS"
+printf 'no-mistakes <%s> <%s> <%s> <%s>\n' "${1:-}" "${2:-}" "${3:-}" "${4:-}" >> "$FM_RUNTIME_LOG"
+case "$*" in
+  axi)
+    if [ -f "$FM_TEST_RUN_OVERVIEW" ]; then cat "$FM_TEST_RUN_OVERVIEW"; exit; fi
+    printf 'repo: %s\n' "$PWD"
+    if [ ! -f "$FM_TEST_RUN_STATUS" ]; then
+      printf 'count: 0 of 0 total\nruns[0]{id,branch,status,head,pr}:\n'
+      exit
+    fi
+    printf 'count: 1 of 1 total\nruns[1]{id,branch,status,head,pr}:\n'
+    printf '  %s,%s,%s,%s,\n' \
+      "$(sed -n 's/^id: //p' "$FM_TEST_RUN_STATUS")" \
+      "$(sed -n 's/^branch: //p' "$FM_TEST_RUN_STATUS")" \
+      "$(sed -n 's/^status: //p' "$FM_TEST_RUN_STATUS" | sed 's/^fixing$/running/')" \
+      "$(sed -n 's/^head: //p' "$FM_TEST_RUN_STATUS")"
+    ;;
+  'axi status --run run-fixture') cat "$FM_TEST_RUN_STATUS" ;;
+  'axi status')
+    if [ -f "$FM_TEST_GLOBAL_STATUS" ]; then cat "$FM_TEST_GLOBAL_STATUS"; else cat "$FM_TEST_RUN_STATUS"; fi
+    ;;
+  *) exit 1 ;;
+esac
 SH
   chmod +x "$dir/fakebin/no-mistakes"
   cat > "$dir/fakebin/ps" <<'SH'
@@ -1624,8 +1644,14 @@ test_retire_claim_refuses_attributable_validation_runs() {
     "$id" "$head" > "$dir/run.status"
   assert_retire_refused_unchanged "$dir" "$id" "parked validation run"
   assert_no_grep 'no-mistakes <axi> <abort>' "$dir/runtime.log" "retirement administered the parked run"
-  printf 'id: run-fixture\nbranch: fm/%s\nhead: unknown\nstatus: fixing\nbranch_sync:\n  state: pipeline_owned\n' \
+  printf 'id: unrelated\nbranch: other-branch\nhead: %s\nstatus: completed\noutcome: passed\n' \
+    "$head" > "$dir/global.status"
+  printf 'repo: %s\ncount: 2 of 2 total\nruns[2]{id,branch,status,head,pr}:\n  unrelated,other-branch,completed,%s,\n  run-fixture,fm/%s,running,%s,\n' \
+    "$dir/project" "$head" "$id" "$head" > "$dir/run.overview"
+  assert_retire_refused_unchanged "$dir" "$id" "own parked run behind another branch's latest run"
+  printf 'id: run-fixture\nbranch: fm/%s\nhead: deadbeef\nstatus: fixing\nbranch_sync:\n  state: pipeline_owned\n' \
     "$id" > "$dir/run.status"
+  rm "$dir/run.overview"
   assert_retire_refused_unchanged "$dir" "$id" "active pipeline-owned validation run"
   assert_no_grep 'no-mistakes <axi> <abort>' "$dir/runtime.log" "retirement administered the active run"
   printf 'id: run-fixture\nbranch: fm/%s\nhead: %s\nstatus: completed\noutcome: passed\n' \
