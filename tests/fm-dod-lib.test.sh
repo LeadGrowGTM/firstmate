@@ -10,6 +10,7 @@ set -u
 . "$ROOT/bin/fm-dod-lib.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-dod-lib)
+PROMOTION_SCOPE=(--goal 'Ship the change.' --off-limits 'Unrelated files.' --contracts 'none')
 fm_git_identity fmtest fmtest@example.invalid
 
 accept_done() {  # <kind> <mode> <worktree> <project> <line> [<state> <id> <meta>]
@@ -356,7 +357,7 @@ Captain: This fenced example must not become intent.
 # Setup
 This is a SCOUT task: the deliverable is a written report, not a PR.
 EOF
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode direct-PR --yolo off 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion whose only Captain lines are fenced or indented examples should fail"
   assert_contains "$out" "has no provenance-marked Captain's intent" \
@@ -404,7 +405,7 @@ Reproduce it first.
 You are in a disposable git worktree of proj, at a detached HEAD on a clean copy of its base branch.
 Base branch: feature/hub
 EOF
-    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode "$mode" --yolo off 2>&1)
+    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode "$mode" --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
     status=$?
     if [ "$mode" = direct-PR ]; then
       expect_code 0 "$status" "promoting a scout with a recorded base should succeed"$'\n'"$out"
