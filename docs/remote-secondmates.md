@@ -561,7 +561,7 @@ The check reads Boat and reports; it never stops a sandbox.
 
 An explicitly Boat-selected ship or scout can use [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) through a purpose-built `boat-eng` remote route.
 Firstmate still labels and selects work at intake; the sender does not evaluate routing policy or choose a model profile.
-The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, refusal behavior, and transport recovery commands in their headers and `--help`.
+The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, and refusal behavior in their headers and `--help`; an unconfirmed-start refusal prints the same-task recovery commands.
 
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
@@ -578,7 +578,7 @@ The box generates its own normal worker brief and operational paths, allocates i
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
-Ships also require `gh-axi` installed on the box; installing that developer tool is allowed under R6, while credential setup remains a separate operation.
+Ships require `gh-axi` installed on the box; GitHub credential setup remains a separate operation.
 The sender supplies the effective Git commit name and email from the controller's firstmate project for every ship and scout, and the worker applies it only to that worker's isolated worktree.
 Boat worktree pools live only on the box, every worker there receives that controller identity and overwrites a reused slot before launch, and PC pools never host Boat workers.
 Boat ship PR delivery waits for a separate provisioning follow-up: the box must receive GitHub authentication from Infisical through a Boat-provisioned machine identity, never from this PC.
