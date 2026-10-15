@@ -215,11 +215,6 @@ fm_ship_rule_one() {  # <no-mistakes|direct-PR|local-only> <task-id> [branch] [<
   esac
 }
 
-# Return 0 when a Task subsection still holds an unfilled scaffold placeholder:
-# an intent that is only `{TASK}`, or a spec line that is only `{FIRSTMATE_SPEC}`,
-# `Goal: {GOAL}`, or `Off-limits: {OFF_LIMITS}`, or that ends in `{CONTRACTS}`.
-# A missing file and legacy
-# briefs carry no such placeholders.
 fm_brief_task_placeholders_present() {  # <file>
   local file=$1 intent spec
   [ -f "$file" ] || return 1
@@ -227,8 +222,47 @@ fm_brief_task_placeholders_present() {  # <file>
   spec=$(fm_brief_task_heading_body "$file" "## Firstmate spec")
   [ "$(printf '%s' "$intent" | tr -d '[:space:]')" = '{TASK}' ] && return 0
   printf '%s\n' "$spec" | awk '
-    { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
-    $0 == "{FIRSTMATE_SPEC}" || $0 == "Goal: {GOAL}" || $0 == "Off-limits: {OFF_LIMITS}" || $0 ~ /[{]CONTRACTS[}]$/ { found = 1 }
+    {
+      scan = $0
+      spaces = 0
+      while (spaces < 3 && substr(scan, 1, 1) == " ") {
+        scan = substr(scan, 2)
+        spaces++
+      }
+      marker = substr(scan, 1, 1)
+      marker_len = 0
+      if (marker == "`" || marker == "~") {
+        while (substr(scan, marker_len + 1, 1) == marker) marker_len++
+      }
+      if (marker_len >= 3) {
+        if (!fenced) {
+          fenced = 1
+          fence_marker = marker
+          fence_len = marker_len
+        } else if (marker == fence_marker && marker_len >= fence_len && substr(scan, marker_len + 1) ~ /^[[:space:]]*$/) {
+          fenced = 0
+        }
+        next
+      }
+      if (fenced || $0 ~ /^(    |\t)/) next
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", scan)
+      if (scan == "") next
+      if (scan ~ /^Goal:/) {
+        if (!goal_seen++ && scan == "Goal: {GOAL}") found = 1
+        next
+      }
+      if (scan ~ /^Off-limits:/) {
+        if (!off_seen++ && scan == "Off-limits: {OFF_LIMITS}") found = 1
+        next
+      }
+      if (index(scan, "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): ") == 1) {
+        if (!contracts_seen++ && scan == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}") found = 1
+        next
+      }
+      if (!spec_seen++) {
+        if (scan == "{FIRSTMATE_SPEC}") found = 1
+      }
+    }
     END { exit !found }
   '
 }
@@ -240,7 +274,7 @@ fm_prove_it_clause() {  # <ship|scout> <where the evidence goes>
   if [ "$1" = scout ]; then
     printf '%s' "proven for real: run the actual existing system, reproduction, or commands your findings rest on, and put the commands you ran and their output in $2."
   else
-    printf '%s' "proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in $2."
+    printf '%s' "proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in $2. The proof must cover the final HEAD; rerun it after any code or pipeline fix."
   fi
 }
 
@@ -410,6 +444,7 @@ Publish from this copy with \`gerrit-axi\`, never with \`git push\`:
    Never pass \`--stack\`: a stack of changes is not published from this fleet until it can be watched by its membership pinned when its watch is armed, and the watch follows exactly one change.
 3. Read the record it prints: \`ok\` must be \`true\`, and the one row of its \`changes\` table is your change. Its \`url\` is the change URL; when \`url\` is null, write \`https://<host>/c/<project>/+/<change>\` from your \`origin\` remote's host and that row's \`project\` and \`change\`.
    A failure prints a typed error record instead; fix what it names and publish again, which updates the same change rather than creating another.
+After publishing, rerun the actual thing end to end on this copy's published HEAD and replace $1 with that HEAD from \`git rev-parse HEAD\`, the commands you ran, and their output before the final ready report.
 Then append \`done [at=<epoch>]: PR {change url} published for review\` to the status file and stop. You are finished.
 That \`done:\` is accepted only when the change's current patch set on the server carries this copy's HEAD tree, so commit nothing after publishing; if you must change the work, commit it and publish again before reporting done.
 A \`done:\` whose URL is not the canonical \`https://<host>/c/<project>/+/<number>\` change URL is refused.
@@ -419,8 +454,9 @@ EOF
 
 fm_dod_block() {  # <mode> <task-id> [branch] [<forge>] [<base>]
   local mode=$1 id=$2 forge=${4:-none} base=${5:-}
-  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove
-  prove=$(fm_prove_it_clause ship "\`${FM_HOME:-.}/data/$id/proof.md\`")
+  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove proof_path
+  proof_path="\`${FM_HOME:-.}/data/$id/proof.md\`"
+  prove=$(fm_prove_it_clause ship "$proof_path")
   fm_forge_valid_for_mode "$forge" "$mode" fm_dod_block || return 1
   fm_base_branch_valid "$base" "$mode" "$forge" fm_dod_block || return 1
   if [ -n "$base" ]; then
@@ -440,7 +476,7 @@ Gerrit has no pull requests, so there is nothing to open; publishing creates the
 The task is complete only when committed on your branch and $prove
 When it is implemented and committed, publish it.
 EOF
-      fm_gerrit_publish_block
+      fm_gerrit_publish_block "$proof_path"
       cat <<EOF
 Do NOT run /no-mistakes.
 EOF
@@ -475,7 +511,7 @@ When the run's outcome is passed, passed-with-skips, or passed-with-override and
 The squashed change carries only the oldest commit's message, so the pipeline's own fix commits never reach the reviewer's description; your report is how they reach the captain.
 After publishing and immediately before your ready report, append one line \`note [at=<epoch>]: pipeline changes: {finding} - {fix it made}; {finding} - {fix it made}\` to the status file, one short clause per finding the run fixed, taken from the run's \`fixes\` table and the gate findings its drive calls returned (\`no-mistakes axi logs --step <step> --full\` has the detail); write \`note [at=<epoch>]: pipeline changes: none\` when it fixed nothing.
 EOF
-      fm_gerrit_publish_block
+      fm_gerrit_publish_block "$proof_path"
       ;;
     direct-PR:*)
       cat <<EOF
@@ -521,7 +557,8 @@ EOF
       fm_nm_driving_block "$forge"
       cat <<EOF
 
-After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
+After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), rerun the actual thing end to end on this copy's final HEAD and replace $proof_path with that HEAD from \`git rev-parse HEAD\`, the commands you ran, and their output before the final ready report.
+Read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
 Then append \`done [at=<epoch>]: PR {url} checks green\` and stop. You are finished.
 That CI-ready \`done:\` is accepted only when this copy's HEAD - your latest commit - is one the /no-mistakes run pushed, so commit nothing after the run; the check tests that commit, not merely that a branch moved.

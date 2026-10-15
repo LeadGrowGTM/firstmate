@@ -1675,6 +1675,56 @@ EOF
   pass "fm-project-mode: --branch-prefix resolves order-independently and defaults to the legacy fm/ prefix"
 }
 
+test_placeholder_examples_do_not_block_delivery() {
+  local rec home proj fakebin id out meta
+  rec=$(make_home placeholder-examples)
+  IFS='|' read -r home proj fakebin <<EOF
+$rec
+EOF
+  for id in example-ship example-scout; do
+    mkdir -p "$home/data/$id"
+    cat > "$home/data/$id/brief.md" <<'EOF'
+# Task
+## Captain's intent
+Ship the example-safe change.
+
+## Firstmate spec
+Goal: Ship the example-safe change.
+Implement the requested behavior.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+
+~~~text
+Goal: {GOAL}
+{FIRSTMATE_SPEC}
+Off-limits: {OFF_LIMITS}
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
+~~~
+    Goal: {GOAL}
+    {FIRSTMATE_SPEC}
+    Off-limits: {OFF_LIMITS}
+    Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
+Goal: {GOAL}
+{FIRSTMATE_SPEC}
+Off-limits: {OFF_LIMITS}
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
+EOF
+  done
+  printf '# Definition of done\nDelivery contract: mode=direct-PR\n' >> "$home/data/example-ship/brief.md"
+  out=$(run_spawn "$home" "$fakebin" example-ship "$proj" claude --mode direct-PR --yolo off)
+  assert_not_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
+    "spawn rejected examples in a filled ship spec"
+  assert_present "$home/data/example-ship/launch-brief.md" "spawn did not render the example-safe ship brief"
+
+  meta="$home/state/example-scout.meta"
+  printf 'window=fm-example-scout\nkind=scout\nworktree=/tmp/wt\n' > "$meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" example-scout \
+    --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
+  assert_contains "$out" 'promoted example-scout to ship' "promotion rejected examples in a filled scout spec"
+  assert_grep 'kind=ship' "$meta" "example-safe scout did not promote"
+  pass "fm-spawn/fm-promote: examples do not masquerade as unfilled scaffold fields"
+}
+
 test_ship_spawn_requires_a_valid_delivery_contract
 test_scout_and_secondmate_refuse_delivery_flags
 test_spawn_refuses_a_brief_mode_mismatch
@@ -1700,5 +1750,6 @@ test_spawn_notices_a_ship_branch_against_the_registry_prefix
 test_spawn_refuses_a_registry_forge_it_cannot_read
 test_promotion_carries_the_forge_binding
 test_spawn_and_promote_require_filled_task_subsections
+test_placeholder_examples_do_not_block_delivery
 test_project_mode_resolves_branch_prefix
 echo "# all fm-task-delivery tests passed"

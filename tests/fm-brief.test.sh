@@ -1815,6 +1815,8 @@ test_briefs_are_bounded_and_demand_real_proof() {
     else
       assert_grep "proven for real: run the actual thing end to end as its user would, not only its tests" "$brief" \
         "$mode: the Definition of done does not demand a real run"
+      assert_grep 'The proof must cover the final HEAD; rerun it after any code or pipeline fix.' "$brief" \
+        "$mode: the proof could be stale after a change"
     fi
   done
   for mode in no-mistakes direct-PR local-only; do
@@ -1829,6 +1831,12 @@ test_briefs_are_bounded_and_demand_real_proof() {
     assert_grep "and their output in \`$home/data/bp-gerrit-$mode/proof.md\`." "$home/data/bp-gerrit-$mode/brief.md" \
       "$mode Gerrit: the ship proof has no durable destination"
   done
+  assert_grep "After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), rerun the actual thing end to end on this copy's final HEAD and replace \`$home/data/bp-no-mistakes/proof.md\`" \
+    "$home/data/bp-no-mistakes/brief.md" "no-mistakes PR: final proof can predate a fix round"
+  assert_grep "After publishing, rerun the actual thing end to end on this copy's published HEAD and replace \`$home/data/bp-gerrit-no-mistakes/proof.md\`" \
+    "$home/data/bp-gerrit-no-mistakes/brief.md" "no-mistakes Gerrit: final proof can predate a fix round"
+  assert_grep "After publishing, rerun the actual thing end to end on this copy's published HEAD and replace \`$home/data/bp-gerrit-direct-PR/proof.md\`" \
+    "$home/data/bp-gerrit-direct-PR/brief.md" "direct-PR Gerrit: final proof can predate the publish rewrite"
   assert_grep "and their output in the report." "$home/data/bp-scout/brief.md" "scout: the proof is not put in the report"
   assert_grep 'Do NOT push, do NOT open a PR, do NOT merge.' "$home/data/bp-local-only/brief.md" \
     "local-only: the no-push rule was lost"
