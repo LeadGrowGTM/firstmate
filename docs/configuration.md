@@ -1526,7 +1526,7 @@ This single-provider table is separate from the frozen legacy mapping used by `f
 - Except for `ultra`, which refuses unsupported profiles under the native-effort contract above, an effort value the chosen harness does not accept is recorded as `effort=` in task meta for traceability but omitted from the launch flags.
 - Bootstrap reports unsupported harness/model/effort combinations as a `CREW_DISPATCH` diagnostic when they are visible in the file.
 
-Spawn records the uniquely selected profile set as JSON-encoded `dispatch_rule`, its optional `reasoning_class` and `dispatch_provider`, and the JSON-encoded `fallback_reason` in task metadata.
+Spawn records the uniquely selected profile set as JSON-encoded `dispatch_rule` (`{"rule":"rule_1"}` for the first rule or `{"default":true}`), its optional `reasoning_class` and `dispatch_provider`, and the JSON-encoded `fallback_reason` in task metadata.
 An ambiguous set requires an explicit selector at intake; scripts never choose among natural-language rules.
 An explicit profile outside the configuration remains an intake override, with no recorded rule authorizing subsequent fallback.
 Ship and scout relaunches preserve the recorded model and effort when omitted, including direct spawn relaunches, and preserve the chosen class and fallback rationale on an unchanged profile.

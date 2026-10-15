@@ -490,7 +490,7 @@ RESULT=$(jq -n --arg floor "$CONFIDENCE_FLOOR" --argjson lat "$LAT_MS" --arg non
       ([$elig[] | select(.spendPriority == $best.spendPriority)] | length) as $ties |
       if $ties > 1 then $ev + {status: "escalate", reason: "genuine spendPriority tie", note: $sel.note, candidates: $cands}
       else $ev + {status: "clear", note: $sel.note, candidates: $cands, chosen: $best,
-        dispatch_rule:(if $sel.source == "default" then {default:true} else {when:rule_at($sel.source).when} end)}
+        dispatch_rule:(if $sel.source == "default" then {default:true} else {rule:$sel.source} end)}
         + (if ($unranked | length) > 0 then
              {unranked_note: "\($unranked | length) eligible candidate(s) unranked (\([$unranked[].provider] | unique | join(", ")))"}
            else {} end)

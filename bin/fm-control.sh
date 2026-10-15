@@ -1264,7 +1264,7 @@ do_relaunch() {
   RELAUNCH_TX="${BASHPID:-$$}.$(date -u +%Y%m%dT%H%M%SZ).$RANDOM"
   journal_write launching "${CHECKPOINT_LINES[@]}" "$note_line" "relaunch_tx=$RELAUNCH_TX"
   spawn_args=("$ID" --relaunch --harness "$TARGET_HARNESS" --model "$TARGET_MODEL" --effort "$TARGET_EFFORT")
-  [ -z "$NOTE" ] || spawn_args+=(--fallback-reason "$NOTE")
+  [ -z "$NOTE" ] || spawn_args+=("--fallback-reason=$NOTE")
   local child_outcome=
   if [ -n "$FM_LAUNCH_OUTCOME_FILE" ]; then
     child_outcome="$STATE/.${ID}.${RELAUNCH_TX}.outcome.json"

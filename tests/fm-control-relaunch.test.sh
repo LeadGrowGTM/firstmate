@@ -874,7 +874,7 @@ test_fallback_policy_changes() {
     sed 's/^model=default$/model=gpt-6.1-sol/; s/^effort=default$/effort=xhigh/' "$dir/home/state/$id.meta" > "$dir/meta.tmp"
     mv "$dir/meta.tmp" "$dir/home/state/$id.meta"
     if [ "$variant" != ambiguous-legacy ]; then
-      printf '%s\n' 'dispatch_rule={"when":"hard tasks"}' >> "$dir/home/state/$id.meta"
+      printf '%s\n' 'dispatch_rule={"rule":"rule_1"}' >> "$dir/home/state/$id.meta"
     fi
     [ "$variant" != reclassified ] || printf '%s\n' reasoning_class=strong >> "$dir/home/state/$id.meta"
     case "$variant" in
@@ -927,7 +927,7 @@ test_configured_equivalent_fallback_records_realized_profile_and_reason() {
   printf codex > "$dir/fake/becomes"
   out=$(run_control "$dir" rl-equivalent relaunch --harness codex --model gpt-6.1-sol --effort high --note "$reason"); rc=$?
   expect_code 0 "$rc" "declared equivalent fallback should succeed"$'\n'"$out"
-  [ "$(meta_field "$dir" rl-equivalent dispatch_rule)" = '{"when":"hard tasks"}' ] || fail "fallback lost its rule"
+  [ "$(meta_field "$dir" rl-equivalent dispatch_rule)" = '{"rule":"rule_1"}' ] || fail "fallback lost its rule"
   [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "fallback lost its chosen class"
   [ "$(meta_field "$dir" rl-equivalent dispatch_provider)" = codex ] || fail "fallback lost provider"
   [ "$(meta_field "$dir" rl-equivalent harness)" = codex ] || fail "fallback lost realized harness"
@@ -942,6 +942,28 @@ test_configured_equivalent_fallback_records_realized_profile_and_reason() {
   [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "unchanged relaunch lost its class"
   [ "$(meta_field "$dir" rl-equivalent fallback_reason | jq -r .)" = "$reason" ] || fail "unchanged relaunch replaced the fallback reason with its progress note"
   pass "declared equivalent fallback records the rule, class, realized profile, provider and reason"
+}
+
+test_leading_option_relaunch_notes_reach_replacement() {
+  local dir id out rc note variant
+  for variant in option markdown; do
+    id="rl-leading-note-$variant"
+    dir=$(new_case "$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    if [ "$variant" = option ]; then
+      note='--quota exhausted'
+      out=$(run_control "$dir" "$id" relaunch "--note=$note"); rc=$?
+    else
+      note=$'---\nContinue from the checkpoint.'
+      printf '%s\n' "$note" > "$dir/note.md"
+      out=$(run_control "$dir" "$id" relaunch --note-file "$dir/note.md"); rc=$?
+    fi
+    expect_code 0 "$rc" "$variant note should reach the replacement"$'\n'"$out"
+    [ "$(meta_field "$dir" "$id" fallback_reason | jq -r .)" = "$note" ] || fail "$variant note changed in the replacement receipt"
+    assert_grep '/exit' "$dir/fake/literal" "$variant note did not stop the prior worker"
+    assert_grep 'Firstmate operational input waiting: read' "$dir/fake/literal" "$variant note did not launch the replacement"
+  done
+  pass "leading-option and Markdown relaunch notes reach the replacement"
 }
 
 test_explicit_default_clears_same_harness_profile() {
@@ -3249,6 +3271,7 @@ test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop
 test_fallback_policy_changes
 test_configured_fallback_refuses_an_omitted_effort_before_stop
 test_configured_equivalent_fallback_records_realized_profile_and_reason
+test_leading_option_relaunch_notes_reach_replacement
 test_explicit_default_clears_same_harness_profile
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop
 test_signed_out_worker_account_pin_refuses_before_stop

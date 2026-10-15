@@ -1742,7 +1742,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ -z "$MODEL" ] || shared_args+=(--model "$MODEL")
   [ -z "$EFFORT" ] || shared_args+=(--effort "$EFFORT")
   [ -z "$DISPATCH_RULE" ] || shared_args+=(--dispatch-rule "$DISPATCH_RULE")
-  [ -z "$FALLBACK_REASON" ] || shared_args+=(--fallback-reason "$FALLBACK_REASON")
+  [ -z "$FALLBACK_REASON" ] || shared_args+=("--fallback-reason=$FALLBACK_REASON")
   [ -z "$BACKEND_ARG" ] || shared_args+=(--backend "$BACKEND_ARG")
   # One delivery contract applies to every pair in a batch, exactly like the shared
   # harness. Each pair still re-validates it against its own brief, so a batch

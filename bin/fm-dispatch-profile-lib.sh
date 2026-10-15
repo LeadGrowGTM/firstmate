@@ -69,7 +69,9 @@ fm_dispatch_profile_check() {
     def safe_provider: if (.provider | type) == "string" and (.provider | test($provider_re)) then .provider else "" end;
     (if $rule == "" then null else ($rule | fromjson) end) as $selected_rule |
     if type != "object" or ((.rules // []) | type) != "array" then error("malformed dispatch configuration") else . end |
-    [(.rules // [])[] | if type != "object" or (.when | type) != "string" or (.when | length) == 0 then error("rule needs when and use") else {key:{when:.when}, items:(.use | profiles)} end]
+    [(.rules // []) | to_entries[] | . as $entry | $entry.value |
+      if type != "object" or (.when | type) != "string" or (.when | length) == 0 then error("rule needs when and use")
+      else {key:{rule:("rule_" + (($entry.key + 1) | tostring))}, items:(.use | profiles)} end]
     + (if has("default") then [{key:{default:true},items:(.default | profiles)}] else [] end) as $groups |
     if any($groups[]; (.items | length) == 0) or any($groups[].items[];
       type != "object" or (.harness | type) != "string" or (.harness | length) == 0

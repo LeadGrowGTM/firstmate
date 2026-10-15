@@ -98,15 +98,63 @@ test_selected_dispatch_rule_and_class_are_recorded() {
   expect_code 1 "$status" "plain rule text is not a rule key"
   assert_absent "$HOME_DIR/state/$id.meta" "plain rule text should not publish metadata"
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
-    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh --dispatch-rule '{"when":"hard tasks"}' --fallback-reason "$reason")
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh --dispatch-rule '{"when":"hard tasks"}')
+  status=$?
+  expect_code 1 "$status" "condition text is not a rule key"
+  assert_absent "$HOME_DIR/state/$id.meta" "condition text should not publish metadata"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh --dispatch-rule '{"rule":"rule_1"}' --fallback-reason "$reason")
   status=$?
   expect_code 0 "$status" "selected rule should launch"$'\n'"$out"
-  assert_grep 'dispatch_rule={"when":"hard tasks"}' "$HOME_DIR/state/$id.meta" "selected rule missing"
+  assert_grep 'dispatch_rule={"rule":"rule_1"}' "$HOME_DIR/state/$id.meta" "selected rule missing"
   assert_grep 'reasoning_class=strong' "$HOME_DIR/state/$id.meta" "selected class missing"
   assert_grep 'realized_model=gpt-6.1-sol' "$HOME_DIR/state/$id.meta" "realized model missing"
   assert_grep 'realized_effort=xhigh' "$HOME_DIR/state/$id.meta" "realized effort missing"
   [ "$(sed -n 's/^fallback_reason=//p' "$HOME_DIR/state/$id.meta" | jq -r .)" = "$reason" ] || fail "reason did not survive JSON encoding"
   pass "intake records the explicitly selected rule, class, provider and realized axes"
+}
+
+test_resolver_selected_duplicate_condition_launches() {
+  local rec id resolved profile status out
+  id=profile-duplicate-condition
+  rec=$(make_spawn_case profile-duplicate-condition codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"same condition","use":{"harness":"codex","model":"gpt-6-sol","effort":"high"}},{"when":"same condition","use":{"harness":"codex","model":"gpt-6.1-sol","effort":"high"}}]}' > "$HOME_DIR/config/crew-dispatch.json"
+  printf '%s\n' '# Task' 'Use the second matching rule.' > "$CASE_DIR/brief.md"
+  printf '%s\n' '{"model":"jev-latest","answers":{"rule":{"type":"choice","choice":"rule_2","confidence":0.9,"probabilities":{"rule_1":0.05,"rule_2":0.9,"default":0.05}}},"usage":{"input_tokens":20,"output_tokens":10}}' > "$CASE_DIR/response.json"
+  printf '%s\n' '{"generatedAt":"2030-01-01T00:00:00Z","schemaVersion":5,"providers":[{"provider":"codex","state":{"status":"fresh"},"quotaSemantics":{"status":"known","effectiveAvailability":[{"scope":"all_models","status":"known","effectivePercentRemaining":60,"runway":{"status":"through_reset"},"selection":{"spendPriority":0.8}}]}}]}' > "$CASE_DIR/quota.json"
+  cat > "$FAKEBIN_DIR/curl" <<'SH'
+#!/usr/bin/env bash
+out=
+while [ $# -gt 0 ]; do
+  case "$1" in -o) out=$2; shift 2 ;; *) shift ;; esac
+done
+cat >/dev/null
+cp "$FM_FAKE_DISPATCH_RESPONSE" "$out"
+printf 200
+SH
+  cat > "$FAKEBIN_DIR/quota-axi" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = --json ] || exit 2
+cat "$FM_FAKE_DISPATCH_QUOTA"
+SH
+  chmod +x "$FAKEBIN_DIR/curl" "$FAKEBIN_DIR/quota-axi"
+  fm_fake_exit0 "$FAKEBIN_DIR" codex
+  resolved=$(FM_HOME="$HOME_DIR" FM_CONFIG_OVERRIDE="$HOME_DIR/config" TYPESAFE_API_KEY=synthetic \
+    FM_FAKE_DISPATCH_RESPONSE="$CASE_DIR/response.json" FM_FAKE_DISPATCH_QUOTA="$CASE_DIR/quota.json" \
+    PATH="$FAKEBIN_DIR:$PATH" "$ROOT/bin/fm-dispatch-resolve.sh" "$CASE_DIR/brief.md" 2>&1)
+  status=$?
+  expect_code 0 "$status" "duplicate-condition resolution should succeed"$'\n'"$resolved"
+  assert_contains "$resolved" '  status: clear' "resolver did not select a rule"
+  profile=$(printf '%s\n' "$resolved" | sed -n 's/^  profile: //p')
+  [ -n "$profile" ] || fail "resolver did not emit a spawn profile"
+  eval "set -- $profile"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$@")
+  status=$?
+  expect_code 0 "$status" "resolver-selected duplicate condition should launch"$'\n'"$out"
+  assert_grep 'dispatch_rule={"rule":"rule_2"}' "$HOME_DIR/state/$id.meta" "spawn recorded the wrong duplicate condition"
+  assert_grep 'model=gpt-6.1-sol' "$HOME_DIR/state/$id.meta" "spawn used the other matching rule"
+  pass "resolver-selected rule launches with duplicate condition text"
 }
 
 test_unrealizable_reasoning_class_refuses_before_launch() {
@@ -1562,6 +1610,23 @@ test_batch_forwards_shared_profile_flags() {
   pass "batch dispatch forwards shared --harness, --model, and --effort to every pair"
 }
 
+test_batch_forwards_leading_option_fallback_reason() {
+  local rec id1 id2 out status id reason='--quota exhausted'
+  id1=profile-batch-reason-a
+  id2=profile-batch-reason-b
+  rec=$(make_spawn_case profile-batch-reason codex "$id1" "$id2")
+  read_case_record "$rec"
+  printf '%s\n' '{"default":{"harness":"codex","model":"gpt-6.1-sol","effort":"high"}}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id1=$PROJ_DIR" "$id2=$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort high "--fallback-reason=$reason")
+  status=$?
+  expect_code 0 "$status" "batch fallback reason should reach each task"$'\n'"$out"
+  for id in "$id1" "$id2"; do
+    [ "$(sed -n 's/^fallback_reason=//p' "$HOME_DIR/state/$id.meta" | jq -r .)" = "$reason" ] || fail "$id lost the batch fallback reason"
+  done
+  pass "batch dispatch forwards leading-option fallback reasons"
+}
+
 test_claude_forwards_firstmate_config_dir_when_set() {
   local rec id out status launch
   id=profile-claude-cfgdir-z17
@@ -2748,6 +2813,7 @@ SH
 
 test_worker_launch_delivers_role_scope
 test_selected_dispatch_rule_and_class_are_recorded
+test_resolver_selected_duplicate_condition_launches
 test_unrealizable_reasoning_class_refuses_before_launch
 test_invalid_dispatch_receipt_fields_refuse_before_launch
 test_non_typed_provider_hints_do_not_block_spawn_or_inject_metadata
@@ -2804,6 +2870,7 @@ test_pi_exclude_tools_malformed_entry_refuses_before_endpoint
 test_pi_exclude_tools_read_failure_refuses_before_launch
 test_pi_exclude_tools_do_not_leak_across_homes_or_to_secondmates
 test_batch_forwards_shared_profile_flags
+test_batch_forwards_leading_option_fallback_reason
 test_claude_forwards_firstmate_config_dir_when_set
 test_lavish_server_address_is_exported_to_worker_launch
 test_lavish_absent_config_preserves_destination_ambient
