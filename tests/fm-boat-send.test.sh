@@ -25,6 +25,23 @@ cat > "$BIN/fm-backend.sh" <<'SH'
 fm_backend_name() { cat "$FM_HOME/config/backend"; }
 fm_backend_source() { [ "$1" = tmux ]; }
 fm_backend_of_meta() { sed -n 's/^backend=//p' "$1" | awk 'NR==1 { found=1; print } END { if (!found) print "tmux" }'; }
+fm_backend_tmux_visible_capture() {
+  printf 'capture %s\n' "$1" >> "$FIXTURES/calls"
+  [ ! -e "$FIXTURES/capture.fail" ] || return 1
+  if [ -e "$FIXTURES/trust" ]; then
+    printf 'Do you trust the contents of this directory?\n\n› 1. Yes, I trust this folder\n  2. No, exit\n'
+  elif [ -e "$FIXTURES/quoted-trust" ]; then
+    printf 'FIRSTMATE_OP: v1 launch-brief: Fix the \"Trust this folder?\" prompt\nDo you trust the contents of this directory?\n› 1. Yes, I trust this folder\n  2. No, exit\n'
+  elif [ -e "$FIXTURES/negative-trust" ]; then
+    printf 'Do you trust the contents of this directory?\n  1. Yes, I trust this folder\n› 2. No, exit\n'
+  else printf 'Worker running\n'; fi
+}
+fm_backend_tmux_send_key() {
+  printf 'key %s\n' "$*" >> "$FIXTURES/calls"
+  [ ! -e "$FIXTURES/trust.stuck" ] || return 0
+  rm -f "$FIXTURES/trust"
+  printf 'working [at=1791892800]: brief consumed\n' >> "$FM_HOME/state/task-one.status"
+}
 fm_backend_tmux_window_inventory() {
   printf 'inventory %s\n' "$1" >> "$FIXTURES/calls"
   [ "$1" = '=firstmate' ] || return 1
@@ -127,6 +144,9 @@ if [ -e "$FIXTURES/use-real-worker" ]; then
   FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" spawn "$5" < "$FIXTURES/transport.request"
   exit $?
 fi
+if [ ! -e "$FIXTURES/bare-success" ]; then
+  printf 'boat-started: %s (fresh worker status)\n' "$(jq -r .id "$FIXTURES/transport.request")"
+fi
 exit "$(cat "$FIXTURES/transport.code" 2>/dev/null || printf 0)"
 SH
 cat > "$BIN/fm-brief.sh" <<'SH'
@@ -151,7 +171,19 @@ fi
 printf '%s\n' "$@" > "$FIXTURES/spawn.argv"
 kind=ship
 for arg in "$@"; do [ "$arg" != --scout ] || kind=scout; done
+if [ ! -e "$FIXTURES/no-start" ] && [ ! -e "$FIXTURES/trust" ]; then
+  printf 'working [at=1791892800]: brief consumed\n' >> "$FM_HOME/state/$1.status"
+fi
 printf 'kind=%s\nproject=%s\n' "$kind" "$2" > "$FM_HOME/state/$1.meta"
+SH
+cat > "$FAKEBIN/gh-axi" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+cat > "$BIN/fm-captain-hold.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'hold %s\n' "$*" >> "$FIXTURES/calls"
+[ "$1" = verify ] && [ "$2" = task-one ] && [ ! -e "$FIXTURES/hold-missing" ]
 SH
 cat > "$BIN/fm-teardown.sh" <<'SH'
 #!/usr/bin/env bash
@@ -186,7 +218,7 @@ new_case() {
   printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$REMOTE_HOME/.tasks.toml"
   printf '## In flight\n\n## Queued\n\n## Done\n' > "$REMOTE_HOME/data/backlog.md"
   : > "$FIXTURES/windows"
-  printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium"}' \
+  printf '%s\n' '{"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Implement the requested fix","spec":"Use existing helpers","harness":"codex","model":"gpt-6-sol","effort":"medium","git_name":"Fixture","git_email":"fixture@example.invalid"}' \
     > "$FIXTURES/request.json"
   printf '%s\n' '{"billingStatus":"active","canStart":true,"creditSecondsPerDollar":100000,"creditUsedSeconds":1000,"last24hUsageSeconds":2000,"creditBalanceSeconds":100000,"activeStates":["ready","idle","running"]}' \
     > "$FIXTURES/limits.json"
@@ -200,6 +232,8 @@ new_case() {
   printf '%s\n' '{"sandboxId":"bx_ahnbu3qr","sandboxType":"default","secondsPerDollar":100000,"billingMultiplier":1,"seconds":3000}' \
     > "$FIXTURES/usage.json"
   printf '%s\n' '11111111-1111-4111-8111-111111111111' > "$FIXTURES/boot-id"
+  git config --file "$CASE/user-home/.gitconfig" user.name Fixture
+  git config --file "$CASE/user-home/.gitconfig" user.email fixture@example.invalid
   : > "$FIXTURES/calls"
 }
 
@@ -215,9 +249,9 @@ run_entry() {
   shift 2
   OUT=$(env -u FM_ROOT -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u STATE \
     -u FM_WAKE_QUEUE -u FM_WAKE_QUEUE_LOCK -u TMUX -u TMUX_PANE \
-    FM_HOME="$home" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" \
+    FM_HOME="$home" HOME="$CASE/user-home" GIT_CONFIG_GLOBAL="$CASE/user-home/.gitconfig" PATH="$FAKEBIN:$PATH" \
     FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
-    TMUX="${BOAT_TEST_TMUX:-}" \
+    TMUX="${BOAT_TEST_TMUX:-}" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 \
     FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
     BIN="$BIN" REAL_BRIEF="$ROOT/bin/fm-brief.sh" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
     "$BIN/$entry" "$@" < "$FIXTURES/request.json" 2>&1)
@@ -240,7 +274,7 @@ test_validation() {
     '.home = "/home/user/other"' '.origin = "https://example.invalid/repo"' '.yolo = "on"' \
     '.flags = ["--unsafe"]' '.secrets = {}' '.mode = "local-only"' '.kind = "secondmate"' \
     '.harness = "echo"' '.effort = "unknown"' '.model = ""' '.intent = ""' \
-    '.spec = ""' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
+    '.spec = ""' '.git_name = ""' '.git_email = "invalid"' 'del(.git_email)' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
     '.intent = "hidden\u0000text"' '.kind = "scout"'; do
     n=$((n + 1))
     new_case "invalid-$n"
@@ -277,6 +311,122 @@ test_validation() {
   expect_code 1 "$CODE" 'missing code-only attestation'
   [ ! -s "$FIXTURES/calls" ] || fail 'missing attestation contacted Boat'
   pass 'Boat request validation refuses unsupported or oversized envelopes before contact'
+}
+
+test_running_reservation_and_start() {
+  local row file filter name
+  for row in 'limits|.creditUsedSeconds = 1996400|monthly' \
+    'limits|.last24hUsageSeconds = 56400|account' \
+    'usage|.seconds = 39400|box' \
+    'limits|.creditBalanceSeconds = 3599|balance'; do
+    IFS='|' read -r file filter name <<< "$row"
+    new_case "running-cap-$name"
+    jq --argjson end "$((NOW + 3600))" '.sandbox.archiveAfter = ($end|todateiso8601)' "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+    seed_receipt
+    set_json "$file" "$filter"
+    send_task
+    assert_pre_resume_refusal "remaining timer $name cap"
+  done
+  new_case running-short-timer
+  jq --argjson end "$((NOW + 3600))" '.sandbox.archiveAfter = ($end|todateiso8601)' "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  seed_receipt
+  set_json usage '.seconds = 39000'
+  set_json limits '.creditUsedSeconds = 1996000 | .last24hUsageSeconds = 56000 | .creditBalanceSeconds = 3600'
+  send_task
+  expect_code 0 "$CODE" "remaining timer fits all caps: $OUT"
+  assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'running dispatch extended timer'
+  new_case bare-spawn-success
+  : > "$FIXTURES/bare-success"
+  send_task
+  expect_code 1 "$CODE" 'sender requires positive worker start proof'
+  assert_contains "$OUT" 'start unconfirmed' 'bare success diagnostic'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unconfirmed worker stopped'
+  pass 'running dispatch reserves remaining timer and sender requires start proof'
+}
+
+test_worker_start() {
+  local variant
+  for variant in status trust stuck stale capture quoted negative; do
+    new_case "start-$variant"
+    seed_project firstmate
+    case "$variant" in
+      trust) : > "$FIXTURES/trust" ;;
+      stuck) : > "$FIXTURES/trust"; : > "$FIXTURES/trust.stuck" ;;
+      stale) : > "$FIXTURES/no-start"; printf 'working [at=1]: old\n' > "$REMOTE_HOME/state/task-one.status" ;;
+      capture) : > "$FIXTURES/capture.fail"; : > "$FIXTURES/no-start" ;;
+      quoted) : > "$FIXTURES/quoted-trust"; : > "$FIXTURES/no-start" ;;
+      negative) : > "$FIXTURES/negative-trust"; : > "$FIXTURES/no-start" ;;
+    esac
+    spawn_task
+    case "$variant" in
+      status|trust)
+        expect_code 0 "$CODE" "worker $variant start: $OUT"
+        assert_contains "$OUT" 'boat-started: task-one' 'missing positive start proof'
+        ;;
+      *)
+        expect_code 1 "$CODE" "worker $variant refuses success"
+        if [[ "$OUT" == *boat-started:* ]]; then fail 'false start proof'; fi
+        [ -e "$REMOTE_HOME/state/task-one.meta" ] || fail 'unconfirmed launch lost metadata'
+        ;;
+    esac
+    if [ "$variant" = trust ] || [ "$variant" = stuck ]; then
+      assert_equals 1 "$(grep -c '^key ' "$FIXTURES/calls")" 'trust Enter must be sent once'
+    else
+      assert_no_grep 'key ' "$FIXTURES/calls" 'non-modal text received Enter'
+    fi
+  done
+  new_case scout-completion-missing
+  seed_receipt
+  seed_worker task-one scout dev-loop 'state: done complete'
+  : > "$FIXTURES/hold-missing"
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'unreviewed scout completion refuses teardown'
+  assert_contains "$OUT" 'fm-on.sh boat-eng fm-captain-hold.sh complete task-one --none' 'missing exact controller command'
+  assert_equals '' "$(sed -n '/^teardown /p' "$FIXTURES/calls")" 'unreviewed scout was torn down'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unreviewed scout box was stopped'
+  pass 'worker confirms fresh progress, handles trust once, and preserves unreviewed scouts'
+}
+
+test_ship_prerequisites_and_identity() {
+  new_case sender-global-identity
+  set_json request 'del(.git_name,.git_email)'
+  send_task
+  expect_code 0 "$CODE" "controller default identity: $OUT"
+  assert_equals Fixture "$(jq -r .git_name "$FIXTURES/transport.request")" 'controller default name missing'
+  assert_equals fixture@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'controller default email missing'
+  new_case sender-explicit-identity
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --git-name 'Another User' --git-email another@example.invalid --code-only
+  expect_code 0 "$CODE" "explicit controller identity: $OUT"
+  assert_equals 'Another User' "$(jq -r .git_name "$FIXTURES/transport.request")" 'explicit name not used'
+  assert_equals another@example.invalid "$(jq -r .git_email "$FIXTURES/transport.request")" 'explicit email not used'
+  new_case sender-no-identity
+  set_json request 'del(.git_name,.git_email)'
+  rm "$CASE/user-home/.gitconfig"
+  send_task
+  assert_pre_resume_refusal 'missing controller identity'
+  assert_contains "$OUT" 'git committer name and email' 'missing identity diagnostic'
+  new_case sender-invalid-identity
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --git-name $'Injected\nname' --code-only
+  assert_pre_resume_refusal 'unsafe identity'
+  new_case worker-no-identity
+  seed_project firstmate
+  set_json request 'del(.git_name,.git_email)'
+  spawn_task
+  expect_code 1 "$CODE" 'worker refuses missing supplied identity'
+  assert_contains "$OUT" 'git committer name and email' 'worker identity diagnostic'
+  assert_no_grep 'brief ' "$FIXTURES/calls" 'missing identity accepted backlog intake'
+  new_case worker-no-gh-axi
+  seed_project firstmate
+  # Shadow command discovery, leaving all other real tools available.
+  mkdir -p "$CASE/no-gh"
+  # The wrapper is sourced through BASH_ENV only in this isolated child.
+  printf 'command() { if [ "$*" = "-v gh-axi" ]; then return 1; fi; builtin command "$@"; }\n' > "$CASE/no-gh/bash-env"
+  OUT=$(BASH_ENV="$CASE/no-gh/bash-env" env -u TMUX FM_HOME="$REMOTE_HOME" HOME="$CASE/user-home" PATH="$FAKEBIN:$PATH" FIXTURES="$FIXTURES" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 "$BIN/fm-boat-worker.sh" spawn "$(cat "$FIXTURES/boot-id")" < "$FIXTURES/request.json" 2>&1)
+  CODE=$?
+  expect_code 1 "$CODE" 'worker refuses missing gh-axi'
+  assert_contains "$OUT" 'gh-axi installed' 'missing gh-axi diagnostic'
+  assert_no_grep 'brief ' "$FIXTURES/calls" 'missing gh-axi accepted backlog intake'
+  pass 'ships preflight gh-axi and controller-provided identity before intake'
 }
 
 test_whole_timer_reservation() {
@@ -360,7 +510,7 @@ test_sender_success_and_timer() {
     fi
     assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
       "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
-    cmp -s "$FIXTURES/request.json" "$FIXTURES/transport.request" || fail 'transport changed the request bytes'
+    assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc . "$FIXTURES/transport.request")" 'transport changed request fields'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
     assert_equals 'bx_ahnbu3qr 22222222-2222-4222-8222-222222222222' "$(cat "$LOCAL_HOME/state/.boat-no-env")" 'successful no-env resume receipt'
   done
@@ -619,6 +769,8 @@ test_existing_backlog_row() {
 
 seed_project() {
   fm_git_init_commit "$REMOTE_HOME/projects/$1"
+  git -C "$REMOTE_HOME/projects/$1" config user.name Fixture
+  git -C "$REMOTE_HOME/projects/$1" config user.email fixture@example.invalid
   git -C "$REMOTE_HOME/projects/$1" remote add origin "https://github.com/LeadGrowGTM/$1.git"
 }
 seed_worker() {
@@ -683,7 +835,7 @@ test_remote_cap_and_merge_authority() {
   spawn_task
   expect_code 0 "$CODE" "remote dispatch: $OUT"
   assert_equals "$(printf '%s\n' task-one "$REMOTE_HOME/projects/firstmate" \
-    --mode direct-PR --yolo off --backend tmux --harness codex --model gpt-6-sol --effort medium)" \
+    --mode direct-PR --yolo off --git-name Fixture --git-email fixture@example.invalid --backend tmux --harness codex --model gpt-6-sol --effort medium)" \
     "$(cat "$FIXTURES/spawn.argv")" 'remote spawn forces merge authority off with selected profile'
   assert_grep 'Implement the requested fix' "$REMOTE_HOME/data/task-one/brief.md" 'intent omitted from remote brief'
   assert_grep 'Use existing helpers' "$REMOTE_HOME/data/task-one/brief.md" 'spec omitted from remote brief'
@@ -815,6 +967,9 @@ test_same_id_orphan_retry
 test_existing_backlog_row
 test_confirmed_prelaunch_refusal_stop
 test_native_spawn_refusal_stop
+test_running_reservation_and_start
+test_worker_start
+test_ship_prerequisites_and_identity
 test_validation
 test_whole_timer_reservation
 test_unreadable_caps

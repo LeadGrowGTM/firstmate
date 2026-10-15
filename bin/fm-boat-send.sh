@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Send one explicitly Boat-selected, code-only task through the boat-eng route.
-# Usage: fm-boat-send.sh [--prepare] --code-only < request.json
+# Usage: fm-boat-send.sh [--prepare] [--git-name <name> --git-email <email>] --code-only < request.json
 #        fm-boat-send.sh --teardown <task-id>
 # --prepare performs the guarded resume/SSH refresh only, for initial seeding;
 # it does not dispatch a worker. The same valid, selected task is required.
@@ -16,7 +16,7 @@
 # The one approved box is bx_ahnbu3qr. Reads are fresh, bounded limits, list,
 # info, and rolling-24-hour usage calls. Unavailable readings or exhausted caps
 # refuse dispatch.
-# The entire auto-stop window is reserved
+# The remaining auto-stop window (full timer on resume) is reserved
 # below $20/month, 60000 account seconds/day, and 43000 box seconds/day ($0.43).
 # Resume uses --no-env and an explicit timer (4 hours paid, 2 hours trial).
 # A receipt binds that no-env resume to the current box instance, so an
@@ -25,6 +25,11 @@
 # this command never extends it. No box creation/deletion/sharing, billing,
 # plan, credit, environment injection, or merge command exists here.
 #
+# Ships carry a non-secret paired git_name/git_email in the envelope. Explicit
+# --git-name/--git-email override envelope values, which otherwise default to
+# this controller's global Git user.name/user.email. Empty identities refuse
+# before Boat contact. Scouts and --prepare do not require an identity.
+# Dispatch returns success only after the remote worker confirms fresh status.
 # FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh.
 # On transport failure, remote completion is unknown: reconcile the SAME task
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
@@ -51,7 +56,16 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 [ "${1:-}" != --help ] || { sed -n '2,/^set -eu/{/^set -eu/!s/^# \{0,1\}//p;}' "$0"; exit 0; }
 PREPARE=0
 TEARDOWN_ID=
-if [ "${1:-}" = --prepare ]; then PREPARE=1; shift; fi
+GIT_NAME=
+GIT_EMAIL=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --git-name) [ "$#" -ge 2 ] || die 'git name value required'; GIT_NAME=$2; shift 2 ;;
+    --git-email) [ "$#" -ge 2 ] || die 'git email value required'; GIT_EMAIL=$2; shift 2 ;;
+    --prepare) PREPARE=1; shift ;;
+    *) break ;;
+  esac
+done
 if [ "${1:-}" = --teardown ]; then
   [ "$PREPARE" -eq 0 ] || die 'prepare cannot teardown a task'
   [ "$#" -eq 2 ] || die 'task id required for teardown'
@@ -70,6 +84,16 @@ if [ -z "$TEARDOWN_ID" ]; then
   [ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
   # Both ends use the same validator; no remote contact occurs before validation.
   "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
+  if [ "$PREPARE" -eq 0 ] && [ "$(jq -r .kind "$TMP/request")" = ship ]; then
+    GIT_NAME=${GIT_NAME:-$(jq -r '.git_name // empty' "$TMP/request")}
+    GIT_EMAIL=${GIT_EMAIL:-$(jq -r '.git_email // empty' "$TMP/request")}
+    GIT_NAME=${GIT_NAME:-$(git config --global user.name || true)}
+    GIT_EMAIL=${GIT_EMAIL:-$(git config --global user.email || true)}
+    [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'ship requires git committer name and email; configure controller global Git identity or pass --git-name and --git-email'
+    jq --arg name "$GIT_NAME" --arg email "$GIT_EMAIL" '. + {git_name:$name,git_email:$email}' "$TMP/request" > "$TMP/identified"
+    mv "$TMP/identified" "$TMP/request"
+    "$SCRIPT_DIR/fm-boat-worker.sh" validate < "$TMP/request"
+  fi
 fi
 LOCK_PATH="$FM_HOME/state/.boat-send.lock"
 fm_lock_acquire_wait "$LOCK_PATH" || die 'Boat send lock unavailable'
@@ -131,13 +155,17 @@ fi
 read_boat limits
 read_boat list --all
 read_boat usage "$BOX" --since "$(( $(date +%s) - 86400 ))"
-# Reserve the whole timer rather than trusting a worker's runtime estimate.
+# Reserve the existing remaining timer, or the full timer for a new resume.
 TTL=$(jq -nr --slurpfile l "$TMP/limits" --slurpfile b "$TMP/list" \
-  --slurpfile i "$TMP/info" --slurpfile u "$TMP/usage" --arg box "$BOX" '
+  --slurpfile i "$TMP/info" --slurpfile u "$TMP/usage" --arg box "$BOX" --argjson now "$(date +%s)" '
   def nonneg: type == "number" and . >= 0;
   $l[0] as $l | $b[0] as $b | $i[0].sandbox as $i | $u[0] as $u |
-  (if $l.billingStatus == "active" then 14400 elif $l.billingStatus == "trialing" then 7200 else error("plan is off") end) as $ttl |
-  if ($i.state == "stopped" and $l.canStart != true) or $l.creditSecondsPerDollar != 100000 or
+  (if $l.billingStatus == "active" then 14400 elif $l.billingStatus == "trialing" then 7200 else error("plan is off") end) as $max_ttl |
+  (if $i.state == "stopped" then $max_ttl
+   elif ($i.state | IN("ready", "idle", "running")) and ($i.archiveAfter | type) == "string" then
+     ($i.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now
+   else error("unreadable Boat timer") end) as $ttl |
+  if $ttl <= 0 or $ttl > $max_ttl or ($i.state == "stopped" and $l.canStart != true) or $l.creditSecondsPerDollar != 100000 or
      ($l.creditUsedSeconds | nonneg | not) or ($l.last24hUsageSeconds | nonneg | not) or
      ($l.creditBalanceSeconds | nonneg | not) or
      $b.pageInfo.hasMore != false or ($b.sandboxes | type) != "array" or
@@ -190,6 +218,11 @@ fi
 DISPATCH_STATUS=0
 "$SCRIPT_DIR/fm-on.sh" --stdin "$ROUTE" fm-boat-worker.sh spawn "$instance" < "$TMP/request" > "$TMP/dispatch" || DISPATCH_STATUS=$?
 cat "$TMP/dispatch"
+if [ "$DISPATCH_STATUS" -eq 0 ]; then
+  ID=$(jq -r .id "$TMP/request")
+  grep -Fxq "boat-started: $ID (fresh worker status)" "$TMP/dispatch" ||
+    die "worker start unconfirmed for $ID; reconcile with fm-on.sh boat-eng fm-crew-state.sh $ID before retry"
+fi
 if [ "$DISPATCH_STATUS" -ne 0 ] && [ "$DISPATCH_STATUS" -ne 255 ] && [ "$STATE" = stopped ]; then
   remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh idle "$instance") || remaining=unknown
   if [ "$remaining" = 'boat-tasks-remaining: no' ]; then

@@ -104,6 +104,12 @@ EOF
 
 run_settle_spawn() {
   local id=$1
+  local -a kind_args=(--mode no-mistakes --yolo off)
+  shift
+  if [ "${1:-}" = --scout ]; then
+    kind_args=(--scout)
+    shift
+  fi
   FM_ROOT_OVERRIDE='' FM_HOME="$HOME_DIR" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
@@ -111,7 +117,117 @@ run_settle_spawn() {
     FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_PANE_STALE="$STALE_DIR" \
     FM_FAKE_PANE_STALE_READS="$STALE_READS" FM_FAKE_PANE_COUNTFILE="$COUNTFILE" \
     PATH="$FAKEBIN_DIR:$PATH" \
-    "$SPAWN" "$id" "$PROJ_DIR" --mode no-mistakes --yolo off 2>&1
+    "$SPAWN" "$id" "$PROJ_DIR" "${kind_args[@]}" "$@" 2>&1
+}
+
+test_git_identity_is_worktree_scoped() {
+  local rec id out status ident common before
+  id=settle-git-identity-z5
+  rec=$(make_settle_case settle-git-identity "$id" 0)
+  read_settle_record "$rec"
+  git -C "$PROJ_DIR" config --local user.name 'Shared Operator'
+  git -C "$PROJ_DIR" config --local user.email 'operator@example.invalid'
+  common=$(git -C "$PROJ_DIR" rev-parse --path-format=absolute --git-common-dir)
+  before=$(git config --file "$common/config" --get user.name)
+
+  out=$(run_settle_spawn "$id" --git-name 'Task Worker' --git-email 'worker@example.invalid')
+  status=$?
+  expect_code 0 "$status" "spawn with task Git identity should succeed"$'\n'"$out"
+  ident=$(env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL git -C "$WT_DIR" var GIT_COMMITTER_IDENT)
+  case "$ident" in
+  'Task Worker <worker@example.invalid> '*) ;;
+  *) fail "task worktree committer ident was '$ident'" ;;
+  esac
+  [ "$(git -C "$WT_DIR" config --worktree --get user.name)" = 'Task Worker' ] || fail "task worktree name was not set"
+  [ "$(git config --file "$common/config" --get user.name)" = "$before" ] || fail "common Git name changed"
+  [ "$(git config --file "$common/config" --get user.email)" = 'operator@example.invalid' ] || fail "common Git email changed"
+  [ "$(git config --file "$common/config" --get --bool extensions.worktreeConfig)" = true ] || fail "worktree config extension was not enabled"
+  pass "requested committer identity belongs only to the linked task worktree"
+}
+
+test_scout_git_identity_is_worktree_scoped() {
+  local rec id out status ident
+  id=settle-scout-git-identity-z9
+  rec=$(make_settle_case settle-scout-git-identity "$id" 0)
+  read_settle_record "$rec"
+  out=$(run_settle_spawn "$id" --scout --git-name 'Scout Worker' --git-email 'scout@example.invalid')
+  status=$?
+  expect_code 0 "$status" "scout spawn with task Git identity should succeed"$'\n'"$out"
+  ident=$(env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL git -C "$WT_DIR" var GIT_COMMITTER_IDENT)
+  case "$ident" in
+  'Scout Worker <scout@example.invalid> '*) ;;
+  *) fail "scout worktree committer ident was '$ident'" ;;
+  esac
+  pass "scout committer identity belongs to its linked task worktree"
+}
+
+test_git_identity_flag_validation() {
+  local rec id out status args
+  id=settle-git-invalid-z6
+  rec=$(make_settle_case settle-git-invalid "$id" 0)
+  read_settle_record "$rec"
+  for args in name-only email-only empty-name empty-email newline-name malformed-name malformed-email double-at-email; do
+    case "$args" in
+    name-only) set -- --git-name Worker ;;
+    email-only) set -- --git-email worker@example.invalid ;;
+    empty-name) set -- --git-name '' --git-email worker@example.invalid ;;
+    empty-email) set -- --git-name Worker --git-email '' ;;
+    newline-name) set -- --git-name $'Worker\nOther' --git-email worker@example.invalid ;;
+    malformed-name) set -- --git-name 'Worker <Other>' --git-email worker@example.invalid ;;
+    malformed-email) set -- --git-name Worker --git-email 'worker example.invalid' ;;
+    double-at-email) set -- --git-name Worker --git-email 'worker@extra@example.invalid' ;;
+    esac
+    out=$(run_settle_spawn "$id" "$@")
+    status=$?
+    [ "$status" -ne 0 ] || fail "$args unexpectedly launched"$'\n'"$out"
+  done
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "invalid flags published task metadata"
+  out=$("$SPAWN" "$id" "$PROJ_DIR" --secondmate --git-name Worker --git-email worker@example.invalid 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "secondmate accepted task Git identity"
+  assert_contains "$out" "fresh ship and scout" "secondmate Git identity refusal was unexplained"
+  out=$("$SPAWN" "$id" --relaunch --git-name Worker --git-email worker@example.invalid 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "relaunch accepted task Git identity"
+  assert_contains "$out" "fresh ship and scout" "relaunch Git identity refusal was unexplained"
+  pass "unpaired, empty, control, and malformed Git identity flags refuse"
+}
+
+test_git_identity_refuses_unsafe_common_config() {
+  local rec id out status common setting
+  for setting in bare worktree; do
+    id="settle-git-unsafe-$setting-z7"
+    rec=$(make_settle_case "settle-git-unsafe-$setting" "$id" 0)
+    read_settle_record "$rec"
+    common=$(git -C "$PROJ_DIR" rev-parse --path-format=absolute --git-common-dir)
+    if [ "$setting" = bare ]; then
+      git config --file "$common/config" core.bare true
+    else
+      git config --file "$common/config" core.worktree "$PROJ_DIR"
+    fi
+    out=$(run_settle_spawn "$id" --git-name Worker --git-email worker@example.invalid)
+    status=$?
+    [ "$status" -ne 0 ] || fail "unsafe core.$setting unexpectedly launched"$'\n'"$out"
+    assert_contains "$out" "core.$setting" "unsafe core.$setting refusal was unexplained"
+    [ "$(git config --file "$common/config" --get extensions.worktreeConfig || true)" != true ] || fail "unsafe core.$setting enabled worktree config"
+  done
+  pass "unsafe common Git core settings refuse before enabling worktree config"
+}
+
+test_no_git_flags_leave_config_unchanged() {
+  local rec id out status common before after
+  id=settle-git-default-z8
+  rec=$(make_settle_case settle-git-default "$id" 0)
+  read_settle_record "$rec"
+  common=$(git -C "$PROJ_DIR" rev-parse --path-format=absolute --git-common-dir)
+  before=$(cat "$common/config")
+  out=$(run_settle_spawn "$id")
+  status=$?
+  expect_code 0 "$status" "ordinary spawn should succeed"$'\n'"$out"
+  after=$(cat "$common/config")
+  [ "$before" = "$after" ] || fail "ordinary spawn changed common Git config"
+  [ ! -e "$(git -C "$WT_DIR" rev-parse --git-path config.worktree)" ] || fail "ordinary spawn created worktree config"
+  pass "ordinary spawn leaves Git config unchanged"
 }
 
 # A single stale first read (the exact incident) must not be accepted: the
@@ -225,5 +341,10 @@ test_single_stale_first_read_is_not_accepted
 test_already_settled_pane_costs_one_confirm_read
 test_transient_primary_checkout_is_not_accepted
 test_primary_checkout_that_never_settles_fails_at_the_deadline
+test_git_identity_is_worktree_scoped
+test_scout_git_identity_is_worktree_scoped
+test_git_identity_flag_validation
+test_git_identity_refuses_unsafe_common_config
+test_no_git_flags_leave_config_unchanged
 
 echo "# all fm-spawn-worktree-settle tests passed"

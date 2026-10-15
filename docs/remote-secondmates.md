@@ -578,6 +578,15 @@ The box generates its own normal worker brief and operational paths, allocates i
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
+Ships also require `gh-axi` installed on the box; installing that developer tool is allowed under R6, while credential setup remains a separate operation.
+The sender supplies a non-secret Git commit name and email, defaulting to the controller's global Git identity; its header documents the explicit overrides.
+The worker applies that identity only to its isolated worktree's Git configuration, leaving other workers' identities intact.
+Boat ship PR delivery still depends on the separate memory-only GitHub authentication transport follow-up; this route does not transfer a token, set a credential, or prove GitHub authentication.
+Do not send a token in task JSON: the current remote job transport stages stdin on disk.
+
+Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.
+The worker answers a recognized Codex directory-trust modal once, then requires worker progress; an unrecognized modal or missing start proof leaves the task intact for same-task reconciliation.
+Running boxes reserve only their existing timer's remaining duration against the unchanged spend caps; dispatch never extends the timer.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
 
@@ -595,6 +604,14 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
 ```
 
 The command uses ordinary remote teardown and its landed-work checks.
+For scouts, first review the report's unresolved calls and record the completion inventory from the controller with the origin task id:
+
+```sh
+FM_HOME=<controller-home> bin/fm-on.sh boat-eng fm-captain-hold.sh complete <task-id> --none
+```
+
+Use `--none` only after confirming there are no unresolved calls; otherwise pass the durable held task ids as defined by `fm-captain-hold.sh --help`.
+Teardown refuses with that controller command when the inventory has not been completed, preserving both the scout and the box.
 It stops the approved box when both Boat task records and worker endpoints are gone.
 There is no twenty-minute idle monitor: if teardown does not complete, the box runs until its auto-stop timer expires.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.

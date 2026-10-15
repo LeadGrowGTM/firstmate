@@ -12,6 +12,8 @@
 #   harness: claude|codex|grok; model: concrete nonempty model; effort:
 #   low|medium|high|xhigh|max|ultra. These are the profile selected by firstmate
 #   under its ordinary dispatch/quota rules, never an alternate quota budget.
+# Optional paired git_name/git_email are non-secret per-worker Git identity.
+# Ships require both at spawn; validate and scouts may omit them.
 # No other keys (including env, secrets, home, origin, yolo, flags) are accepted.
 #
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
@@ -37,6 +39,14 @@
 #
 # Inspect/steer/report through fm-on.sh boat-eng with existing fm-crew-state.sh,
 # fm-peek.sh, fm-send.sh, and fm-remote-file.sh; task teardown uses fm-teardown.sh.
+# Dispatch success requires a fresh worker status declaration within 120 polls
+# (one second apart; FM_BOAT_START_POLLS and FM_BOAT_START_INTERVAL override).
+# Codex directory trust is accepted once with Enter from the visible viewport;
+# missing proof leaves the task intact for same-id reconciliation, never retry.
+# Scout teardown requires a controller-reviewed completion inventory; refusal
+# prints the exact controller command rather than manufacturing --none consent.
+# Ships require gh-axi and a valid supplied Git identity before backlog intake;
+# fm-spawn.sh applies the identity only to the isolated worker worktree.
 # No merges, home transfer, secret injection, or new supervision loop is added.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,6 +109,9 @@ if [ "$1" = teardown ] || [ "$1" = idle ]; then
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
     case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
     [ "$(fm_backend_of_meta "$FM_HOME/state/$ID.meta")" = tmux ] || die 'Boat teardown requires a tmux worker'
+    if [ "$kind" = scout ] && ! "$SCRIPT_DIR/fm-captain-hold.sh" verify "$ID" >&2; then
+      die "scout completion inventory required; after reviewing unresolved calls, run from the controller: fm-on.sh boat-eng fm-captain-hold.sh complete $ID --none (or list the held task ids instead of --none)"
+    fi
     "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
   fi
   COUNT=$(boat_worker_count) || exit 1
@@ -121,7 +134,10 @@ head -c 65537 > "$TMP/request"
 jq -es '
   def text: type == "string" and length > 0 and (test("[\u0000-\u0008\u000b-\u001f]") | not);
   length == 1 and (.[0] | type == "object" and
-  (keys == ["effort","harness","id","intent","kind","mode","model","project","spec"]) and
+  ((keys - ["git_name","git_email"]) == ["effort","harness","id","intent","kind","mode","model","project","spec"]) and
+  ((has("git_name") | not) and (has("git_email") | not) or
+   ((.git_name | type == "string" and test("^[^\u0000-\u001f\u007f<>]+$") and test("[^ ]")) and
+    (.git_email | type == "string" and test("^[^\u0000-\u0020\u007f<>]+@[^\u0000-\u0020\u007f<>]+$")))) and
   (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
   (.project == "firstmate" or .project == "dev-loop") and
   ((.kind == "ship" and (.mode == "direct-PR" or .mode == "no-mistakes")) or
@@ -167,6 +183,13 @@ case "$origin" in
 esac
 [ -z "$(git -C "$REPO" ls-files -- 'clients' '.env' '**/.env')" ] || die 'project tracks client or secret files'
 [ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
+if [ "$MODE" != scout ]; then
+  command -v gh-axi >/dev/null || die 'ship requires gh-axi installed on the Boat box'
+  GIT_NAME=$(jq -r '.git_name // empty' "$TMP/request")
+  GIT_EMAIL=$(jq -r '.git_email // empty' "$TMP/request")
+  [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ] || die 'ship requires git committer name and email supplied by the controller'
+  git -C "$REPO" -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" var GIT_COMMITTER_IDENT >/dev/null 2>&1 || die 'ship git committer identity is invalid'
+fi
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
@@ -202,7 +225,55 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
   { print }
 ' "$BRIEF" > "$TMP/brief"
 cat "$TMP/brief" > "$BRIEF"
-if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
+if [ "$MODE" != scout ]; then ARGS+=(--yolo off --git-name "$GIT_NAME" --git-email "$GIT_EMAIL"); fi
 ARGS+=(--backend tmux --harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
-"$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
+STATUS="$FM_HOME/state/$ID.status"
+STATUS_LINES=0
+if [ -L "$STATUS" ] || { [ -e "$STATUS" ] && [ ! -f "$STATUS" ]; }; then
+  die 'unsafe worker status path'
+fi
+if [ -f "$STATUS" ]; then STATUS_LINES=$(wc -l < "$STATUS"); fi
+"$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}" >&2
+# A spawned pane is not proof that the brief was consumed. Only a new worker
+# declaration counts; captures and trust-key delivery cannot supply start proof.
+polls=${FM_BOAT_START_POLLS:-120}
+interval=${FM_BOAT_START_INTERVAL:-1}
+case "$polls" in ''|*[!0-9]*|0) die 'invalid Boat start poll limit' ;; esac
+trust_answered=0
+trust_seen=0
+harness=$(jq -r .harness "$TMP/request")
+for ((poll=0; poll<polls; poll++)); do
+  if [ -f "$STATUS" ] && tail -n "+$((STATUS_LINES + 1))" "$STATUS" |
+    grep -Eq '^(failed|blocked|needs-decision) \[at=[0-9]+\].*: '; then
+    die "worker $ID declared a failure or decision before start confirmation; reconcile its status"
+  fi
+  if [ -f "$STATUS" ] && tail -n "+$((STATUS_LINES + 1))" "$STATUS" |
+    grep -Eq '^(working|paused|done) \[at=[0-9]+\].*: '; then
+    printf 'boat-started: %s (fresh worker status)\n' "$ID"
+    break
+  fi
+  pane=$(fm_backend_tmux_visible_capture "=firstmate:=fm-$ID") || die "worker start unconfirmed: viewport unavailable for $ID; reconcile the existing task before retry"
+  if [ "$harness" = codex ] && printf '%s\n' "$pane" |
+    grep -Eq '^[[:space:]]*(Do you trust the contents of this directory\?|Trust this folder\?)[[:space:]]*$'; then
+    trust_seen=1
+  fi
+  if [ "$harness" = codex ] &&
+    printf '%s\n' "$pane" | grep -Eq '^[[:space:]]*(Do you trust the contents of this directory\?|Trust this folder\?)[[:space:]]*$' &&
+    printf '%s\n' "$pane" | grep -Eq '^[[:space:]]*[›❯>][[:space:]]*(1\.[[:space:]]*)?Yes, (I trust this folder|allow Codex to work in this folder)[[:space:]]*$' &&
+    printf '%s\n' "$pane" | grep -Eq '^[[:space:]]*(2\.[[:space:]]*)?No, exit[[:space:]]*$' &&
+    ! printf '%s\n' "$pane" | grep -Fq 'FIRSTMATE_OP:'; then
+    if [ "$trust_answered" -eq 0 ]; then
+      fm_backend_tmux_send_key "=firstmate:=fm-$ID" Enter || die "Codex folder-trust dialog could not be answered for $ID"
+      trust_answered=1
+    fi
+  fi
+  if [ "$poll" -lt "$((polls - 1))" ]; then sleep "$interval"; fi
+done
+if [ "$poll" -eq "$polls" ]; then
+  if [ "$trust_seen" -eq 1 ]; then
+    version=$(codex --version 2>/dev/null || printf 'version unavailable')
+    die "Codex folder-trust start unconfirmed for $ID ($version, Enter sent=$trust_answered); reconcile the existing task before retry"
+  fi
+  die "worker start unconfirmed for $ID; inspect with fm-on.sh boat-eng fm-peek.sh $ID and reconcile before retry"
+fi
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"
