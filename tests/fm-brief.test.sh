@@ -1596,7 +1596,7 @@ test_task_type_renders_and_surfaces_model_and_effort() {
   intent=$(fm_brief_task_heading_body "$brief" "## Captain's intent")
   spec=$(fm_brief_task_heading_body "$brief" "## Firstmate spec")
   assert_equals '{TASK}' "$intent" "the task type section was pulled into Captain's intent"
-  assert_equals "$(printf '%s\n%s\n%s\n%s' 'Goal: {GOAL}' '{FIRSTMATE_SPEC}' 'Off-limits: {OFF_LIMITS}' 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}')" "$spec" "the task type section was pulled into Firstmate spec"
+  assert_equals "$(printf '%s\n%s\n%s\n%s' 'Goal: {GOAL} <!-- fm:goal -->' '{FIRSTMATE_SPEC} <!-- fm:spec -->' 'Off-limits: {OFF_LIMITS} <!-- fm:off-limits -->' 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS} <!-- fm:contracts -->')" "$spec" "the task type section was pulled into Firstmate spec"
 
   out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" type-scout other-proj --scout --type copy-draft 2>&1) \
     || fail "an unrestricted type did not scaffold a scout: $out"
@@ -1805,9 +1805,9 @@ test_briefs_are_bounded_and_demand_real_proof() {
     || fail "scout scaffold exited non-zero"
   for mode in no-mistakes direct-PR local-only scout; do
     brief="$home/data/bp-$mode/brief.md"
-    assert_equals 1 "$(grep -c '^Goal: {GOAL}$' "$brief")" "$mode: the one-goal line is missing or duplicated"
-    assert_equals 1 "$(grep -c '^Off-limits: {OFF_LIMITS}$' "$brief")" "$mode: the off-limits line is missing or duplicated"
-    assert_equals 1 "$(grep -c '^Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}$' "$brief")" \
+    assert_equals 1 "$(grep -c '^Goal: {GOAL} <!-- fm:goal -->$' "$brief")" "$mode: the one-goal line is missing or duplicated"
+    assert_equals 1 "$(grep -c '^Off-limits: {OFF_LIMITS} <!-- fm:off-limits -->$' "$brief")" "$mode: the off-limits line is missing or duplicated"
+    assert_equals 1 "$(grep -c '^Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS} <!-- fm:contracts -->$' "$brief")" \
       "$mode: the contracts-and-pipeline-states line is missing or duplicated"
     if [ "$mode" = scout ]; then
       assert_grep 'proven for real: run the actual existing system, reproduction, or commands your findings rest on' "$brief" \
@@ -1815,7 +1815,7 @@ test_briefs_are_bounded_and_demand_real_proof() {
     else
       assert_grep "proven for real: run the actual thing end to end as its user would, not only its tests" "$brief" \
         "$mode: the Definition of done does not demand a real run"
-      assert_grep 'The proof must cover the final HEAD; rerun it after any code or pipeline fix.' "$brief" \
+      assert_grep 'The proof must cover the final delivered revision; rerun it after any code or pipeline fix.' "$brief" \
         "$mode: the proof could be stale after a change"
     fi
   done
@@ -1831,7 +1831,7 @@ test_briefs_are_bounded_and_demand_real_proof() {
     assert_grep "and their output in \`$home/data/bp-gerrit-$mode/proof.md\`." "$home/data/bp-gerrit-$mode/brief.md" \
       "$mode Gerrit: the ship proof has no durable destination"
   done
-  assert_grep "After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), rerun the actual thing end to end on this copy's final HEAD and replace \`$home/data/bp-no-mistakes/proof.md\`" \
+  assert_grep "After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the pushed PR head SHA from its forge Git ref (\`git ls-remote <PR remote> refs/pull/<number>/head\`), get a clean checkout of that exact revision, fetching it if needed, and rerun the actual thing end to end there. Replace \`$home/data/bp-no-mistakes/proof.md\` with that PR head SHA" \
     "$home/data/bp-no-mistakes/brief.md" "no-mistakes PR: final proof can predate a fix round"
   assert_grep "After publishing, rerun the actual thing end to end on this copy's published HEAD and replace \`$home/data/bp-gerrit-no-mistakes/proof.md\`" \
     "$home/data/bp-gerrit-no-mistakes/brief.md" "no-mistakes Gerrit: final proof can predate a fix round"

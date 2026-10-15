@@ -637,10 +637,10 @@ IFS= read -r -d '' TASK_SECTION <<'EOF' || true
 {TASK}
 
 ## Firstmate spec
-Goal: {GOAL}
-{FIRSTMATE_SPEC}
-Off-limits: {OFF_LIMITS}
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}
+Goal: {GOAL} <!-- fm:goal -->
+{FIRSTMATE_SPEC} <!-- fm:spec -->
+Off-limits: {OFF_LIMITS} <!-- fm:off-limits -->
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS} <!-- fm:contracts -->
 EOF
 TASK_SECTION=${TASK_SECTION%$'\n'}
 if [ -n "$FM_TASK_TYPE_SECTION" ]; then

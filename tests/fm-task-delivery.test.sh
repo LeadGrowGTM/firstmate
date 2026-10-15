@@ -1676,7 +1676,7 @@ EOF
 }
 
 test_placeholder_examples_do_not_block_delivery() {
-  local rec home proj fakebin id out meta
+  local rec home proj fakebin id out meta content field filled unfilled
   rec=$(make_home placeholder-examples)
   IFS='|' read -r home proj fakebin <<EOF
 $rec
@@ -1689,10 +1689,14 @@ EOF
 Ship the example-safe change.
 
 ## Firstmate spec
-Goal: Ship the example-safe change.
-Implement the requested behavior.
-Off-limits: Unrelated files.
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+Goal: Example of a filled goal.
+Implement this example of a filled spec.
+Off-limits: Example of filled off-limits.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): example
+Goal: Ship the example-safe change. <!-- fm:goal -->
+Implement the requested behavior. <!-- fm:spec -->
+Off-limits: Unrelated files. <!-- fm:off-limits -->
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none <!-- fm:contracts -->
 
 ~~~text
 Goal: {GOAL}
@@ -1715,6 +1719,31 @@ EOF
   assert_not_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "spawn rejected examples in a filled ship spec"
   assert_present "$home/data/example-ship/launch-brief.md" "spawn did not render the example-safe ship brief"
+
+  for field in goal spec off-limits contracts; do
+    id="unfilled-$field"
+    mkdir -p "$home/data/$id"
+    content=$(cat "$home/data/example-ship/brief.md")
+    case "$field" in
+      goal) filled='Goal: Ship the example-safe change. <!-- fm:goal -->'; unfilled='Goal: {GOAL} <!-- fm:goal -->' ;;
+      spec) filled='Implement the requested behavior. <!-- fm:spec -->'; unfilled='{FIRSTMATE_SPEC} <!-- fm:spec -->' ;;
+      off-limits) filled='Off-limits: Unrelated files. <!-- fm:off-limits -->'; unfilled='Off-limits: {OFF_LIMITS} <!-- fm:off-limits -->' ;;
+      contracts) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none <!-- fm:contracts -->'; unfilled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS} <!-- fm:contracts -->' ;;
+    esac
+    printf '%s\n' "${content/"$filled"/"$unfilled"}" > "$home/data/$id/brief.md"
+    out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
+    assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
+      "spawn accepted an unfilled $field after filled-looking examples"
+  done
+
+  id=unfilled-promotion
+  mkdir -p "$home/data/$id"
+  cp "$home/data/unfilled-goal/brief.md" "$home/data/$id/brief.md"
+  printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$home/state/$id.meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
+    --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
+  assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
+    "promotion accepted an unfilled goal after filled-looking examples"
 
   meta="$home/state/example-scout.meta"
   printf 'window=fm-example-scout\nkind=scout\nworktree=/tmp/wt\n' > "$meta"

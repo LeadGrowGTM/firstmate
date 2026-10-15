@@ -256,8 +256,8 @@ fi
 [ -n "${SHIP_OFF_LIMITS//[[:space:]]/}" ] || SHIP_OFF_LIMITS='{OFF_LIMITS}'
 [ -n "${SHIP_CONTRACTS//[[:space:]]/}" ] || SHIP_CONTRACTS='{CONTRACTS}'
 IFS= read -r -d '' PROMOTION_SHIP_SPEC <<EOF || true
-Goal: $SHIP_GOAL
-If these promotion steps were already completed before a relaunch, preserve the existing \`$BRANCH_Q\` branch and continue from its current state; do not repeat them destructively.
+Goal: $SHIP_GOAL <!-- fm:goal -->
+If these promotion steps were already completed before a relaunch, preserve the existing \`$BRANCH_Q\` branch and continue from its current state; do not repeat them destructively. <!-- fm:spec -->
 1. **Verify isolation before anything else.** Run \`pwd -P\` and \`git rev-parse --show-toplevel\`; both must resolve to the disposable task worktree you were launched in, such as a treehouse pool path or an Orca-managed worktree, not the primary checkout firstmate operates from. If either does not resolve to the worktree you were launched in, stop and escalate to firstmate.
 2. Inventory this worktree's scratch state with \`git status\` and \`git log\` before changing anything.
 3. Return to a clean $PROMOTE_BASE_WORDS, then create your branch: \`git checkout -b $BRANCH_Q --\`.
@@ -265,8 +265,8 @@ If these promotion steps were already completed before a relaunch, preserve the 
 5. If you reproduced a bug, turn that reproduction into a regression test.
 6. Treat the scout-time Firstmate spec and any unmarked legacy \`# Task\` text as investigation context, not captain intent or current ship-time instructions.
 7. Everything else in your original instructions carries over unchanged: the status protocol; the instruction inbox and its acknowledgement; the escalation rules, including ask-user; and every safety rule, except where the current delivery contract below explicitly replaces scout-only delivery rules.
-Off-limits: $SHIP_OFF_LIMITS
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): $SHIP_CONTRACTS
+Off-limits: $SHIP_OFF_LIMITS <!-- fm:off-limits -->
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): $SHIP_CONTRACTS <!-- fm:contracts -->
 EOF
 promote_delivery_contract() {
   cat <<EOF

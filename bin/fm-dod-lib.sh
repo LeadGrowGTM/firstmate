@@ -247,23 +247,50 @@ fm_brief_task_placeholders_present() {  # <file>
       if (fenced || $0 ~ /^(    |\t)/) next
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", scan)
       if (scan == "") next
+      if (index(scan, "<!-- fm:goal -->")) {
+        tagged = 1
+        goal_tags++
+        if (scan == "Goal: {GOAL} <!-- fm:goal -->") found = 1
+        next
+      }
+      if (index(scan, "<!-- fm:spec -->")) {
+        tagged = 1
+        spec_tags++
+        if (scan == "{FIRSTMATE_SPEC} <!-- fm:spec -->") found = 1
+        next
+      }
+      if (index(scan, "<!-- fm:off-limits -->")) {
+        tagged = 1
+        off_tags++
+        if (scan == "Off-limits: {OFF_LIMITS} <!-- fm:off-limits -->") found = 1
+        next
+      }
+      if (index(scan, "<!-- fm:contracts -->")) {
+        tagged = 1
+        contracts_tags++
+        if (scan == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS} <!-- fm:contracts -->") found = 1
+        next
+      }
       if (scan ~ /^Goal:/) {
-        if (!goal_seen++ && scan == "Goal: {GOAL}") found = 1
+        if (!goal_seen++ && scan == "Goal: {GOAL}") legacy_found = 1
         next
       }
       if (scan ~ /^Off-limits:/) {
-        if (!off_seen++ && scan == "Off-limits: {OFF_LIMITS}") found = 1
+        if (!off_seen++ && scan == "Off-limits: {OFF_LIMITS}") legacy_found = 1
         next
       }
       if (index(scan, "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): ") == 1) {
-        if (!contracts_seen++ && scan == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}") found = 1
+        if (!contracts_seen++ && scan == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}") legacy_found = 1
         next
       }
       if (!spec_seen++) {
-        if (scan == "{FIRSTMATE_SPEC}") found = 1
+        if (scan == "{FIRSTMATE_SPEC}") legacy_found = 1
       }
     }
-    END { exit !found }
+    END {
+      if (tagged) exit !(found || goal_tags != 1 || spec_tags != 1 || off_tags != 1 || contracts_tags != 1)
+      exit !legacy_found
+    }
   '
 }
 
@@ -274,7 +301,7 @@ fm_prove_it_clause() {  # <ship|scout> <where the evidence goes>
   if [ "$1" = scout ]; then
     printf '%s' "proven for real: run the actual existing system, reproduction, or commands your findings rest on, and put the commands you ran and their output in $2."
   else
-    printf '%s' "proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in $2. The proof must cover the final HEAD; rerun it after any code or pipeline fix."
+    printf '%s' "proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in $2. The proof must cover the final delivered revision; rerun it after any code or pipeline fix."
   fi
 }
 
@@ -557,11 +584,11 @@ EOF
       fm_nm_driving_block "$forge"
       cat <<EOF
 
-After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), rerun the actual thing end to end on this copy's final HEAD and replace $proof_path with that HEAD from \`git rev-parse HEAD\`, the commands you ran, and their output before the final ready report.
+After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the pushed PR head SHA from its forge Git ref (\`git ls-remote <PR remote> refs/pull/<number>/head\`), get a clean checkout of that exact revision, fetching it if needed, and rerun the actual thing end to end there. Replace $proof_path with that PR head SHA, the commands you ran, and their output; confirm it is still the PR head before the final ready report.
 Read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
 Then append \`done [at=<epoch>]: PR {url} checks green\` and stop. You are finished.
-That CI-ready \`done:\` is accepted only when this copy's HEAD - your latest commit - is one the /no-mistakes run pushed, so commit nothing after the run; the check tests that commit, not merely that a branch moved.
+For that CI-ready \`done:\`, use the pushed PR head recorded by /no-mistakes; commit nothing after the run.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.
 EOF
       ;;
