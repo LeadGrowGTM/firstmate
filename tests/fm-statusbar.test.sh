@@ -77,12 +77,13 @@ tmux new-session -d -t firstmate -s orca-view -x 150 -y 20
 tmux new-session -d -s unrelated -x 150 -y 20 "sleep 600"
 SOCKET_PATH=$(tmux display-message -p -t firstmate '#{socket_path}')
 [ -n "$SOCKET_PATH" ] || fail "scratch server did not expose its private socket"
-tracker_key() {  # <socket> <main-state>
-  local key
-  key=$(printf '%s\037%s' "$1" "$2" | cksum)
+tracker_key() {  # <socket> <main-state> <main-home> [main-config]
+  local key config=${4:-$3/config}
+  key=$(printf '%s\037%s\037%s\037%s\037%s' \
+    "$1" "$2" "$3/data" "$config" "$3/projects" | cksum)
   printf '%s' "${key%% *}"
 }
-TRACKER_SOCKET_KEY=$(tracker_key "$SOCKET_PATH" "$WORK/firstmate/state")
+TRACKER_SOCKET_KEY=$(tracker_key "$SOCKET_PATH" "$WORK/firstmate/state" "$WORK/firstmate")
 TRACKER_CACHE_FILE="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$TRACKER_SOCKET_KEY.txt"
 TRACKER_ATTEMPT_FILE="$FM_SB_TRACKER_CACHE_DIR/.statusbar-crew-tracker-attempt.$TRACKER_SOCKET_KEY"
 if statusbar "$SB" >/dev/null 2>&1; then fail "statusbar helper accepted a missing socket"; fi
@@ -556,6 +557,9 @@ else
   [ "$FM_STATE_OVERRIDE" = "$FM_HOME/state" ] || { echo 'state: unknown · source: wrong-home'; exit; }
 fi
 [ "$FM_DATA_OVERRIDE" = "$FM_HOME/data" ] || { echo 'state: unknown · source: wrong-data'; exit; }
+if [ "$1" = config-task ]; then
+  [ "$FM_CONFIG_OVERRIDE" = "${FM_SB_EXPECTED_CONFIG:-}" ] || { echo 'state: unknown · source: wrong-config'; exit; }
+fi
 case "$TMUX" in "$FM_SB_EXPECTED_SOCKET",*) ;; *) echo 'state: unknown · source: wrong-socket'; exit ;; esac
 case "$1" in
   dev|napoleon|alexander-media|ottersec|legion)
@@ -564,7 +568,7 @@ case "$1" in
     [ -z "${FM_SB_SLOW_MATE_PROBES:-}" ] || sleep 8 ;;
 esac
 case "$1" in
-  main-task|dev-task|override-task) echo 'state: working · source: pane' ;;
+  main-task|dev-task|override-task|config-task) echo 'state: working · source: pane' ;;
   otter-task|dev|override-waiting) echo 'state: parked · source: status-log' ;;
   *) echo 'state: unknown · source: none' ;;
 esac
@@ -602,7 +606,7 @@ unset FM_SB_SLOW_MATE_PROBES
 rm -f "$WORK/custom-dev/state"/slow-task-*.meta
 pass "concurrent slow mate probes publish a summary inside the refresh deadline"
 other_socket=$("$REAL_TMUX" -L "$OUTER" display-message -p '#{socket_path}')
-other_key=$(tracker_key "$other_socket" "$WORK/firstmate/state")
+other_key=$(tracker_key "$other_socket" "$WORK/firstmate/state" "$WORK/firstmate")
 other_cache="$FM_SB_TRACKER_CACHE_DIR/statusbar-crew-tracker.$other_key.txt"
 [ "$other_cache" != "$TRACKER_CACHE_FILE" ] || fail "two tmux servers shared a tracker cache path"
 other_tracker=$(statusbar "$SB" "$other_socket" crew-tracker)
@@ -629,7 +633,7 @@ printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/operator/state/main-
 FM_STATE_OVERRIDE="$WORK/operator/state" statusbar "$SB" "$SOCKET_PATH" \
   label firstmate:fm-demo-task operator claude opus high "$WORK/operator"
 operator_cache_dir="$WORK/operator-cache"
-operator_key=$(tracker_key "$SOCKET_PATH" "$WORK/operator/state")
+operator_key=$(tracker_key "$SOCKET_PATH" "$WORK/operator/state" "$WORK/operator")
 operator_cache="$operator_cache_dir/statusbar-crew-tracker.$operator_key.txt"
 operator=$(FM_HOME="$WORK/operator" FM_STATE_OVERRIDE="$WORK/operator/state" \
   FM_SB_TRACKER_ROOT='' FM_SB_TRACKER_CACHE_DIR="$operator_cache_dir" \
@@ -657,7 +661,7 @@ case "$override_right" in *"FM_SB_TRACKER_MAIN_STATE=$WORK/override-state"*) ;;
   *) fail "primary status job lost its bound state directory" "$override_right" ;;
 esac
 override_cache_dir="$WORK/override-cache"
-override_key=$(tracker_key "$SOCKET_PATH" "$WORK/override-state")
+override_key=$(tracker_key "$SOCKET_PATH" "$WORK/override-state" "$WORK/firstmate")
 override_cache="$override_cache_dir/statusbar-crew-tracker.$override_key.txt"
 override=$(FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$WORK/override-state" \
   FM_SB_TRACKER_ROOT="$WORK" FM_SB_TRACKER_CACHE_DIR="$override_cache_dir" \
@@ -673,7 +677,7 @@ pass "tracker carries the primary session's configured state directory"
 mkdir -p "$WORK/override-state-b"
 export FM_SB_EXPECTED_OVERRIDE_STATE="$WORK/override-state-b"
 printf 'window=override-owner:primary\nkind=ship\n' >"$WORK/override-state-b/override-waiting.meta"
-override_b_key=$(tracker_key "$SOCKET_PATH" "$WORK/override-state-b")
+override_b_key=$(tracker_key "$SOCKET_PATH" "$WORK/override-state-b" "$WORK/firstmate")
 override_b_cache="$override_cache_dir/statusbar-crew-tracker.$override_b_key.txt"
 override_b=$(FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$WORK/override-state-b" \
   FM_SB_TRACKER_ROOT="$WORK" FM_SB_TRACKER_CACHE_DIR="$override_cache_dir" \
@@ -685,6 +689,31 @@ while [ ! -s "$override_b_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1
 override_b=$(cat "$override_b_cache")
 case "$override_b" in *'churchill:off 0r/1w'*) ;; *) fail "second primary state borrowed another state's counts" "$override_b" ;; esac
 pass "tracker cache keys include the selected primary state"
+
+mkdir -p "$WORK/custom-config"
+export FM_SB_EXPECTED_CONFIG="$WORK/custom-config"
+printf 'window=firstmate:fm-live-crew\nkind=ship\n' >"$WORK/firstmate/state/config-task.meta"
+tmux new-session -d -s config-owner -n primary 'sleep 600'
+FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$WORK/firstmate/state" \
+  FM_CONFIG_OVERRIDE="$WORK/custom-config" statusbar "$SB" "$SOCKET_PATH" apply --primary config-owner
+config_right=$(tmux show-options -qv -t config-owner status-right)
+case "$config_right" in *"FM_SB_TRACKER_MAIN_CONFIG=$WORK/custom-config"*) ;;
+  *) fail "primary status job lost its configured directory" "$config_right" ;;
+esac
+config_cache_dir="$WORK/config-cache"
+config_key=$(tracker_key "$SOCKET_PATH" "$WORK/firstmate/state" "$WORK/firstmate" "$WORK/custom-config")
+config_cache="$config_cache_dir/statusbar-crew-tracker.$config_key.txt"
+config_tracker=$(FM_HOME="$WORK/firstmate" FM_STATE_OVERRIDE="$WORK/firstmate/state" \
+  FM_CONFIG_OVERRIDE="$WORK/custom-config" FM_SB_TRACKER_ROOT="$WORK" \
+  FM_SB_TRACKER_CACHE_DIR="$config_cache_dir" statusbar "$SB" "$SOCKET_PATH" crew-tracker)
+[ "$config_tracker" = 'crew: loading' ] || fail "configured tracker did not start a fresh refresh" "$config_tracker"
+i=0
+while [ ! -s "$config_cache" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+[ -s "$config_cache" ] || fail "configured tracker did not publish"
+config_tracker=$(cat "$config_cache")
+case "$config_tracker" in *'churchill:on 2r/0w'*) ;; *) fail "tracker ignored the primary config override" "$config_tracker" ;; esac
+rm -f "$WORK/firstmate/state/config-task.meta"
+pass "tracker carries the primary configuration directory into worker probes"
 
 leased_home="$WORK/pool/45/dev"
 mkdir -p "$leased_home/state"
