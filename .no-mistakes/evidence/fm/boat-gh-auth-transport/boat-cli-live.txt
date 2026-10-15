@@ -1,0 +1,122 @@
+
+SCENARIO configured box with matching on-box account starts ship
+exit=0
+output=boat-started: task-one (fresh worker status)
+boat-task: task-one project=firstmate mode=direct-PR route=boat-eng
+calls:
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update limits --json
+boat --no-update list --all --json
+boat --no-update usage bx_ahnbu3qr --since 1791806400 --json
+boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 14400 --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+alias bx_ahnbu3qr boat-prove
+on --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222
+inventory =firstmate
+gh-axi api /user --jq "fm_boat_identity=" + ({login,id} | tojson | @base64) --full
+brief task-one firstmate --mode direct-PR
+spawn task-one /tmp/fm-boat-send.tgWgU0/matching-account-dispatch/remote/projects/firstmate --mode direct-PR --yolo off --git-name fixture-boat --git-email 12345+fixture-boat@users.noreply.github.com --backend tmux --harness codex --model gpt-6-sol --effort medium
+environment receipt: bx_ahnbu3qr 22222222-2222-4222-8222-222222222222 fm-code
+worker git identity: fixture-boat 12345+fixture-boat@users.noreply.github.com 
+backlog task: - [ ] task-one - Boat firstmate task-one (repo: firstmate) (kind: ship) (since 2026-10-15)
+
+SCENARIO last task teardown stops selected instance
+exit=0
+output=teardown: task-one; stopped bx_ahnbu3qr
+calls:
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update limits --json
+boat --no-update list --all --json
+boat --no-update usage bx_ahnbu3qr --since 1791806400 --json
+boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 14400 --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+alias bx_ahnbu3qr boat-prove
+on --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222
+inventory =firstmate
+gh-axi api /user --jq "fm_boat_identity=" + ({login,id} | tojson | @base64) --full
+brief task-one firstmate --mode direct-PR
+spawn task-one /tmp/fm-boat-send.tgWgU0/matching-account-dispatch/remote/projects/firstmate --mode direct-PR --yolo off --git-name fixture-boat --git-email 12345+fixture-boat@users.noreply.github.com --backend tmux --harness codex --model gpt-6-sol --effort medium
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+on boat-eng fm-boat-worker.sh teardown task-one 22222222-2222-4222-8222-222222222222
+teardown task-one
+inventory =firstmate
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update stop bx_ahnbu3qr --json
+
+SCENARIO other GitHub account refused before intake
+exit=1
+output=error: Boat GitHub account mismatch: expected fixture-boat (12345); actual other-user (54321)
+error: remote worker refused before spawning; dispatch refused (stopped bx_ahnbu3qr)
+calls:
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update limits --json
+boat --no-update list --all --json
+boat --no-update usage bx_ahnbu3qr --since 1791806400 --json
+boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 14400 --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+alias bx_ahnbu3qr boat-prove
+on --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222
+inventory =firstmate
+gh-axi api /user --jq "fm_boat_identity=" + ({login,id} | tojson | @base64) --full
+on boat-eng fm-boat-worker.sh idle 22222222-2222-4222-8222-222222222222
+inventory =firstmate
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update stop bx_ahnbu3qr --json
+backlog task lines: 0
+
+SCENARIO missing expected account refused before intake
+exit=1
+output=error: expected Boat GitHub account is missing (config/boat-github-account.json); actual fixture-boat (12345)
+calls:
+inventory =firstmate
+gh-axi api /user --jq "fm_boat_identity=" + ({login,id} | tojson | @base64) --full
+backlog task lines: 0
+
+SCENARIO identity fields rejected before Boat contact
+exit=1
+output=error: invalid code-only Boat request
+calls:
+
+SCENARIO wrong resumed environment refused and stopped
+exit=1
+output=error: box metadata does not prove the fm-code environment; permanently no-env boxes cannot be used; dispatch refused (stopped bx_ahnbu3qr)
+calls:
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update limits --json
+boat --no-update list --all --json
+boat --no-update usage bx_ahnbu3qr --since 1791806400 --json
+boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 14400 --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update stop bx_ahnbu3qr --json
+
+SCENARIO whole timer exceeds daily ceiling and refuses before resume
+exit=1
+output=error: Boat safety or spend reservation failed; dispatch refused
+calls:
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update limits --json
+boat --no-update list --all --json
+boat --no-update usage bx_ahnbu3qr --since 1791806400 --json
+
+SCENARIO unknown transport completion is not stopped or retried
+exit=255
+output=boat-started: task-one (fresh worker status)
+calls:
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update limits --json
+boat --no-update list --all --json
+boat --no-update usage bx_ahnbu3qr --since 1791806400 --json
+boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 14400 --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+boat --no-update info bx_ahnbu3qr --json
+boat --no-update exec bx_ahnbu3qr --json -- cat /proc/sys/kernel/random/boot_id
+alias bx_ahnbu3qr boat-prove
+on --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222

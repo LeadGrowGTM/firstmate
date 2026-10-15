@@ -1,0 +1,23 @@
+SCENARIO replacement selected from safe local configuration
+exit=0
+output=boat-started: task-one (fresh worker status)
+boat --no-update resume bx_23456789 --environment fm-code --ttl 14400 --json
+on --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222
+receipt: bx_23456789 22222222-2222-4222-8222-222222222222 fm-code
+
+SCENARIO missing box selection refused before Boat contact
+exit=1
+output=error: safe config/boat-box-id is required
+Boat calls=0
+
+SCENARIO old no-env receipt cannot authorize dispatch
+exit=1
+output=error: running box has no current fm-code environment receipt; dispatch refused
+transport calls=0 stop calls=0
+
+SCENARIO scout uses matching on-box account
+exit=0
+output=boat-started: task-one (fresh worker status)
+boat-task: task-one project=firstmate mode=scout route=boat-eng
+gh-axi api /user --jq "fm_boat_identity=" + ({login,id} | tojson | @base64) --full
+spawn task-one /tmp/fm-boat-send.fhkDPC/scout-matching-account/remote/projects/firstmate --scout --git-name fixture-boat --git-email 12345+fixture-boat@users.noreply.github.com --backend tmux --harness codex --model gpt-6-sol --effort medium
