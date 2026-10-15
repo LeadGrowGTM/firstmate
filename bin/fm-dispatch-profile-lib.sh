@@ -4,7 +4,7 @@
 #   <model> <effort> <rule-or-empty> <reason-or-empty>
 # Returns a JSON receipt in FM_DISPATCH_PROFILE_RECEIPT; no writes or routing.
 # docs/configuration.md "Crew dispatch profiles" owns the policy and schema.
-# The rule argument is exact `when` text, `default`, or a JSON rule key.
+# The rule argument is a JSON rule key.
 # Rule identity and reasons are JSON-encoded in metadata to preserve newlines.
 
 # shellcheck source=bin/fm-quota-axi-lib.sh
@@ -66,9 +66,8 @@ fm_dispatch_profile_check() {
     --arg rule "$rule" --arg reason "$reason" --argjson prior_reason "${prior_reason:-null}" --argjson changed "$changed" '
     def profiles: if type == "array" then . elif type == "object" then [.] else error("profile set must be an object or non-empty array") end;
     def matches($h; $m; $e): .harness == $h and (.model // "default") == $m and (.effort // "default") == $e;
-    (if $rule == "default" then {default:true}
-     elif ($rule | startswith("{")) then ($rule | fromjson)
-     else {when:$rule} end) as $selected_rule |
+    def safe_provider: if (.provider | type) == "string" and (.provider | test($provider_re)) then .provider else "" end;
+    (if $rule == "" then null else ($rule | fromjson) end) as $selected_rule |
     if type != "object" or ((.rules // []) | type) != "array" then error("malformed dispatch configuration") else . end |
     [(.rules // [])[] | if type != "object" or (.when | type) != "string" or (.when | length) == 0 then error("rule needs when and use") else {key:{when:.when}, items:(.use | profiles)} end]
     + (if has("default") then [{key:{default:true},items:(.default | profiles)}] else [] end) as $groups |
@@ -76,9 +75,8 @@ fm_dispatch_profile_check() {
       type != "object" or (.harness | type) != "string" or (.harness | length) == 0
       or (has("model") and ((.model | type) != "string" or (.model | length) == 0))
       or (has("effort") and ((.effort | type) != "string" or (.effort | length) == 0))
-      or (has("provider") and ((.provider | type) != "string" or (.provider | test($provider_re)) == false))
       or (has("reasoning_class") and ((.reasoning_class | type) != "string" or (.reasoning_class | test("^[A-Za-z0-9][A-Za-z0-9._-]*\\z")) == false)))
-    then error("malformed dispatch profiles or reasoning_class (including provider identifiers)") else . end |
+    then error("malformed dispatch profiles or reasoning_class") else . end |
     (if $source != null then [$groups[] | select(.key == $source)]
      elif $changed == 1 then [$groups[] | select(any(.items[]; matches($oh;$om;$oe)))]
      elif $rule != "" then [$groups[] | select(.key == $selected_rule)]
@@ -93,7 +91,7 @@ fm_dispatch_profile_check() {
       if ($next | length) > 1 or ($old | length) > 1 then error("duplicate dispatch profile")
       elif $changed == 1 and ($next | length) != 1 then error("fallback profile is not listed for the recorded dispatch rule")
       elif $rule != "" and ($next | length) != 1 then error("selected profile is not listed for --dispatch-rule")
-      elif $changed == 0 then {source:$set.key,class:(if $old_class != "" then $old_class else ($next[0].reasoning_class // "") end),provider:($next[0].provider // ""),reason:($prior_reason // ($reason | if . == "" then "resolved-profile" else . end))}
+      elif $changed == 0 then {source:$set.key,class:(if $old_class != "" then $old_class else ($next[0].reasoning_class // "") end),provider:($next[0] | safe_provider),reason:($prior_reason // ($reason | if . == "" then "resolved-profile" else . end))}
       elif $reason == "" then error("fallback requires --fallback-reason (control uses --note)")
       else (if $old_class != "" then $old_class else ($old[0].reasoning_class // "") end) as $required |
         ($next[0].reasoning_class // "") as $equivalent |
@@ -102,7 +100,7 @@ fm_dispatch_profile_check() {
               and (["low","medium","high","xhigh","max","ultra"] | index($oe)) != null
               and (["low","medium","high","xhigh","max","ultra"] | index($e)) != null
               and (["low","medium","high","xhigh","max","ultra"] | index($e)) >= (["low","medium","high","xhigh","max","ultra"] | index($oe)))
-        then {source:$set.key,class:$equivalent,provider:($next[0].provider // ""),reason:$reason}
+        then {source:$set.key,class:$equivalent,provider:($next[0] | safe_provider),reason:$reason}
         else error("fallback would lower or change the recorded reasoning class; declare equivalent reasoning_class profiles in the same rule") end
       end
     end

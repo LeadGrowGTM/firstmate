@@ -1538,7 +1538,7 @@ Control checks the same guard before stopping an agent and uses its progress not
 This guard does not select a fallback or change quota/account policy.
 Unconfigured manual replacements and configured secondmate pins retain their existing control contracts.
 
-`realized_harness`, `realized_model`, and `realized_effort` record the axes actually supplied by the canonical launch mapping: omitted axes record `default`, and raw-command model and effort record `unknown`.
+`harness` records the realized harness; `realized_model` records a model supplied to the canonical launch and is absent when the harness chooses its default; `realized_effort` records the applied effort or `default`, while raw-command model and effort record `unknown`.
 These fields describe the launch request, not unobservable model substitutions inside a vendor service.
 A declared reasoning class or configured fallback refuses an effort the adapter would omit, and a raw command cannot claim a configured profile.
 Public-interface regression coverage lives in `tests/fm-spawn-dispatch-profile.test.sh` and `tests/fm-control-relaunch.test.sh`.

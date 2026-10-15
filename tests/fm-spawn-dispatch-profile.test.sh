@@ -93,7 +93,12 @@ test_selected_dispatch_rule_and_class_are_recorded() {
   assert_contains "$out" "ambiguous dispatch rule" "missing rule-selection diagnostic"
   assert_absent "$HOME_DIR/state/$id.meta" "ambiguous intake should not publish metadata"
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
-    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh --dispatch-rule "hard tasks" --fallback-reason "$reason")
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh --dispatch-rule "hard tasks")
+  status=$?
+  expect_code 1 "$status" "plain rule text is not a rule key"
+  assert_absent "$HOME_DIR/state/$id.meta" "plain rule text should not publish metadata"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh --dispatch-rule '{"when":"hard tasks"}' --fallback-reason "$reason")
   status=$?
   expect_code 0 "$status" "selected rule should launch"$'\n'"$out"
   assert_grep 'dispatch_rule={"when":"hard tasks"}' "$HOME_DIR/state/$id.meta" "selected rule missing"
@@ -121,23 +126,51 @@ test_unrealizable_reasoning_class_refuses_before_launch() {
 }
 
 test_invalid_dispatch_receipt_fields_refuse_before_launch() {
-  local rec id out status field
-  for field in reasoning_class provider; do
-    id="profile-invalid-$field"
-    rec=$(make_spawn_case "$id" codex "$id")
-    read_case_record "$rec"
-    jq -n --arg field "$field" \
-      '{default:({harness:"codex",model:"gpt-6.1-sol",effort:"xhigh",reasoning_class:"strong"} + {($field):"strong\nmodel=gpt-6-sol"})}' \
-      > "$HOME_DIR/config/crew-dispatch.json"
-    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
-      "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh)
-    status=$?
-    expect_code 1 "$status" "$field cannot inject a metadata line"
-    assert_contains "$out" "malformed dispatch profiles" "missing malformed-$field refusal"
-    assert_absent "$HOME_DIR/state/$id.meta" "invalid $field should not publish metadata"
-    [ ! -s "$LAUNCH_LOG" ] || fail "invalid $field sent launch input"
-    pass "an invalid $field refuses before launch or task publication"
-  done
+  local rec id out status
+  id=profile-invalid-reasoning-class
+  rec=$(make_spawn_case "$id" codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"default":{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong\nmodel=gpt-6-sol"}}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort xhigh)
+  status=$?
+  expect_code 1 "$status" "reasoning class cannot inject a metadata line"
+  assert_contains "$out" "malformed dispatch profiles" "missing malformed reasoning class refusal"
+  assert_absent "$HOME_DIR/state/$id.meta" "invalid reasoning class should not publish metadata"
+  [ ! -s "$LAUNCH_LOG" ] || fail "invalid reasoning class sent launch input"
+  pass "an invalid reasoning class refuses before launch or task publication"
+}
+
+test_non_typed_provider_hints_do_not_block_spawn_or_inject_metadata() {
+  local rec id out status
+  id=profile-provider-hint
+  rec=$(make_spawn_case profile-provider-hint codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"other tasks","use":{"harness":"claude","provider":"Anthropic"}}],"default":{"harness":"codex","model":"gpt-6.1-sol","effort":"high","provider":"codex\nmodel=forged"}}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort high --dispatch-rule '{"default":true}')
+  status=$?
+  expect_code 0 "$status" "non-typed provider hints should not block spawn"$'\n'"$out"
+  assert_grep 'dispatch_rule={"default":true}' "$HOME_DIR/state/$id.meta" "default rule key missing"
+  ! grep -q '^dispatch_provider=' "$HOME_DIR/state/$id.meta" || fail "invalid provider reached task metadata"
+  ! grep -q '^model=forged$' "$HOME_DIR/state/$id.meta" || fail "provider hint injected metadata"
+  pass "non-typed provider hints remain inert and metadata-safe"
+}
+
+test_configured_default_model_has_no_realized_model() {
+  local rec id out status
+  id=profile-default-model
+  rec=$(make_spawn_case profile-default-model codex "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"default":{"harness":"codex","effort":"high"}}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+    "$id" "$PROJ_DIR" --harness codex --effort high --dispatch-rule '{"default":true}')
+  status=$?
+  expect_code 0 "$status" "configured harness default model should launch"$'\n'"$out"
+  assert_grep 'model=default' "$HOME_DIR/state/$id.meta" "model selector missing"
+  ! grep -q '^realized_model=' "$HOME_DIR/state/$id.meta" || fail "harness default was recorded as a realized model"
+  ! grep -q -- '--model ' "$LAUNCH_LOG" || fail "harness default unexpectedly passed a model"
+  pass "omitted model leaves realized model absent"
 }
 
 make_seeded_secondmate_home() {
@@ -265,6 +298,7 @@ test_claude_secondmate_launch_brief_publishes_into_its_own_home() {
     run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
   status=$?
   expect_code 0 "$status" "secondmate claude spawn for the doorbell check should succeed"$'\n'"$out"
+  ! grep -q '^fallback_reason=' "$HOME_DIR/state/$id.meta" || fail "secondmate received a crew fallback reason"
   launch=$(cat "$LAUNCH_LOG")
   doorbell=$(claude_launch_brief_arg "$launch")
   [ "$(printf '%s' "$doorbell" | "$ROOT/bin/fm-operational-input.sh" doorbell-kind)" = launch-brief ] \
@@ -2716,6 +2750,8 @@ test_worker_launch_delivers_role_scope
 test_selected_dispatch_rule_and_class_are_recorded
 test_unrealizable_reasoning_class_refuses_before_launch
 test_invalid_dispatch_receipt_fields_refuse_before_launch
+test_non_typed_provider_hints_do_not_block_spawn_or_inject_metadata
+test_configured_default_model_has_no_realized_model
 test_no_profile_keeps_claude_profile_defaults
 test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home

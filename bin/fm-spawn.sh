@@ -59,7 +59,7 @@
 #   steering inbox. This never rewrites a project's instruction files or a
 #   secondmate's charter.
 #        fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>]
-#   --dispatch-rule <when|default|JSON-key> disambiguates a fresh launch's configured
+#   --dispatch-rule <JSON-key> disambiguates a fresh launch's configured
 #   profile set; --fallback-reason <text> records the provider/quota rationale.
 #   Configured replacements must belong to the recorded rule and preserve the
 #   reasoning class (bin/fm-dispatch-profile-lib.sh), including direct relaunch.
@@ -5702,19 +5702,18 @@ preserve_relaunch_meta() {
   [ -z "$BASE_BRANCH" ] || echo "base_branch=$BASE_BRANCH"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
-  echo "realized_harness=$HARNESS"
   if [ "$RAW_LAUNCH" = 1 ]; then
     echo "realized_model=unknown"
     echo "realized_effort=unknown"
   else
-    echo "realized_model=${MODEL:-default}"
+    [ -z "$MODEL" ] || [ "$MODEL" = default ] || echo "realized_model=$MODEL"
     echo "realized_effort=$(fm_dispatch_realized_effort "$HARNESS" "$MODEL" "$EFFORT")"
   fi
   printf '%s\n' "$FM_DISPATCH_PROFILE_RECEIPT" | jq -r '
     (if .source != null then "dispatch_rule=" + (.source | tojson) else empty end),
     (if (.class // "") != "" then "reasoning_class=" + .class else empty end),
     (if (.provider // "") != "" then "dispatch_provider=" + .provider else empty end),
-    "fallback_reason=" + ((.reason // "configured-secondmate") | tojson)'
+    (if .reason != null then "fallback_reason=" + (.reason | tojson) else empty end)'
   # The worker account pin, only when this home declares one, so an unpinned
   # task record stays byte-identical.
   [ -z "$WORKER_ACCOUNT" ] || echo "account=$WORKER_ACCOUNT_DECLARED"
