@@ -100,7 +100,7 @@
 # It requires a recovery-grade proof that the old agent is gone and no live
 # process rooted in its copy, under the same project/control/meta locks as
 # ordinary teardown. It archives the original metadata in
-# data/<id>/retired-worktree-claim.meta and preserves the copy, branch, commits,
+# data/<id>/retired-worktree-claim.<incarnation>.meta and preserves the copy, branch, commits,
 # dirty files and hooks. Only this task's own slot marker is released; another
 # holder's marker is untouched. It cannot be combined with --force and never
 # applies to secondmate homes or backend-owned Orca worktrees.
@@ -3713,28 +3713,30 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
     case "$retirement_choice" in
       absent) ;;
       selected\|*)
-        IFS='|' read -r _ retirement_run_id retirement_run_status _ <<< "$retirement_choice"
-        retirement_run=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi status --run "$retirement_run_id") || {
-          echo "REFUSED: stale claim's selected validation run is unreadable; nothing was changed" >&2
-          exit 1
-        }
-        [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" id)")" = "$retirement_run_id" ] \
-          && [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" branch)")" = "$retirement_branch" ] \
-          && { [ "$(fm_nm_run_status_class "$retirement_run_status")" = live ] \
-            && fm_nm_run_is_active "$retirement_run" \
-            || [ "$(fm_nm_run_status_class "$retirement_run_status")" = terminal ] \
-            && ! fm_nm_run_is_active "$retirement_run"; } || {
-          echo "REFUSED: stale claim's selected validation run identity or state is unproven; nothing was changed" >&2
-          exit 1
-        }
-        if fm_nm_run_is_active "$retirement_run"; then
-          if task_status_is_own_parked_run "$WT" "$retirement_run" 1; then
-            echo "REFUSED: no-mistakes run $TASK_RUN_ID for $ID is still active; nothing was changed" >&2
-          else
-            echo "REFUSED: stale claim's active validation run attribution is unproven; nothing was changed" >&2
+        IFS='|' read -r _ _ _ retirement_run_ids <<< "$retirement_choice"
+        IFS=',' read -r -a retirement_candidates <<< "$retirement_run_ids"
+        for retirement_run_id in "${retirement_candidates[@]}"; do
+          retirement_run_id=$(fm_nm_trim "$retirement_run_id")
+          retirement_run=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi status --run "$retirement_run_id") || {
+            echo "REFUSED: stale claim's validation run $retirement_run_id is unreadable; nothing was changed" >&2
+            exit 1
+          }
+          retirement_run_status=$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" status)")
+          [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" id)")" = "$retirement_run_id" ] \
+            && [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" branch)")" = "$retirement_branch" ] \
+            && [ "$(fm_nm_run_status_class "$retirement_run_status")" != unknown ] || {
+            echo "REFUSED: stale claim's validation run $retirement_run_id identity or state is unproven; nothing was changed" >&2
+            exit 1
+          }
+          if fm_nm_run_is_active "$retirement_run"; then
+            if task_status_is_own_parked_run "$WT" "$retirement_run" 1; then
+              echo "REFUSED: no-mistakes run $TASK_RUN_ID for $ID is still active; nothing was changed" >&2
+            else
+              echo "REFUSED: stale claim's active validation run attribution is unproven; nothing was changed" >&2
+            fi
+            exit 1
           fi
-          exit 1
-        fi
+        done
         ;;
       *)
         echo "REFUSED: stale claim's validation run inventory is unproven: $retirement_choice; nothing was changed" >&2
@@ -4257,7 +4259,18 @@ retirement_owner_released=0
 retirement_prepare() {
   [ ! -L "$DATA/$ID" ] && { [ ! -e "$DATA/$ID" ] || [ -d "$DATA/$ID" ]; } || return 1
   mkdir -p "$DATA/$ID" || return 1
-  retirement_archive="$DATA/$ID/retired-worktree-claim.meta"
+  retirement_gen=$(fm_backend_meta_exact_value "$META" spawn_gen) || retirement_gen=
+  if [[ $retirement_gen =~ ^s[0-9]{1,12}\.[0-9]+\.[0-9]+$ ]]; then
+    retirement_archive="$DATA/$ID/retired-worktree-claim.$retirement_gen.meta"
+  else
+    retirement_stamp=$(date -u +%Y%m%dT%H%M%S) || return 1
+    retirement_suffix=0
+    retirement_archive="$DATA/$ID/retired-worktree-claim.$retirement_stamp.$$.meta"
+    while [ -e "$retirement_archive" ] || [ -L "$retirement_archive" ]; do
+      retirement_suffix=$((retirement_suffix + 1))
+      retirement_archive="$DATA/$ID/retired-worktree-claim.$retirement_stamp.$$.$retirement_suffix.meta"
+    done
+  fi
   retirement_tmp=$(mktemp "$DATA/$ID/.retired-worktree-claim.XXXXXX") || return 1
   if ! cp "$META" "$retirement_tmp"; then
     rm -f "$retirement_tmp"
@@ -4287,10 +4300,10 @@ retirement_prepare() {
   case "$FM_TREEHOUSE_SLOT_OWNER" in
     absent|other) return 0 ;;
     mine)
+      retirement_owner_released=1
       fm_treehouse_slot_owner_release "$WT" "$ID" "$FM_HOME"
       fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
       [ "$FM_TREEHOUSE_SLOT_OWNER" = absent ] || return 1
-      retirement_owner_released=1
       ;;
     *) return 1 ;;
   esac

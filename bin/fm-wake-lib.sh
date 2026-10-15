@@ -1872,6 +1872,10 @@ fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
     return 1
   }
   for state_dir in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
+    [ -d "$state_dir" ] && [ -r "$state_dir" ] && [ -x "$state_dir" ] || {
+      printf 'REFUSED: worktree custody state directory is unreadable: %s\n' "$state_dir" >&2
+      return 1
+    }
     for other in "$state_dir"/*.meta; do
       [ -e "$other" ] || [ -L "$other" ] || continue
       [ -f "$other" ] && [ ! -L "$other" ] && [ -r "$other" ] || {
@@ -1924,6 +1928,10 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
     return 1
   }
   for state_dir in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
+    [ -d "$state_dir" ] && [ -r "$state_dir" ] && [ -x "$state_dir" ] || {
+      printf 'REFUSED: pool custody state directory is unreadable: %s\n' "$state_dir" >&2
+      return 1
+    }
     for meta in "$state_dir"/*.meta; do
       [ -e "$meta" ] || [ -L "$meta" ] || continue
       [ -f "$meta" ] && [ ! -L "$meta" ] && [ -r "$meta" ] || {

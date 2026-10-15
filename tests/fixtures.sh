@@ -287,9 +287,9 @@ fm_test_spawn_brief() {
 $intent
 
 ## Firstmate spec
-Goal: Exercise the spawn behavior under test.
-Off-limits: Changes outside the disposable test case.
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract.
+Goal: Observe the requested spawn or refusal through the public command.
+Off-limits: Changes outside the disposable test case; do not operate any real worker endpoint or shared pool.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract only with this fixture's private project and state.
 EOF
 }
 

@@ -4,6 +4,7 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
 TMP_ROOT=$(fm_test_tmproot fm-teardown-endpoint-safety)
@@ -1465,7 +1466,7 @@ make_retire_claim_case() {  # <name> <id>
   fm_write_meta "$dir/home/state/$id.meta" \
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=no-mistakes" \
-    "spawn_gen=s$(date +%s).fixture"
+    "spawn_gen=s$(date +%s).$$.$RANDOM"
   claim_pool_slot "$dir" "$id"
   git -C "$dir/worktree" switch -q -c "fm/$id"
   mkdir -p "$dir/worktree/.git-hooks"
@@ -1489,7 +1490,13 @@ case "$*" in
       "$(sed -n 's/^status: //p' "$FM_TEST_RUN_STATUS" | sed 's/^fixing$/running/')" \
       "$(sed -n 's/^head: //p' "$FM_TEST_RUN_STATUS")"
     ;;
-  'axi status --run run-fixture') cat "$FM_TEST_RUN_STATUS" ;;
+  'axi status --run '*)
+    if [ -f "$FM_TEST_RUN_STATUS.${4:-}" ]; then
+      cat "$FM_TEST_RUN_STATUS.${4:-}"
+    else
+      cat "$FM_TEST_RUN_STATUS"
+    fi
+    ;;
   'axi status')
     if [ -f "$FM_TEST_GLOBAL_STATUS" ]; then cat "$FM_TEST_GLOBAL_STATUS"; else cat "$FM_TEST_RUN_STATUS"; fi
     ;;
@@ -1527,14 +1534,15 @@ assert_retire_refused_unchanged() {  # <case> <id> <reason> [extra flags]
   [ "$(git -C "$dir/worktree" rev-parse HEAD)" = "$before_head" ] \
     || fail "$reason: retirement changed HEAD"
   assert_present "$dir/worktree/.git-hooks/pre-commit" "$reason: retirement removed a hook"
-  assert_absent "$dir/home/data/$id/retired-worktree-claim.meta" \
-    "$reason: refused retirement archived metadata"
+  if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+    fail "$reason: refused retirement archived metadata"
+  fi
   assert_no_grep 'kill-window' "$dir/runtime.log" "$reason: retirement closed an endpoint"
   assert_no_grep 'treehouse <return>' "$dir/runtime.log" "$reason: retirement returned the pool copy"
 }
 
 test_retire_claim_archives_only_the_gone_agents_record() {
-  local dir id=old-task other=other-task original before_head before_reflog
+  local dir id=old-task other=other-task original before_head before_reflog archive
   dir=$(make_retire_claim_case retire-gone "$id")
   original=$(cat "$dir/home/state/$id.meta")
   before_head=$(git -C "$dir/worktree" rev-parse HEAD)
@@ -1548,9 +1556,10 @@ test_retire_claim_archives_only_the_gone_agents_record() {
   run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
     || fail "a definitively gone agent could not retire its old claim: $(cat "$dir/retire.err")"
   assert_absent "$dir/home/state/$id.meta" "retirement left the active task record"
-  assert_present "$dir/home/data/$id/retired-worktree-claim.meta" \
+  archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  assert_present "$archive" \
     "retirement did not archive the original metadata"
-  [ "$(cat "$dir/home/data/$id/retired-worktree-claim.meta")" = "$original" ] \
+  [ "$(cat "$archive")" = "$original" ] \
     || fail "retirement did not archive the original metadata verbatim"
   assert_absent "$dir/pool/1/.fm-slot-owner" "retirement left its own old slot marker"
   assert_present "$dir/home/state/$other.meta" "retirement removed another task record"
@@ -1569,6 +1578,72 @@ test_retire_claim_archives_only_the_gone_agents_record() {
   assert_no_grep 'kill-window' "$dir/runtime.log" "retirement closed an endpoint"
   assert_no_grep 'treehouse <return>' "$dir/runtime.log" "retirement returned the pool copy"
   pass "a gone agent retires only its old claim and archives its original record"
+}
+
+test_retire_claim_preserves_archives_across_task_id_reuse() {
+  local dir id=reused-worker first_archive first_record second_archive second_record out
+  dir=$(make_retire_claim_case retire-reused "$id")
+  first_record=$(cat "$dir/home/state/$id.meta")
+  run_retire_claim "$dir" "$id" > "$dir/first.out" 2> "$dir/first.err" \
+    || fail "first retirement failed: $(cat "$dir/first.err")"
+  first_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  assert_present "$first_archive" 'first retirement did not retain its record'
+  mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.retire"
+  fm_test_fake_tmux_spawn "$dir/fakebin"
+  printf 'codex\n' > "$dir/home/config/crew-harness"
+  mkdir -p "$dir/home/projects" "$dir/pool/2"
+  fm_test_spawn_brief "$dir/home" "$id"
+  git -C "$dir/project" worktree add -q --detach "$dir/pool/2/project"
+  printf '{"worktrees":[{"name":"1","path":"%s"},{"name":"2","path":"%s"}]}\n' \
+    "$dir/pool/1/project" "$dir/pool/2/project" > "$dir/pool/treehouse-state.json"
+  out=$(fm_test_run_spawn "$dir/home" "$dir/pool/2/project" "$dir/fakebin" \
+    "$id" "$dir/project" --mode no-mistakes --yolo off)
+  [ "$?" -eq 0 ] || fail "public spawn could not reuse the retired ID: $out"
+  git -C "$dir/pool/2/project" switch -q -c "fm/$id-second"
+  second_record=$(cat "$dir/home/state/$id.meta")
+  [ "$second_record" != "$first_record" ] || fail 'respawn did not publish a new claim'
+  mv "$dir/fakebin/tmux.retire" "$dir/fakebin/tmux"
+  run_retire_claim "$dir" "$id" > "$dir/second.out" 2> "$dir/second.err" \
+    || fail "second retirement failed: $(cat "$dir/second.err")"
+  second_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  [ "$(printf '%s\n' "$second_archive" | wc -l)" -eq 2 ] \
+    || fail 'task ID reuse did not preserve two separate archives'
+  [ "$(cat "$first_archive")" = "$first_record" ] || fail 'respawn changed the first archive'
+  for archive in $second_archive; do
+    [ "$archive" = "$first_archive" ] && continue
+    [ "$(cat "$archive")" = "$second_record" ] || fail 'second archive does not match the respawned record'
+  done
+  assert_absent "$dir/home/state/$id.meta" 'second retirement left its active record'
+  pass 'retire, public respawn, and second retirement preserve both claim records'
+}
+
+test_retire_claim_archives_without_spawn_generation() {
+  local dir id=legacy-archive first_record second_record first_archive second_archive archive
+  dir=$(make_retire_claim_case retire-legacy-archive "$id")
+  sed '/^spawn_gen=/d' "$dir/home/state/$id.meta" > "$dir/legacy.meta"
+  mv "$dir/legacy.meta" "$dir/home/state/$id.meta"
+  first_record=$(cat "$dir/home/state/$id.meta")
+  run_retire_claim "$dir" "$id" > "$dir/first.out" 2> "$dir/first.err" \
+    || fail "first legacy retirement failed: $(cat "$dir/first.err")"
+  first_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  assert_present "$first_archive" 'first legacy retirement did not archive its record'
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=no-mistakes" \
+    "harness=codex"
+  claim_pool_slot "$dir" "$id"
+  second_record=$(cat "$dir/home/state/$id.meta")
+  run_retire_claim "$dir" "$id" > "$dir/second.out" 2> "$dir/second.err" \
+    || fail "second legacy retirement failed: $(cat "$dir/second.err")"
+  second_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  [ "$(printf '%s\n' "$second_archive" | wc -l)" -eq 2 ] \
+    || fail 'legacy claims did not receive separate timestamp archives'
+  [ "$(cat "$first_archive")" = "$first_record" ] || fail 'legacy retry changed the first archive'
+  for archive in $second_archive; do
+    [ "$archive" = "$first_archive" ] && continue
+    [ "$(cat "$archive")" = "$second_record" ] || fail 'second legacy archive changed the claim'
+  done
+  pass 'legacy claims use distinct timestamp archives when spawn generation is absent'
 }
 
 test_retire_claim_refuses_unsafe_identity_and_options() {
@@ -1649,6 +1724,12 @@ test_retire_claim_refuses_attributable_validation_runs() {
   printf 'repo: %s\ncount: 2 of 2 total\nruns[2]{id,branch,status,head,pr}:\n  unrelated,other-branch,completed,%s,\n  run-fixture,fm/%s,running,%s,\n' \
     "$dir/project" "$head" "$id" "$head" > "$dir/run.overview"
   assert_retire_refused_unchanged "$dir" "$id" "own parked run behind another branch's latest run"
+  printf 'id: newer-failed\nbranch: fm/%s\nhead: %s\nstatus: failed\noutcome: failed\n' \
+    "$id" "$head" > "$dir/run.status.newer-failed"
+  printf 'repo: %s\ncount: 2 of 2 total\nruns[2]{id,branch,status,head,pr}:\n  newer-failed,fm/%s,failed,%s,\n  run-fixture,fm/%s,running,%s,\n' \
+    "$dir/project" "$id" "$head" "$id" "$head" > "$dir/run.overview"
+  assert_retire_refused_unchanged "$dir" "$id" "older active run behind a newer failure"
+  rm "$dir/run.status.newer-failed"
   printf 'id: run-fixture\nbranch: fm/%s\nhead: deadbeef\nstatus: fixing\nbranch_sync:\n  state: pipeline_owned\n' \
     "$id" > "$dir/run.status"
   rm "$dir/run.overview"
@@ -1720,8 +1801,9 @@ test_retire_claim_refuses_live_agent() {
     || fail "retirement closed the live recorded agent"
   assert_present "$dir/home/state/$id.meta" "retirement removed the live agent's record"
   assert_present "$dir/pool/1/.fm-slot-owner" "retirement removed the live agent's claim"
-  assert_absent "$dir/home/data/$id/retired-worktree-claim.meta" \
-    "retirement archived a live agent's record"
+  if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+    fail "retirement archived a live agent's record"
+  fi
   assert_no_grep 'kill-window' "$dir/runtime.log" "retirement tried to close the live agent"
   ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null ) || true
   pass "records-only retirement refuses a live recorded agent without closing it"
@@ -2119,6 +2201,8 @@ test_own_and_absent_slot_claims_still_tear_down
 test_recycled_slot_of_another_clone_is_already_gone
 test_absent_recorded_slot_still_holds_project_lock
 test_retire_claim_archives_only_the_gone_agents_record
+test_retire_claim_preserves_archives_across_task_id_reuse
+test_retire_claim_archives_without_spawn_generation
 test_retire_claim_refuses_live_agent
 test_retire_claim_refuses_unsafe_identity_and_options
 test_retire_claim_preserves_tasktmp_and_retries_after_refusals

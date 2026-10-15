@@ -4922,6 +4922,44 @@ spawn_lease_clone_worktree() {
   fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$leased"
 }
 
+spawn_allocated_copy_custody_check() {  # <worktree>
+  local copy=$1 pane_pid= processes marker pane_capture line
+  fm_worktree_custody_check "$STATE" "$STATE/$ID.meta" "$copy" "$ID" || return 1
+  if fm_treehouse_pool_slot "$PROJ_ABS" "$copy"; then
+    fm_treehouse_slot_owner_state "$copy" "$ID" "$FM_HOME"
+    [ "$FM_TREEHOUSE_SLOT_OWNER" = absent ] || {
+      echo "REFUSED: allocated pool copy $copy retains a slot claim; nothing was refreshed" >&2
+      return 1
+    }
+  fi
+  if [ "$BACKEND" = tmux ]; then
+    pane_pid=$(tmux display-message -p -t "$WT_TARGET" '#{pane_pid}' 2>/dev/null) || pane_pid=
+  elif [ "$BACKEND" = herdr ] && fm_backend_herdr_target_ready "$WT_TARGET"; then
+    pane_pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+      | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
+        'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pane_pid=
+  elif [ "$BACKEND" = zellij ] || [ "$BACKEND" = cmux ]; then
+    marker="__FM_PANE_PID_${BASHPID}_${RANDOM}__"
+    if spawn_send_text_line "$WT_TARGET" "printf '%s%s\\n' '$marker' \"\$\$\""; then
+      sleep 0.3
+      pane_capture=$(fm_backend_capture "$BACKEND" "$WT_TARGET" 100 "$W" 2>/dev/null) || pane_capture=
+      while IFS= read -r line; do
+        case "$line" in
+          "$marker"[0-9]*) pane_pid=${line#"$marker"} ;;
+        esac
+      done <<< "$pane_capture"
+    fi
+  fi
+  processes=$(fm_agent_worktree_processes "$copy" "$pane_pid") || {
+    echo "REFUSED: process custody for allocated copy $copy is unreadable; nothing was refreshed" >&2
+    return 1
+  }
+  [ -z "$processes" ] || {
+    echo "REFUSED: allocated copy $copy has other live processes rooted in it ($processes); nothing was refreshed" >&2
+    return 1
+  }
+}
+
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$RELAUNCH" -eq 1 ]; then
@@ -4975,6 +5013,13 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     exit 1
   fi
   rm -f -- "$pool_refusal_file"
+  if ! spawn_allocated_copy_custody_check "$WT"; then
+    if ! spawn_send_text_line "$WT_TARGET" 'exit' ||
+      ! spawn_wait_left_path "$WT" || ! spawn_wait_treehouse_returned "$WT"; then
+      echo "error: disputed Treehouse copy $WT was not confirmed returned; its work was left untouched" >&2
+    fi
+    exit 1
+  fi
   if ! fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$WT"; then
     if ! spawn_send_text_line "$WT_TARGET" 'exit' ||
       ! spawn_wait_left_path "$WT" || ! spawn_wait_treehouse_returned "$WT"; then
@@ -5011,6 +5056,10 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
       echo "error: pane settled in '$WT' instead of the leased worktree '$SPAWN_PRIVATE_LEASE_PATH' of '$PROJ_ABS'; refusing to launch" >&2
       exit 1
     fi
+    if ! spawn_allocated_copy_custody_check "$WT"; then
+      SPAWN_PRIVATE_LEASE_PATH=
+      exit 1
+    fi
     validate_spawn_worktree "per-home treehouse lease" "$T"
   fi
 
@@ -5029,7 +5078,6 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # A per-home lease is still a pool slot once its common dir is this clone, so
   # the same claim covers it.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
-    fm_worktree_custody_check "$STATE" "$STATE/$ID.meta" "$WT" "$ID" || exit 1
     fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
     if [ "$FM_TREEHOUSE_SLOT_OWNER" != absent ] && [ "$FM_TREEHOUSE_SLOT_OWNER" != mine ]; then
       echo "error: Treehouse pool slot $WT still belongs to task $FM_TREEHOUSE_SLOT_OWNER_ID; retire that stale claim before allocation" >&2

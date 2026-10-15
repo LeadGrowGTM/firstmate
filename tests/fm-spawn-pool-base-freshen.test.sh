@@ -13,6 +13,20 @@ set -u
 
 TMP_ROOT=$(fm_test_tmproot fm-spawn-pool-base-freshen)
 
+make_private_process_inventory() {  # <fakebin>
+  cat > "$1/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] && [ "$#" -eq 4 ]; then
+  [ "${FM_TEST_PS_FAIL:-0}" = 0 ] || exit 1
+  printf '%s\n' "$PPID"
+  [ -z "${FM_TEST_PROCESS_PIDS:-}" ] || cat "$FM_TEST_PROCESS_PIDS"
+else
+  exec /bin/ps "$@"
+fi
+SH
+  chmod +x "$1/ps"
+}
+
 make_case() {
   local name=$1 id=$2 default=${3:-main} case_dir home project origin pool publisher fakebin initial
   case_dir="$TMP_ROOT/$name"
@@ -22,6 +36,7 @@ make_case() {
   pool="$case_dir/pool"
   publisher="$case_dir/publisher"
   fakebin=$(make_spawn_fakebin "$case_dir/fake")
+  make_private_process_inventory "$fakebin"
 
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
   printf 'codex\n' > "$home/config/crew-harness"
@@ -164,7 +179,7 @@ test_linked_spawning_home_rejects_primary_before_refresh() {
 }
 
 test_stale_pool_base_refreshes_before_branching() {
-  local rec id out status current branch_head
+  local rec id out status current branch_head repeat_pool
   id='pool-current-base-r1'
   rec=$(make_case current-base "$id")
   read_case_record "$rec"
@@ -185,6 +200,9 @@ test_stale_pool_base_refreshes_before_branching() {
 
   id='pool-current-base-repeat-r1'
   fm_test_spawn_brief "$HOME_DIR" "$id"
+  repeat_pool="$CASE_DIR/pool-repeat"
+  git -C "$PROJECT_DIR" worktree add --quiet --detach "$repeat_pool" "$current"
+  POOL_DIR=$repeat_pool
   out=$(run_spawn "$id" --mode no-mistakes --yolo off)
   status=$?
   expect_code 0 "$status" "repeating the base refresh should be idempotent"
@@ -222,6 +240,7 @@ make_originless_case() {  # <name> <id>
   project="$case_dir/project"
   pool="$case_dir/pool"
   fakebin=$(make_spawn_fakebin "$case_dir/fake")
+  make_private_process_inventory "$fakebin"
 
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
   printf 'codex\n' > "$home/config/crew-harness"
@@ -469,6 +488,7 @@ make_submodule_case() {  # <name> <id>
   publisher="$case_dir/publisher"
   sub="$case_dir/sub-origin"
   fakebin=$(make_spawn_fakebin "$case_dir/fake")
+  make_private_process_inventory "$fakebin"
 
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
   printf 'codex\n' > "$home/config/crew-harness"
@@ -528,6 +548,8 @@ strand_submodule_pin_via_spawn() {  # <seed-id>
     || fail "the first spawn did not move the pooled base across the moved submodule pin"
   [ "$(git -C "$POOL_DIR/ui" rev-parse HEAD)" = "$SUBPIN1" ] \
     || fail "the first spawn did not strand the submodule on the pin the old base recorded"
+  mkdir -p "$CASE_DIR/retired"
+  mv "$HOME_DIR/state/$id.meta" "$CASE_DIR/retired/$id.meta"
 }
 
 test_stale_submodule_pin_explains_itself() {
@@ -691,7 +713,7 @@ lay_out_as_pool_slot() {
 
 test_pool_custody_refuses_before_refresh_or_claim() {
   local variant rec id other other_home recorded before_head before_remote before_reflog before_claim out status launch_log pane_log
-  for variant in same-home sibling-home alias unsafe-metadata other-claim; do
+  for variant in same-home sibling-home unreadable-sibling alias unsafe-metadata other-claim; do
     id="pool-custody-${variant}-r1"
     other="prior-${variant}-r1"
     rec=$(make_case "custody-$variant" "$id")
@@ -700,7 +722,7 @@ test_pool_custody_refuses_before_refresh_or_claim() {
     other_home=$HOME_DIR
     recorded=$POOL_DIR
     case "$variant" in
-      sibling-home)
+      sibling-home|unreadable-sibling)
         other_home="$CASE_DIR/secondmate-home"
         mkdir -p "$other_home/state" "$other_home/data" "$other_home/config"
         printf '%s\n' "- mate - fixture (home: $other_home; scope: test; projects: project; added 2026-01-01)" \
@@ -721,6 +743,9 @@ test_pool_custody_refuses_before_refresh_or_claim() {
           "worktree=$recorded" "project=$PROJECT_DIR" "kind=scout"
       fi
     fi
+    if [ "$variant" = unreadable-sibling ]; then
+      chmod 000 "$other_home/state"
+    fi
     before_claim=
     if [ "$variant" = other-claim ]; then
       printf 'task=%s\nhome=%s\n' "$other" "$other_home" > "$SLOT_CLAIM"
@@ -733,6 +758,9 @@ test_pool_custody_refuses_before_refresh_or_claim() {
     pane_log="$CASE_DIR/pane.log"
     out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
     status=$?
+    if [ "$variant" = unreadable-sibling ]; then
+      chmod 700 "$other_home/state"
+    fi
     [ "$status" -ne 0 ] || fail "$variant: spawn accepted a slot already held by $other"
     assert_absent "$HOME_DIR/state/$id.meta" "$variant: refused spawn published metadata"
     if [ "$variant" = other-claim ]; then
@@ -754,6 +782,131 @@ test_pool_custody_refuses_before_refresh_or_claim() {
       assert_no_grep 'treehouse get' "$pane_log" "$variant: custody refusal happened after pool acquisition"
     fi
     pass "spawn refuses a $variant pool custody collision before refresh and claim"
+  done
+}
+
+test_returned_pool_copy_rechecks_custody_before_refresh() {
+  local rec id=new-worker old=old-worker out status before_head before_reflog before_status launch_log collision
+  for collision in record marker; do
+  rec=$(make_case "returned-custody-$collision" "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  printf 'preserve tracked work\n' >> "$POOL_DIR/README.md"
+  printf 'preserve untracked work\n' > "$POOL_DIR/untracked.txt"
+  before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  before_reflog=$(git -C "$POOL_DIR" reflog)
+  before_status=$(git -C "$POOL_DIR" status --porcelain)
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_RACE_EXITED" ]; then printf '%s\n' "$FM_TEST_RACE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*)
+    if [ "$FM_TEST_RACE_KIND" = record ]; then
+      printf 'worktree=%s\nproject=%s\nkind=scout\n' \
+        "$FM_TEST_RACE_COPY" "$FM_TEST_RACE_PROJECT" > "$FM_TEST_RACE_META"
+    else
+      printf 'task=%s\nhome=%s\n' "$FM_TEST_RACE_OLD" "$FM_TEST_RACE_HOME" > "$FM_TEST_RACE_MARKER"
+    fi
+    : > "$FM_TEST_RACE_REACHED"
+    ;;
+  *' exit Enter'*) : > "$FM_TEST_RACE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+  cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = status ] && [ -f "$FM_TEST_RACE_EXITED" ]; then
+  printf '1  available  %s\n' "$FM_TEST_RACE_COPY"
+  exit
+fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/treehouse"
+  launch_log="$CASE_DIR/launch.log"
+  out=$(FM_TEST_RACE_KIND="$collision" FM_TEST_RACE_COPY="$POOL_DIR" FM_TEST_RACE_PROJECT="$PROJECT_DIR" \
+    FM_TEST_RACE_META="$HOME_DIR/state/$old.meta" FM_TEST_RACE_MARKER="$SLOT_CLAIM" \
+    FM_TEST_RACE_OLD="$old" FM_TEST_RACE_HOME="$HOME_DIR" \
+    FM_TEST_RACE_REACHED="$CASE_DIR/reached" FM_TEST_RACE_EXITED="$CASE_DIR/exited" \
+    FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail 'spawn accepted a copy claimed after preflight'
+  assert_present "$CASE_DIR/reached" 'spawn never reached the Treehouse handoff'
+  assert_present "$CASE_DIR/exited" 'spawn did not leave the disputed interactive copy'
+  if [ "$collision" = record ]; then
+    assert_contains "$out" 'custody conflict' 'spawn did not refuse the returned record'
+    assert_grep "worktree=$POOL_DIR" "$HOME_DIR/state/$old.meta" 'spawn changed the old record'
+    assert_absent "$SLOT_CLAIM" 'spawn added a slot marker on record refusal'
+  else
+    assert_contains "$out" 'retains a slot claim' 'spawn did not refuse the returned marker'
+    assert_absent "$HOME_DIR/state/$old.meta" 'spawn added an old record on marker refusal'
+    assert_grep "task=$old" "$SLOT_CLAIM" 'spawn changed the old slot marker'
+  fi
+  assert_absent "$HOME_DIR/state/$id.meta" 'spawn published a conflicting record'
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] || fail 'spawn changed the copy HEAD'
+  [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] || fail 'spawn changed the copy reflog'
+  [ "$(git -C "$POOL_DIR" status --porcelain)" = "$before_status" ] || fail 'spawn changed preserved work'
+  [ ! -s "$launch_log" ] || fail 'spawn launched a worker on the disputed copy'
+  pass "returned pool copy is refused when a $collision claim arrives after preflight"
+  done
+}
+
+test_returned_pool_copy_rechecks_process_evidence() {
+  local rec id=process-worker variant out status survivor= launch_log
+  for variant in survivor unreadable; do
+    rec=$(make_case "returned-process-$variant" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+    cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_PANE_EXITED" ]; then printf '%s\n' "$FM_TEST_PANE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*) : > "$FM_TEST_PANE_REACHED" ;;
+  *' exit Enter'*) : > "$FM_TEST_PANE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/tmux"
+    mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+    cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = status ] && [ -f "$FM_TEST_PANE_EXITED" ]; then
+  printf '1  available  %s\n' "$FM_TEST_PANE_COPY"
+  exit
+fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/treehouse"
+    if [ "$variant" = survivor ]; then
+      (cd "$POOL_DIR" && exec /bin/sleep 60) &
+      survivor=$!
+      printf '%s\n' "$survivor" > "$CASE_DIR/process-pids"
+    fi
+    launch_log="$CASE_DIR/launch.log"
+    out=$(FM_TEST_PANE_COPY="$POOL_DIR" FM_TEST_PANE_PROJECT="$PROJECT_DIR" \
+      FM_TEST_PANE_REACHED="$CASE_DIR/reached" FM_TEST_PANE_EXITED="$CASE_DIR/exited" \
+      FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" FM_TEST_PS_FAIL=$([ "$variant" = unreadable ] && echo 1 || echo 0) \
+      FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+    status=$?
+    if [ -n "$survivor" ]; then kill "$survivor" 2>/dev/null || true; wait "$survivor" 2>/dev/null || true; survivor=; fi
+    [ "$status" -ne 0 ] || fail "$variant: spawn accepted unproven process custody"
+    assert_present "$CASE_DIR/reached" "$variant: spawn never reached the returned copy"
+    assert_present "$CASE_DIR/exited" "$variant: spawn did not leave the returned copy"
+    if [ "$variant" = survivor ]; then
+      assert_contains "$out" 'other live processes' "$variant: spawn did not refuse the rooted process"
+    else
+      assert_contains "$out" 'process custody' "$variant: spawn did not refuse unreadable evidence"
+    fi
+    assert_absent "$HOME_DIR/state/$id.meta" "$variant: spawn published task metadata"
+    [ ! -s "$launch_log" ] || fail "$variant: spawn launched a worker"
+    pass "returned pool copy refuses $variant process evidence before refresh"
   done
 }
 
@@ -1004,6 +1157,8 @@ test_scout_base_branch_refused_on_gerrit_forge() {
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
 test_pool_custody_refuses_before_refresh_or_claim
+test_returned_pool_copy_rechecks_custody_before_refresh
+test_returned_pool_copy_rechecks_process_evidence
 test_provider_pool_marker_from_sibling_clone_blocks_allocation
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching

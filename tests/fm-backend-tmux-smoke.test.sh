@@ -58,6 +58,27 @@ cleanup_all() {
 # socket, so bin/backends/tmux.sh's bare `tmux ...` invocations never touch the
 # host's real sessions.
 SHIM_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-backend-smoke.XXXXXX")
+TMUX_TMPDIR=${TMUX_TMPDIR:-$SHIM_DIR/tmux-tmp}
+mkdir -p "$TMUX_TMPDIR"
+chmod 700 "$TMUX_TMPDIR"
+export TMUX_TMPDIR
+PS_SHIM_DIR="$SHIM_DIR/ps-bin"
+mkdir -p "$PS_SHIM_DIR"
+FM_TEST_PRIVATE_PIDS="$SHIM_DIR/private-pids"
+FM_TEST_REAL_PS=$(command -v ps)
+export FM_TEST_PRIVATE_PIDS FM_TEST_REAL_PS
+cat > "$PS_SHIM_DIR/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ]; then
+  if [ "$#" -eq 4 ]; then cat "$FM_TEST_PRIVATE_PIDS"; exit; fi
+  pids=$(paste -sd, "$FM_TEST_PRIVATE_PIDS")
+  [ -n "$pids" ] || exit 0
+  shift 2
+  exec "$FM_TEST_REAL_PS" -p "$pids" "$@"
+fi
+exec "$FM_TEST_REAL_PS" "$@"
+SH
+chmod +x "$PS_SHIM_DIR/ps"
 cat > "$SHIM_DIR/tmux" <<SH
 #!/usr/bin/env bash
 exec "$REAL_TMUX" -L "$SOCKET" "\$@"
@@ -196,6 +217,7 @@ pass "real tmux: kill removes the window and the readable session inventory auth
 # A readable inventory on one socket says nothing about the endpoint on a
 # different socket. Keep both servers private and prove both CLI observations.
 HIDDEN_SOCKET="$SOCKET-hidden"
+PROOF_SPAWN_EPOCH=$(date +%s)
 "$REAL_TMUX" -L "$HIDDEN_SOCKET" new-session -d -s hidden -n agent \
   || fail 'could not create the endpoint on the hidden private socket'
 [ "$(fm_backend_agent_state tmux hidden:agent)" = missing ] \
@@ -209,6 +231,7 @@ pass 'real tmux: a second private server can hide a live endpoint from the curre
 PROOF_HOME="$SHIM_DIR/proof-home"
 PROOF_COPY="$SHIM_DIR/recorded-worktree"
 mkdir -p "$PROOF_HOME/state" "$PROOF_COPY/nested"
+"$REAL_TMUX" -L "$SOCKET" display-message -p '#{pid}' > "$FM_TEST_PRIVATE_PIDS"
 RECORDED_SOCKET=$("$REAL_TMUX" -L "$HIDDEN_SOCKET" display-message -p -t hidden:agent '#{socket_path}')
 cat > "$PROOF_HOME/state/recovery.meta" <<EOF
 window=hidden:fm-recovery
@@ -218,9 +241,11 @@ worktree=$PROOF_COPY
 project=$ROOT
 harness=codex
 kind=ship
-spawn_gen=s$(date +%s).fixture
+spawn_gen=s${PROOF_SPAWN_EPOCH}.1.1
 EOF
-proof_out=$(PATH="${PATH#*:}" FM_HOME="$PROOF_HOME" \
+"$REAL_TMUX" -L "$HIDDEN_SOCKET" kill-server \
+  || fail 'could not remove the recorded private server before recovery proof'
+proof_out=$(PATH="$PS_SHIM_DIR:${PATH#*:}" FM_HOME="$PROOF_HOME" FM_GATE_REFUSE_BYPASS=1 \
   bash "$ROOT/bin/fm-control.sh" recovery exit 2>&1) \
   || fail "real missing-endpoint control proof failed: $proof_out"
 case "$proof_out" in *endpoint-gone*) ;; *) fail "control did not confirm endpoint loss: $proof_out" ;; esac
@@ -234,12 +259,13 @@ if [ -d /proc/self/cwd ]; then
   ( cd "$ROOTED_DIR" && : > "$SHIM_DIR/rooted-ready" && exec /bin/sleep 60 ) &
   ROOTED_PID=$!
   while [ ! -e "$SHIM_DIR/rooted-ready" ]; do sleep 0.01; done
+  printf '%s\n' "$ROOTED_PID" >> "$FM_TEST_PRIVATE_PIDS"
   [ "$(readlink "/proc/$ROOTED_PID/cwd")" = "$ROOTED_DIR" ] \
     || fail 'the kernel did not report the process cwd inside the worktree child'
   case "$(ps -p "$ROOTED_PID" -o args=)" in
     *"$ROOTED_DIR"*) fail 'the process fixture leaked the worktree path into its command line' ;;
   esac
-  if PATH="${PATH#*:}" FM_HOME="$PROOF_HOME" \
+  if PATH="$PS_SHIM_DIR:${PATH#*:}" FM_HOME="$PROOF_HOME" FM_GATE_REFUSE_BYPASS=1 \
       bash "$ROOT/bin/fm-control.sh" recovery exit > "$SHIM_DIR/rooted-refusal" 2>&1; then
     fail 'control claimed an orphan process in the preserved copy had stopped'
   fi
