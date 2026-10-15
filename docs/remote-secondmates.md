@@ -583,6 +583,8 @@ Firstmate excludes `local-only` work at intake; the worker rejects projects outs
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 Provision the dedicated `fm-code` Boat environment with GitHub access enabled and secrets, Boat credentials, and agent credentials disabled.
 The box acts as the captain's GitHub account through Boat's own GitHub connection; no PC credential or Infisical token is transferred.
+Set the remote `boat-eng` home's local `config/boat-github-account.json` to the expected public GitHub account, for example `{"id":194535094,"login":"MitchellkellerLG"}`; use the captain's current account ID and login for the home being provisioned.
+The worker compares the injected account by numeric ID, uses the login as a readable label, and refuses ships and scouts before backlog intake when the setting is absent, invalid, or mismatched.
 Install `gh-axi` on the box and ensure its worker harnesses have working logins; this environment does not inject agent logins.
 Before backlog intake, every ship and scout resolves the injected GitHub account on the box and derives its public noreply committer name and email.
 The worker applies that identity only to its isolated worktree, including reused slots; no identity is read from the controller's Git configuration or accepted in task JSON.

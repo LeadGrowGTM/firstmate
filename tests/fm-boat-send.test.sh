@@ -231,6 +231,7 @@ new_case() {
   printf 'bx_ahnbu3qr\n' > "$LOCAL_HOME/config/boat-box-id"
   cp "$LOCAL_HOME/config/boat-box-id" "$FIXTURES/box-id"
   printf '%s\n' '{"id":12345,"login":"fixture-boat"}' > "$FIXTURES/github-account"
+  printf '%s\n' '{"id":12345,"login":"fixture-boat"}' > "$REMOTE_HOME/config/boat-github-account.json"
   printf '%s\n' '{"billingStatus":"active","canStart":true,"creditSecondsPerDollar":100000,"creditUsedSeconds":1000,"last24hUsageSeconds":2000,"creditBalanceSeconds":100000,"activeStates":["ready","idle","running"]}' \
     > "$FIXTURES/limits.json"
   printf '%s\n' '{"pageInfo":{"hasMore":false},"sandboxes":[{"id":"bx_ahnbu3qr","state":"stopped"}]}' \
@@ -452,6 +453,28 @@ test_ship_prerequisites_and_identity() {
   spawn_task
   expect_code 0 "$CODE" "quoted numeric GitHub login: $OUT"
   grep -Fx '12345+123@users.noreply.github.com' "$FIXTURES/spawn.argv" >/dev/null || fail 'numeric login was not decoded'
+  for variant in ship scout; do
+    new_case "github-other-account-$variant"
+    seed_project firstmate
+    if [ "$variant" = scout ]; then set_json request '.kind = "scout" | .mode = "scout"'; fi
+    printf '%s\n' '{"id":54321,"login":"other-user"}' > "$FIXTURES/github-account"
+    spawn_task
+    expect_code 1 "$CODE" "other GitHub account $variant refusal"
+    assert_contains "$OUT" 'expected fixture-boat (12345); actual other-user (54321)' 'account mismatch diagnostic omitted expected or actual'
+    assert_no_grep 'brief ' "$FIXTURES/calls" "other account $variant reached brief generation"
+    assert_no_grep 'spawn task-one ' "$FIXTURES/calls" "other account $variant reached spawn"
+    assert_no_grep 'task-one' "$REMOTE_HOME/data/backlog.md" "other account $variant reached backlog intake"
+    new_case "github-missing-account-setting-$variant"
+    seed_project firstmate
+    if [ "$variant" = scout ]; then set_json request '.kind = "scout" | .mode = "scout"'; fi
+    rm "$REMOTE_HOME/config/boat-github-account.json"
+    spawn_task
+    expect_code 1 "$CODE" "missing GitHub account setting $variant refusal"
+    assert_contains "$OUT" 'expected Boat GitHub account is missing (config/boat-github-account.json); actual fixture-boat (12345)' 'missing account setting diagnostic omitted actual account'
+    assert_no_grep 'brief ' "$FIXTURES/calls" "missing account setting $variant reached brief generation"
+    assert_no_grep 'spawn task-one ' "$FIXTURES/calls" "missing account setting $variant reached spawn"
+    assert_no_grep 'task-one' "$REMOTE_HOME/data/backlog.md" "missing account setting $variant reached backlog intake"
+  done
   for variant in unavailable missing-login missing-id invalid-login invalid-id bad-envelope truncated; do
     new_case "github-$variant"
     seed_project firstmate

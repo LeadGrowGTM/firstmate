@@ -45,7 +45,8 @@
 # Scout teardown requires a completed captain-hold inventory; refusal
 # prints the exact controller command rather than manufacturing --none consent.
 # Every worker, including scouts, requires gh-axi and a valid injected on-box
-# GitHub account before backlog intake. gh-axi api /user supplies only login/id;
+# GitHub account matching config/boat-github-account.json by numeric id before
+# backlog intake. gh-axi api /user supplies only login/id;
 # its --jq scalar is read from its exact untruncated api_response envelope.
 # The account login and <numeric-id>+<login>@users.noreply.github.com become
 # --git-name/--git-email; fm-spawn.sh applies them only to the isolated worktree.
@@ -198,6 +199,23 @@ GH_ACCOUNT=$(jq -cen --arg encoded "$GH_ENCODED" '
     (.id | type == "number" and . > 0 and . <= 9007199254740991 and floor == .))
 ' 2>/dev/null) || die 'on-box GitHub account login or numeric id is invalid'
 GIT_NAME=$(printf '%s' "$GH_ACCOUNT" | jq -r .login)
+GH_ID=$(printf '%s' "$GH_ACCOUNT" | jq -r .id)
+ACCOUNT_CONFIG="$FM_HOME/config/boat-github-account.json"
+if [ ! -f "$ACCOUNT_CONFIG" ] || [ -L "$ACCOUNT_CONFIG" ]; then
+  die "expected Boat GitHub account is missing (config/boat-github-account.json); actual $GIT_NAME ($GH_ID)"
+fi
+[ "$(wc -c < "$ACCOUNT_CONFIG")" -le 256 ] || die 'invalid config/boat-github-account.json'
+EXPECTED_ACCOUNT=$(jq -cen --slurpfile account "$ACCOUNT_CONFIG" '
+  $account | select(length == 1) | .[0] |
+  select(type == "object" and (keys == ["id","login"]) and
+    (.login | type == "string" and length <= 39 and
+      test("\\A[A-Za-z0-9]+(-[A-Za-z0-9]+)*\\z")) and
+    (.id | type == "number" and . > 0 and . <= 9007199254740991 and floor == .))
+' 2>/dev/null) || die 'invalid config/boat-github-account.json'
+EXPECTED_ID=$(printf '%s' "$EXPECTED_ACCOUNT" | jq -r .id)
+EXPECTED_NAME=$(printf '%s' "$EXPECTED_ACCOUNT" | jq -r .login)
+[ "$GH_ID" = "$EXPECTED_ID" ] ||
+  die "Boat GitHub account mismatch: expected $EXPECTED_NAME ($EXPECTED_ID); actual $GIT_NAME ($GH_ID)"
 GIT_EMAIL=$(printf '%s' "$GH_ACCOUNT" | jq -r '"\(.id)+\(.login)@users.noreply.github.com"')
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
