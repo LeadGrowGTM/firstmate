@@ -236,8 +236,12 @@ fm_brief_task_placeholders_present() {  # <file>
 # The one mandatory prove-it clause, completing the "complete only when" sentence
 # of every ship Definition of done (and so of scout promotion) and of the scout
 # report rule in bin/fm-brief.sh.
-fm_prove_it_clause() {  # <where the evidence goes>
-  printf '%s' "proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in $1."
+fm_prove_it_clause() {  # <ship|scout> <where the evidence goes>
+  if [ "$1" = scout ]; then
+    printf '%s' "proven for real: run the actual existing system, reproduction, or commands your findings rest on, and put the commands you ran and their output in $2."
+  else
+    printf '%s' "proven for real: run the actual thing end to end as its user would, not only its tests, and put the commands you ran and their output in $2."
+  fi
 }
 
 # Print the words of every provenance-marked line in a legacy `# Task` body.
@@ -416,7 +420,7 @@ EOF
 fm_dod_block() {  # <mode> <task-id> [branch] [<forge>] [<base>]
   local mode=$1 id=$2 forge=${4:-none} base=${5:-}
   local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove
-  prove=$(fm_prove_it_clause "\`proof.md\` in the proof directory named above")
+  prove=$(fm_prove_it_clause ship "\`${FM_HOME:-.}/data/$id/proof.md\`")
   fm_forge_valid_for_mode "$forge" "$mode" fm_dod_block || return 1
   fm_base_branch_valid "$base" "$mode" "$forge" fm_dod_block || return 1
   if [ -n "$base" ]; then

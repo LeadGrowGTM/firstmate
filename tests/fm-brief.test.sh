@@ -1793,9 +1793,6 @@ test_scout_and_secondmate_scaffold
 test_ship_and_scout_route_surfaces_through_lavish_or_html
 test_scout_lavish_line_follows_presentation_floor
 test_workers_wait_without_spending_turns
-# Every brief is bounded (one goal, off-limits, the contracts and pipeline
-# states that apply where it is spawned) and every Definition of done demands a
-# real end-to-end run with saved evidence.
 test_briefs_are_bounded_and_demand_real_proof() {
   local home mode brief
   home="$TMP_ROOT/bounded-home"
@@ -1812,17 +1809,30 @@ test_briefs_are_bounded_and_demand_real_proof() {
     assert_equals 1 "$(grep -c '^Off-limits: {OFF_LIMITS}$' "$brief")" "$mode: the off-limits line is missing or duplicated"
     assert_equals 1 "$(grep -c '^Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}$' "$brief")" \
       "$mode: the contracts-and-pipeline-states line is missing or duplicated"
-    assert_grep "proven for real: run the actual thing end to end as its user would, not only its tests" "$brief" \
-      "$mode: the Definition of done does not demand a real run"
+    if [ "$mode" = scout ]; then
+      assert_grep 'proven for real: run the actual existing system, reproduction, or commands your findings rest on' "$brief" \
+        "scout: the Definition of done does not scope proof to existing evidence"
+    else
+      assert_grep "proven for real: run the actual thing end to end as its user would, not only its tests" "$brief" \
+        "$mode: the Definition of done does not demand a real run"
+    fi
   done
   for mode in no-mistakes direct-PR local-only; do
-    assert_grep "and their output in \`proof.md\` in the proof directory named above." "$home/data/bp-$mode/brief.md" \
+    assert_grep "and their output in \`$home/data/bp-$mode/proof.md\`." "$home/data/bp-$mode/brief.md" \
       "$mode: the ship proof has no evidence destination"
+    assert_grep "write proof to \`$home/data/bp-$mode/proof.md\`" "$home/data/bp-$mode/brief.md" \
+      "$mode: the ship rules name a different proof destination"
+  done
+  for mode in no-mistakes direct-PR; do
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "bp-gerrit-$mode" some-proj --mode "$mode" --forge gerrit >/dev/null 2>&1 \
+      || fail "$mode Gerrit scaffold exited non-zero"
+    assert_grep "and their output in \`$home/data/bp-gerrit-$mode/proof.md\`." "$home/data/bp-gerrit-$mode/brief.md" \
+      "$mode Gerrit: the ship proof has no durable destination"
   done
   assert_grep "and their output in the report." "$home/data/bp-scout/brief.md" "scout: the proof is not put in the report"
   assert_grep 'Do NOT push, do NOT open a PR, do NOT merge.' "$home/data/bp-local-only/brief.md" \
     "local-only: the no-push rule was lost"
-  pass "fm-brief: ship and scout briefs are bounded and demand a real end-to-end proof"
+  pass "fm-brief: ship and scout briefs are bounded and demand real proof"
 }
 
 # A type may name the tools its worker uses; the line is omitted when it names

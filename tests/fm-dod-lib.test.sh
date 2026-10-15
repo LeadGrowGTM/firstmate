@@ -415,6 +415,10 @@ EOF
       assert_grep 'against the base branch `feature/hub`' "$home/data/$id/ship-instructions.md" \
         "promotion did not target the PR at the recorded base"
       assert_grep 'base_branch=feature/hub' "$meta" "promotion dropped the recorded base"
+      assert_grep "write proof to \`$home/data/$id/proof.md\`" "$home/data/$id/ship-instructions.md" \
+        "promotion did not name the durable proof destination"
+      assert_grep "and their output in \`$home/data/$id/proof.md\`." "$home/data/$id/ship-instructions.md" \
+        "promotion Definition of done named a different proof destination"
     else
       [ "$status" -ne 0 ] || fail "promoting a based scout to local-only should be refused"
       assert_contains "$out" "mode=local-only" "the local-only promotion refusal did not explain itself"

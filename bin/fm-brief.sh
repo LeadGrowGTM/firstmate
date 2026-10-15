@@ -756,7 +756,7 @@ $WAIT_BLOCK$SUB_AGENT_BLOCK$INBOX_SECTION
 # Definition of done
 Write your findings to \`$DATA/$ID/report.md\`.
 The report must stand alone: what you did, what you found, the evidence (file:line references and the proof below), and what you recommend.
-It is complete only when $(fm_prove_it_clause "the report")
+It is complete only when $(fm_prove_it_clause scout "the report")
 $LAVISH_LINE
 Before reporting done, read and follow \`$FM_ROOT/.agents/skills/captain-hold-lifecycle/SKILL.md\` and pass its shared completion gate for the report and any visual review.
 When the report is complete, append \`done [at=<epoch>]: {one-line conclusion}\` to the status file and stop.
@@ -806,7 +806,7 @@ If the top-level path is the primary checkout or not the worktree you were launc
 
 # Rules
 $RULE1
-2. Keep project edits inside this worktree; keep proof and scratch output outside it, under \`$DATA/$ID/\` or a temporary directory.
+2. Keep project edits inside this worktree; write proof to \`$FM_HOME/data/$ID/proof.md\` and keep scratch output outside it, under \`$DATA/$ID/\` or a temporary directory.
    Outside the worktree, write only that task material and the status and steering-inbox records authorized below.
    Leave the worktree clean before reporting done.
 $TOOLS_RULE
