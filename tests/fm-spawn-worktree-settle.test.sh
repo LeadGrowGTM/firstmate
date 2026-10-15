@@ -230,8 +230,8 @@ test_no_git_flags_leave_config_unchanged() {
   pass "ordinary spawn leaves Git config unchanged"
 }
 
-test_reused_slot_drops_prior_worker_identity() {
-  local kind requested rec id out status ident key
+test_reused_slot_identity_scope() {
+  local kind requested rec id out status ident
   for kind in ship scout; do
     for requested in no yes; do
       id="settle-reused-$kind-$requested-z10"
@@ -259,16 +259,15 @@ test_reused_slot_drops_prior_worker_identity() {
         esac
       else
         case "$ident" in
-        'Current Operator <current@example.invalid> '*) ;;
-        *) fail "reused $kind worktree kept the previous worker identity: $ident" ;;
+        'Prior Boat Worker <prior@example.invalid> '*) ;;
+        *) fail "ordinary reused $kind worktree changed its identity: $ident" ;;
         esac
-        for key in user.name user.email; do
-          [ -z "$(git -C "$WT_DIR" config --worktree --get "$key" || true)" ] || fail "reused $kind worktree retained $key"
-        done
+        [ "$(git -C "$WT_DIR" config --worktree --get user.name)" = 'Prior Boat Worker' ] || fail "ordinary reused $kind worktree changed its name"
+        [ "$(git -C "$WT_DIR" config --worktree --get user.email)" = 'prior@example.invalid' ] || fail "ordinary reused $kind worktree changed its email"
       fi
     done
   done
-  pass "reused ship and scout slots use the requested or current project identity"
+  pass "Boat identity overwrites reused ship and scout slots; ordinary launches leave them alone"
 }
 
 # A single stale first read (the exact incident) must not be accepted: the
@@ -387,6 +386,6 @@ test_scout_git_identity_is_worktree_scoped
 test_git_identity_flag_validation
 test_git_identity_refuses_unsafe_common_config
 test_no_git_flags_leave_config_unchanged
-test_reused_slot_drops_prior_worker_identity
+test_reused_slot_identity_scope
 
 echo "# all fm-spawn-worktree-settle tests passed"

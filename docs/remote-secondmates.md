@@ -580,11 +580,13 @@ Firstmate excludes `local-only` work at intake; the worker rejects projects outs
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 Ships also require `gh-axi` installed on the box; installing that developer tool is allowed under R6, while credential setup remains a separate operation.
 The sender supplies the effective Git commit name and email from the controller's firstmate project for every ship and scout, and the worker applies it only to that worker's isolated worktree.
+Boat worktree pools live only on the box, every worker there receives that controller identity and overwrites a reused slot before launch, and PC pools never host Boat workers.
 Boat ship PR delivery waits for a separate provisioning follow-up: the box must receive GitHub authentication from Infisical through a Boat-provisioned machine identity, never from this PC.
 Do not send a token in task JSON: the current remote job transport stages stdin on disk.
 
 Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.
-The worker answers a recognized Codex directory-trust modal once, then requires worker progress; an unrecognized modal or missing start proof leaves the task intact for same-task reconciliation.
+The worker does not auto-answer Codex directory-trust text because a rendered transcript cannot prove an active modal.
+Without a fresh worker status declaration, dispatch refuses success and leaves the task intact for same-task reconciliation.
 Running boxes reserve only their existing timer's remaining duration against the unchanged spend caps; dispatch never extends the timer.
 
 Use the existing remote commands for supervision, steering, and report retrieval:

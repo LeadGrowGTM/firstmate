@@ -41,8 +41,8 @@
 # fm-peek.sh, fm-send.sh, and fm-remote-file.sh; task teardown uses fm-teardown.sh.
 # Dispatch success requires a fresh worker status declaration within 120 polls
 # (one second apart; FM_BOAT_START_POLLS and FM_BOAT_START_INTERVAL override).
-# Codex directory trust is accepted once with Enter from the visible viewport;
-# missing proof leaves the task intact for same-id reconciliation, never retry.
+# Codex directory-trust text is not auto-answered; missing start proof leaves
+# the task intact for same-id reconciliation, never retry.
 # Scout teardown requires a controller-reviewed completion inventory; refusal
 # prints the exact controller command rather than manufacturing --none consent.
 # Ships require gh-axi; every worker requires a valid supplied Git identity before backlog intake;
@@ -59,20 +59,6 @@ boat_runtime() {
   . "$SCRIPT_DIR/fm-backend.sh"
   [ "$(fm_backend_name)" = tmux ] || die 'Boat worker inventory requires the tmux backend'
   fm_backend_source tmux || die 'Boat tmux adapter unavailable'
-}
-boat_codex_trust_dialog() {
-  local command
-  command=$(fm_backend_tmux_current_command "$1") || return 1
-  [ "$command" = codex ] || return 1
-  printf '%s\n' "$2" | awk '
-    /^[[:space:]]*$/ { next }
-    { n++
-      if (n == 1 && $0 ~ /^[[:space:]]*(Do you trust the contents of this directory\?|Trust this folder\?)[[:space:]]*$/) question = 1
-      if (n == 2 && $0 ~ /^[[:space:]]*[›❯>][[:space:]]*(1\.[[:space:]]*)?Yes, (I trust this folder|allow Codex to work in this folder)[[:space:]]*$/) yes = 1
-      if (n == 3 && $0 ~ /^[[:space:]]*(2\.[[:space:]]*)?No, exit[[:space:]]*$/) no = 1
-    }
-    END { exit !(n == 3 && question && yes && no) }
-  '
 }
 boat_worker_count() { # [new task id, refused if its endpoint already exists]
   local meta id records='' windows status=0
@@ -248,13 +234,10 @@ fi
 if [ -f "$STATUS" ]; then STATUS_LINES=$(wc -l < "$STATUS"); fi
 "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}" >&2
 # A spawned pane is not proof that the brief was consumed. Only a new worker
-# declaration counts; captures and trust-key delivery cannot supply start proof.
+# declaration counts; captures cannot supply start proof.
 polls=${FM_BOAT_START_POLLS:-120}
 interval=${FM_BOAT_START_INTERVAL:-1}
 case "$polls" in ''|*[!0-9]*|0) die 'invalid Boat start poll limit' ;; esac
-trust_answered=0
-trust_seen=0
-harness=$(jq -r .harness "$TMP/request")
 for ((poll=0; poll<polls; poll++)); do
   if [ -f "$STATUS" ] && tail -n "+$((STATUS_LINES + 1))" "$STATUS" |
     grep -Eq '^(failed|blocked|needs-decision) \[at=[0-9]+\].*: '; then
@@ -265,21 +248,10 @@ for ((poll=0; poll<polls; poll++)); do
     printf 'boat-started: %s (fresh worker status)\n' "$ID"
     break
   fi
-  pane=$(fm_backend_tmux_visible_capture "=firstmate:=fm-$ID") || die "worker start unconfirmed: viewport unavailable for $ID; reconcile the existing task before retry"
-  if [ "$harness" = codex ] && boat_codex_trust_dialog "=firstmate:=fm-$ID" "$pane"; then
-    trust_seen=1
-    if [ "$trust_answered" -eq 0 ]; then
-      fm_backend_tmux_send_key "=firstmate:=fm-$ID" Enter || die "Codex folder-trust dialog could not be answered for $ID"
-      trust_answered=1
-    fi
-  fi
+  fm_backend_tmux_visible_capture "=firstmate:=fm-$ID" >/dev/null || die "worker start unconfirmed: viewport unavailable for $ID; reconcile the existing task before retry"
   if [ "$poll" -lt "$((polls - 1))" ]; then sleep "$interval"; fi
 done
 if [ "$poll" -eq "$polls" ]; then
-  if [ "$trust_seen" -eq 1 ]; then
-    version=$(codex --version 2>/dev/null || printf 'version unavailable')
-    die "Codex folder-trust start unconfirmed for $ID ($version, Enter sent=$trust_answered); reconcile the existing task before retry"
-  fi
   die "worker start unconfirmed for $ID; inspect with fm-on.sh boat-eng fm-peek.sh $ID and reconcile before retry"
 fi
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"

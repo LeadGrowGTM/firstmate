@@ -25,7 +25,6 @@ cat > "$BIN/fm-backend.sh" <<'SH'
 fm_backend_name() { cat "$FM_HOME/config/backend"; }
 fm_backend_source() { [ "$1" = tmux ]; }
 fm_backend_of_meta() { sed -n 's/^backend=//p' "$1" | awk 'NR==1 { found=1; print } END { if (!found) print "tmux" }'; }
-fm_backend_tmux_current_command() { [ ! -e "$FIXTURES/noncodex" ] && printf 'codex\n' || printf 'bash\n'; }
 fm_backend_tmux_visible_capture() {
   printf 'capture %s\n' "$1" >> "$FIXTURES/calls"
   [ ! -e "$FIXTURES/capture.fail" ] || return 1
@@ -35,15 +34,14 @@ fm_backend_tmux_visible_capture() {
     printf 'FIRSTMATE_OP: v1 launch-brief: Fix the \"Trust this folder?\" prompt\nDo you trust the contents of this directory?\n› 1. Yes, I trust this folder\n  2. No, exit\n'
   elif [ -e "$FIXTURES/quoted-no-op" ]; then
     printf 'Quoted tool output:\nDo you trust the contents of this directory?\n› 1. Yes, I trust this folder\n  2. No, exit\n'
+  elif [ -e "$FIXTURES/quoted-exact" ]; then
+    printf 'Do you trust the contents of this directory?\n› 1. Yes, I trust this folder\n  2. No, exit\n'
   elif [ -e "$FIXTURES/negative-trust" ]; then
     printf 'Do you trust the contents of this directory?\n  1. Yes, I trust this folder\n› 2. No, exit\n'
   else printf 'Worker running\n'; fi
 }
 fm_backend_tmux_send_key() {
   printf 'key %s\n' "$*" >> "$FIXTURES/calls"
-  [ ! -e "$FIXTURES/trust.stuck" ] || return 0
-  rm -f "$FIXTURES/trust"
-  printf 'working [at=1791892800]: brief consumed\n' >> "$FM_HOME/state/task-one.status"
 }
 fm_backend_tmux_window_inventory() {
   printf 'inventory %s\n' "$1" >> "$FIXTURES/calls"
@@ -358,22 +356,21 @@ test_running_reservation_and_start() {
 
 test_worker_start() {
   local variant
-  for variant in status trust stuck stale capture quoted quoted-no-op negative noncodex; do
+  for variant in status trust stale capture quoted quoted-no-op quoted-exact negative; do
     new_case "start-$variant"
     seed_project firstmate
     case "$variant" in
       trust) : > "$FIXTURES/trust" ;;
-      stuck) : > "$FIXTURES/trust"; : > "$FIXTURES/trust.stuck" ;;
       stale) : > "$FIXTURES/no-start"; printf 'working [at=1]: old\n' > "$REMOTE_HOME/state/task-one.status" ;;
       capture) : > "$FIXTURES/capture.fail"; : > "$FIXTURES/no-start" ;;
       quoted) : > "$FIXTURES/quoted-trust"; : > "$FIXTURES/no-start" ;;
       quoted-no-op) : > "$FIXTURES/quoted-no-op"; : > "$FIXTURES/no-start" ;;
+      quoted-exact) : > "$FIXTURES/quoted-exact"; : > "$FIXTURES/no-start" ;;
       negative) : > "$FIXTURES/negative-trust"; : > "$FIXTURES/no-start" ;;
-      noncodex) : > "$FIXTURES/trust"; : > "$FIXTURES/noncodex"; : > "$FIXTURES/no-start" ;;
     esac
     spawn_task
     case "$variant" in
-      status|trust)
+      status)
         expect_code 0 "$CODE" "worker $variant start: $OUT"
         assert_contains "$OUT" 'boat-started: task-one' 'missing positive start proof'
         ;;
@@ -383,14 +380,10 @@ test_worker_start() {
         [ -e "$REMOTE_HOME/state/task-one.meta" ] || fail 'unconfirmed launch lost metadata'
         ;;
     esac
-    if [ "$variant" = quoted-no-op ] || [ "$variant" = noncodex ]; then
+    if [ "$variant" = quoted-no-op ] || [ "$variant" = quoted-exact ] || [ "$variant" = trust ]; then
       assert_contains "$OUT" 'worker start unconfirmed' 'non-dialog viewport was classified as a trust dialog'
     fi
-    if [ "$variant" = trust ] || [ "$variant" = stuck ]; then
-      assert_equals 1 "$(grep -c '^key ' "$FIXTURES/calls")" 'trust Enter must be sent once'
-    else
-      assert_no_grep 'key ' "$FIXTURES/calls" 'non-modal text received Enter'
-    fi
+    assert_no_grep 'key ' "$FIXTURES/calls" 'viewport text received Enter without modal proof'
   done
   new_case scout-completion-missing
   seed_receipt
@@ -401,7 +394,7 @@ test_worker_start() {
   assert_contains "$OUT" 'fm-on.sh boat-eng fm-captain-hold.sh complete task-one --none' 'missing exact controller command'
   assert_equals '' "$(sed -n '/^teardown /p' "$FIXTURES/calls")" 'unreviewed scout was torn down'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unreviewed scout box was stopped'
-  pass 'worker confirms fresh progress, handles trust once, and preserves unreviewed scouts'
+  pass 'worker confirms fresh progress, refuses ambiguous trust text, and preserves unreviewed scouts'
 }
 
 test_ship_prerequisites_and_identity() {

@@ -53,8 +53,7 @@
 #   task worktree via Git worktree config, before the harness starts. Enabling
 #   extensions.worktreeConfig changes common config, so an existing core.bare=true
 #   or core.worktree refuses the launch before that change. No flags leave Git
-#   config untouched when there is no inherited worktree identity; a reused
-#   slot drops inherited name/email. Secondmates and relaunches cannot set one.
+#   config untouched; secondmates and relaunches cannot set this identity.
 #   Ship/scout launches always put fm-dod-lib.sh's current worker role scope
 #   first in the private launch-brief overlay, including the exact task-owned
 #   steering inbox. This never rewrites a project's instruction files or a
@@ -3800,6 +3799,7 @@ set_spawn_git_identity() { # <verified linked worktree>
     return 1
   fi
   git -C "$worktree" config --local extensions.worktreeConfig true || return 1
+  # Boat-only pools pass this pair on every launch, overwriting a reused slot before use.
   git -C "$worktree" config --worktree user.name "$GIT_NAME" || return 1
   git -C "$worktree" config --worktree user.email "$GIT_EMAIL" || return 1
   ident=$(env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL git -C "$worktree" var GIT_COMMITTER_IDENT) || return 1
@@ -5000,24 +5000,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
   freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" || exit 1
-  if [ "$GIT_NAME_SET" -eq 1 ]; then
-    set_spawn_git_identity "$WT" || exit 1
-  else
-    spawn_git_config_rc=0
-    spawn_git_worktree_config=$(git -C "$WT" config --local --get --bool extensions.worktreeConfig 2>/dev/null) || spawn_git_config_rc=$?
-    [ "$spawn_git_config_rc" -eq 0 ] || [ "$spawn_git_config_rc" -eq 1 ] || exit 1
-    if [ "$spawn_git_worktree_config" = true ]; then
-      for spawn_git_key in user.name user.email; do
-        spawn_git_config_rc=0
-        git -C "$WT" config --worktree --get "$spawn_git_key" >/dev/null 2>&1 || spawn_git_config_rc=$?
-        if [ "$spawn_git_config_rc" -eq 0 ]; then
-          git -C "$WT" config --worktree --unset-all "$spawn_git_key" || exit 1
-        else
-          [ "$spawn_git_config_rc" -eq 1 ] || exit 1
-        fi
-      done
-    fi
-  fi
+  [ "$GIT_NAME_SET" -eq 0 ] || set_spawn_git_identity "$WT" || exit 1
 fi
 
 # Re-assert the durable task copy after either treehouse acquisition or endpoint
