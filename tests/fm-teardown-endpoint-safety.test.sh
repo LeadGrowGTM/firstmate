@@ -1664,7 +1664,7 @@ test_retire_claim_archives_without_spawn_generation() {
 
 test_retire_claim_preserves_partial_backlog_transitions() {
   local dir id mode rc before archive row expected
-  for mode in prepare backup done reopen update remove marker-remove close-marker; do
+  for mode in prepare backup 'done' reopen update remove marker-remove close-marker; do
     id="retire-partial-$mode"
     dir=$(make_retire_claim_case "retire-partial-$mode" "$id")
     printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
@@ -1673,8 +1673,8 @@ test_retire_claim_preserves_partial_backlog_transitions() {
     if [ "$mode" = reopen ]; then
       tasks-axi hold "$id" --reason 'captain answer pending' --kind captain --file "$dir/home/data/backlog.md" >/dev/null
     elif [ "$mode" = update ]; then
-      tasks-axi done "$id" --file "$dir/home/data/backlog.md" >/dev/null
-    elif [ "$mode" = done ] || [ "$mode" = close-marker ]; then
+      tasks-axi 'done' "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    elif [ "$mode" = 'done' ] || [ "$mode" = close-marker ]; then
       git -C "$dir/worktree" add -A
       git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid commit -qm landed
       git -C "$dir/project" merge --ff-only "fm/$id" >/dev/null
@@ -1761,7 +1761,7 @@ SH
       if [ "$mode" = update ] || [ "$mode" = marker-remove ] || [ "$mode" = close-marker ]; then
         row=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
         expected=queued
-        [ "$mode" != close-marker ] || expected=done
+        [ "$mode" != close-marker ] || expected='done'
         assert_contains "$row" "state: $expected" "$mode: fixture did not reach its partial backlog mutation"
       fi
     fi
@@ -1776,7 +1776,7 @@ SH
         PATH="$dir/fakebin:$PATH" "$ROOT/bin/fm-bootstrap.sh" > "$dir/retry.out" 2> "$dir/retry.err" \
         || fail "$mode: retirement replay failed: $(cat "$dir/retry.err")"
       expected=queued
-      [ "$mode" != done ] && [ "$mode" != close-marker ] || expected=done
+      [ "$mode" != 'done' ] && [ "$mode" != close-marker ] || expected='done'
       row=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
       assert_contains "$row" "state: $expected" "$mode: replay did not finish its backlog transition"
       assert_absent "$dir/home/state/$id.backlog-close" "$mode: replay kept the retirement marker"
