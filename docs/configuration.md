@@ -502,7 +502,7 @@ New work that home starts then reads as that mate's crew:
 
 The file holds one short form of 1-16 lowercase letters, digits, and inner dashes, on one line with an optional final newline.
 A missing or empty file keeps today's names exactly.
-Any other content stops new spawns and ship briefs that use the default branch prefix with an error naming the file, rather than guessing a name.
+Invalid content fails operations that read the short form with an error naming the file; resolving a registered branch prefix does not read it.
 [`bin/fm-crew-name-lib.sh`](../bin/fm-crew-name-lib.sh) implements this format and the resulting names.
 
 The branch is only a default: a project's registered `branch=<prefix>` and an explicit `--branch-prefix` still win, and `bin/fm-project-mode.sh --branch-prefix <project>` reports the resolved prefix.
@@ -510,7 +510,7 @@ The label is display only.
 Scripts keep addressing every task window by its `fm-<task-id>` name, so steering, peeking, monitoring, and recovery are unchanged.
 Only the tmux backend shows the label.
 Firstmate records the label on its own window as the `@fm_label` window option.
-Firstmate leaves tmux's built-in and operator custom status formats unchanged, so those formats keep displaying the plain `fm-<task-id>` name.
+Firstmate leaves tmux's built-in and operator custom status formats unchanged; formats that render the window name keep displaying `fm-<task-id>`.
 Firstmate's status theme (`bin/fm-statusbar.sh theme`, loaded by the tracked `fm-statusbar.tmux` snippet) shows the label when loaded before or after the worker is spawned.
 The window name reported by `tmux list-windows` remains `fm-<task-id>` in every case.
 Herdr, zellij, cmux, and Orca keep their current tab names, because those backends also use the tab name to find and recover a task.

@@ -24,9 +24,9 @@
 # project fact rather than a task choice.
 #
 # Registry line format (data/projects.md):
-#   - <name> - <desc> (added <date>)                                 -> no-mistakes off fm/  (legacy default)
-#   - <name> [<mode>] - <desc> (added <date>)                        -> <mode> off fm/
-#   - <name> [<mode> +yolo] - <desc> (added <date>)                  -> <mode> on fm/
+#   - <name> - <desc> (added <date>)                                 -> no-mistakes off <home-default>
+#   - <name> [<mode>] - <desc> (added <date>)                        -> <mode> off <home-default>
+#   - <name> [<mode> +yolo] - <desc> (added <date>)                  -> <mode> on <home-default>
 #   - <name> [<mode> +yolo branch=<prefix>] - <desc> (added <date>)  -> <mode> <yolo> <prefix>
 #   - <name> [<mode> forge=gerrit] - <desc> (added <date>)           -> <mode> off, --forge gerrit
 #   <name> may contain spaces; it ends at the literal " [" or " - " that follows it.
