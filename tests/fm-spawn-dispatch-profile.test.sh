@@ -326,6 +326,29 @@ test_no_profile_keeps_claude_profile_defaults() {
   pass "no --model/--effort records defaults and types the claude launch instructions"
 }
 
+# A home's short form names the ship branch a spawn records: a flagless spawn
+# takes <short>/crew/<id>, and an explicit --branch-prefix still wins. Both
+# launch, and each records the branch its brief names.
+test_crew_short_name_spawn_records_the_ship_branch() {
+  local rec id prefix out status
+  local -a flag
+  for prefix in nap/crew/ fix/; do
+    id="crew-branch-${prefix%%/*}"
+    rec=$(make_spawn_case "$id" claude "$id")
+    read_case_record "$rec"
+    printf 'nap\n' > "$HOME_DIR/config/mate-short-name"
+    printf 'Ship branch: %s%s\n' "$prefix" "$id" >> "$HOME_DIR/data/$id/brief.md"
+    flag=()
+    [ "$prefix" = nap/crew/ ] || flag=(--branch-prefix "$prefix")
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "${flag[@]}")
+    status=$?
+    expect_code 0 "$status" "a $prefix spawn in a home with a short form should launch"$'\n'"$out"
+    assert_grep "branch=$prefix$id" "$HOME_DIR/state/$id.meta" "the $prefix spawn did not record its ship branch"
+    assert_grep "crew_label=nap-crew-$id" "$HOME_DIR/state/$id.meta" "the $prefix spawn lost its crew label"
+  done
+  pass "crew names: a flagless spawn records the crew branch and an explicit prefix still wins"
+}
+
 # Claude Code strips U+2063 from the launch-prompt argument, so a claude launch
 # publishes the launch-brief envelope as a record in the receiving home's
 # operational inbox and passes only a printable doorbell naming it. Parsing the
@@ -2924,6 +2947,7 @@ test_non_typed_provider_hints_do_not_block_spawn_or_inject_metadata
 test_configured_default_model_has_no_realized_model
 test_scheduled_plan_sets_class_beside_unrelated_dispatch
 test_no_profile_keeps_claude_profile_defaults
+test_crew_short_name_spawn_records_the_ship_branch
 test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home
 test_claude_spawn_refuses_when_the_brief_record_cannot_publish

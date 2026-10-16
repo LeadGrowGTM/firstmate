@@ -1714,10 +1714,7 @@ EOF
     "the brief did not default to the crew branch"
   assert_grep "git checkout -b nap/crew/crew-branch-a1 --" "$home/data/crew-branch-a1/brief.md" \
     "the brief's branch-creation command did not use the crew branch"
-  fill_brief_subsections "$home/data/crew-branch-a1/brief.md" "Run the review loop." "Ship it."
-  out=$(run_spawn "$home" "$fakebin" crew-branch-a1 "$proj" claude --mode no-mistakes --yolo off)
-  assert_not_contains "$out" "branch mismatch" "a flagless spawn did not select the same crew branch as its flagless brief"
-  assert_not_contains "$out" "registers the ship-branch prefix" "the crew branch was announced as a registry deviation"
+  # tests/fm-spawn-dispatch-profile.test.sh proves the matching spawns launch and record the branch.
 
   FM_HOME="$home" "$BRIEF" crew-branch-a2 proj --mode no-mistakes --branch-prefix fm/ >/dev/null \
     || fail "an explicit fm/ brief should scaffold in a home with a short form"
@@ -1725,6 +1722,9 @@ EOF
     "an explicit --branch-prefix lost to the crew prefix in the brief"
   fill_brief_subsections "$home/data/crew-branch-a2/brief.md" "Run the review loop." "Ship it."
   out=$(run_spawn "$home" "$fakebin" crew-branch-a2 "$proj" claude --mode no-mistakes --yolo off)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a flagless spawn launched against an explicit fm/ brief"
+  assert_absent "$home/state/crew-branch-a2.meta" "a refused crew-branch spawn left task metadata"
   assert_contains "$out" "the brief says branch=fm/crew-branch-a2 but this spawn selected branch=nap/crew/crew-branch-a2" \
     "a flagless spawn did not default to the crew branch"
 

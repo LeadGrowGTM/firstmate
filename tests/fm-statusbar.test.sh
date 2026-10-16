@@ -840,4 +840,18 @@ tmux source-file "$ROOT/bin/fm-statusbar.tmux"
 [ "$(tmux show-options -gqv status-style)" = 'bg=colour234,fg=colour250' ] || fail "repeat source changed theme"
 pass "theme can be sourced repeatedly"
 
+# The theme shows a recorded crew label instead of the addressed window name,
+# from the server-wide format alone, and an unlabeled window keeps its name.
+tmux new-window -d -t restarted: -n fm-themed 'sleep 600' || fail "could not open a themed task window"
+tmux set-window-option -t restarted:fm-themed @fm_label nap-crew-themed || fail "could not record a crew label"
+theme_fmt=$(tmux show-window-options -gv window-status-format)
+[ "$(tmux display-message -p -t restarted:fm-themed "$theme_fmt")" = " 1:nap-crew-themed " ] \
+  || fail "theme did not show the crew label" "$(tmux display-message -p -t restarted:fm-themed "$theme_fmt")"
+[ "$(tmux display-message -p -t restarted:0 "$theme_fmt")" = " 0:$(tmux display-message -p -t restarted:0 '#{window_name}') " ] \
+  || fail "theme changed an unlabeled window's name" "$(tmux display-message -p -t restarted:0 "$theme_fmt")"
+[ "$(tmux display-message -p -t restarted:fm-themed '#{window_name}')" = fm-themed ] || fail "theme label renamed the window"
+[ -z "$(tmux show-window-options -v -t restarted:fm-themed window-status-format)" ] \
+  || fail "the theme label needed a per-window format"
+pass "theme shows a recorded crew label while the window keeps its addressed name"
+
 echo "fm-statusbar: all passed"

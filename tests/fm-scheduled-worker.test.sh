@@ -210,10 +210,60 @@ check_generation_change_at_control_admission() {
   pass 'scheduled continuation forwards G1 and refuses when control admits G2'
 }
 
+# The ship branch the spawn would derive from its recorded arguments: the
+# forwarded --branch-prefix, else this home's default crew prefix.
+spawn_branch() {
+  local dir=$1 prefix
+  prefix=$(sed -n 's/^spawn .* --branch-prefix \([^ ]*\).*/\1/p' "$dir/home/calls")
+  [ -n "$prefix" ] || prefix=$(bash -c '. "$1/bin/fm-crew-name-lib.sh" && fm_crew_default_branch_prefix "$2"' _ "$ROOT" "$dir/home/config")
+  printf '%s%s\n' "$prefix" job
+}
+
+# The plan's branch_prefix reaches the spawn so the branch it derives is the
+# one the prepared brief records: absent or null forwards no flag, so the spawn
+# takes the home's default crew prefix just as a flagless brief does; an
+# explicit prefix is forwarded verbatim; an explicit empty prefix is refused
+# before any owner call.
+check_branch_prefix_forwarding() {
+  local dir out rc variant brief_branch
+  for variant in absent null explicit; do
+    dir=$(make_case "prefix-$variant")
+    mkdir -p "$dir/home/config"
+    printf 'nap\n' > "$dir/home/config/mate-short-name"
+    case "$variant" in
+      absent)
+        FM_HOME="$dir/home" "$ROOT/bin/fm-brief.sh" job project --mode direct-PR >/dev/null ;;
+      null)
+        jq '.branch_prefix=null' "$dir/plan.json" > "$dir/other.json" && mv "$dir/other.json" "$dir/plan.json"
+        FM_HOME="$dir/home" "$ROOT/bin/fm-brief.sh" job project --mode direct-PR >/dev/null ;;
+      explicit)
+        jq '.branch_prefix="fix/"' "$dir/plan.json" > "$dir/other.json" && mv "$dir/other.json" "$dir/plan.json"
+        FM_HOME="$dir/home" "$ROOT/bin/fm-brief.sh" job project --mode direct-PR --branch-prefix fix/ >/dev/null ;;
+    esac || fail "$variant prefix brief should scaffold"
+    brief_branch=$(sed -n 's/^Ship branch: //p' "$dir/home/data/job/brief.md")
+    out=$(run_case "$dir"); rc=$?
+    expect_code 0 "$rc" "$variant prefix spawn: $out"
+    assert_equals "$brief_branch" "$(spawn_branch "$dir")" "$variant prefix spawn arguments disagree with the prepared brief"
+    case "$variant" in
+      explicit) assert_equals fix/job "$brief_branch" 'explicit prefix brief lost its prefix' ;;
+      *)
+        assert_equals nap/crew/job "$brief_branch" "$variant prefix brief did not take the crew default"
+        assert_no_grep '--branch-prefix' "$dir/home/calls" "$variant prefix forwarded a prefix instead of the home default" ;;
+    esac
+  done
+  dir=$(make_case prefix-empty)
+  jq '.branch_prefix=""' "$dir/plan.json" > "$dir/other.json" && mv "$dir/other.json" "$dir/plan.json"
+  out=$(run_case "$dir"); rc=$?
+  expect_code 1 "$rc" 'explicit empty prefix'
+  assert_equals 0 "$(count_calls "$dir")" 'explicit empty prefix reached the spawn'
+  pass 'branch_prefix: absent, null and explicit spawn the prepared brief branch; empty is refused'
+}
+
 check_authorization_and_selection
 check_capacity_and_reselect
 check_failure_barriers
 check_attempt_and_exhaustion
 check_relative_state_receipt
 check_generation_change_at_control_admission
+check_branch_prefix_forwarding
 printf '# all fm-scheduled-worker tests passed\n'

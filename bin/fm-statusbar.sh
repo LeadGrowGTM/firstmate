@@ -6,7 +6,10 @@
 # Usage:
 #   fm-statusbar.sh [--socket <path>] theme
 #       Load the persistent dark theme on that server. The tracked
-#       fm-statusbar.tmux snippet calls this when sourced by tmux.
+#       fm-statusbar.tmux snippet calls this when sourced by tmux. Its window
+#       list shows a window's crew label (@fm_label, set by
+#       bin/backends/tmux.sh fm_backend_tmux_show_label) in place of the
+#       window name when one is set, and the name otherwise.
 #   fm-statusbar.sh install|check [config-file]
 #       Append/check the exact source line (default ~/.tmux.conf).
 #       Install changes only the config file, never live tmux options.
@@ -639,8 +642,8 @@ cmd_theme() {
     tmux set-option -g status-left '[#S] ' &&
     tmux set-option -g status-right-length 200 &&
     tmux set-option -g status-right "$(fm_sb_tracker_job)" &&
-    tmux set-window-option -g window-status-format ' #I:#W ' &&
-    tmux set-window-option -g window-status-current-format ' #I:#W ' &&
+    tmux set-window-option -g window-status-format ' #I:#{?@fm_label,#{@fm_label},#W} ' &&
+    tmux set-window-option -g window-status-current-format ' #I:#{?@fm_label,#{@fm_label},#W} ' &&
     tmux set-window-option -g window-status-current-style 'bg=colour24,fg=colour255,bold' &&
     tmux set-window-option -g pane-border-format "$(fm_sb_format)"
 }

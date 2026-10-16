@@ -49,7 +49,7 @@ tmux attach -t firstmate
 ```
 
 Each task window is named `fm-<id>`.
-When [crew names](configuration.md#crew-names-configmate-short-name) are configured, a new window's status-bar label shows the crew name instead, while its name stays `fm-<id>`.
+When [crew names](configuration.md#crew-names-configmate-short-name) are configured, a new window's status-bar entry shows the crew name on Firstmate's status theme or tmux's built-in formats, while its name stays `fm-<id>`; custom status formats keep showing `fm-<id>`.
 
 ```sh
 tmux list-windows -t <session-name>

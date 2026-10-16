@@ -198,37 +198,52 @@ pass "real tmux: fm_backend_tmux_capture's -S -N bound trims old history for a s
 
 # --- crew label: display changes, the addressed name does not ---------------
 
-# The label rides the window's own status formats, so it must replace the name
-# where the server's formats show it, keep their styling, leave the name every
-# lookup addresses untouched, and stay out of a format that never shows the name.
-tmux set-window-option -g window-status-format ' #I:#W#{?window_flags,#{window_flags}, }' \
-  || fail "could not set the server's window-status-format"
-tmux set-window-option -g window-status-current-format '[#{window_name}]' \
-  || fail "could not set the server's window-status-current-format"
+# The label is recorded on the window. Only tmux's own built-in status formats
+# gain it, on that window alone; the server's formats are never rewritten, and
+# the name every lookup addresses never changes.
+tmux set-window-option -gu window-status-format || fail "could not restore the built-in window-status-format"
+tmux set-window-option -gu window-status-current-format || fail "could not restore the built-in window-status-current-format"
+builtin=$(tmux show-window-options -gv window-status-format)
+[ "$builtin" = "$FM_TMUX_DEFAULT_STATUS_FORMAT" ] \
+  || fail "this tmux's built-in window-status-format is '$builtin', not the one the label recognizes"
 fm_backend_tmux_show_label "$TARGET" "nap-crew-smoke1" || fail "fm_backend_tmux_show_label failed"
 [ "$(tmux display-message -p -t "$TARGET" '#{window_name}')" = "$WINDOW" ] \
   || fail "showing a label renamed the addressed window"
 [ "$(tmux show-window-options -v -t "$TARGET" @fm_label)" = "nap-crew-smoke1" ] \
   || fail "the label was not recorded on the window"
-[ "$(tmux show-window-options -v -t "$TARGET" window-status-format)" = ' #I:#{@fm_label}#{?window_flags,#{window_flags}, }' ] \
-  || fail "the window's status format did not swap the name for the label"
-[ "$(tmux show-window-options -v -t "$TARGET" window-status-current-format)" = '[#{@fm_label}]' ] \
-  || fail "the window's current status format did not swap the long-form name for the label"
-shown=$(tmux display-message -p -t "$TARGET" "$(tmux show-window-options -v -t "$TARGET" window-status-current-format)")
-[ "$shown" = "[nap-crew-smoke1]" ] || fail "the status bar would show '$shown', not the label"
+for opt in window-status-format window-status-current-format; do
+  [ "$(tmux show-window-options -gv "$opt")" = "$builtin" ] || fail "labeling changed the server's $opt"
+  shown=$(tmux display-message -p -t "$TARGET" "$(tmux show-window-options -v -t "$TARGET" "$opt")")
+  case "$shown" in [0-9]*:nap-crew-smoke1*) ;; *) fail "the built-in $opt would show '$shown', not the label" ;; esac
+done
 tmux new-window -d -t "$SESSION:" -n fm-plain || fail "could not create an unlabeled window"
 [ -z "$(tmux show-window-options -v -t "$SESSION:fm-plain" window-status-format)" ] \
   || fail "labeling one window changed another window's status format"
 tmux kill-window -t "$SESSION:fm-plain"
-tmux set-window-option -g window-status-current-format '#I' || fail "could not set a name-free format"
-fm_backend_tmux_create_task "$SESSION" fm-nameless "$HOME" >/dev/null || fail "could not create the name-free window"
-fm_backend_tmux_show_label "$SESSION:fm-nameless" "nap-crew-nameless" || fail "a name-free format refused the label"
-[ -z "$(tmux show-window-options -v -t "$SESSION:fm-nameless" window-status-current-format)" ] \
-  || fail "a format that never shows the name was overridden"
-tmux kill-window -t "$SESSION:fm-nameless"
+pass "real tmux: on built-in status formats a crew label shows on its window only, never renaming it"
+
+# Every other server format is the operator's: it stays byte-for-byte
+# untouched, gains no per-window copy, and the window shows its fm- name.
+idx=0
+for custom in ' #I:#W ' '#I:#{window_name}' '#I:#{=20:window_name}' \
+  '#I:#{?#{==:#{window_name},fm-x},x,#W}' '#I:##W' '#I'; do
+  idx=$((idx + 1))
+  tmux set-window-option -g window-status-format "$custom" || fail "could not set custom format $idx"
+  tmux set-window-option -g window-status-current-format "$custom" || fail "could not set custom current format $idx"
+  fm_backend_tmux_create_task "$SESSION" "fm-custom$idx" "$HOME" >/dev/null || fail "could not create custom window $idx"
+  fm_backend_tmux_show_label "$SESSION:fm-custom$idx" "nap-crew-custom$idx" || fail "custom format '$custom' refused the label"
+  for opt in window-status-format window-status-current-format; do
+    [ "$(tmux show-window-options -gv "$opt")" = "$custom" ] || fail "custom $opt '$custom' was rewritten"
+    [ -z "$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" "$opt")" ] \
+      || fail "custom $opt '$custom' gained a per-window copy"
+  done
+  shown=$(tmux display-message -p -t "$SESSION:fm-custom$idx" "$custom")
+  case "$shown" in *nap-crew*) fail "custom format '$custom' showed the label as '$shown'" ;; esac
+  tmux kill-window -t "$SESSION:fm-custom$idx"
+done
 tmux set-window-option -gu window-status-format
 tmux set-window-option -gu window-status-current-format
-pass "real tmux: a crew label changes only the displayed name, never the addressed window name"
+pass "real tmux: custom, modified, comparison and escaped status formats stay byte-for-byte untouched"
 
 # --- resolve_bare_selector (live-window-listing) -----------------------------
 
