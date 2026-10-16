@@ -158,24 +158,13 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
   printf '%s\n' "$wid"
 }
 
-# tmux's own built-in window-status formats (tmux 3.x), and the same format with
-# a crew label in place of the window name.
-FM_TMUX_DEFAULT_STATUS_FORMAT='#I:#W#{?window_flags,#{window_flags}, }'
-FM_TMUX_LABELED_STATUS_FORMAT='#I:#{@fm_label}#{?window_flags,#{window_flags}, }'
-
-# Show <label> for one window without renaming it, because every lookup above
-# addresses a task window by its name. The label is recorded as the window's
-# @fm_label option, which Firstmate's own status theme (bin/fm-statusbar.sh
-# theme) already displays. A status format that is still tmux's built-in
-# default gets that default with the label on this window only. Any other
-# server format is an operator's choice: it is never rewritten or copied, and
-# the window keeps showing its fm-<id> name there.
 fm_backend_tmux_show_label() {  # <window-target> <label>
-  local target=$1 label=$2 opt
+  local target=$1 label=$2 opt format
   tmux set-window-option -t "$target" @fm_label "$label" || return 1
   for opt in window-status-format window-status-current-format; do
-    [ "$(tmux show-window-options -gv "$opt")" = "$FM_TMUX_DEFAULT_STATUS_FORMAT" ] || continue
-    tmux set-window-option -t "$target" "$opt" "$FM_TMUX_LABELED_STATUS_FORMAT" || return 1
+    format=$(tmux show-window-options -gv "$opt") || return 1
+    case "$format" in *'#{?@fm_label,'*) continue ;; esac
+    tmux set-window-option -g "$opt" "#{?@fm_label,#I:#{@fm_label},$format}" || return 1
   done
 }
 

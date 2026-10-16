@@ -508,11 +508,10 @@ Any other content stops new spawns and ship briefs that use the default branch p
 The branch is only a default: a project's registered `branch=<prefix>` and an explicit `--branch-prefix` still win, and `bin/fm-project-mode.sh --branch-prefix <project>` reports the resolved prefix.
 The label is display only.
 Scripts keep addressing every task window by its `fm-<task-id>` name, so steering, peeking, monitoring, and recovery are unchanged.
-Only the tmux backend shows the label, and only where the status bar would otherwise show the window name with no operator customization.
+Only the tmux backend shows the label.
 Firstmate records the label on its own window as the `@fm_label` window option.
-Firstmate's status theme (`bin/fm-statusbar.sh theme`, loaded by the tracked `fm-statusbar.tmux` snippet) shows that label in place of the window name, and a server still on the theme loaded before this change shows labels once the snippet is sourced again.
-When a status format is still tmux's built-in default, that labeled window alone gets the default with the label in place of the name; it keeps that format if the server's formats are customized later.
-Any other status format is the operator's choice: Firstmate never rewrites or copies it, and windows there keep showing `fm-<task-id>`.
+When a new labeled worker is spawned, Firstmate makes the server's active and inactive status formats show that label for labeled windows and preserve their existing display for unlabeled windows.
+Firstmate's status theme (`bin/fm-statusbar.sh theme`, loaded by the tracked `fm-statusbar.tmux` snippet) also shows the label after it is loaded or reloaded.
 The window name reported by `tmux list-windows` remains `fm-<task-id>` in every case.
 Herdr, zellij, cmux, and Orca keep their current tab names, because those backends also use the tab name to find and recover a task.
 Existing branches, pull requests, and live windows are never renamed.
