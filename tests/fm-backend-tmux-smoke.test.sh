@@ -41,11 +41,14 @@ command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-backend-smoke-$$"
 OUTER_SOCKET=
+HIDDEN_SOCKET=
+ROOTED_PID=
 SHIM_DIR=
-trap cleanup_all EXIT
 
 cleanup_all() {
+  [ -z "$ROOTED_PID" ] || { kill "$ROOTED_PID" 2>/dev/null || true; wait "$ROOTED_PID" 2>/dev/null || true; }
   [ -z "$OUTER_SOCKET" ] || "$REAL_TMUX" -L "$OUTER_SOCKET" kill-server >/dev/null 2>&1 || true
+  [ -z "$HIDDEN_SOCKET" ] || "$REAL_TMUX" -L "$HIDDEN_SOCKET" kill-server >/dev/null 2>&1 || true
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${SHIM_DIR:-}" ] && rm -rf "$SHIM_DIR"
 }
@@ -53,7 +56,35 @@ cleanup_all() {
 # A `tmux` shim on PATH that transparently redirects every call to the private
 # socket, so bin/backends/tmux.sh's bare `tmux ...` invocations never touch the
 # host's real sessions.
-SHIM_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-backend-smoke.XXXXXX")
+SMOKE_TMP_PARENT=${TMPDIR:-/tmp}
+if [ -n "${FM_TEST_TMUX_REAL:-}" ] && [ "$REAL_TMUX" != "$FM_TEST_TMUX_REAL" ] &&
+   [ "${TMUX_TMPDIR:-}" = "${REAL_TMUX%/bin/tmux}/s" ]; then
+  SMOKE_TMP_PARENT=$TMUX_TMPDIR
+fi
+SHIM_DIR=$(mktemp -d "$SMOKE_TMP_PARENT/fm-backend-smoke.XXXXXX") || exit 1
+[ -d "$SHIM_DIR" ] && [ ! -L "$SHIM_DIR" ] || exit 1
+TMUX_TMPDIR="$SHIM_DIR/tmux-tmp"
+export TMUX_TMPDIR
+unset TMUX TMUX_PANE || exit 1
+trap cleanup_all EXIT
+mkdir -m 700 -- "$TMUX_TMPDIR" || fail 'could not create the private tmux socket directory'
+PS_SHIM_DIR="$SHIM_DIR/ps-bin"
+mkdir -p "$PS_SHIM_DIR"
+FM_TEST_PRIVATE_PIDS="$SHIM_DIR/private-pids"
+FM_TEST_REAL_PS=$(command -v ps)
+export FM_TEST_PRIVATE_PIDS FM_TEST_REAL_PS
+cat > "$PS_SHIM_DIR/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ]; then
+  if [ "$#" -eq 4 ]; then cat "$FM_TEST_PRIVATE_PIDS"; exit; fi
+  pids=$(paste -sd, "$FM_TEST_PRIVATE_PIDS")
+  [ -n "$pids" ] || exit 0
+  shift 2
+  exec "$FM_TEST_REAL_PS" -p "$pids" "$@"
+fi
+exec "$FM_TEST_REAL_PS" "$@"
+SH
+chmod +x "$PS_SHIM_DIR/ps"
 cat > "$SHIM_DIR/tmux" <<SH
 #!/usr/bin/env bash
 exec "$REAL_TMUX" -L "$SOCKET" "\$@"
@@ -112,7 +143,8 @@ pass "real tmux: fm_backend_tmux_create_task creates a window and refuses a dupl
 wait_for_shell_ready "$TARGET" || fail "the tmux task shell did not become ready"
 
 tmux send-keys -t "$TARGET" "cd /tmp && PS1='smoke\$ ' && clear && printf 'setup-%s\\n' ready" Enter
-wait_for_capture_text "$TARGET" "setup-ready" || fail "the tmux task shell did not complete setup"
+wait_for_capture_text "$TARGET" "setup-ready" \
+  || fail "the tmux task shell did not complete setup: $(fm_backend_tmux_capture "$TARGET" 80 2>&1)"
 
 fm_backend_tmux_send_text_line "$TARGET" "printf 'captain-on-deck-%s\\n' line" \
   || fail "fm_backend_tmux_send_text_line failed"
@@ -188,6 +220,67 @@ state=$(fm_backend_agent_state tmux "$TARGET")
 # Best-effort contract: killing an already-gone window must not error.
 fm_backend_tmux_kill "$TARGET" || fail "fm_backend_tmux_kill on an already-dead target must stay best-effort (never fail)"
 pass "real tmux: kill removes the window and the readable session inventory authoritatively classifies it missing"
+
+# A readable inventory on one socket says nothing about the endpoint on a
+# different socket. Keep both servers private and prove both CLI observations.
+HIDDEN_SOCKET="$SOCKET-hidden"
+PROOF_SPAWN_EPOCH=$(date +%s)
+"$REAL_TMUX" -L "$HIDDEN_SOCKET" new-session -d -s hidden -n agent \
+  || fail 'could not create the endpoint on the hidden private socket'
+[ "$(fm_backend_agent_state tmux hidden:agent)" = missing ] \
+  || fail 'the current private socket unexpectedly sees the hidden endpoint'
+"$REAL_TMUX" -L "$HIDDEN_SOCKET" has-session -t '=hidden:agent' \
+  || fail 'the recorded private socket lost its live endpoint'
+pass 'real tmux: a second private server can hide a live endpoint from the current socket'
+
+# Exercise the recovery proof through the public control command, with real
+# tmux reads and a real cwd inventory rather than a canned missing verdict.
+PROOF_HOME="$SHIM_DIR/proof-home"
+PROOF_COPY="$SHIM_DIR/recorded-worktree"
+mkdir -p "$PROOF_HOME/state" "$PROOF_COPY/nested"
+"$REAL_TMUX" -L "$SOCKET" display-message -p '#{pid}' > "$FM_TEST_PRIVATE_PIDS"
+RECORDED_SOCKET=$("$REAL_TMUX" -L "$HIDDEN_SOCKET" display-message -p -t hidden:agent '#{socket_path}')
+cat > "$PROOF_HOME/state/recovery.meta" <<EOF
+window=hidden:fm-recovery
+endpoint_task_id=recovery
+tmux_socket=$RECORDED_SOCKET
+worktree=$PROOF_COPY
+project=$ROOT
+harness=codex
+kind=ship
+spawn_gen=s${PROOF_SPAWN_EPOCH}.1.1
+EOF
+"$REAL_TMUX" -L "$HIDDEN_SOCKET" kill-server \
+  || fail 'could not remove the recorded private server before recovery proof'
+proof_out=$(PATH="$PS_SHIM_DIR:${PATH#*:}" FM_HOME="$PROOF_HOME" FM_GATE_REFUSE_BYPASS=1 \
+  bash "$ROOT/bin/fm-control.sh" recovery exit 2>&1) \
+  || fail "real missing-endpoint control proof failed: $proof_out"
+case "$proof_out" in *endpoint-gone*) ;; *) fail "control did not confirm endpoint loss: $proof_out" ;; esac
+pass 'real tmux: control proves a missing recorded endpoint gone through its socket and process inventory'
+
+# The process guard must consider a process whose kernel cwd is a descendant
+# of the recorded worktree, even when its command line has no worktree path.
+if [ -d /proc/self/cwd ]; then
+  ROOTED_DIR="$PROOF_COPY/nested"
+  mkdir -p "$ROOTED_DIR"
+  ( cd "$ROOTED_DIR" && : > "$SHIM_DIR/rooted-ready" && exec /bin/sleep 60 ) &
+  ROOTED_PID=$!
+  while [ ! -e "$SHIM_DIR/rooted-ready" ]; do sleep 0.01; done
+  printf '%s\n' "$ROOTED_PID" >> "$FM_TEST_PRIVATE_PIDS"
+  [ "$(readlink "/proc/$ROOTED_PID/cwd")" = "$ROOTED_DIR" ] \
+    || fail 'the kernel did not report the process cwd inside the worktree child'
+  case "$(ps -p "$ROOTED_PID" -o args=)" in
+    *"$ROOTED_DIR"*) fail 'the process fixture leaked the worktree path into its command line' ;;
+  esac
+  if PATH="$PS_SHIM_DIR:${PATH#*:}" FM_HOME="$PROOF_HOME" FM_GATE_REFUSE_BYPASS=1 \
+      bash "$ROOT/bin/fm-control.sh" recovery exit > "$SHIM_DIR/rooted-refusal" 2>&1; then
+    fail 'control claimed an orphan process in the preserved copy had stopped'
+  fi
+  grep -q 'live processes still have cwd' "$SHIM_DIR/rooted-refusal" \
+    || fail "control did not identify the surviving process: $(cat "$SHIM_DIR/rooted-refusal")"
+  kill -0 "$ROOTED_PID" 2>/dev/null || fail 'control signaled the surviving process'
+  pass 'real process: kernel cwd identifies a rooted process that command arguments do not'
+fi
 
 # --- container_ensure with a grouped viewer attached ---------------------------
 # A viewer such as an Orca view tab attaches through a grouped session
