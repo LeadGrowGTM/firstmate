@@ -1664,7 +1664,7 @@ test_retire_claim_archives_without_spawn_generation() {
 
 test_retire_claim_restores_partial_backlog_transitions() {
   local dir id mode rc before archive backup
-  for mode in prepare backup done reopen remove rollback; do
+  for mode in prepare backup 'done' reopen remove rollback; do
     id="retire-partial-$mode"
     dir=$(make_retire_claim_case "retire-partial-$mode" "$id")
     printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
@@ -1672,7 +1672,7 @@ test_retire_claim_restores_partial_backlog_transitions() {
     tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
     if [ "$mode" = reopen ]; then
       tasks-axi hold "$id" --reason 'captain answer pending' --kind captain --file "$dir/home/data/backlog.md" >/dev/null
-    elif [ "$mode" = done ]; then
+    elif [ "$mode" = 'done' ]; then
       git -C "$dir/worktree" add -A
       git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid commit -qm landed
       git -C "$dir/project" merge --ff-only "fm/$id" >/dev/null

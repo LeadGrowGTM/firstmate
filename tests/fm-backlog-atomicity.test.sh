@@ -68,6 +68,21 @@ pin_markdown_backend() {  # <addressing-root>
   printf '%s\n' 'backend = "markdown"' > "$1/.tasks.toml"
 }
 
+# The recovery proof inventories processes through ps. These fixtures own no
+# worker processes; keep their inventory private rather than inspecting host
+# services whose cwd may be unreadable under the developer's /proc policy.
+make_private_process_inventory() {  # <fakebin>
+  cat > "$1/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] && [ "$#" -eq 4 ]; then
+  printf '%s\n' "$PPID"
+else
+  exec /bin/ps "$@"
+fi
+SH
+  chmod +x "$1/ps"
+}
+
 # A home with a real backlog, a real project clone with an origin, a pooled
 # worktree, and stubs for every tool the spawn path shells out to.
 make_home() {  # <name> [task-id...]
@@ -76,6 +91,7 @@ make_home() {  # <name> [task-id...]
   case_dir="$TMP_ROOT/$name"
   home="$case_dir/home"
   fakebin=$(fm_fakebin "$case_dir")
+  make_private_process_inventory "$fakebin"
   mkdir -p "$home/state" "$home/config" "$home/data" "$home/projects"
   touch "$home/state/.last-watcher-beat"
   printf '%s\n' claude > "$home/config/crew-harness"
@@ -99,6 +115,9 @@ Exercise backlog dispatch for $id.
 
 ## Firstmate spec
 Verify the atomic backlog transition.
+Goal: Verify the paired record and backlog state for $id.
+Off-limits: Files outside this private test fixture.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Exercise the public lifecycle commands and inspect their durable records.
 
 # Definition of done
 Delivery contract: mode=no-mistakes
@@ -1404,6 +1423,7 @@ test_boat_intake_owns_the_provisioned_backlog() {
     home="$case_dir/home"
     proj="$home/projects/firstmate"
     fakebin=$(fm_fakebin "$case_dir")
+    make_private_process_inventory "$fakebin"
     mkdir -p "$home/"{bin,data,state,config,projects} "$case_dir/user-home"
     printf 'Fixture home.\n' > "$home/AGENTS.md"
     printf 'boat-eng\n' > "$home/.fm-secondmate-home"
@@ -2223,7 +2243,7 @@ test_recovery_requeues_done_unlanded_retirement() {
   case_dir=$(make_home retire-done-requeue)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
-  tasks-axi done "$id" --file "$(backlog_of "$case_dir")" >/dev/null
+  tasks-axi 'done' "$id" --file "$(backlog_of "$case_dir")" >/dev/null
   write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-requeue'
   marker="$(home_of "$case_dir")/state/$id.backlog-close"
   note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
@@ -2250,7 +2270,7 @@ test_retirement_replay_preserves_a_later_captain_answer() {
   home=$(home_of "$case_dir")
   add_item "$case_dir" "$id"
   FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" \
-    "$ROOT/bin/fm-captain-hold.sh" hold "$id" --category scope --reason 'Choose the preserved work outcome.' >/dev/null \
+    "$ROOT/bin/fm-captain-hold.sh" hold "$id" --category security --reason 'Choose the preserved work outcome.' >/dev/null \
     || fail 'could not create the later-answer hold'
   digest=$(tasks-axi show "$id" --full --file "$(backlog_of "$case_dir")" \
     | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')
@@ -2264,7 +2284,7 @@ test_retirement_replay_preserves_a_later_captain_answer() {
     "$ROOT/bin/fm-captain-hold.sh" answer "$id" --decision-file "$case_dir/decision.txt" >/dev/null \
     || fail 'could not answer after recording the retirement intent'
   out=$(run_bootstrap "$case_dir")
-  [ "$(row_state "$case_dir" "$id")" = done ] || fail "retirement reopened a later answer: $out"
+  [ "$(row_state "$case_dir" "$id")" = 'done' ] || fail "retirement reopened a later answer: $out"
   assert_grep 'Keep the recorded resolution closed.' "$(backlog_of "$case_dir")" 'replay lost the answer'
   assert_absent "$marker" 'answered retirement intent was not retired'
   pass 'retirement replay leaves a later captain answer Done'
@@ -2276,7 +2296,7 @@ test_legacy_retirement_replay_refuses_without_prior_state() {
   case_dir=$(make_home retire-legacy-answer)
   home=$(home_of "$case_dir")
   add_item "$case_dir" "$id"
-  tasks-axi done "$id" --file "$(backlog_of "$case_dir")" >/dev/null
+  tasks-axi 'done' "$id" --file "$(backlog_of "$case_dir")" >/dev/null
   write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-legacy'
   cp "$home/state/$id.meta" "$case_dir/before.meta"
   note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
@@ -2285,7 +2305,7 @@ test_legacy_retirement_replay_refuses_without_prior_state() {
   printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-legacy\nmode=retain\narg=--note\narg=hex:%s\n' \
     "$id" "$home/data" "$note_hex" > "$marker"
   out=$(run_bootstrap "$case_dir")
-  [ "$(row_state "$case_dir" "$id")" = done ] || fail "legacy intent reopened Done without prior state: $out"
+  [ "$(row_state "$case_dir" "$id")" = 'done' ] || fail "legacy intent reopened Done without prior state: $out"
   cmp -s "$case_dir/before.meta" "$home/state/$id.meta" || fail 'legacy replay removed the active record'
   assert_present "$marker" 'unproven legacy retirement intent was discarded'
   assert_contains "$out" 'without its pre-retirement backlog state' 'legacy refusal was not explained'
