@@ -287,7 +287,9 @@ fm_test_spawn_brief() {
 $intent
 
 ## Firstmate spec
-Exercise the spawn behavior under test.
+Goal: Exercise the spawn behavior under test.
+Off-limits: Changes outside the disposable test case.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract.
 EOF
 }
 
