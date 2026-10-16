@@ -12,8 +12,11 @@
 #   harness: claude|codex|grok; model: concrete nonempty model; effort:
 #   low|medium|high|xhigh|max|ultra. These are the profile selected by firstmate
 #   under its ordinary dispatch/quota rules, never an alternate quota budget.
-# No other keys (including git_name, git_email, env, secrets, home, origin,
-# yolo, flags) are accepted. Git identity never comes from the controller.
+# Optional single-line fields goal, off_limits, and contracts fill those brief
+# lines when present. Absent fields use fixed code-only text. A blank line or
+# a line containing a control character is rejected. No other keys (including
+# git_name, git_email, env, secrets, home, origin, yolo, flags) are accepted.
+# Git identity never comes from the controller.
 #
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project
@@ -138,13 +141,19 @@ head -c 65537 > "$TMP/request"
 [ "$(wc -c < "$TMP/request")" -le 65536 ] || die 'request exceeds 65536 bytes'
 jq -es '
   def text: type == "string" and length > 0 and (test("[\u0000-\u0008\u000b-\u001f]") | not);
+  def line: type == "string" and length > 0 and (test("[\u0000-\u001f]") | not);
+  def allowed: ["contracts","effort","goal","harness","id","intent","kind","mode","model","off_limits","project","spec"];
+  def required: ["effort","harness","id","intent","kind","mode","model","project","spec"];
   length == 1 and (.[0] | type == "object" and
-  (keys == ["effort","harness","id","intent","kind","mode","model","project","spec"]) and
+  (keys - allowed == []) and (required - keys == []) and
   (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
   (.project == "firstmate" or .project == "dev-loop") and
   ((.kind == "ship" and (.mode == "direct-PR" or .mode == "no-mistakes")) or
    (.kind == "scout" and .mode == "scout")) and
   (.intent | text) and (.spec | text) and (.model | text) and
+  ((has("goal") | not) or (.goal | line)) and
+  ((has("off_limits") | not) or (.off_limits | line)) and
+  ((has("contracts") | not) or (.contracts | line)) and
   (.harness == "claude" or .harness == "codex" or .harness == "grok") and
   (.effort | IN("low","medium","high","xhigh","max","ultra")))
 ' "$TMP/request" >/dev/null 2>&1 || die 'invalid code-only Boat request'
@@ -246,12 +255,47 @@ other mates' homes, desktop/browser state, or use lg or boat env. Never merge,
 deploy, publish, or contact the captain. Report only through the task status
 and steering paths generated in this brief. Route any decision to firstmate.
 RULES
-awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
+boat_request_line() { # <key> <fallback> <dest>
+  local status=0
+  jq -e --arg key "$1" 'has($key)' "$TMP/request" >/dev/null || status=$?
+  if [ "$status" -eq 0 ]; then
+    jq -r --arg key "$1" '.[$key]' "$TMP/request" > "$3"
+  elif [ "$status" -eq 1 ]; then
+    printf '%s\n' "$2" > "$3"
+  else
+    die "could not read request field $1"
+  fi
+}
+boat_request_line goal 'Complete the one code-only task in the spec.' "$TMP/goal"
+boat_request_line off_limits 'Secrets, client data, pushes, merges, deploys, and captain contact.' "$TMP/off"
+boat_request_line contracts none "$TMP/contracts"
+awk -v intent="$TMP/intent" -v spec="$TMP/spec" -v goal="$TMP/goal" -v off="$TMP/off" -v contracts="$TMP/contracts" '
+  function one_line(path,    line, n, kept) {
+    n = 0
+    while ((getline line < path) > 0) {
+      n++
+      if (n == 1) kept = line
+    }
+    close(path)
+    if (n != 1) exit 2
+    return kept
+  }
   $0 == "{TASK}" { while ((getline line < intent) > 0) print line; close(intent); next }
+  $0 == "Goal: {GOAL}" { print "Goal: " one_line(goal); next }
   $0 == "{FIRSTMATE_SPEC}" { while ((getline line < spec) > 0) print line; close(spec); next }
+  $0 == "Off-limits: {OFF_LIMITS}" { print "Off-limits: " one_line(off); next }
+  $0 == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}" {
+    print "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): " one_line(contracts)
+    next
+  }
   { print }
-' "$BRIEF" > "$TMP/brief"
+' "$BRIEF" > "$TMP/brief" || die 'brief rewrite failed'
 cat "$TMP/brief" > "$BRIEF"
+# shellcheck source=bin/fm-dod-lib.sh
+. "$SCRIPT_DIR/fm-dod-lib.sh"
+if fm_brief_task_placeholders_present "$BRIEF"; then
+  die 'brief still has unfilled task placeholders'
+fi
 if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
 ARGS+=(--git-name "$GIT_NAME" --git-email "$GIT_EMAIL")
 ARGS+=(--backend tmux --harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
