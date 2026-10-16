@@ -1,0 +1,6 @@
+base live crew: unproven	live processes still have cwd in the recorded worktree (pids 33117 34128)
+fixed live crew: clear	 (pane pid 33117 remains live)
+unmarked mate process in crew copy: unproven	live processes still have cwd in the recorded worktree (pids 37126)
+marked detached crew process in mate home: clear	 (pid 38586 remains live)
+stale crew socket: unproven	live processes still have cwd in the recorded worktree (pids 33117 34128)
+ordinary ship record with live processes: unproven	live processes still have cwd in the recorded worktree (pids 33117 34128)
