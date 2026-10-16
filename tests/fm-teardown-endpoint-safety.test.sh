@@ -1714,7 +1714,15 @@ SH
 #!/usr/bin/env bash
 mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
 if [ "$mode" = prepare ]; then
-  case "${1:-}" in */.retired-worktree-claim.*) exit 1 ;; esac
+  case "${1:-}" in
+    */.retired-worktree-claim.*)
+      base=${FM_RUNTIME_LOG%/runtime.log}
+      if [ -e "$base/home/state/retire-partial-prepare.backlog-close" ]; then
+        cp "$base/home/state/retire-partial-prepare.backlog-close" "$base/premature-marker"
+      fi
+      exit 1
+      ;;
+  esac
 fi
 exec /usr/bin/mktemp "$@"
 SH
@@ -1736,6 +1744,7 @@ SH
     rc=0
     run_retire_claim "$dir" "$id" > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
     [ "$rc" -ne 0 ] || fail "$mode: injected retirement failure was accepted"
+    assert_absent "$dir/premature-marker" "$mode: retirement published replay intent before archival and claim release"
     if [ "$mode" = rollback ]; then
       assert_absent "$dir/home/state/$id.meta" 'rollback failure unexpectedly restored the task record'
       archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
@@ -2416,6 +2425,7 @@ test_already_gone_endpoint_still_completes_without_a_refusal() {
   pass "fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently"
 }
 
+test_retire_claim_restores_partial_backlog_transitions
 test_invalid_endpoint_records_refuse_before_mutation
 test_control_lock_contention_refuses_before_mutation
 test_non_pool_teardown_ignores_task_set_lock
@@ -2444,7 +2454,6 @@ test_absent_recorded_slot_still_holds_project_lock
 test_retire_claim_archives_only_the_gone_agents_record
 test_retire_claim_preserves_archives_across_task_id_reuse
 test_retire_claim_archives_without_spawn_generation
-test_retire_claim_restores_partial_backlog_transitions
 test_retire_claim_requeues_unlanded_work
 test_retire_claim_accepts_cleared_task_temp_with_process_proof
 test_retire_claim_accepts_its_nested_foreground_shell

@@ -59,6 +59,9 @@
 # The snapshot is taken before mutation; only that exact preexisting Done row
 # may be reopened. A later Done answer wins. Reopen precedes the preserved-work
 # note, so our own partial body update cannot masquerade as a later answer.
+# Retirement publishes its marker only after archival and claim release. Its
+# close/retain modes are `retire-close`/`retire-retain`; all retirement modes
+# refuse replay beside the matching active meta, including a restored record.
 
 # Set by fm_backlog_transition_applies for a return-1 exemption.
 # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
@@ -946,7 +949,7 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
     return 1
   fi
   case "$mode" in
-    close|retain) ;;
+    close|retain|retire-close|retire-retain) ;;
     requeue:*)
       if ! [[ $mode =~ ^requeue:(queued|in_flight|done):[0-9a-f]{64}$ ]]; then
         FM_BACKLOG_TRANSITION_ERROR="invalid requeue intent in pending-close record $marker"
@@ -1234,6 +1237,12 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
       FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
       return 0
     fi
+    case "$mode" in
+      requeue:*|retire-close|retire-retain)
+        FM_BACKLOG_TRANSITION_ERROR="active task record remains for claim retirement of $id; retry guarded retirement before replay"
+        return 1
+        ;;
+    esac
     fm_backlog_close_marker_mark_cleanup_incomplete "$state" "$marker" "$id" "$data" \
       "$marker_spawn_gen" "${mode_flags[@]+"${mode_flags[@]}"}" "${args[@]+"${args[@]}"}" \
       || return 1
@@ -1241,6 +1250,10 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
     fm_backlog_atomic_transition remove "$meta" "the interrupted task record" "$state" \
       || return 1
   fi
+  case "$mode" in
+    retire-close) mode=close ;;
+    retire-retain) mode=retain ;;
+  esac
   if fm_backlog_row_probe "$data" "$id"; then
     row_state=$FM_BACKLOG_ROW_STATE
     if [ "${row_state%% *}" != "done" ] && [ "$FM_BACKLOG_ROW_HOLD_KIND" = captain ]; then

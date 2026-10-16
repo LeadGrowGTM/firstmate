@@ -2245,6 +2245,8 @@ test_recovery_requeues_done_unlanded_retirement() {
   start_item "$case_dir" "$id"
   tasks-axi 'done' "$id" --file "$(backlog_of "$case_dir")" >/dev/null
   write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-requeue'
+  mkdir -p "$(home_of "$case_dir")/data/$id"
+  mv "$(home_of "$case_dir")/state/$id.meta" "$(home_of "$case_dir")/data/$id/retired-worktree-claim.fixture.meta"
   marker="$(home_of "$case_dir")/state/$id.backlog-close"
   note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
     "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
@@ -2310,6 +2312,38 @@ test_legacy_retirement_replay_refuses_without_prior_state() {
   assert_present "$marker" 'unproven legacy retirement intent was discarded'
   assert_contains "$out" 'without its pre-retirement backlog state' 'legacy refusal was not explained'
   pass 'legacy retirement replay refuses without pre-retirement state'
+}
+
+test_retirement_replay_preserves_active_claim_records() {
+  local case_dir home id mode intent marker note_hex digest out
+  for mode in requeue retire-close retire-retain; do
+    id="atomic-retire-active-$mode"
+    case_dir=$(make_home "retire-active-$mode")
+    home=$(home_of "$case_dir")
+    add_item "$case_dir" "$id"
+    start_item "$case_dir" "$id"
+    write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-active'
+    cp "$home/state/$id.meta" "$case_dir/before.meta"
+    marker="$home/state/$id.backlog-close"
+    intent=$mode
+    note_hex=local%20main
+    if [ "$mode" = requeue ]; then
+      digest=$(tasks-axi show "$id" --full --file "$(backlog_of "$case_dir")" \
+        | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')
+      intent="requeue:in_flight:$digest"
+      note_hex="hex:$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
+        "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')"
+    fi
+    printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-active\nmode=%s\narg=--note\narg=%s\n' \
+      "$id" "$home/data" "$intent" "$note_hex" > "$marker"
+    cp "$marker" "$case_dir/before.marker"
+    out=$(run_bootstrap "$case_dir")
+    cmp -s "$case_dir/before.meta" "$home/state/$id.meta" || fail "$mode replay removed a restored active record: $out"
+    cmp -s "$case_dir/before.marker" "$marker" || fail "$mode replay changed its uncommitted retirement intent"
+    [ "$(row_state "$case_dir" "$id")" = in_flight ] || fail "$mode replay changed an active claim's row"
+    assert_contains "$out" 'active task record remains for claim retirement' "$mode replay did not explain its refusal"
+  done
+  pass 'retirement replay preserves active records until retirement is committed'
 }
 
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read() {
@@ -3258,6 +3292,7 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
   pass "dispatching a persistent secondmate needs no backlog item"
 }
 
+test_retirement_replay_preserves_active_claim_records
 test_boat_postlaunch_endpoint_reserves_capacity
 test_boat_intake_owns_the_provisioned_backlog
 test_legacy_retirement_replay_refuses_without_prior_state

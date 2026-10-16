@@ -3974,8 +3974,10 @@ teardown_legacy_stamp_rollback() {
       exit 1
     }
     BACKLOG_TRANSITION_FLAGS=(--mode "$retirement_mode")
+  elif [ "$RETIRE_CLAIM" = 1 ]; then
+    BACKLOG_TRANSITION_FLAGS=(--mode "retire-$BACKLOG_TRANSITION")
   fi
-  if ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
+  if [ "$RETIRE_CLAIM" != 1 ] && ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
       "${BACKLOG_TRANSITION_FLAGS[@]+"${BACKLOG_TRANSITION_FLAGS[@]}"}" \
       "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
     if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ] && [ -z "$TEARDOWN_LEGACY_RETAINED_STAMP" ] \
@@ -4389,10 +4391,19 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
     echo "REFUSED: stale claim archive or slot release failed; its active record was retained" >&2
     exit 1
   }
+  # The retirement intent must never be replayable before its archive and
+  # slot transition exist. An active record also blocks replay after rollback.
+  if [ "$BACKLOG_CLOSED" = 1 ] && ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
+      "${BACKLOG_TRANSITION_FLAGS[@]+"${BACKLOG_TRANSITION_FLAGS[@]}"}" \
+      "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
+    retirement_rollback || true
+    echo "REFUSED: stale claim backlog intent could not be recorded; recovery material was retained" >&2
+    exit 1
+  fi
 fi
 if [ "$BACKLOG_CLOSED" = 1 ]; then
   retirement_transition() {
-    if [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+    if [ "$RETIRE_CLAIM" = 1 ]; then
       fm_backlog_atomic_transition remove "$META" "task record" "$STATE" \
         && fm_backlog_close_marker_replay "$STATE" "$BACKLOG_CLOSE_MARKER" "$DATA"
     else
@@ -4404,7 +4415,9 @@ if [ "$BACKLOG_CLOSED" = 1 ]; then
     [ "$RETIRE_CLAIM" != 1 ] || retirement_rollback || true
     fm_lock_release "$META_LOCK"
     META_LOCK_HELD=0
-    if [ "$BACKLOG_TRANSITION" = retain ]; then
+    if [ "$RETIRE_CLAIM" = 1 ]; then
+      echo "error: stale claim $ID's backlog $BACKLOG_TRANSITION failed ($FM_BACKLOG_TRANSITION_ERROR); recovery material was retained for guarded retirement" >&2
+    elif [ "$BACKLOG_TRANSITION" = retain ]; then
       echo "error: $ID's endpoint and local copy are cleaned up, but its captain-held backlog item could not be returned to Queued atomically ($FM_BACKLOG_TRANSITION_ERROR); the pending retention is recorded and the next session start retries it" >&2
     else
       echo "error: $ID's endpoint and local copy are cleaned up, but its backlog item could not be closed atomically ($FM_BACKLOG_TRANSITION_ERROR); the pending close is recorded and the next session start retries it" >&2

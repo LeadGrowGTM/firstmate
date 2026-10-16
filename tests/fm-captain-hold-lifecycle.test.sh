@@ -5382,6 +5382,33 @@ SH
   pass "invalid categories and uncategorized shim calls refuse exactly before locks, backlog, backend, or parent events"
 }
 
+test_answer_preserves_retired_claims_pending_report() {
+  local home id=sample-retired-pending-report marker shown bootstrap
+  home=$(make_home retired-pending-report)
+  mkdir -p "$home/data/$id"
+  printf '# Preserved report\n' > "$home/data/$id/report.md"
+  tasks_in "$home" add "$id" 'Retired report needs a decision' --kind scout --repo sample >/dev/null
+  run_captain "$home" hold "$id" --category security --reason 'Choose the recorded result.' >/dev/null \
+    || fail 'could not create retired-report hold'
+  marker="$home/state/$id.backlog-close"
+  printf 'id=%s\ndata=%s\nspawn_gen=retired-report-fixture\nmode=retire-retain\narg=--report\narg=data/%s/report.md\n' \
+    "$id" "$home/data" "$id" > "$marker"
+  printf 'Keep the reported result.\n' > "$home/decision.txt"
+  run_captain "$home" answer "$id" --decision-file "$home/decision.txt" >/dev/null \
+    || fail 'could not answer before retirement replay'
+  bootstrap=$(PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+    FM_CONFIG_OVERRIDE="$home/config" FM_BOOTSTRAP_NETWORK=skip \
+    "$ROOT/bin/fm-bootstrap.sh" 2>&1) || fail "retired-report replay failed: $bootstrap"
+  shown=$(tasks_in "$home" show "$id" --full)
+  assert_contains "$shown" 'state: done' 'retirement replay reopened the answer'
+  assert_contains "$shown" "report:data/$id/report.md" 'answer lost the pending retirement report'
+  assert_contains "$shown" 'Keep the reported result.' 'answer lost its decision body'
+  assert_absent "$marker" 'answered retirement marker was not retired'
+  pass 'an answer before claim-retirement replay preserves the recorded report'
+}
+
+test_answer_preserves_retired_claims_pending_report
 test_established_budget_spend_is_mate_judgment
 test_categories_accept_through_public_interfaces
 test_invalid_categories_refuse_before_any_home_or_backend_mutation
