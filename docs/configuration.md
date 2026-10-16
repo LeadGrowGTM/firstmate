@@ -14,7 +14,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
 | Automatic reversible work and numeric goals | [Idle sweep and standing targets](#idle-sweep-and-standing-targets) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd), [Claude Remote Control](#claude-remote-control-configclaude-remote-control), and [Orca view tabs](#orca-view-tabs-configorca-view-tabs) |
-| Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity) and [worktree pool guard](#worktree-pool-guard) |
+| Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity), [worktree pool guard](#worktree-pool-guard), [data management](#data-management-configdata-management), and [disk guard](#disk-guard-configdisk-guard) |
 | Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
 | Opt-in recurring task intake | [Recurring intake](#recurring-intake-configschedulesjson) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
@@ -2219,6 +2219,56 @@ Long copy lists show up to two names per finding and count the rest, so the line
 
 Arm it in the root home with `bin/fm-clutter-check.sh arm`, which writes `state/clutter.check.sh` and binds its bytes with `bin/fm-check-register.sh`.
 `bin/fm-clutter-check.sh disarm` removes the shim, its trust binding, and the records.
+
+## Data management (config/data-management)
+
+[`bin/fm-data-manage.sh`](../bin/fm-data-manage.sh) measures the homes, pool roots, and stores named in the optional local `config/data-management`, then plans retention cleanup.
+Dry-run is the default.
+Live deletion requires `--live` on `clean`.
+It also requires a regular `config/data-management.live-authorized` file in the first configured home, which must be the root Firstmate home.
+Create that marker only after reviewing the dry-run report; the tool checks its existence and does not create it.
+The script header owns the config grammar, the protected-path rules, the landed-work classification, and the output records.
+Category totals overlap, so a home is not added to its children.
+
+A worktree directory is never removed by this script.
+A landed, clean, idle pool slot is handed to [`bin/fm-treehouse-guard.sh`](../bin/fm-treehouse-guard.sh) `prune`, and only in live mode.
+Copies named by a task record stay in place.
+Stopped workers remain the job of [`bin/fm-deadweight-sweep.sh`](../bin/fm-deadweight-sweep.sh).
+[`bin/fm-clutter-check.sh`](../bin/fm-clutter-check.sh) remains the read-only threshold check.
+
+The script does not delete `data/` records, home `config/`, live task records, secrets, dotenv files, browser profiles, SSH or cloud CLI configuration, or anything under `/mnt`.
+A file inside any checkout or task-named copy is left in place when a deletion root contains it.
+A `cache` deletion root removes aged regular files, so it must not point at a package-manager store or a session store.
+`cache-tool` runs that tool's own purge, bound to the configured directory, and skips stores with an open file, protected path, or checkout.
+`claude-sessions` removes only old session logs, and `codex-sessions` runs `codex-session-prune` when it is installed.
+`procevent-result` removes only an old handled result group whose source is no longer registered.
+The script header owns which files those directives can touch.
+Docker is measured when the client answers and is never pruned.
+
+Copy [`fm-data-manage.service`](examples/data-management/fm-data-manage.service) and [`fm-data-manage.timer`](examples/data-management/fm-data-manage.timer) from [`docs/examples/data-management/`](examples/data-management/) into `~/.config/systemd/user/`, replace the path placeholders, then enable the timer.
+The shipped service runs a dry-run.
+After reviewing the dry-run report, create the authorization marker and add `--live` to that `ExecStart`, then run `systemctl --user daemon-reload` to enable scheduled deletion.
+
+## Disk guard (config/disk-guard)
+
+[`bin/fm-disk-guard.sh`](../bin/fm-disk-guard.sh) samples available RAM, free swap, Linux disk, free space on `C:`, and an optional virtual-disk file.
+It is the predictive check for this machine.
+The script header owns the floors, the lead window, the projection, the log line, and when the pause flag is written or removed.
+The defaults are 8 GiB of available RAM, 100 GiB free on `C:`, 70 percent of the Linux filesystem, and a 30 minute lead.
+Optional `config/disk-guard` in the root Firstmate home replaces any of those and names the virtual-disk file.
+The guard writes `state/disk-guard.pause` in that root home when a floor is already crossed or the lead window says it will be.
+[`bin/fm-spawn.sh`](../bin/fm-spawn.sh) refuses a fresh ship or scout while a regular pause file or symlink exists at that path: it launches nothing, creates no record, leaves the backlog item queued, and exits 75 until the flag is repaired or removed.
+A relaunch and a secondmate are not deferred.
+The guard removes the flag when the sample is healthy, and it does not follow a symlink there.
+The sample that first writes the flag runs [`bin/fm-data-manage.sh`](../bin/fm-data-manage.sh) `clean` once when the root home's `config/data-management` is regular, adding `--live` only when the authorization marker is regular too.
+The nightly data-management timer stays a dry-run until its own service command gains `--live`.
+The guard does not trim the page cache.
+The machine's existing root cron owns that trim.
+The guard may stat the configured virtual-disk file and read free space on `C:`, and it never walks `/mnt`.
+Copy [`docs/examples/data-management/fm-disk-guard.service`](examples/data-management/fm-disk-guard.service) and [`fm-disk-guard.timer`](examples/data-management/fm-disk-guard.timer) into `~/.config/systemd/user/`, point `ExecStart` at the installed script, then enable the timer.
+Enable it only after this change has landed on the default branch.
+The timer is a sample every 10 minutes.
+It is not an installer.
 
 ## Mail plane (.env)
 

@@ -1,0 +1,11 @@
+# Opt-in pressure sample, every 10 minutes, including once after boot.
+[Unit]
+Description=Firstmate disk pressure sample
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

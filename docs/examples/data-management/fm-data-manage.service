@@ -1,0 +1,17 @@
+# Opt-in disk survey. Copy this and fm-data-manage.timer into
+# ~/.config/systemd/user/, replace the two /path/to/... placeholders, then run:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now fm-data-manage.timer
+# The command below is a dry-run. It deletes nothing.
+# After reviewing the dry-run report, create the regular
+# config/data-management.live-authorized marker in the root home, add --live
+# before --config on ExecStart, then reload the user daemon.
+[Unit]
+Description=Firstmate data management dry-run
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/path/to/firstmate/bin/fm-data-manage.sh clean --config /path/to/firstmate-home/config/data-management
+Nice=10
+IOSchedulingClass=idle

@@ -1,0 +1,19 @@
+# Opt-in pressure sample. Copy this and fm-disk-guard.timer into
+# ~/.config/systemd/user/, replace the two /path/to/... placeholders, then run:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now fm-disk-guard.timer
+# Enable it only after the script has landed on the default branch.
+# Point ExecStart at that installed copy, not at a task worktree.
+# The sample pauses new spawns when a floor is crossed or the lead window
+# says it will be. It runs live cleanup only when config/data-management and
+# config/data-management.live-authorized are regular files in the root home.
+[Unit]
+Description=Firstmate disk pressure sample
+
+[Service]
+Type=oneshot
+Environment=FM_HOME=/path/to/firstmate-home
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/path/to/firstmate/bin/fm-disk-guard.sh sample
+Nice=10
+IOSchedulingClass=idle
