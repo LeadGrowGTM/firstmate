@@ -2,7 +2,7 @@
 
 The xAI `grok` TUI is Claude-Code-compatible.
 Verified initially on 2026-06-29 with 0.2.73, slash submission on 2026-07-03 with 0.2.82, effort on 2026-07-13 with 0.2.99, exit on 2026-07-19 with 0.2.103, and folder trust, the training opt-in, and unsent composer delivery on 2026-09-24 with 1.0.41.
-Launch shape: `grok --always-approve "$(cat <brief>)"`.
+Launch shape: `grok --permission-mode bypassPermissions "$(cat <brief>)"`.
 
 ## Operating facts
 
@@ -12,7 +12,7 @@ Launch shape: `grok --always-approve "$(cat <brief>)"`.
 | Exit | `/exit` prints `Resume this session with: grok --resume <session-id>`; fallback is `Ctrl+Q` twice within 1000ms, `Ctrl+D` quits in VS Code-family terminals, and `Ctrl+C` interrupts. |
 | Interrupt | Single `Ctrl+C`; Escape only focuses scrollback. |
 | Skill | `/<skill>`, for example `/no-mistakes`, with end-to-end user-skill discovery, invocation, and real `no-mistakes axi run` evidence; the popup may consume Enter and fill an argument placeholder, requiring a real second Enter. |
-| Autonomy | `--always-approve`, footer `· always-approve`, verified unattended; `--permission-mode bypassPermissions` is stronger equivalent. |
+| Autonomy | `--permission-mode bypassPermissions`, the documented name of always-approve, by captain exception (2026-10-16) that [`docs/configuration.md`](../../../../../docs/configuration.md#grok-permission-mode) owns; on 1.0.60 it ran a shell redirect, an outside-cwd file edit, and a commit unattended, with mid-turn `Ctrl+c:cancel` and idle `Shift+Tab:mode │ Ctrl+x:shortcuts`. No narrower posture runs unattended: `default`, `acceptEdits`, `dontAsk`, and `auto`, allow rules up to `--allow '*'`, and an enforced `--sandbox` with `GROK_SANDBOX_AUTO_ALLOW_BASH=true` all prompt for `echo hi >> r.txt`, and `plan` prompts before a report write. |
 | Marker | `GROK_AGENT=1` on child or tool processes in 0.2.73 and no `CLAUDECODE`; a 1.0.0 hook instead had `GROK_HOOK_EVENT`, `GROK_HOOK_NAME`, `GROK_SESSION_ID`, and `GROK_WORKSPACE_ROOT` without `GROK_AGENT`, so ancestry guarantees identity. |
 | Resume | `grok --resume <session-id>`, or `grok -c` / `--continue` for cwd latest; `--fork-session` creates a new id. |
 | Model | `--model <model>`; discover current account models with `grok models`. |

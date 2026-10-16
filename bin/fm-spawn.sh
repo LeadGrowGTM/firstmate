@@ -2410,13 +2410,14 @@ launch_template() {
   # (bin/fm-busy-lib.sh) and nothing is armed below.
   agy) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS __AGYBIN__ --prompt-interactive "$(__OPINPUT__ encode launch-brief < __BRIEF__)" __MODELFLAG____EFFORTFLAG__--dangerously-skip-permissions' ;;
   # grok (Grok Build TUI): a positional prompt starts the supervised interactive
-  # session. --always-approve auto-approves every tool execution (verified: the
-  # crewmate runs fully autonomously, no permission gate), which an unattended
-  # crewmate needs; it is the targeted equivalent of claude's
-  # --dangerously-skip-permissions. grok's turn-end signal does NOT ride the
+  # session. --permission-mode bypassPermissions is Grok's approval-skipping
+  # mode (the documented name of always-approve): an unattended crewmate needs
+  # it because every narrower Grok posture still prompts for a shell redirect.
+  # It runs by captain exception, beside claude's bypass setting; docs/configuration.md
+  # "Grok permission mode" owns that exception. grok's turn-end signal does NOT ride the
   # launch command - it is a Stop-event hook installed below (global hook +
   # per-task pointer), so the template is identical for ship/scout/secondmate.
-  grok) printf '%s' 'grok --always-approve __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  grok) printf '%s' 'grok --permission-mode bypassPermissions __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   # Cursor Agent CLI. --trust suppresses the workspace-trust prompt, which
   # --yolo does NOT cover and which would otherwise block every spawn, since
   # each task gets a fresh worktree path cursor has never seen. --yolo is the
