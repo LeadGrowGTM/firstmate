@@ -168,7 +168,7 @@ Strict shell refusal was verified on 2026-10-16 UTC on Linux 6.6.87.2-microsoft-
 `bash bin/fm-test-run.sh tests/fm-tmux-agent-liveness.test.sh` keeps a real interactive builtin loop and a timed read on an unrelated FIFO descriptor ambiguous while their argv remain interactive-shell argv.
 On this kernel, idle Bash and the unrelated-descriptor wait both expose `do_select`, and syscall details are unreadable.
 The positive idle-shell proof is capability-skipped, and the idle-shell ambiguous refusal is verified instead.
-Recovery of an idle shell pane therefore needs manual confirmation on such kernels; a missing server still uses the separate socket and rooted-process absence proof.
+The current recovery rule for an unproven idle shell is in [tmux backend](../tmux-backend.md#agent-liveness-probe).
 
 Foreground-process behavior was verified on 2026-07-07 with tmux 3.6a on macOS.
 
@@ -2247,7 +2247,7 @@ Resolution prints the STABLE launcher rather than the canonical target, because 
 
 `node` matches no harness name pattern, so a cursor pane is identified from Cursor's own name or install tree in the path or argv[0].
 An unrelated `node` or `agent` matches neither and classifies `other`, which the liveness callers fold into `ambiguous` rather than `dead`.
-A live cursor pane returned `alive`; a plain shell pane in the same run returned `dead`.
+A live cursor pane returned `alive`.
 
 ### Environment markers and detection ordering
 

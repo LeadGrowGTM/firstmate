@@ -88,7 +88,8 @@ Shell names and interactive argv alone never establish idleness: an interactive 
 `bin/fm-agent-process.py` owns the Linux kernel terminal-input proof shared by liveness and rooted-process exclusions, including a nested foreground shell's waiting parent.
 Only a sleeping foreground shell with an explicit kernel tty-read wait qualifies; generic `do_select` and `wait_woken` waits also describe unrelated work and refuse.
 The cwd-only macOS inventory supplies no such shell exemption.
-When this proof is unavailable, relaunch, returned-copy reuse and claim retirement refuse with an unproven-agent reason; an idle shell pane needs manual confirmation before recovery.
+For a surviving shell pane without this proof, relaunch, returned-copy reuse, and claim retirement refuse with an unproven-agent reason.
+Manual inspection alone does not change an `ambiguous` verdict; recovery requires a missing endpoint and the separate absence proof.
 Missing-server recovery still uses socket identity and rooted-process absence, so it does not require a surviving shell to supply terminal-input proof.
 
 Scoping the second source to the foreground process group rather than to the pane's descendants is deliberate: a harness-named process left running in the background of an otherwise idle pane must not read as an agent.
