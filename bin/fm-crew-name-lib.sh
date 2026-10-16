@@ -18,32 +18,28 @@
 #
 # Declaration: config/mate-short-name in the spawning home, holding one short
 # form: 1-16 characters of lowercase letters, digits and inner dashes, for
-# example `nap`. Blank lines and lines starting with `#` are ignored. A missing
-# or empty file means no short form and today's names exactly. Any other shape
+# example `nap`, on one line with an optional final newline. A missing or
+# empty file means no short form and today's names exactly. Any other shape
 # is malformed: the lookup prints an error and returns 1 so a caller refuses
 # rather than guessing a name.
 #
 # No side effects on source.
 
 fm_crew_short_name() {  # <config-dir> -> prints the short form, or nothing when unset
-  local file=$1/mate-short-name line value= count=0
+  local file=$1/mate-short-name value= extra=
   [ -e "$file" ] || [ -L "$file" ] || return 0
   if [ ! -f "$file" ] || [ ! -r "$file" ]; then
     echo "error: $file is not a readable file" >&2
     return 1
   fi
-  while IFS= read -r line || [ -n "$line" ]; do
-    line=${line#"${line%%[![:space:]]*}"}
-    line=${line%"${line##*[![:space:]]}"}
-    case "$line" in '' | '#'*) continue ;; esac
-    value=$line
-    count=$((count + 1))
-  done <"$file"
-  [ "$count" -le 1 ] || {
-    echo "error: $file declares more than one short form" >&2
-    return 1
-  }
-  [ -n "$value" ] || return 0
+  [ -s "$file" ] || return 0
+  {
+    IFS= read -r value || :
+    if IFS= read -r extra || [ -n "$extra" ]; then
+      echo "error: $file must contain one short form on one line" >&2
+      return 1
+    fi
+  } <"$file"
   if [ "${#value}" -gt 16 ] || ! printf '%s' "$value" | grep -Eqx '[a-z0-9]([a-z0-9-]*[a-z0-9])?'; then
     echo "error: $file holds '$value'; a short form is 1-16 lowercase letters, digits and inner dashes" >&2
     return 1

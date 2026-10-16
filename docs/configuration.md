@@ -500,8 +500,7 @@ New work that home starts then reads as that mate's crew:
 | Window label of a second mate this home launches | `fm-<id>` | `<id>`, its plain name |
 | Default ship branch | `fm/<task-id>` | `nap/crew/<task-id>` |
 
-The file holds one short form of 1-16 lowercase letters, digits, and inner dashes.
-Blank lines and lines starting with `#` are ignored.
+The file holds one short form of 1-16 lowercase letters, digits, and inner dashes, on one line with an optional final newline.
 A missing or empty file keeps today's names exactly.
 Any other content stops new spawns and ship briefs in that home with an error naming the file, rather than guessing a name.
 [`bin/fm-crew-name-lib.sh`](../bin/fm-crew-name-lib.sh) owns the format and the names it produces.

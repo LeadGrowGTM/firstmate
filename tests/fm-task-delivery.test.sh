@@ -1699,7 +1699,7 @@ test_crew_short_name_sets_the_default_ship_branch() {
   IFS='|' read -r home proj fakebin <<EOF
 $rec
 EOF
-  printf '# the mate owning this home\nnap\n' > "$home/config/mate-short-name"
+  printf 'nap\n' > "$home/config/mate-short-name"
 
   out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix proj 2>/dev/null)
   [ "$out" = "nap/crew/" ] || fail "a registered project without branch= did not take the crew prefix (got '$out')"
