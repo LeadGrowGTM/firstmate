@@ -1,0 +1,52 @@
+Fresh configured spawn
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-crew-naming.CEZjSy
+spawned live-proof harness=claude kind=ship mode=local-only yolo=off window=primary:fm-live-proof worktree=/home/mitch/.treehouse/source-64e022/1/source
+Window address and label
+name=claude label=
+name=fm-live-proof label=nap-crew-live-proof
+Recorded branch and label
+window=primary:fm-live-proof
+crew_label=nap-crew-live-proof
+branch=nap/crew/live-proof
+worktree_is_inside_lab=no (/home/mitch/.treehouse/source-64e022/1/source)
+Actual branch after worker launch
+branch=nap/crew/live-proof
+Worker pane tail
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/
+.lab-crew-naming.CEZjSy/source$ bash '/home/mitch/.no-mistakes/worktrees/5782b71
+▝▜██████▀  Sonnet 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.treehouse/source-64e022/1/source
+
+
+❯ : Firstmate operational input waiting: read '/home/mitch/.no-mistakes/worktre
+  es/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-crew-naming.CEZjSy/state/oper
+  ational-inbox/1792167623-d75e6426f8b1405e.msg' and handle its contents as
+  Firstmate operational input.
+
+● Reading ~/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-
+  crew-naming.CEZjSy/state/operational-inbox/1792167623-d75e6426f8b1405e.msg
+  ⎿  $ pwd -P; git rev-parse --show-toplevel; git checkout -b
+     nap/crew/live-proof --; git branch --show-current; ls
+     /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/
+     .lab-crew-naming.CEZjSy/state/live-proof.inbox/ 2>&1
+
+✢ Recombobulating… (7s · ↓ 324 tokens)
+                                                            ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+   ⚓ source  ▸ live-proof  ◆ Sonnet 5.5  ⎇ nap/crew/live-proof  ctx 5%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+Addressed send
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Malformed config refusal
+error: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-crew-naming.CEZjSy/config/mate-short-name holds 'Nap'; a short form is 1-16 lowercase letters, digits and inner dashes
+Existing window after invalid config
+name=claude label=
+name=fm-live-proof label=nap-crew-live-proof
+Unset and override prefixes
+fm/
+fix/

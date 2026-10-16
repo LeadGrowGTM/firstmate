@@ -1,0 +1,14 @@
+Fresh spawn with clone-local Treehouse root
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-relaunch.w9r8oI
+spawned live-proof harness=claude kind=ship mode=local-only yolo=off window=primary:fm-live-proof worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.worktrees/crew-naming-proof/.treehouse/source-f068d6/1/source
+worktree_inside_repository=yes
+before name=claude label=
+before name=fm-live-proof label=nap-crew-live-proof
+Restarted disposable tmux server; relaunch via control plane
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-relaunch.w9r8oI
+error: task live-proof's endpoint primary:fm-live-proof reads 'missing', but tmux server process 339 has no answering socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of live-proof failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+after name=claude label=
+window=primary:fm-live-proof
+crew_label=nap-crew-live-proof
+branch=nap/crew/live-proof
