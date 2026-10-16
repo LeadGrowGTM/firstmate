@@ -510,7 +510,8 @@ The label is display only.
 Scripts keep addressing every task window by its `fm-<task-id>` name, so steering, peeking, monitoring, and recovery are unchanged.
 Only the tmux backend shows the label, through that window's own status-bar formats with the name replaced by the label; tmux's window list and any status format that never shows the window name still show `fm-<task-id>`.
 Herdr, zellij, cmux, and Orca keep their current tab names, because those backends also use the tab name to find and recover a task.
-Existing branches, pull requests, and windows are never renamed, and a relaunched task keeps its window's existing display.
+Existing branches, pull requests, and live windows are never renamed.
+A relaunch restores a new task's recorded label if its tmux window must be replaced; older tasks without a recorded label keep their original names.
 
 ## Runtime backend (config/backend / FM_BACKEND)
 

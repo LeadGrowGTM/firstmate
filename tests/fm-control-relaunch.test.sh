@@ -198,6 +198,9 @@ case "${1:-}" in
     printf '%s\n' "$*" >> "$D/killed-windows"
     : > "$D/windows"
     exit 0 ;;
+  set-window-option)
+    [ "${4:-}" != @fm_label ] || printf '%s' "${5:-}" > "$D/label"
+    exit 0 ;;
 esac
 exit 0
 SH
@@ -2573,6 +2576,9 @@ test_tmux_reclaims_a_window_whose_recorded_server_died() {
   local dir sock
   dir=$(new_case tmux-dead rl60)
   add_ship_task "$dir" rl60 claude
+  printf 'crew_label=nap-crew-rl60\n' >> "$dir/home/state/rl60.meta"
+  mkdir -p "$dir/home/config"
+  printf 'leg\n' > "$dir/home/config/mate-short-name"
   sock=$(start_real_tmux "$dir" rl60-old fmses fm-rl60)
   printf 'tmux_socket=%s\n' "$sock" >> "$dir/home/state/rl60.meta"
   crash_real_tmux "$dir" rl60-old
@@ -2580,6 +2586,8 @@ test_tmux_reclaims_a_window_whose_recorded_server_died() {
   start_real_tmux "$dir" rl60-live churchill fm-other >/dev/null
   strand_endpoint "$dir" rl60
   assert_tmux_reclaimed "$dir" rl60 "recorded server killed, its socket left behind"
+  [ "$(cat "$dir/fake/label")" = nap-crew-rl60 ] || fail "a rebind lost the recorded crew label"
+  [ "$(meta_field "$dir" rl60 crew_label)" = nap-crew-rl60 ] || fail "a rebind changed the recorded crew label"
   TMUX_TMPDIR="$dir/tmux-root" tmux -L rl60-live kill-server
   pass "tmux: a window whose recorded server died is reclaimed in place with its work intact"
 }
@@ -2636,6 +2644,8 @@ test_tmux_reclaims_a_legacy_record_no_live_server_holds() {
   local dir
   dir=$(new_case tmux-legacy rl63)
   add_ship_task "$dir" rl63 claude
+  mkdir -p "$dir/home/config"
+  printf 'nap\n' > "$dir/home/config/mate-short-name"
   # A legacy record names no socket. Its candidate server started later.
   printf 'spawn_gen=s%s.%s.%s\n' "$(( $(date +%s) - 2 ))" "$$" "$RANDOM" >> "$dir/home/state/rl63.meta"
   start_real_tmux "$dir" rl63-crashed fmses fm-rl63 >/dev/null
@@ -2644,6 +2654,7 @@ test_tmux_reclaims_a_legacy_record_no_live_server_holds() {
   start_real_tmux "$dir" rl63-live churchill fm-other >/dev/null
   : > "$dir/fake/session-missing"
   assert_tmux_reclaimed "$dir" rl63 "legacy record, no live server holds the window"
+  assert_absent "$dir/fake/label" "a legacy task gained a crew label during rebind"
   TMUX_TMPDIR="$dir/tmux-root" tmux -L rl63-live kill-server
   pass "tmux: a legacy record is reclaimed once no server this user could address holds its window"
 }

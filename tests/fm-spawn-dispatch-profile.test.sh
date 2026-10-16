@@ -308,12 +308,16 @@ test_no_profile_keeps_claude_profile_defaults() {
   id="profile-off-z1"
   rec=$(make_spawn_case profile-off claude "$id")
   read_case_record "$rec"
+  printf 'nap\n' > "$HOME_DIR/config/mate-short-name"
+  printf 'Ship branch: nap/crew/%s\n' "$id" >> "$HOME_DIR/data/$id/brief.md"
 
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
   status=$?
   expect_code 0 "$status" "claude spawn without profile flags should succeed"
   assert_contains "$out" "spawned $id harness=claude" "spawn did not report claude"
   assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
+  assert_grep "crew_label=nap-crew-$id" "$HOME_DIR/state/$id.meta" \
+    "a fresh spawn did not record its visible crew label"
   ! grep -q '^fallback_reason=' "$HOME_DIR/state/$id.meta" || fail "fresh unconfigured spawn fabricated a fallback reason"
 
   launch=$(cat "$LAUNCH_LOG")

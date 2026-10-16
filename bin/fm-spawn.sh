@@ -1853,7 +1853,7 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = ship ]; then
   fi
 fi
 # A fresh endpoint's visible label (bin/fm-crew-name-lib.sh). Empty keeps
-# today's fm-<id> display. A relaunch keeps its endpoint's existing display.
+# today's fm-<id> display.
 CREW_LABEL=
 if [ "$RELAUNCH" -eq 0 ]; then
   CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
@@ -2062,6 +2062,9 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
+  if [ "$BACKEND" = tmux ]; then
+    CREW_LABEL=$(fm_meta_get "$RELAUNCH_META" crew_label)
+  fi
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
   if [ "$BACKEND" = tmux ]; then
@@ -4208,6 +4211,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
     TMUX_REBIND_ABORT_TARGET=$T
     WT_TARGET=$WID
+    if [ -n "$CREW_LABEL" ]; then
+      fm_backend_tmux_show_label "$WID" "$CREW_LABEL" ||
+        echo "warning: could not show label $CREW_LABEL on window $T; it still shows $W" >&2
+    fi
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the
@@ -5864,6 +5871,9 @@ preserve_relaunch_meta() {
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
   echo "kind=$KIND"
+  if [ "$RELAUNCH" -eq 0 ] && [ "$BACKEND" = tmux ] && [ -n "$CREW_LABEL" ]; then
+    echo "crew_label=$CREW_LABEL"
+  fi
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
   [ -z "${BRANCH:-}" ] || echo "branch=$BRANCH"
