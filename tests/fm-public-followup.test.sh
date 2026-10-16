@@ -38,7 +38,10 @@ write_promotion_brief() {  # <home> <id>
 Promote the selected scout.
 
 ## Firstmate spec
+Goal: Verify promotion preserves the behavior under test.
 Verify promotion preserves the behavior under test.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
 }
 

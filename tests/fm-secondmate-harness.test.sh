@@ -1126,7 +1126,10 @@ test_spawn_fallback_chain_and_crew_scout_unaffected() {
 Exercise an ordinary crew launch.
 
 ## Firstmate spec
+Goal: Verify secondmate harness settings do not affect an ordinary crew launch.
 Verify secondmate harness settings do not affect it.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   : > "$launchlog"
   PATH="$fakebin:$BASE_PATH" TMUX="fake,1,0" CLAUDECODE=1 \

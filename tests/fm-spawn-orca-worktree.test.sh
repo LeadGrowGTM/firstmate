@@ -97,7 +97,10 @@ test_orca_fresh_spawn_enters_the_worktree_it_created() {
 Exercise an Orca-backed spawn for $id.
 
 ## Firstmate spec
+Goal: Confirm the launch enters the worktree Orca created for it.
 Confirm the launch enters the worktree Orca created for it.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   fb=$(make_orca_fakebin "$case_dir")
 
@@ -135,7 +138,10 @@ test_orca_relaunch_is_refused_before_the_worktree_carveout_could_run() {
 Exercise a relaunch attempt against a recorded Orca task.
 
 ## Firstmate spec
+Goal: Confirm the relaunch is refused before any worktree re-entry logic runs.
 Confirm the relaunch is refused before any worktree re-entry logic runs.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   {
     echo "window=fm-$id"

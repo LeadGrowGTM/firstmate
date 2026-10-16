@@ -531,14 +531,24 @@ test_watcher_surfaces_new_contribution_once() {
   [ "$rc" -eq 0 ] || fail "watcher did not surface the new contribution signal: $(cat "$home/watcher.err")"
   grep -E '^check: contributions delivery [0-9a-f]{64}$' "$out" >/dev/null \
     || fail "watcher did not surface the durable contribution wake: $(cat "$out")"
-  rows=$(awk -F '\t' 'NF >= 5 && $3 == "check" { count++ } END { print count + 0 }' "$home/state/.wake-queue")
-  [ "$rows" = 1 ] || fail "one contribution signal created $rows durable check wakes"
+  rows=$(awk -F '\t' 'NF >= 5 && $3 == "check" && $5 ~ /^check: contributions / { count++ } END { print count + 0 }' "$home/state/.wake-queue")
+  [ "$rows" = 1 ] || fail "one contribution signal created $rows durable contribution wakes"
   rc=0
   with_home "$home" env FM_WATCH_HANDLING_SUCCESSOR=1 FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=0 FM_HEARTBEAT=999999 \
     "$ROOT/bin/fm-watch-checkpoint.sh" --seconds 2 > "$home/watcher-repeat.out" 2> "$home/watcher-repeat.err" || rc=$?
-  [ "$rc" -eq 124 ] || fail "an already durable contribution signal re-rang the watcher: $(cat "$home/watcher-repeat.out")"
-  rows=$(awk -F '\t' 'NF >= 5 && $3 == "check" { count++ } END { print count + 0 }' "$home/state/.wake-queue")
-  [ "$rows" = 1 ] || fail "repeat contribution observation created $rows durable check wakes"
+  # The daily maintenance sweep reports a delivery it refuses to remove. That
+  # check is a separate wake from the contribution signal and is not a re-ring.
+  if [ "$rc" -ne 124 ]; then
+    grep -E '^check: contributions ' "$home/watcher-repeat.out" >/dev/null \
+      && fail "an already durable contribution signal re-rang the watcher: $(cat "$home/watcher-repeat.out")"
+    [ "$rc" -eq 0 ] || fail "repeat watch failed: $(cat "$home/watcher-repeat.err")"
+    grep -E '^check: deadweight-sweep:' "$home/watcher-repeat.out" >/dev/null \
+      || fail "repeat watch surfaced a wake that is not the maintenance sweep: $(cat "$home/watcher-repeat.out")"
+  fi
+  rows=$(awk -F '\t' 'NF >= 5 && $3 == "check" && $5 ~ /^check: contributions / { count++ } END { print count + 0 }' "$home/state/.wake-queue")
+  [ "$rows" = 1 ] || fail "repeat contribution observation created $rows durable contribution wakes"
+  rows=$(awk -F '\t' 'NF >= 5 && $3 == "check" && $5 !~ /^check: contributions / && $5 !~ /^check: deadweight-sweep:/ { count++ } END { print count + 0 }' "$home/state/.wake-queue")
+  [ "$rows" = 0 ] || fail "repeat observation created an unexpected durable check wake"
   pass 'watcher surfaces one newly durable contribution signal without re-ringing it'
 }
 
