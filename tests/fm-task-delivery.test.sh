@@ -1638,7 +1638,7 @@ test_spawn_refreshes_legacy_worker_roles
 # presence-independent), defaults an unregistered/plain project to the legacy
 # "fm/" prefix, and resolves an empty override to "" for a bare <task-id> branch.
 test_project_mode_resolves_branch_prefix() {
-  local home out err
+  local home out err status project
   home="$TMP_ROOT/project-mode-branch/home"
   mkdir -p "$home/data"
   cat > "$home/data/projects.md" <<'EOF'
@@ -1684,7 +1684,108 @@ EOF
 
   out=$(FM_HOME="$TMP_ROOT/project-mode-branch/no-registry-home" "$PROJECT_MODE" --branch-prefix anyproj 2>/dev/null)
   [ "$out" = "fm/" ] || fail "an absent registry must default the branch prefix to fm/ (got '$out')"
+
+  mkdir -p "$home/config" "$TMP_ROOT/project-mode-branch/no-registry-home/config"
+  printf 'Nap\n' > "$home/config/mate-short-name"
+  printf 'Nap\n' > "$TMP_ROOT/project-mode-branch/no-registry-home/config/mate-short-name"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix overrideproj 2>&1)
+  [ "$out" = fix/ ] || fail "a registered override read the malformed home short form (got '$out')"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix reorderedproj 2>&1)
+  [ "$out" = contrib/ ] || fail "a reordered override read the malformed home short form (got '$out')"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix bareproj 2>&1)
+  [ -z "$out" ] || fail "an empty override read the malformed home short form (got '$out')"
+  for project in plainproj typomodeproj never-registered; do
+    out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix "$project" 2>"$home/warn")
+    status=$?
+    [ "$status" -eq 0 ] || fail "$project refused over a malformed short form instead of falling back"
+    [ "$out" = fm/ ] || fail "$project did not fall back to the fm/ default (got '$out')"
+    assert_grep "mate-short-name holds 'Nap'" "$home/warn" "$project did not warn about the malformed short form"
+  done
+  out=$(FM_HOME="$TMP_ROOT/project-mode-branch/no-registry-home" "$PROJECT_MODE" --branch-prefix anyproj 2>"$home/warn")
+  status=$?
+  [ "$status" -eq 0 ] || fail "an absent registry refused over a malformed short form instead of falling back"
+  [ "$out" = fm/ ] || fail "an absent registry did not fall back to the fm/ default (got '$out')"
+  assert_grep "mate-short-name holds 'Nap'" "$home/warn" "an absent registry did not warn about the malformed short form"
   pass "fm-project-mode: --branch-prefix resolves order-independently and defaults to the legacy fm/ prefix"
+}
+
+# A home's short form (config/mate-short-name, bin/fm-crew-name-lib.sh) turns
+# the default ship branch into <short>/crew/<id> for every tool that picks one
+# without a flag, while a registered branch= and an explicit --branch-prefix
+# still win, and an unconfigured home keeps fm/ exactly.
+test_crew_short_name_sets_the_default_ship_branch() {
+  local rec home proj fakebin out status id meta
+  rec=$(make_home crew-branch \
+    "- proj [no-mistakes] - fixture (added 2026-01-01)" \
+    "- fixproj [no-mistakes branch=fix/] - fixture (added 2026-01-01)")
+  IFS='|' read -r home proj fakebin <<EOF
+$rec
+EOF
+  printf 'nap\n' > "$home/config/mate-short-name"
+
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix proj 2>/dev/null)
+  [ "$out" = "nap/crew/" ] || fail "a registered project without branch= did not take the crew prefix (got '$out')"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix never-registered 2>/dev/null)
+  [ "$out" = "nap/crew/" ] || fail "an unregistered project did not take the crew prefix (got '$out')"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix fixproj 2>/dev/null)
+  [ "$out" = "fix/" ] || fail "a registered branch= override lost to the crew prefix (got '$out')"
+
+  FM_HOME="$home" "$BRIEF" crew-branch-a1 proj --mode no-mistakes >/dev/null \
+    || fail "a ship brief in a home with a short form should scaffold"
+  assert_grep "Ship branch: nap/crew/crew-branch-a1" "$home/data/crew-branch-a1/brief.md" \
+    "the brief did not default to the crew branch"
+  assert_grep "git checkout -b nap/crew/crew-branch-a1 --" "$home/data/crew-branch-a1/brief.md" \
+    "the brief's branch-creation command did not use the crew branch"
+  # tests/fm-spawn-dispatch-profile.test.sh proves the matching spawns launch and record the branch.
+
+  FM_HOME="$home" "$BRIEF" crew-branch-a2 proj --mode no-mistakes --branch-prefix fm/ >/dev/null \
+    || fail "an explicit fm/ brief should scaffold in a home with a short form"
+  assert_grep "Ship branch: fm/crew-branch-a2" "$home/data/crew-branch-a2/brief.md" \
+    "an explicit --branch-prefix lost to the crew prefix in the brief"
+  fill_brief_subsections "$home/data/crew-branch-a2/brief.md" "Run the review loop." "Ship it."
+  out=$(run_spawn "$home" "$fakebin" crew-branch-a2 "$proj" claude --mode no-mistakes --yolo off)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a flagless spawn launched against an explicit fm/ brief"
+  assert_absent "$home/state/crew-branch-a2.meta" "a refused crew-branch spawn left task metadata"
+  assert_contains "$out" "the brief says branch=fm/crew-branch-a2 but this spawn selected branch=nap/crew/crew-branch-a2" \
+    "a flagless spawn did not default to the crew branch"
+
+  id=crew-branch-p1
+  meta="$home/state/$id.meta"
+  printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$meta"
+  FM_HOME="$home" "$BRIEF" "$id" proj --scout >/dev/null 2>&1 || fail "a scout brief should scaffold"
+  fill_brief_subsections "$home/data/$id/brief.md" "Promote the crew fixture." "Use the default branch."
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
+    --mode local-only --yolo off "${PROMOTION_SCOPE[@]}") || fail "a flagless promotion should succeed"
+  assert_grep "branch=nap/crew/$id" "$meta" "a flagless promotion did not record the crew branch"
+
+  printf 'Nap\n' > "$home/config/mate-short-name"
+  FM_HOME="$home" "$BRIEF" crew-branch-a3 proj --mode no-mistakes >/dev/null 2>"$home/warn" \
+    || fail "a malformed short form blocked a ship brief instead of falling back"
+  assert_grep "Ship branch: fm/crew-branch-a3" "$home/data/crew-branch-a3/brief.md" \
+    "a malformed short form did not fall back to the fm/ branch in the brief"
+  assert_grep "mate-short-name holds 'Nap'" "$home/warn" "the brief did not warn about the malformed short form"
+  id=crew-branch-p2
+  meta="$home/state/$id.meta"
+  printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$meta"
+  FM_HOME="$home" "$BRIEF" "$id" proj --scout >/dev/null 2>&1 || fail "a scout brief should scaffold with a malformed short form"
+  fill_brief_subsections "$home/data/$id/brief.md" "Promote the crew fixture." "Use the default branch."
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
+    --mode local-only --yolo off "${PROMOTION_SCOPE[@]}" >/dev/null 2>"$home/warn" \
+    || fail "a malformed short form blocked a promotion instead of falling back"
+  assert_grep "branch=fm/$id" "$meta" "a malformed short form did not fall back to the fm/ branch on promotion"
+  assert_grep "mate-short-name holds 'Nap'" "$home/warn" "the promotion did not warn about the malformed short form"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" proj 2>/dev/null)
+  [ "$out" = "no-mistakes off" ] || fail "a malformed short form disturbed a mode query (got '$out')"
+
+  rm -f "$home/config/mate-short-name"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix proj 2>/dev/null)
+  [ "$out" = "fm/" ] || fail "an unconfigured home did not keep the fm/ prefix (got '$out')"
+  FM_HOME="$home" "$BRIEF" crew-branch-a4 proj --mode no-mistakes >/dev/null || fail "an unconfigured ship brief should scaffold"
+  assert_grep "Ship branch: fm/crew-branch-a4" "$home/data/crew-branch-a4/brief.md" \
+    "an unconfigured home's brief left the fm/ default"
+
+  pass "crew names: a home's short form sets the default ship branch everywhere, explicit prefixes still win, and a malformed one falls back to fm/"
 }
 
 test_required_labeled_fields_gate_delivery() {
@@ -1783,4 +1884,5 @@ test_promotion_carries_the_forge_binding
 test_spawn_and_promote_require_filled_task_subsections
 test_required_labeled_fields_gate_delivery
 test_project_mode_resolves_branch_prefix
+test_crew_short_name_sets_the_default_ship_branch
 echo "# all fm-task-delivery tests passed"

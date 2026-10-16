@@ -158,6 +158,10 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
   printf '%s\n' "$wid"
 }
 
+fm_backend_tmux_show_label() {  # <window-target> <label>
+  tmux set-window-option -t "$1" @fm_label "$2"
+}
+
 # fm_backend_tmux_current_path: the live pane's current working directory, or
 # empty on any tmux error. Mirrors fm-spawn.sh's worktree-discovery poll:
 # `tmux display-message -p -t "$T" '#{pane_current_path}'`.

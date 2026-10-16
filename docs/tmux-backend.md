@@ -37,10 +37,10 @@ Two long keys with the same displayed ends can still share a label.
 The optional persistent dark theme lives in [`../bin/fm-statusbar.tmux`](../bin/fm-statusbar.tmux).
 Use `bin/fm-statusbar.sh source-line` from a stable installed checkout to preview its exact `source-file` line, `bin/fm-statusbar.sh check` to check `~/.tmux.conf`, and `bin/fm-statusbar.sh install` to append it once while preserving existing settings.
 The installer edits only the configuration file; it changes no live server options.
-The next tmux server startup loads the theme, and session start or spawn restores window labels from durable task facts; tmux sessions themselves are not preserved by a server restart.
+The next tmux server startup loads the theme, and session start or spawn restores pane detail labels from durable task facts; tmux sessions themselves are not preserved by a server restart.
 To apply the approved configuration to a running server, source `~/.tmux.conf` explicitly on that server.
 The usage job addresses the rendering server's socket and reads the labeled window's home cache, so grouped views and named servers cannot borrow another home's usage.
-Existing sessions pick up the primary label and detail line at their next locked session start or context re-emit; task windows also refresh their labels at spawn and can be refreshed from recorded metadata with `bin/fm-statusbar.sh sync`.
+Existing sessions pick up the primary label and detail line at their next locked session start or context re-emit; task windows refresh their pane detail labels at spawn and can refresh them from recorded metadata with `bin/fm-statusbar.sh sync`.
 A viewer attached through a grouped session (`tmux new-session -t <session-name> -s <view>`) does not become the container: Firstmate reads the primary's pane when `TMUX_PANE` is set and resolves a grouped session to its base session.
 If the primary harness runs outside tmux, Firstmate creates or reuses a detached session named `firstmate`:
 
@@ -49,6 +49,7 @@ tmux attach -t firstmate
 ```
 
 Each task window is named `fm-<id>`.
+The [crew names setting](configuration.md#crew-names-configmate-short-name) owns how Firstmate's status theme displays new windows.
 
 ```sh
 tmux list-windows -t <session-name>

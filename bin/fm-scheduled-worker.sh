@@ -70,7 +70,7 @@ jq -e '
   (.backend | IN("tmux","herdr","zellij","orca","cmux")) and
   (.mode | IN("no-mistakes","direct-PR","local-only")) and (.yolo | IN("on","off")) and
   (.reasoning_class | token) and
-  (.branch_prefix // "fm/" | token) and (.base_branch // "main" | token) and
+  (.branch_prefix == null or (.branch_prefix | token)) and (.base_branch // "main" | token) and
   (.profiles | type == "array" and length > 0 and length <= 32) and
   (.reasoning_class as $class | all(.profiles[];
     (keys == ["effort","harness","model","reasoning_class"]) and
@@ -178,6 +178,28 @@ if [ "$(jq -r .phase "$JOURNAL")" = capacity ]; then
   [ "$PROFILE" = "$(jq -cS .profile "$JOURNAL")" ] || die 'capacity cannot switch subscription profile'
 fi
 [ "$OBSERVED" -gt "$(jq -r .observed_at "$JOURNAL")" ] || die 'refresh evidence after the prior failed attempt'
+if [ "$ACTION" = spawn ]; then
+  if jq -e '.branch_prefix != null' "$PLAN" >/dev/null; then
+    BRANCH_PREFIX=$(jq -r .branch_prefix "$PLAN")
+  else
+    BRIEF=${FM_DATA_OVERRIDE:-$FM_HOME/data}/$ID/brief.md
+    safe_file "$BRIEF" || die "prepared ship brief is missing or unsafe: $BRIEF"
+    SHIP_BRANCHES=$(sed -n 's/^Ship branch: //p' "$BRIEF")
+    if [ -n "$SHIP_BRANCHES" ]; then
+      SHIP_BRANCH=$(printf '%s\n' "$SHIP_BRANCHES" | head -n 1)
+      if printf '%s\n' "$SHIP_BRANCHES" | grep -vxF -- "$SHIP_BRANCH" >/dev/null; then
+        die "prepared ship brief records conflicting branches: $BRIEF"
+      fi
+      git check-ref-format --branch "$SHIP_BRANCH" >/dev/null 2>&1 || die "prepared ship brief records an invalid branch: $BRIEF"
+      case "$SHIP_BRANCH" in
+        *"$ID") BRANCH_PREFIX=${SHIP_BRANCH%"$ID"} ;;
+        *) die "prepared ship branch does not end with task id $ID: $SHIP_BRANCH" ;;
+      esac
+    else
+      BRANCH_PREFIX=fm/
+    fi
+  fi
+fi
 ATTEMPT=$(( $(jq -r .attempt "$JOURNAL") + 1 ))
 RECEIPT=$DIR/outcome.$ATTEMPT.json
 cp "$SELECTION" "$DIR/selection.$ATTEMPT.json"
@@ -189,7 +211,7 @@ ARGS=(--harness "$HARNESS" --model "$MODEL" --effort "$EFFORT")
 RC=0
 if [ "$ACTION" = spawn ]; then
   ARGS+=(--backend "$(jq -r .backend "$PLAN")" --mode "$(jq -r .mode "$PLAN")" --yolo "$(jq -r .yolo "$PLAN")")
-  ARGS+=(--branch-prefix "$(jq -r '.branch_prefix // "fm/"' "$PLAN")")
+  ARGS+=(--branch-prefix "$BRANCH_PREFIX")
   BASE=$(jq -r '.base_branch // empty' "$PLAN")
   [ -z "$BASE" ] || ARGS+=(--base-branch "$BASE")
   FM_SPAWN_OUTCOME_FILE=$RECEIPT FM_SCHEDULED_WORKER_PLAN=$DIR/plan.json \

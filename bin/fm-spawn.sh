@@ -32,12 +32,14 @@
 #   no-mistakes-prod-only is a registry policy rather than a task mode and is
 #   refused as a flag value.
 #   --branch-prefix is the optional prefix selected at intake for this ship's
-#   immutable branch, defaulting to "fm/". It must agree with the branch recorded
-#   in the brief, and is refused on scouts, secondmates, and relaunches. When the
-#   selected branch does not match the project's registered prefix, the spawn
-#   prints a one-line deviation notice and continues, because the registered
-#   prefix is the captain's standing preference and the brief agreement above
-#   already guarantees the worker's instructions match the branch.
+#   immutable branch, defaulting to this home's crew prefix ("fm/" unless
+#   config/mate-short-name is set; bin/fm-crew-name-lib.sh). It must agree with
+#   the branch recorded in the brief, and is refused on scouts, secondmates,
+#   and relaunches. When the selected branch does not match the project's
+#   registered prefix, the spawn prints a one-line deviation notice and
+#   continues, because the registered prefix is the captain's standing
+#   preference and the brief agreement above already guarantees the worker's
+#   instructions match the branch.
 #   --base-branch is the optional branch selected at intake for a ship or scout
 #   to start from and target instead of origin's default branch. A fresh launch
 #   resets its pooled copy to origin/<branch>, refusing when the project has no
@@ -749,6 +751,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-wsl-interop-lib.sh"
 # shellcheck source=bin/fm-project-capacity-lib.sh
 . "$SCRIPT_DIR/fm-project-capacity-lib.sh"
+# shellcheck source=bin/fm-crew-name-lib.sh
+. "$SCRIPT_DIR/fm-crew-name-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
 . "$SCRIPT_DIR/fm-worker-account-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
@@ -1838,13 +1842,28 @@ fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
   exit 2
 }
+# The home's short form (bin/fm-crew-name-lib.sh), read at most once so a
+# malformed declaration warns once and falls back to the fm- names.
+CREW_SHORT=
+CREW_SHORT_READ=0
+fm_spawn_crew_short() {
+  [ "$CREW_SHORT_READ" -eq 1 ] && return 0
+  CREW_SHORT=$(fm_crew_usable_short_name "$CONFIG")
+  CREW_SHORT_READ=1
+}
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = ship ]; then
+  if [ "$BRANCH_PREFIX_SET" -eq 0 ]; then
+    fm_spawn_crew_short
+    BRANCH_PREFIX=$(fm_crew_branch_prefix_for "$CREW_SHORT")
+  fi
   BRANCH="$BRANCH_PREFIX$ID"
   if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
     echo "error: --branch-prefix and task id must form a valid git branch (got '$BRANCH')" >&2
     exit 1
   fi
 fi
+# A fresh tmux endpoint's visible label. Empty keeps today's fm-<id> display.
+CREW_LABEL=
 if [ -e "$STATE" ] || [ -L "$STATE" ]; then
   fm_backlog_directory_present "$STATE" "state directory" || {
     echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
@@ -1993,6 +2012,10 @@ if [ "$RELAUNCH" -eq 0 ]; then
   fi
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
+  if [ "$BACKEND" = tmux ] && [ "$KIND" != secondmate ]; then
+    fm_spawn_crew_short
+    CREW_LABEL=$(fm_crew_label_for "$CREW_SHORT" "$KIND" "$ID")
+  fi
   if [ "$BACKEND" = orca ] && [ "$KIND" = secondmate ]; then
     echo "error: backend=orca does not support --secondmate spawns yet" >&2
     exit 1
@@ -2049,6 +2072,9 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
+  if [ "$BACKEND" = tmux ]; then
+    CREW_LABEL=$(fm_meta_get "$RELAUNCH_META" crew_label)
+  fi
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
   if [ "$BACKEND" = tmux ]; then
@@ -4142,6 +4168,23 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
 fi
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ] && [ "$BACKEND" = tmux ]; then
+  if [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
+    fm_backlog_record_present "$STATE/$ID.meta" "task record" "$STATE" || {
+      echo "error: secondmate task record is unsafe: $FM_BACKLOG_TRANSITION_ERROR" >&2
+      exit 1
+    }
+    if [ "$(fm_meta_get "$STATE/$ID.meta" kind)" = secondmate ]; then
+      CREW_LABEL=$(fm_meta_get "$STATE/$ID.meta" crew_label)
+    else
+      fm_spawn_crew_short
+      CREW_LABEL=$(fm_crew_label_for "$CREW_SHORT" "$KIND" "$ID")
+    fi
+  else
+    fm_spawn_crew_short
+    CREW_LABEL=$(fm_crew_label_for "$CREW_SHORT" "$KIND" "$ID")
+  fi
+fi
 if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
   echo "error: task $ID has a pending authoritative backlog close at $STATE/$ID.backlog-close; finish or repair that close before dispatching a new worker" >&2
   exit 1
@@ -4164,6 +4207,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
     T=$RELAUNCH_TARGET
     WT_TARGET=$T
     SES=${T%%:*}
+    # Restore the recorded label on the adopted window, never a recomputed one.
+    if [ "$BACKEND" = tmux ] && [ -n "$CREW_LABEL" ]; then
+      fm_backend_tmux_show_label "$T" "$CREW_LABEL" ||
+        echo "warning: could not show label $CREW_LABEL on window $T; it still shows $W" >&2
+    fi
   elif [ "$BACKEND" = tmux ]; then
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh window for the same task, opened directly in the
@@ -4195,6 +4243,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
     TMUX_REBIND_ABORT_TARGET=$T
     WT_TARGET=$WID
+    if [ -n "$CREW_LABEL" ]; then
+      fm_backend_tmux_show_label "$WID" "$CREW_LABEL" ||
+        echo "warning: could not show label $CREW_LABEL on window $T; it still shows $W" >&2
+    fi
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the
@@ -4282,6 +4334,12 @@ else
     # stays $T (the name form), which is safe now that rename is disabled.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     WT_TARGET="$WID"
+    # Only the displayed label changes; every script still addresses $T by
+    # its fm-<id> window name. Cosmetic, so a failure only warns.
+    if [ -n "$CREW_LABEL" ]; then
+      fm_backend_tmux_show_label "$WID" "$CREW_LABEL" ||
+        echo "warning: could not show label $CREW_LABEL on window $T; it still shows $W" >&2
+    fi
     ;;
   herdr)
     # fm_backend_herdr_workspace_label resolves the target workspace from
@@ -5845,6 +5903,9 @@ preserve_relaunch_meta() {
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
   echo "kind=$KIND"
+  if [ "$RELAUNCH" -eq 0 ] && [ "$BACKEND" = tmux ] && [ -n "$CREW_LABEL" ]; then
+    echo "crew_label=$CREW_LABEL"
+  fi
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
   [ -z "${BRANCH:-}" ] || echo "branch=$BRANCH"

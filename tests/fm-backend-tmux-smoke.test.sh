@@ -196,12 +196,59 @@ case "$large" in
 esac
 pass "real tmux: fm_backend_tmux_capture's -S -N bound trims old history for a small window and reaches it for a large one"
 
+# --- crew label: display changes, the addressed name does not ---------------
+
+tmux set-window-option -gu window-status-format || fail "could not restore the built-in window-status-format"
+tmux set-window-option -gu window-status-current-format || fail "could not restore the built-in window-status-current-format"
+builtin=$(tmux show-window-options -gv window-status-format)
+builtin_current=$(tmux show-window-options -gv window-status-current-format)
+local_format=$(tmux show-window-options -v -t "$TARGET" window-status-format)
+local_current=$(tmux show-window-options -v -t "$TARGET" window-status-current-format)
+fm_backend_tmux_show_label "$TARGET" "nap-crew-smoke1" || fail "fm_backend_tmux_show_label failed"
+[ "$(tmux display-message -p -t "$TARGET" '#{window_name}')" = "$WINDOW" ] \
+  || fail "showing a label renamed the addressed window"
+[ "$(tmux show-window-options -v -t "$TARGET" @fm_label)" = "nap-crew-smoke1" ] \
+  || fail "the label was not recorded on the window"
+[ "$(tmux show-window-options -gv window-status-format)" = "$builtin" ] || fail "labeling changed the built-in window-status-format"
+[ "$(tmux show-window-options -gv window-status-current-format)" = "$builtin_current" ] || fail "labeling changed the built-in window-status-current-format"
+[ "$(tmux show-window-options -v -t "$TARGET" window-status-format)" = "$local_format" ] || fail "labeling changed the window's status format"
+[ "$(tmux show-window-options -v -t "$TARGET" window-status-current-format)" = "$local_current" ] || fail "labeling changed the window's current status format"
+for opt in window-status-format window-status-current-format; do
+  shown=$(tmux display-message -p -t "$TARGET" "$(tmux show-window-options -gv "$opt")")
+  case "$shown" in *"$WINDOW"*) ;; *) fail "the built-in $opt changed the plain name to '$shown'" ;; esac
+done
+pass "real tmux: a crew label leaves built-in status formats and the addressed name unchanged"
+
+idx=0
+for custom in ' #I:#W ' ' #I:#W#F ' '#I:#{window_name}' '#I:#{=20:window_name}' '#I'; do
+  idx=$((idx + 1))
+  tmux set-window-option -g window-status-format "$custom" || fail "could not set custom format $idx"
+  tmux set-window-option -g window-status-current-format "$custom" || fail "could not set custom current format $idx"
+  fm_backend_tmux_create_task "$SESSION" "fm-custom$idx" "$HOME" >/dev/null || fail "could not create custom window $idx"
+  local_format=$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" window-status-format)
+  local_current=$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" window-status-current-format)
+  fm_backend_tmux_show_label "$SESSION:fm-custom$idx" "nap-crew-custom$idx" || fail "custom format '$custom' refused the label"
+  for opt in window-status-format window-status-current-format; do
+    [ "$(tmux show-window-options -gv "$opt")" = "$custom" ] || fail "labeling changed custom $opt '$custom'"
+    case "$opt" in
+      window-status-format) expected=$local_format ;;
+      window-status-current-format) expected=$local_current ;;
+    esac
+    [ "$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" "$opt")" = "$expected" ] \
+      || fail "labeling changed the window's custom $opt '$custom'"
+    shown=$(tmux display-message -p -t "$SESSION:fm-custom$idx" "$(tmux show-window-options -gv "$opt")")
+    case "$shown" in *nap-crew-custom$idx*) fail "custom $opt '$custom' showed the crew label as '$shown'" ;; esac
+  done
+  tmux kill-window -t "$SESSION:fm-custom$idx"
+done
+pass "real tmux: a crew label leaves custom status formats unchanged"
+
 # --- resolve_bare_selector (live-window-listing) -----------------------------
 
 resolved=$(fm_backend_tmux_resolve_bare_selector "$WINDOW") \
   || fail "fm_backend_tmux_resolve_bare_selector failed to find the live window"
 [ "$resolved" = "$TARGET" ] || fail "fm_backend_tmux_resolve_bare_selector resolved to '$resolved', expected '$TARGET'"
-pass "real tmux: fm_backend_tmux_resolve_bare_selector (list-live) finds the created window by name"
+pass "real tmux: fm_backend_tmux_resolve_bare_selector (list-live) finds the created, labeled window by name"
 
 if fm_backend_tmux_resolve_bare_selector "no-such-window-xyz" 2>/dev/null; then
   fail "fm_backend_tmux_resolve_bare_selector should fail for a nonexistent window"
