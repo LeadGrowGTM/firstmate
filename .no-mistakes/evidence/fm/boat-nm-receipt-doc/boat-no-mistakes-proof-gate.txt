@@ -1,0 +1,18 @@
+== doc line (docs/remote-secondmates.md) ==
+583:A `no-mistakes` ship remains refused until the boat-eng home's `config/boat-no-mistakes-proven` holds one pull URL from a real box pipeline; a missing receipt never downgrades delivery, and `bin/fm-boat-worker.sh`'s header owns the exact check.
+== worker script diff vs base 4c372a7 (empty = unchanged) ==
+$ [1 no receipt file] fm-boat-worker.sh spawn <boot_id> (mode=no-mistakes)
+error: no-mistakes has not been proven on this box
+exit=1
+$ [2 garbage receipt] fm-boat-worker.sh spawn <boot_id> (mode=no-mistakes)
+error: no-mistakes has not been proven on this box
+exit=1
+$ [3 two pull URLs] fm-boat-worker.sh spawn <boot_id> (mode=no-mistakes)
+error: no-mistakes has not been proven on this box
+exit=1
+$ [4 symlinked receipt] fm-boat-worker.sh spawn <boot_id> (mode=no-mistakes)
+error: no-mistakes has not been proven on this box
+exit=1
+$ [5 exactly one pull URL (proof gate passes; next check = project clone refuses)] fm-boat-worker.sh spawn <boot_id> (mode=no-mistakes)
+error: project clone is unavailable or unsafe
+exit=1
