@@ -185,16 +185,19 @@ if [ "$ACTION" = spawn ]; then
     BRIEF=${FM_DATA_OVERRIDE:-$FM_HOME/data}/$ID/brief.md
     safe_file "$BRIEF" || die "prepared ship brief is missing or unsafe: $BRIEF"
     SHIP_BRANCHES=$(sed -n 's/^Ship branch: //p' "$BRIEF")
-    [ -n "$SHIP_BRANCHES" ] || die "prepared ship brief records no branch: $BRIEF"
-    SHIP_BRANCH=$(printf '%s\n' "$SHIP_BRANCHES" | head -n 1)
-    if printf '%s\n' "$SHIP_BRANCHES" | grep -vxF -- "$SHIP_BRANCH" >/dev/null; then
-      die "prepared ship brief records conflicting branches: $BRIEF"
+    if [ -n "$SHIP_BRANCHES" ]; then
+      SHIP_BRANCH=$(printf '%s\n' "$SHIP_BRANCHES" | head -n 1)
+      if printf '%s\n' "$SHIP_BRANCHES" | grep -vxF -- "$SHIP_BRANCH" >/dev/null; then
+        die "prepared ship brief records conflicting branches: $BRIEF"
+      fi
+      git check-ref-format --branch "$SHIP_BRANCH" >/dev/null 2>&1 || die "prepared ship brief records an invalid branch: $BRIEF"
+      case "$SHIP_BRANCH" in
+        *"$ID") BRANCH_PREFIX=${SHIP_BRANCH%"$ID"} ;;
+        *) die "prepared ship branch does not end with task id $ID: $SHIP_BRANCH" ;;
+      esac
+    else
+      BRANCH_PREFIX=fm/
     fi
-    git check-ref-format --branch "$SHIP_BRANCH" >/dev/null 2>&1 || die "prepared ship brief records an invalid branch: $BRIEF"
-    case "$SHIP_BRANCH" in
-      *"$ID") BRANCH_PREFIX=${SHIP_BRANCH%"$ID"} ;;
-      *) die "prepared ship branch does not end with task id $ID: $SHIP_BRANCH" ;;
-    esac
   fi
 fi
 ATTEMPT=$(( $(jq -r .attempt "$JOURNAL") + 1 ))

@@ -239,6 +239,18 @@ check_branch_prefix_forwarding() {
     assert_equals "${expected_prefix}job" "$brief_branch" "$variant prefix brief lost its prefix"
     assert_contains "$(cat "$dir/home/calls")" "--branch-prefix $expected_prefix" "$variant prefix did not forward the prepared brief's prefix"
   done
+  for variant in absent null; do
+    dir=$(make_case "prefix-legacy-$variant")
+    printf 'Legacy ship brief\n' > "$dir/home/data/job/brief.md"
+    mkdir -p "$dir/home/config"
+    printf 'nap\n' > "$dir/home/config/mate-short-name"
+    if [ "$variant" = null ]; then
+      jq '.branch_prefix=null' "$dir/plan.json" > "$dir/other.json" && mv "$dir/other.json" "$dir/plan.json"
+    fi
+    out=$(run_case "$dir"); rc=$?
+    expect_code 0 "$rc" "$variant legacy brief spawn: $out"
+    assert_contains "$(cat "$dir/home/calls")" '--branch-prefix fm/' "$variant legacy brief did not forward fm/"
+  done
   for invalid in '""' '"bad prefix"' false true 0 '[]' '{}'; do
     index=$((index + 1))
     dir=$(make_case "prefix-invalid-$index")
