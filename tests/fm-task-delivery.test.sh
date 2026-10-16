@@ -1695,15 +1695,17 @@ EOF
   out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix bareproj 2>&1)
   [ -z "$out" ] || fail "an empty override read the malformed home short form (got '$out')"
   for project in plainproj typomodeproj never-registered; do
-    out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix "$project" 2>&1)
+    out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix "$project" 2>"$home/warn")
     status=$?
-    [ "$status" -ne 0 ] || fail "$project accepted a malformed short form for its default branch"
-    assert_contains "$out" "mate-short-name holds 'Nap'" "$project did not validate its default branch"
+    [ "$status" -eq 0 ] || fail "$project refused over a malformed short form instead of falling back"
+    [ "$out" = fm/ ] || fail "$project did not fall back to the fm/ default (got '$out')"
+    assert_grep "mate-short-name holds 'Nap'" "$home/warn" "$project did not warn about the malformed short form"
   done
-  out=$(FM_HOME="$TMP_ROOT/project-mode-branch/no-registry-home" "$PROJECT_MODE" --branch-prefix anyproj 2>&1)
+  out=$(FM_HOME="$TMP_ROOT/project-mode-branch/no-registry-home" "$PROJECT_MODE" --branch-prefix anyproj 2>"$home/warn")
   status=$?
-  [ "$status" -ne 0 ] || fail "an absent registry accepted a malformed short form for its default branch"
-  assert_contains "$out" "mate-short-name holds 'Nap'" "an absent registry did not validate its default branch"
+  [ "$status" -eq 0 ] || fail "an absent registry refused over a malformed short form instead of falling back"
+  [ "$out" = fm/ ] || fail "an absent registry did not fall back to the fm/ default (got '$out')"
+  assert_grep "mate-short-name holds 'Nap'" "$home/warn" "an absent registry did not warn about the malformed short form"
   pass "fm-project-mode: --branch-prefix resolves order-independently and defaults to the legacy fm/ prefix"
 }
 
@@ -1758,10 +1760,21 @@ EOF
   assert_grep "branch=nap/crew/$id" "$meta" "a flagless promotion did not record the crew branch"
 
   printf 'Nap\n' > "$home/config/mate-short-name"
-  out=$(FM_HOME="$home" "$BRIEF" crew-branch-a3 proj --mode no-mistakes 2>&1)
-  status=$?
-  [ "$status" -ne 0 ] || fail "a malformed short form was guessed into a branch"
-  assert_contains "$out" "mate-short-name holds 'Nap'" "the refusal did not name the malformed short form"
+  FM_HOME="$home" "$BRIEF" crew-branch-a3 proj --mode no-mistakes >/dev/null 2>"$home/warn" \
+    || fail "a malformed short form blocked a ship brief instead of falling back"
+  assert_grep "Ship branch: fm/crew-branch-a3" "$home/data/crew-branch-a3/brief.md" \
+    "a malformed short form did not fall back to the fm/ branch in the brief"
+  assert_grep "mate-short-name holds 'Nap'" "$home/warn" "the brief did not warn about the malformed short form"
+  id=crew-branch-p2
+  meta="$home/state/$id.meta"
+  printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$meta"
+  FM_HOME="$home" "$BRIEF" "$id" proj --scout >/dev/null 2>&1 || fail "a scout brief should scaffold with a malformed short form"
+  fill_brief_subsections "$home/data/$id/brief.md" "Promote the crew fixture." "Use the default branch."
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
+    --mode local-only --yolo off "${PROMOTION_SCOPE[@]}" >/dev/null 2>"$home/warn" \
+    || fail "a malformed short form blocked a promotion instead of falling back"
+  assert_grep "branch=fm/$id" "$meta" "a malformed short form did not fall back to the fm/ branch on promotion"
+  assert_grep "mate-short-name holds 'Nap'" "$home/warn" "the promotion did not warn about the malformed short form"
   out=$(FM_HOME="$home" "$PROJECT_MODE" proj 2>/dev/null)
   [ "$out" = "no-mistakes off" ] || fail "a malformed short form disturbed a mode query (got '$out')"
 
@@ -1772,7 +1785,7 @@ EOF
   assert_grep "Ship branch: fm/crew-branch-a4" "$home/data/crew-branch-a4/brief.md" \
     "an unconfigured home's brief left the fm/ default"
 
-  pass "crew names: a home's short form sets the default ship branch everywhere, and explicit prefixes still win"
+  pass "crew names: a home's short form sets the default ship branch everywhere, explicit prefixes still win, and a malformed one falls back to fm/"
 }
 
 test_required_labeled_fields_gate_delivery() {

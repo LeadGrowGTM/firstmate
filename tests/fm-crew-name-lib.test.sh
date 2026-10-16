@@ -2,7 +2,8 @@
 # Behavior tests for bin/fm-crew-name-lib.sh: the names a home's short form
 # (config/mate-short-name) selects for new work. Unset keeps today's fm- names
 # exactly; a valid short form yields <short>-crew-<id> worker labels, plain
-# second-mate labels, and a <short>/crew/ branch prefix; anything else refuses.
+# second-mate labels, and a <short>/crew/ branch prefix; anything else warns and
+# falls back to today's names.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -42,22 +43,27 @@ test_short_form_names_new_work() {
   pass "crew names: a short form names new workers, scouts, second mates, and the branch prefix"
 }
 
-test_malformed_short_form_refuses() {
+test_malformed_short_form_falls_back() {
   local config="$TMP_ROOT/bad/config" value out status
   mkdir -p "$config"
   for value in Nap 'na p' ' nap' 'nap ' '#nap' -nap nap- 'nap/x' abcdefghijklmnopq; do
     printf '%s\n' "$value" > "$config/mate-short-name"
-    out=$(fm_crew_default_branch_prefix "$config" 2>&1)
+    out=$(fm_crew_short_name "$config" 2>&1)
     status=$?
     [ "$status" -ne 0 ] || fail "malformed short form '$value' was accepted as '$out'"
-    assert_contains "$out" "holds '$value'" "the refusal of '$value' did not name it"
-    fm_crew_window_label "$config" ship x >/dev/null 2>&1 && fail "malformed short form '$value' produced a label"
+    assert_contains "$out" "holds '$value'" "the strict read of '$value' did not name it"
+    out=$(fm_crew_default_branch_prefix "$config" 2>"$TMP_ROOT/warn") || fail "malformed short form '$value' blocked the branch prefix"
+    assert_equals "fm/" "$out" "malformed short form '$value' did not fall back to fm/"
+    assert_contains "$(cat "$TMP_ROOT/warn")" "holds '$value'" "the fallback for '$value' did not warn"
+    out=$(fm_crew_window_label "$config" ship x 2>/dev/null) || fail "malformed short form '$value' blocked the label"
+    assert_equals "" "$out" "malformed short form '$value' produced a label"
   done
   printf 'nap\nleg\n' > "$config/mate-short-name"
   out=$(fm_crew_short_name "$config" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "two short forms were accepted"
   assert_contains "$out" "one short form on one line" "the refusal did not name the duplicate declaration"
+  assert_equals "fm/" "$(fm_crew_default_branch_prefix "$config" 2>/dev/null)" "two short forms did not fall back to fm/"
   printf 'nap\n\n' > "$config/mate-short-name"
   fm_crew_short_name "$config" >/dev/null 2>&1 && fail "a trailing blank line was accepted"
   printf '# Napoleon\nnap\n' > "$config/mate-short-name"
@@ -67,10 +73,11 @@ test_malformed_short_form_refuses() {
   rm -f "$config/mate-short-name"
   mkdir "$config/mate-short-name"
   fm_crew_short_name "$config" >/dev/null 2>&1 && fail "a directory was read as a short form"
-  pass "crew names: a malformed short form refuses instead of guessing a name"
+  assert_equals "" "$(fm_crew_usable_short_name "$config" 2>/dev/null)" "a directory was used as a short form"
+  pass "crew names: a malformed short form is never guessed; it warns and falls back to the fm- names"
 }
 
 test_unset_keeps_todays_names
 test_short_form_names_new_work
-test_malformed_short_form_refuses
+test_malformed_short_form_falls_back
 echo "# all fm-crew-name-lib tests passed"

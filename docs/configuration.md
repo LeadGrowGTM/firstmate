@@ -502,7 +502,7 @@ New work that home starts then reads as that mate's crew:
 
 The file holds one short form of 1-16 lowercase letters, digits, and inner dashes, on one line with an optional final newline.
 A missing or empty file keeps today's names exactly.
-Invalid content fails operations that read the short form with an error naming the file; resolving a registered branch prefix does not read it.
+Invalid content never blocks work: the operation prints one warning naming the file and falls back to the unset names, `fm/` branches and no label.
 [`bin/fm-crew-name-lib.sh`](../bin/fm-crew-name-lib.sh) implements this format and the resulting names.
 
 The branch is only a default: a project's registered `branch=<prefix>` and an explicit `--branch-prefix` still win, and `bin/fm-project-mode.sh --branch-prefix <project>` reports the resolved prefix.

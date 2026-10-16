@@ -1842,9 +1842,19 @@ fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
   exit 2
 }
+# The home's short form (bin/fm-crew-name-lib.sh), read at most once so a
+# malformed declaration warns once and falls back to the fm- names.
+CREW_SHORT=
+CREW_SHORT_READ=0
+fm_spawn_crew_short() {
+  [ "$CREW_SHORT_READ" -eq 1 ] && return 0
+  CREW_SHORT=$(fm_crew_usable_short_name "$CONFIG")
+  CREW_SHORT_READ=1
+}
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = ship ]; then
   if [ "$BRANCH_PREFIX_SET" -eq 0 ]; then
-    BRANCH_PREFIX=$(fm_crew_default_branch_prefix "$CONFIG") || exit 1
+    fm_spawn_crew_short
+    BRANCH_PREFIX=$(fm_crew_branch_prefix_for "$CREW_SHORT")
   fi
   BRANCH="$BRANCH_PREFIX$ID"
   if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
@@ -1852,12 +1862,8 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = ship ]; then
     exit 1
   fi
 fi
-# A fresh endpoint's visible label (bin/fm-crew-name-lib.sh). Empty keeps
-# today's fm-<id> display.
+# A fresh tmux endpoint's visible label. Empty keeps today's fm-<id> display.
 CREW_LABEL=
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
-  CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
-fi
 if [ -e "$STATE" ] || [ -L "$STATE" ]; then
   fm_backlog_directory_present "$STATE" "state directory" || {
     echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
@@ -2006,6 +2012,10 @@ if [ "$RELAUNCH" -eq 0 ]; then
   fi
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
+  if [ "$BACKEND" = tmux ] && [ "$KIND" != secondmate ]; then
+    fm_spawn_crew_short
+    CREW_LABEL=$(fm_crew_label_for "$CREW_SHORT" "$KIND" "$ID")
+  fi
   if [ "$BACKEND" = orca ] && [ "$KIND" = secondmate ]; then
     echo "error: backend=orca does not support --secondmate spawns yet" >&2
     exit 1
@@ -4158,7 +4168,7 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
 fi
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ]; then
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ] && [ "$BACKEND" = tmux ]; then
   if [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
     fm_backlog_record_present "$STATE/$ID.meta" "task record" "$STATE" || {
       echo "error: secondmate task record is unsafe: $FM_BACKLOG_TRANSITION_ERROR" >&2
@@ -4167,10 +4177,12 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ]; then
     if [ "$(fm_meta_get "$STATE/$ID.meta" kind)" = secondmate ]; then
       CREW_LABEL=$(fm_meta_get "$STATE/$ID.meta" crew_label)
     else
-      CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
+      fm_spawn_crew_short
+      CREW_LABEL=$(fm_crew_label_for "$CREW_SHORT" "$KIND" "$ID")
     fi
   else
-    CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
+    fm_spawn_crew_short
+    CREW_LABEL=$(fm_crew_label_for "$CREW_SHORT" "$KIND" "$ID")
   fi
 fi
 if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then

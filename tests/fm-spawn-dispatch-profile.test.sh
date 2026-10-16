@@ -326,27 +326,116 @@ test_no_profile_keeps_claude_profile_defaults() {
   pass "no --model/--effort records defaults and types the claude launch instructions"
 }
 
-# A home's short form names the ship branch a spawn records: a flagless spawn
-# takes <short>/crew/<id>, and an explicit --branch-prefix still wins. Both
-# launch, and each records the branch its brief names.
-test_crew_short_name_spawn_records_the_ship_branch() {
-  local rec id prefix out status
+# log_tmux_calls <fakebin> <log>: record every tmux call a spawn makes, then
+# run the case's fake tmux unchanged.
+log_tmux_calls() {
+  mv "$1/tmux" "$1/tmux.fake"
+  cat > "$1/tmux" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> '$2'
+exec '$1/tmux.fake' "\$@"
+SH
+  chmod +x "$1/tmux"
+}
+
+# applied_crew_label <log>: the @fm_label value the spawn set, if any.
+applied_crew_label() {
+  sed -n 's/^set-window-option -t [^ ]* @fm_label //p' "$1" | tail -1
+}
+
+# theme_renders <case-dir> <window-name> <label>: create that window on a real
+# private tmux server, apply the label the spawn applied, load Firstmate's
+# status theme, and print the status entry tmux renders for the window.
+theme_renders() {
+  local dir=$1 name=$2 label=$3 real sock shim
+  real=$(command -v tmux)
+  mkdir -p "$dir/real-tmux/bin" && chmod 700 "$dir/real-tmux"
+  TMUX_TMPDIR="$dir/real-tmux" "$real" -L crew -f /dev/null new-session -d -s firstmate -n bash || return 1
+  sock=$(TMUX_TMPDIR="$dir/real-tmux" "$real" -L crew display-message -p '#{socket_path}')
+  shim="$dir/real-tmux/bin/tmux"
+  printf '#!/usr/bin/env bash\nexec %q -S %q "$@"\n' "$real" "$sock" > "$shim"
+  chmod +x "$shim"
+  "$shim" new-window -d -t firstmate: -n "$name" || return 1
+  [ -z "$label" ] || "$shim" set-window-option -t "firstmate:$name" @fm_label "$label" || return 1
+  PATH="$dir/real-tmux/bin:$PATH" FM_HOME="$dir/home" "$ROOT/bin/fm-statusbar.sh" --socket "$sock" theme >/dev/null || return 1
+  "$shim" display-message -p -t "firstmate:$name" "$("$shim" show-window-options -gv window-status-format)"
+  "$shim" kill-server
+}
+
+# A home's short form names the ship branch and the window label a spawn
+# applies: a flagless spawn takes <short>/crew/<id>, an explicit --branch-prefix
+# still wins, the tmux window keeps its fm-<id> name, the spawn applies the
+# label to that window, and Firstmate's theme renders the label for it.
+test_crew_short_name_spawn_applies_branch_and_label() {
+  local rec id prefix out status label
   local -a flag
+  command -v tmux >/dev/null 2>&1 || { echo "ok - skipped: tmux is not installed"; return 0; }
   for prefix in nap/crew/ fix/; do
     id="crew-branch-${prefix%%/*}"
     rec=$(make_spawn_case "$id" claude "$id")
     read_case_record "$rec"
     printf 'nap\n' > "$HOME_DIR/config/mate-short-name"
     printf 'Ship branch: %s%s\n' "$prefix" "$id" >> "$HOME_DIR/data/$id/brief.md"
+    log_tmux_calls "$FAKEBIN_DIR" "$CASE_DIR/tmux-calls"
     flag=()
     [ "$prefix" = nap/crew/ ] || flag=(--branch-prefix "$prefix")
     out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "${flag[@]}")
     status=$?
     expect_code 0 "$status" "a $prefix spawn in a home with a short form should launch"$'\n'"$out"
     assert_grep "branch=$prefix$id" "$HOME_DIR/state/$id.meta" "the $prefix spawn did not record its ship branch"
-    assert_grep "crew_label=nap-crew-$id" "$HOME_DIR/state/$id.meta" "the $prefix spawn lost its crew label"
+    assert_grep "window=firstmate:fm-$id" "$HOME_DIR/state/$id.meta" "the $prefix spawn changed the addressed window"
+    grep -q "^new-window .*-n fm-$id" "$CASE_DIR/tmux-calls" || fail "the $prefix spawn did not create window fm-$id"
+    label=$(applied_crew_label "$CASE_DIR/tmux-calls")
+    assert_equals "nap-crew-$id" "$label" "the $prefix spawn did not apply its crew label to the window"
+    assert_grep "crew_label=nap-crew-$id" "$HOME_DIR/state/$id.meta" "the $prefix spawn did not record its crew label"
+    out=$(theme_renders "$CASE_DIR" "fm-$id" "$label") || fail "could not render the theme on a real tmux server"
+    assert_contains "$out" ":nap-crew-$id" "Firstmate's theme did not render the applied crew label"
   done
-  pass "crew names: a flagless spawn records the crew branch and an explicit prefix still wins"
+  pass "crew names: a spawn keeps fm-<id>, applies the crew label the theme renders, and records the crew or explicit branch"
+}
+
+# A malformed short form never blocks a spawn: it warns once and falls back to
+# the fm/ branch and no label, and an explicit prefix still wins. A backend
+# other than tmux never reads the short form for a label at all.
+test_malformed_short_name_never_blocks_a_spawn() {
+  local rec id prefix out status
+  local -a flag
+  for prefix in fm/ fix/; do
+    id="crew-bad-${prefix%%/*}"
+    rec=$(make_spawn_case "$id" claude "$id")
+    read_case_record "$rec"
+    printf 'Nap\n' > "$HOME_DIR/config/mate-short-name"
+    printf 'Ship branch: %s%s\n' "$prefix" "$id" >> "$HOME_DIR/data/$id/brief.md"
+    log_tmux_calls "$FAKEBIN_DIR" "$CASE_DIR/tmux-calls"
+    flag=()
+    [ "$prefix" = fm/ ] || flag=(--branch-prefix "$prefix")
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "${flag[@]}")
+    status=$?
+    expect_code 0 "$status" "a malformed short form blocked a $prefix spawn"$'\n'"$out"
+    assert_grep "branch=$prefix$id" "$HOME_DIR/state/$id.meta" "a malformed short form changed the $prefix branch"
+    assert_equals "" "$(applied_crew_label "$CASE_DIR/tmux-calls")" "a malformed short form produced a $prefix label"
+    ! grep -q '^crew_label=' "$HOME_DIR/state/$id.meta" || fail "a malformed short form recorded a $prefix label"
+    [ "$(grep -c "mate-short-name holds 'Nap'" <<<"$out")" = 1 ] \
+      || fail "a malformed short form did not warn exactly once on a $prefix spawn"$'\n'"$out"
+  done
+
+  id=crew-bad-zellij
+  rec=$(make_spawn_case "$id" claude "$id")
+  read_case_record "$rec"
+  printf 'Nap\n' > "$HOME_DIR/config/mate-short-name"
+  printf 'Ship branch: fix/%s\n' "$id" >> "$HOME_DIR/data/$id/brief.md"
+  cat > "$FAKEBIN_DIR/zellij" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *version*) echo "zellij 0.44.0" ;; *list-sessions*) echo firstmate ;; esac
+exit 0
+SH
+  chmod +x "$FAKEBIN_DIR/zellij"
+  out=$(FM_BACKEND=zellij run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --branch-prefix fix/)
+  # This stub zellij cannot open a tab, so the spawn stops at endpoint creation,
+  # which comes after the point where a tmux spawn reads its label.
+  assert_contains "$out" "zellij new-tab did not return" "the zellij spawn did not reach endpoint creation"$'\n'"$out"
+  assert_not_contains "$out" "mate-short-name" "a zellij spawn read the short form for a label"
+  pass "crew names: a malformed short form warns once and never blocks a spawn; only tmux reads it for a label"
 }
 
 test_secondmate_respawn_keeps_recorded_crew_label() {
@@ -357,6 +446,7 @@ test_secondmate_respawn_keeps_recorded_crew_label() {
     read_case_record "$rec"
     sm="$CASE_DIR/secondmate-home"
     make_seeded_secondmate_home "$sm" "$id"
+    log_tmux_calls "$FAKEBIN_DIR" "$CASE_DIR/tmux-calls"
     if [ "$initial" = nap ]; then
       printf 'nap\n' > "$HOME_DIR/config/mate-short-name"
     fi
@@ -365,21 +455,26 @@ test_secondmate_respawn_keeps_recorded_crew_label() {
     expect_code 0 "$status" "first secondmate launch should succeed"$'\n'"$out"
     if [ "$initial" = nap ]; then
       assert_grep "crew_label=$id" "$HOME_DIR/state/$id.meta" "first launch lost the configured secondmate label"
+      assert_equals "$id" "$(applied_crew_label "$CASE_DIR/tmux-calls")" "first launch did not apply the mate's plain name"
       rm "$HOME_DIR/config/mate-short-name"
     else
       ! grep -q '^crew_label=' "$HOME_DIR/state/$id.meta" || fail "unconfigured mate gained a label"
+      assert_equals "" "$(applied_crew_label "$CASE_DIR/tmux-calls")" "an unconfigured mate's window was labeled"
       printf 'nap\n' > "$HOME_DIR/config/mate-short-name"
     fi
+    : > "$CASE_DIR/tmux-calls"
     out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
     status=$?
     expect_code 0 "$status" "secondmate respawn should succeed after short form changed"$'\n'"$out"
     if [ "$initial" = nap ]; then
       assert_grep "crew_label=$id" "$HOME_DIR/state/$id.meta" "respawn lost the mate's recorded label"
+      assert_equals "$id" "$(applied_crew_label "$CASE_DIR/tmux-calls")" "respawn did not reapply the mate's recorded label"
     else
       ! grep -q '^crew_label=' "$HOME_DIR/state/$id.meta" || fail "respawn labeled a previously unlabeled mate"
+      assert_equals "" "$(applied_crew_label "$CASE_DIR/tmux-calls")" "respawn applied a label to a previously unlabeled mate"
     fi
   done
-  pass "secondmate respawn keeps its recorded label across short form changes"
+  pass "secondmate respawn applies only its recorded label across short form changes"
 }
 
 # Claude Code strips U+2063 from the launch-prompt argument, so a claude launch
@@ -2983,7 +3078,8 @@ test_non_typed_provider_hints_do_not_block_spawn_or_inject_metadata
 test_configured_default_model_has_no_realized_model
 test_scheduled_plan_sets_class_beside_unrelated_dispatch
 test_no_profile_keeps_claude_profile_defaults
-test_crew_short_name_spawn_records_the_ship_branch
+test_crew_short_name_spawn_applies_branch_and_label
+test_malformed_short_name_never_blocks_a_spawn
 test_secondmate_respawn_keeps_recorded_crew_label
 test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home
