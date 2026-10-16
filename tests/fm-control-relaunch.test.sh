@@ -1420,7 +1420,7 @@ setup_secondmate_crew_case() {
     echo 'model=default'
     echo 'effort=default'
   } > "$dir/smhome/state/crew1.meta"
-  printf 'fm-%s\n' "$id" > "$dir/fake/windows"
+  printf 'fm-%s\nfm-crew1\n' "$id" > "$dir/fake/windows"
   printf '%s' "$dir/smhome" > "$dir/fake/cwd"
 }
 
@@ -1473,6 +1473,40 @@ test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy() {
     'the refusal did not name the surviving mate process'
   kill -0 "$mate_pid" 2>/dev/null || fail 'the mate process died during the refused restart'
   pass 'a mate process in a crew copy blocks restart without a crew task marker'
+}
+
+test_secondmate_relaunch_refuses_borrowed_pane_for_absent_crew_window() {
+  local dir out rc=0 shell_pid child_pid i
+  dir=$(new_case stale-crew-window sm-stale)
+  setup_secondmate_crew_case "$dir" sm-stale
+  printf 'fm-sm-stale\n' > "$dir/fake/windows"
+  # The crew record names fmses:fm-crew1, which is absent from the session
+  # inventory (only the mate's own window exists). Tmux would answer a pane
+  # read for it from the active window; that borrowed pane must not attribute
+  # its home-rooted child as crew.
+  ( unset FM_TASK_ID; cd "$dir/smhome" && /bin/bash -c '
+    /bin/sleep 60 &
+    printf "%s\n" "$!" > "$1"
+    wait
+  ' bash "$dir/borrowed-child-pid" ) &
+  shell_pid=$!
+  ROOTED_PIDS+=("$shell_pid")
+  printf '%s\n' "$shell_pid" > "$dir/fake/pane-pid-fmses:fm-crew1"
+  for ((i=0; i<100; i++)); do
+    [ ! -s "$dir/borrowed-child-pid" ] || break
+    /bin/sleep 0.01
+  done
+  [ -s "$dir/borrowed-child-pid" ] || fail 'the borrowed-pane child did not start'
+  child_pid=$(cat "$dir/borrowed-child-pid")
+  ROOTED_PIDS+=("$child_pid")
+  printf '%s\n%s\n' "$shell_pid" "$child_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-stale relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "an absent crew window borrowed a pane and let the restart through: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the borrowed-pane process'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving home process'
+  kill -0 "$child_pid" 2>/dev/null || fail 'the home process died during the refused restart'
+  pass 'an absent crew window cannot borrow a pane to attribute a home process'
 }
 
 test_secondmate_relaunch_refuses_a_live_home_process() {
@@ -3947,6 +3981,7 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin
 test_secondmate_relaunch_waits_for_exiting_home_process
 test_secondmate_relaunch_ignores_live_crew_processes
 test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy
+test_secondmate_relaunch_refuses_borrowed_pane_for_absent_crew_window
 test_secondmate_relaunch_refuses_a_live_home_process
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings

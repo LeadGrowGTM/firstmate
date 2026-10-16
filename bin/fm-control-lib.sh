@@ -323,7 +323,7 @@ fm_control_secondmate_crew_ids() {  # <meta> <worktree> -> crew task ids
 }
 
 fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> -> crew pane shell pids
-  local meta=$1 worktree=$2 home_canon f window pid backend kind id
+  local meta=$1 worktree=$2 home_canon f window windows pid backend kind id
   [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 0
   [ -d "$worktree" ] || return 0
   home_canon=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 0
@@ -348,6 +348,22 @@ fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> -> crew pane shell
     fi
     pid=
     if [ "$backend" = tmux ]; then
+      # Tmux answers an absent target from the session's active window, so a
+      # stale crew record must prove exact window membership before its pane
+      # PID can attribute anything; otherwise the ancestor is skipped and the
+      # process stays unattributed (and therefore blocks).
+      fm_backend_source tmux >/dev/null 2>&1 || continue
+      declare -F fm_backend_tmux_window_inventory >/dev/null 2>&1 || continue
+      case "$window" in
+        *:*)
+          if windows=$(fm_backend_tmux_window_inventory "${window%%:*}"); then
+            printf '%s\n' "$windows" | grep -Fqx "${window#*:}" || continue
+          else
+            continue
+          fi
+          ;;
+        *) continue ;;
+      esac
       pid=$(tmux display-message -p -t "$window" '#{pane_pid}' 2>/dev/null) || pid=
     elif [ "$backend" = herdr ]; then
       fm_backend_source herdr >/dev/null 2>&1 || continue
