@@ -26,13 +26,74 @@ def shell_identity(pid):
             and all(arg in INTERACTIVE_FLAGS for arg in argv[1:]))
 
 
+AGENT_NAME_FRAGMENTS = ('claude', 'codex', 'opencode', 'grok', 'kimi',
+                        'cursor', 'gemini', 'devin')
+AGENT_NAMES = {'pi', 'pi-signed', 'pi-launcher', 'omp', 'agy', 'rovo'}
+
+
+def agent_named(pid):
+    try:
+        name = (Path('/proc') / str(pid) / 'comm').read_text().strip().lstrip('-')
+    except OSError:
+        return True
+    base = os.path.basename(name)
+    return (base in AGENT_NAMES or base.startswith('muse-bin-')
+            or any(fragment in base for fragment in AGENT_NAME_FRAGMENTS))
+
+
+def session_manager(pid):
+    try:
+        proc = Path('/proc') / str(pid)
+        name = proc.joinpath('comm').read_text().strip()
+        if name == '(sd-pam)':
+            return True
+        if name != 'systemd':
+            return False
+        argv = [arg.decode('utf-8', 'surrogateescape') for arg in
+                proc.joinpath('cmdline').read_bytes().rstrip(b'\0').split(b'\0')]
+        return '--user' in argv
+    except OSError:
+        return False
+
+
+def all_fds_are_terminal(pid):
+    try:
+        entries = list((Path('/proc') / str(pid) / 'fd').iterdir())
+    except OSError:
+        return False
+    if not entries:
+        return False
+    for entry in entries:
+        try:
+            target = os.readlink(entry)
+        except OSError:
+            return False
+        if target.endswith(' (deleted)'):
+            target = target[:-10]
+        if not (target in {'/dev/tty', '/dev/console', '/dev/ptmx'}
+                or target.startswith('/dev/pts/')
+                or (target.startswith('/dev/tty') and target[8:].isdigit())):
+            return False
+    return True
+
+
 def terminal_input_shell(pid):
     state, _, group, tty, foreground = fields(pid)
-    # Generic do_select/wait_woken also describe active builtin reads on other
-    # descriptors. Only a kernel tty-read wait is evidence of terminal input.
+    if not (state == 'S' and tty != 0 and group > 0 and group == foreground
+            and shell_identity(pid)):
+        return False
     wait = (Path('/proc') / str(pid) / 'wchan').read_text().strip()
-    return (state == 'S' and tty != 0 and group > 0 and group == foreground
-            and wait in {'n_tty_read', 'tty_read'} and shell_identity(pid))
+    if wait in {'n_tty_read', 'tty_read'}:
+        return True
+    # An idle interactive shell does not universally sit in a tty-read wait:
+    # bash readline waits in do_select on its terminal descriptors and dash
+    # in a generic wait_woken. Those waits are terminal-input evidence only
+    # when every open descriptor is a terminal, which separates an idle
+    # prompt from a builtin read on an unrelated descriptor (that descriptor
+    # is open and non-terminal) and from a busy loop (never in state S).
+    return (wait in {'do_select', 'do_sys_poll', 'poll_schedule_timeout',
+                     'wait_woken'}
+            and all_fds_are_terminal(pid))
 
 
 def descendant(candidate, original):
@@ -82,7 +143,30 @@ def worktree_processes(root, original):
                 continue
             if state == 'Z':
                 continue
-            raise RuntimeError(f"cannot read live process {pid}'s cwd")
+            # A live process whose cwd is unreadable (a non-dumpable process
+            # the user owns, such as `systemd --user`) aborts the absence
+            # proof only when it could be the surviving agent. With a pane
+            # tree to compare against, an unreadable process outside that
+            # tree and not itself harness-named cannot be the pane's agent:
+            # a dumpable agent rooted in the worktree stays readable and is
+            # still reported below. Without a pane tree, only the user
+            # session manager and its PAM helper are positively not an
+            # agent; every other unreadable process still refuses, so a
+            # non-dumpable survivor rooted in the worktree is never treated
+            # as absent.
+            if agent_named(pid):
+                raise RuntimeError(f"cannot read live process {pid}'s cwd")
+            if original:
+                try:
+                    in_pane_tree = (int(pid) == original
+                                    or descendant(int(pid), original))
+                except (OSError, ValueError, IndexError):
+                    in_pane_tree = True
+                if in_pane_tree:
+                    raise RuntimeError(f"cannot read live process {pid}'s cwd")
+            elif not session_manager(pid):
+                raise RuntimeError(f"cannot read live process {pid}'s cwd")
+            continue
         literal = cwd == root or cwd.startswith(root + '/')
         deleted = cwd.endswith(' (deleted)') and (
             cwd[:-10] == root or cwd[:-10].startswith(root + '/'))

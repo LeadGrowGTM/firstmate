@@ -117,7 +117,8 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
 
 # Recovery proof, independent of harness names: EVERY same-user process rooted
 # in the recorded copy is a possible surviving worker. No signals are sent.
-# Print matching pids; a failed inventory or an unreadable live cwd refuses.
+# Print matching pids; a failed inventory refuses, as does an unreadable live
+# cwd on a process that could be the agent (in the pane's tree or harness-named).
 # Linux uses kernel cwd links, including descendants in subdirectories. macOS
 # uses the bounded cwd-only lsof inventory, never a recursive file-tree walk.
 fm_agent_worktree_processes() {  # <worktree> [<pane-shell-pid>] [allow-missing] -> pids (empty means none)

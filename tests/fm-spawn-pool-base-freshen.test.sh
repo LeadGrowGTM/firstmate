@@ -966,6 +966,66 @@ SH
   done
 }
 
+test_returned_pool_copy_accepts_unreadable_cwd_process() {
+  local rec id=unreadable-cwd-worker out status nodump_pid pane_dummy
+  [ "$(uname -s)" = Linux ] || { echo 'skip - nondumpable process needs Linux'; return 0; }
+  rec=$(make_case returned-unreadable-cwd "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_pid}'*) cat "$FM_TEST_PANE_PID_FILE"; exit ;;
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_PANE_EXITED" ]; then printf '%s\n' "$FM_TEST_PANE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*) : > "$FM_TEST_PANE_REACHED" ;;
+  *' exit Enter'*) : > "$FM_TEST_PANE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+  cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = status ] && [ -f "$FM_TEST_PANE_EXITED" ]; then
+  printf '1  available  %s\n' "$FM_TEST_PANE_COPY"
+  exit
+fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/treehouse"
+  python3 - "$CASE_DIR" "$CASE_DIR/nodump-ready" <<'PY' &
+import ctypes, os, sys, time
+os.chdir(sys.argv[1])
+if ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) != 0:
+    sys.exit(1)
+open(sys.argv[2], 'w').write(str(os.getpid()))
+time.sleep(60)
+PY
+  nodump_pid=$!
+  for _ in $(seq 1 100); do [ -s "$CASE_DIR/nodump-ready" ] && break; sleep 0.05; done
+  [ -s "$CASE_DIR/nodump-ready" ] || fail 'the unreadable-cwd fixture never started'
+  nodump_pid=$(cat "$CASE_DIR/nodump-ready")
+  ! readlink "/proc/$nodump_pid/cwd" >/dev/null 2>&1 \
+    || fail 'the fixture cwd stayed readable, so this case proves nothing'
+  ( exec /bin/sleep 60 ) &
+  pane_dummy=$!
+  printf '%s\n' "$nodump_pid" > "$CASE_DIR/process-pids"
+  printf '%s\n' "$pane_dummy" > "$CASE_DIR/pane-pid"
+  out=$(FM_TEST_PANE_COPY="$POOL_DIR" FM_TEST_PANE_PROJECT="$PROJECT_DIR" \
+    FM_TEST_PANE_PID_FILE="$CASE_DIR/pane-pid" FM_TEST_PANE_REACHED="$CASE_DIR/reached" \
+    FM_TEST_PANE_EXITED="$CASE_DIR/exited" FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" \
+    run_spawn "$id" --scout)
+  status=$?
+  kill "$nodump_pid" "$pane_dummy" 2>/dev/null || true
+  expect_code 0 "$status" "spawn pool custody refused beside an unreadable-cwd process outside the pane tree: $out"
+  assert_present "$CASE_DIR/reached" 'unreadable-cwd spawn never reached the returned copy'
+  assert_grep "worktree=$POOL_DIR" "$HOME_DIR/state/$id.meta" 'unreadable-cwd spawn did not publish the returned copy'
+  pass 'returned pool copy accepts custody beside an unreadable-cwd process outside the pane tree'
+}
+
 test_returned_pool_copy_refuses_active_interactive_builtins() {
   local mode rec id label pane out status
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
@@ -1487,6 +1547,7 @@ test_pool_slot_claim_follows_the_spawn_outcome
 test_pool_custody_refuses_before_refresh_or_claim
 test_returned_pool_copy_rechecks_custody_before_refresh
 test_returned_pool_copy_rechecks_process_evidence
+test_returned_pool_copy_accepts_unreadable_cwd_process
 test_returned_pool_copy_accepts_its_foreground_task_shell
 test_provider_pool_marker_from_sibling_clone_blocks_allocation
 test_state_override_pane_preflight_blocks_retained_claim
