@@ -42,6 +42,7 @@ config/lavish-axi-host  optional one-line per-machine Lavish server address; LOC
 config/brief-include.md  optional standing worker instructions appended verbatim as the last section of every ship and scout scaffold; LOCAL, gitignored, and not inherited; keep its text out of `## Firstmate spec`; see docs/configuration.md "Home brief include"
 config/task-types.json  optional catalog of recurring specialist types for this home (one home is one domain); LOCAL, gitignored, and not inherited, including on a Boat-hosted home; bin/fm-brief.sh --list-types lists them and --type renders one into a ship or scout brief; see docs/configuration.md "Task types"
 config/fleet-ledger  optional presence flag opting this home in to the default-off fleet activity ledger state/fleet-ledger.jsonl that outside tools can follow; LOCAL, gitignored, and not inherited; see docs/fleet-ledger.md
+config/firstmate-role  optional LOCAL, gitignored firstmate-repository publication role; see docs/configuration.md "Firstmate role" for operator opt-in and secondmate inheritance
 config/wait-no-turns  optional presence flag opting this home into default-off waiting-worker behavior (brief waiting section, foreground pipeline drive, pending-reply hold, one fire-and-forget retry ring); LOCAL, gitignored, and not inherited; see docs/configuration.md "Waiting worker spends no turns"
 config/pipeline-spend  optional presence flag opting this home in to default-off per-task no-mistakes spend recording in data/pipeline-spend.jsonl; LOCAL, gitignored, and not inherited; see docs/configuration.md "No-mistakes pipeline spend"
 config/turnend-churn-absorb  optional presence flag opting this home into the default-off absorb of bare turn-end wakes on pane churn; LOCAL, gitignored, and not inherited; see docs/configuration.md "Turn-end pane-churn absorb"
@@ -70,6 +71,7 @@ state/               runtime records and signals; gitignored
   <id>.grok-turnend-token   firstmate-owned grok hook registry token for the task; removed by teardown
   <id>.kimi-turnend-token   firstmate-owned Kimi hook registry token for the task; removed by teardown
   <id>.gemini-settings.json  firstmate-owned per-task Gemini settings carrying the busy-state and turn-end hooks, reached through GEMINI_CLI_SYSTEM_SETTINGS_PATH so nothing is written into the project's own .gemini/; removed by teardown
+  <id>.claude-settings.json  firstmate-owned per-task Claude settings for a secondmate (busy-state hooks plus the session keys), passed through --settings so the mate home's own .claude/settings.local.json is never edited; written by fm-spawn; removed by relaunch retirement and teardown
   <id>.devin-config.json  firstmate-owned per-task Devin config (mode 600 snapshot of the user config plus the busy-state and turn-end hooks) passed through --config so no user or project config is edited; bin/fm-devin-config.sh owns it; removed by teardown
   <id>.muse-session  muse busy-source binding (sessions root plus task worktree) written by fm-spawn; removed by teardown
   <id>.cursor-session  cursor busy-source binding (projects root, task worktree, prior conversations) written by fm-spawn; removed by teardown

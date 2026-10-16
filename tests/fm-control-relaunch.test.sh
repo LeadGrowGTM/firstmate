@@ -1425,7 +1425,7 @@ test_secondmate_relaunch_arms_the_semantic_busy_record() {
   gen1=$(cat "$home/state/sm7.busy-gen")
   [ "$(meta_field "$dir" sm7 busy_gen)" = "$gen1" ] \
     || fail "the relaunched secondmate's record must carry its armed generation"
-  settings="$sm/.claude/settings.local.json"
+  settings="$home/state/sm7.claude-settings.json"
   [ -f "$settings" ] || fail "a relaunched claude secondmate must have its busy-state hooks"
   rm -f "$home/state/sm7.turn-ended"
   sh -c "$(claude_hook_cmd "$settings" Stop)" || fail "the replacement's Stop hook failed"
@@ -1451,9 +1451,8 @@ test_secondmate_relaunch_arms_the_semantic_busy_record() {
   pass "fm-control relaunch: a secondmate relaunch arms a fresh semantic busy record without turn-end wakes"
 }
 
-# An operator-owned settings.local.json in a secondmate home survives a relaunch
-# exactly as it survives a spawn: a claude replacement refuses before the old
-# agent is stopped, and a switch away from claude leaves the file in place.
+# An operator-owned settings.local.json in a secondmate home survives both a
+# same-harness relaunch and a later switch away from Claude.
 test_secondmate_relaunch_never_removes_operator_settings() {
   local dir home sm out rc settings
   dir=$(new_case smoperator sm8)
@@ -1487,21 +1486,63 @@ test_secondmate_relaunch_never_removes_operator_settings() {
   printf '%s' "$sm" > "$dir/fake/cwd"
 
   out=$(run_control "$dir" sm8 relaunch); rc=$?
-  [ "$rc" -ne 0 ] || fail "a claude secondmate relaunch must refuse an operator-owned settings.local.json"$'\n'"$out"
-  assert_contains "$out" "was not written by firstmate" \
-    "the refusal must name the operator-owned settings file"
+  expect_code 0 "$rc" "a claude secondmate relaunch must preserve operator-owned settings"$'\n'"$out"
   cmp -s "$dir/operator-settings" "$settings" \
-    || fail "a refused claude secondmate relaunch removed or replaced the operator's settings.local.json"
-  [ -z "$(cat "$dir/fake/literal")" ] || fail "a refused secondmate relaunch must send the old agent nothing"
-  [ "$(cat "$dir/fake/command")" = claude ] \
-    || fail "the refusal must land before the running agent is stopped"
+    || fail "a claude secondmate relaunch removed or replaced the operator's settings.local.json"
+  [ -f "$home/state/sm8.claude-settings.json" ] \
+    || fail "the replacement did not publish parent-state Claude hook settings"
+  [ -f "$home/state/sm8.busy-gen" ] \
+    || fail "the replacement did not arm a semantic busy record"
 
   printf 'codex' > "$dir/fake/becomes"
   out=$(run_control "$dir" sm8 relaunch --harness codex); rc=$?
   expect_code 0 "$rc" "a secondmate switch away from claude should succeed"$'\n'"$out"
   cmp -s "$dir/operator-settings" "$settings" \
     || fail "a secondmate switch away from claude removed the operator's settings.local.json"
-  pass "fm-control relaunch: a secondmate's operator-owned settings.local.json is never removed or replaced"
+  pass "fm-control relaunch: a secondmate preserves operator settings and arms parent-state hooks"
+}
+
+test_secondmate_claude_relaunch_keeps_local_settings() {
+  local dir home prior settings out rc
+  dir=$(new_case smlocal sml)
+  home="$dir/home"
+  mkdir -p "$home/config" "$home/data/sml"
+  printf 'codex\n' > "$home/config/secondmate-harness"
+  printf '# secondmate brief\n' > "$home/data/sml/brief.md"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-local-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" "$dir/smhome/.claude"
+  printf 'sml\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  prior='{"permissions":{"allow":["Bash(echo hi)"]}}'
+  printf '%s\n' "$prior" > "$dir/smhome/.claude/settings.local.json"
+  printf '%s\n' '{"feedbackDrafts":"on"}' > "$home/state/sml.claude-settings.json"
+  printf 'gen=retired\n' > "$dir/smhome/.fm-busy-stop"
+  {
+    echo "window=fmses:fm-sml"
+    echo "endpoint_task_id=sml"
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo "harness=claude"
+    echo "kind=secondmate"
+    echo "mode=secondmate"
+    echo "yolo=off"
+    echo "model=default"
+    echo "effort=default"
+    echo "home=$dir/smhome"
+  } > "$home/state/sml.meta"
+  printf '%s\n' "fm-sml" > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  printf 'codex' > "$dir/fake/becomes"
+  out=$(run_control "$dir" sml relaunch); rc=$?
+  expect_code 0 "$rc" "a claude secondmate relaunch should retire wiring without touching local settings"$'\n'"$out"
+  settings="$dir/smhome/.claude/settings.local.json"
+  [ "$(cat "$settings")" = "$prior" ] \
+    || fail "relaunch rewrote the mate home's settings.local.json"
+  [ ! -e "$home/state/sml.claude-settings.json" ] \
+    || fail "relaunch left the retired claude settings file in place"
+  [ ! -e "$dir/smhome/.fm-busy-stop" ] \
+    || fail "relaunch left the retired Stop pointer in the mate home"
+  pass "fm-control relaunch: a claude secondmate keeps settings.local.json and retires the state settings file and the Stop pointer"
 }
 
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop() {
@@ -3365,6 +3406,7 @@ test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings
+test_secondmate_claude_relaunch_keeps_local_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop
 test_secondmate_relaunch_holds_off_the_watcher_auto_relaunch
 test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop

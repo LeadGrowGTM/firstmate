@@ -19,9 +19,9 @@
 #      ancestor: it beats an inherited CLAUDECODE under omp and is inert when it
 #      leaks into a worker whose ancestry holds no omp.
 #   3. Every omp launch clears foreign markers, carries the tracked posture
-#      overlay, --auto-approve, --cwd, and one -e pointing at
-#      state/<id>.omp-ext.ts; a secondmate launch names nothing else with -e,
-#      and its extension writes no turn-ended notification.
+#      overlay, --auto-approve, --cwd, and (for a crewmate) one -e pointing at
+#      state/<id>.omp-ext.ts; a secondmate launch names that same busy -e and
+#      nothing else, leaving its primary extensions to auto-discovery.
 #   4. A <provider>/<id> model is validated only when `omp models --json` lists
 #      that provider; an unlisted provider passes through with a notice.
 #   5. Busy state: agent_start is busy, agent_end with willContinue stays busy,

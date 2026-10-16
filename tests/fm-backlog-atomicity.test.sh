@@ -51,6 +51,10 @@ exec '$real_cat' "\$@"
 SH
   chmod +x "$fakebin/cat"
 }
+# The fixture helpers below call tasks-axi directly, and tasks-axi reads a
+# .tasks.toml from its working directory. Run from the scratch root so an
+# operator override in the checkout cannot redirect those calls.
+cd "$TMP_ROOT" || exit 1
 
 command -v tasks-axi >/dev/null 2>&1 || {
   printf 'ok - skipped (tasks-axi is not installed; the fused transitions are inert without it)\n'
@@ -792,7 +796,7 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run() {
   id=atomic-dispatch-b1
   case_dir=$(make_home dispatch-ok "$id")
   add_item "$case_dir" "$id"
-  cp "$ROOT/.tasks.toml" "$(home_of "$case_dir")/.tasks.toml"
+  fm_test_tasks_toml "$(home_of "$case_dir")/.tasks.toml"
   record_tasks_axi_calls "$case_dir"
 
   out=$(run_ship_spawn "$case_dir" "$id") || fail "spawn failed: $out"

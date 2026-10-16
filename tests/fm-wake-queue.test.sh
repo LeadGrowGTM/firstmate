@@ -741,11 +741,10 @@ SH
 # so a mate stuck busy forever still alarms.
 #
 # Scope, so this case is not read as more coverage than it is: the fixture arms
-# the busy contract by hand through fm-busy-event.sh, standing in for the record
-# a real claude, pi, opencode, or omp --secondmate spawn arms
-# (tests/fm-busy-adapter-wiring.test.sh pins that spawn-side wiring). Hand-arming
-# is what isolates the launch-aging defect this case pins, and the launch-aging
-# defect is all it pins.
+# the busy contract by hand through fm-busy-event.sh and backdates the launch
+# record afterwards. That isolates the launch-aging defect this case pins.
+# A real --secondmate spawn of claude, opencode, pi, or omp arms the same
+# contract itself; tests/fm-busy-adapter-wiring.test.sh owns that path.
 test_secondmate_long_lived_mate_mid_turn_is_not_a_stall() {
   local dir state sub fakebin stall_count row_epoch
   dir=$(make_case secondmate-long-lived-active-turn)
@@ -1081,7 +1080,7 @@ test_secondmate_spawned_hooks_gate_the_drain_ring() {
     || fail "the claude secondmate spawn failed: $out"
   grep -Fx 'window=firstmate:fm-mate' "$state/mate.meta" >/dev/null \
     || fail "the spawned secondmate record names an unexpected window: $(cat "$state/mate.meta")"
-  settings="$sub/.claude/settings.local.json"
+  settings="$state/mate.claude-settings.json"
   [ -f "$settings" ] || fail "the spawned claude secondmate has no busy-state hooks"
   printf '100\t7\tcheck\trouted\tcheck: routed row\n' > "$sub/state/.wake-queue"
   install_secondmate_alive_tmux "$fakebin"

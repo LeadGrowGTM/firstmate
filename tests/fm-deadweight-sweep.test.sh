@@ -554,6 +554,9 @@ test_eligible_teardown_preserves_held_pool_copy() {
   printf '%s\n' "$held" > "$home/prune-held"
   out=$(sweep "$home")
   assert_contains "$out" 'swept: 1 workers, 1 copies' 'eligible worker swept'
+  assert_contains "$out" 'cleaned task: warning:' 'completed teardown retains the lost-slot warning'
+  assert_contains "$out" 'the pool lost this slot' 'lost-slot detail survives the completed cleanup summary'
+  assert_not_contains "$out" 'kept task:' 'completed teardown must not claim the worker was kept'
   assert_contains "$out" "pool prune skipped for $home/projects/project: retained task held has a pool copy" 'held pool skip reported'
   assert_absent "$home/state/task.meta" 'eligible worker record removed'
   assert_absent "$eligible" 'eligible worker copy returned'

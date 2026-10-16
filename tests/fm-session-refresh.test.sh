@@ -72,8 +72,8 @@ case "${1:-}" in
           cat "$D/becomes" > "$D/command.$target"
           if [ -e "$D/idle-on-launch" ]; then
             # The replacement's first turn ends: run the Stop hook the launch
-            # itself installed in the mate's home, exactly as Claude would.
-            settings="$(cat "$D/cwd.$target")/.claude/settings.local.json"
+            # itself installed in parent state, exactly as Claude would.
+            settings="$FM_FAKE_STATE/${target#*:fm-}.claude-settings.json"
             sh -c "$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")" \
               >>"$D/busy-event.log" 2>&1 || true
           fi
