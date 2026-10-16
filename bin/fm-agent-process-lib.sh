@@ -121,8 +121,18 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
 # cwd on a process that could be the agent (in the pane's tree or harness-named).
 # Linux uses kernel cwd links, including descendants in subdirectories. macOS
 # uses the bounded cwd-only lsof inventory, never a recursive file-tree walk.
-fm_agent_worktree_processes() {  # <worktree> [<pane-shell-pid>] [allow-missing] -> pids (empty means none)
-  local worktree=$1 excluded_pid=${2:-} allow_missing=${3:-} out pid path line parent leaf
+fm_agent_worktree_processes() {  # <worktree> [<pane-shell-pid>] [allow-missing] [<excluded-ancestor-pid>...] -> pids (empty means none)
+  local worktree=$1 excluded_pid=${2:-} allow_missing='' out pid path line parent leaf
+  local -a excluded_ancestors=()
+  shift $(( $# < 2 ? $# : 2 )) 2>/dev/null || shift $#
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      allow-missing) allow_missing=allow-missing ;;
+      *[!0-9]*|'') ;;
+      *) excluded_ancestors+=("$1") ;;
+    esac
+    shift
+  done
   if [ -d "$worktree" ]; then
     worktree=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
   else
@@ -137,7 +147,7 @@ fm_agent_worktree_processes() {  # <worktree> [<pane-shell-pid>] [allow-missing]
   case "$excluded_pid" in ''|*[!0-9]*) excluded_pid= ;; esac
   case "$(uname -s)" in
     Linux)
-      fm_agent_process_proof rooted "$worktree" "$excluded_pid"
+      fm_agent_process_proof rooted "$worktree" "$excluded_pid" ${excluded_ancestors[@]+"${excluded_ancestors[@]}"}
       ;;
     Darwin)
       out=$(lsof -a -u "$(id -u)" -d cwd -Fpn 2>&1) || return 1

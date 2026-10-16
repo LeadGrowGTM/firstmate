@@ -301,6 +301,136 @@ fm_control_backend_state_verified() {  # <backend>
   return 1
 }
 
+# A second mate's recorded worktree is its whole home, and its own live crew
+# workers run in recorded copies under that home, so an unfiltered rooted
+# inventory counts the crew as the old supervisor agent and a mate with live
+# crew can never restart. The helpers below attribute rooted processes to
+# that crew: a process belongs to the crew when its cwd sits in a crew task's
+# recorded worktree from the mate home's state/*.meta, or when it descends
+# from a recorded crew endpoint pane. Anything unattributed stays counted,
+# and an unreadable crew record refuses the proof rather than exempting by
+# guess. Ordinary ship and scout records never take this path.
+fm_control_secondmate_crew_roots() {  # <meta> <worktree> -> crew worktree paths
+  local meta=$1 worktree=$2 home_canon f kind root
+  [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 0
+  [ -d "$worktree" ] || return 1
+  home_canon=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
+  for f in "$home_canon/state"/*.meta; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+      continue
+    fi
+    if [ ! -f "$f" ] || [ -L "$f" ] || [ ! -r "$f" ]; then
+      return 1
+    fi
+    kind=$(fm_meta_get "$f" kind)
+    [ "$kind" != secondmate ] || continue
+    root=$(fm_backend_meta_exact_value "$f" worktree) || root=
+    [ -n "$root" ] || continue
+    if [ -d "$root" ]; then
+      root=$(CDPATH='' cd -- "$root" && pwd -P) || return 1
+    fi
+    [ "$root" != "$home_canon" ] || continue
+    case "$home_canon" in "$root"/*) continue ;; esac
+    printf '%s\n' "$root"
+  done
+}
+
+fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> <backend> -> crew pane shell pids
+  local meta=$1 worktree=$2 backend=$3 home_canon f window pid
+  [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 0
+  [ -d "$worktree" ] || return 0
+  home_canon=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 0
+  for f in "$home_canon/state"/*.meta; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+      continue
+    fi
+    if [ ! -f "$f" ] || [ -L "$f" ] || [ ! -r "$f" ]; then
+      continue
+    fi
+    [ "$(fm_meta_get "$f" kind)" != secondmate ] || continue
+    window=$(fm_backend_meta_exact_value "$f" window) || window=
+    [ -n "$window" ] || continue
+    pid=
+    if [ "$backend" = tmux ]; then
+      pid=$(tmux display-message -p -t "$window" '#{pane_pid}' 2>/dev/null) || pid=
+    elif [ "$backend" = herdr ] && fm_backend_herdr_parse_target "$window"; then
+      pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+        | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
+          'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pid=
+    fi
+    case "$pid" in ''|*[!0-9]*) ;; *) printf '%s\n' "$pid" ;; esac
+  done
+  return 0
+}
+
+fm_control_process_cwd() {  # <pid> -> cwd path
+  local pid=$1 cwd
+  case "$(uname -s)" in
+    Linux)
+      cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || return 1
+      ;;
+    Darwin)
+      cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+      [ -n "$cwd" ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  case "$cwd" in *' (deleted)') cwd=${cwd% (deleted)} ;; esac
+  [ -n "$cwd" ] || return 1
+  printf '%s' "$cwd"
+}
+
+fm_control_pid_descends_from() {  # <pid> <ancestor-pid>
+  local pid=$1 ancestor=$2 hops=0 ppid
+  while [ "$pid" != "$ancestor" ] && [ "$hops" -lt 64 ]; do
+    case "$pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') || return 1
+    case "$ppid" in ''|*[!0-9]*|0) return 1 ;; esac
+    pid=$ppid
+    hops=$((hops + 1))
+  done
+  [ "$pid" = "$ancestor" ]
+}
+
+# fm_control_rooted_processes: fm_agent_worktree_processes with the second
+# mate crew attribution above applied. Prints pids; nonzero means absence
+# could not be proven, exactly as the unfiltered inventory means it.
+fm_control_rooted_processes() {  # <backend> <meta> <worktree> [<pane-shell-pid>] -> pids
+  local backend=$1 meta=$2 worktree=$3 pane_pid=${4:-} rooted roots_text pid cwd root keep
+  local -a ancestors=() roots=()
+  if [ "$(fm_meta_get "$meta" kind)" != secondmate ]; then
+    fm_agent_worktree_processes "$worktree" "$pane_pid"
+    return
+  fi
+  roots_text=$(fm_control_secondmate_crew_roots "$meta" "$worktree") || return 1
+  while IFS= read -r root; do
+    [ -n "$root" ] || continue
+    roots+=("$root")
+  done <<EOF
+$roots_text
+EOF
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    ancestors+=("$pid")
+  done < <(fm_control_secondmate_crew_ancestors "$meta" "$worktree" "$backend")
+  rooted=$(fm_agent_worktree_processes "$worktree" "$pane_pid" ${ancestors[@]+"${ancestors[@]}"}) || return 1
+  [ -n "$rooted" ] || return 0
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    keep=1
+    if [ -n "$pane_pid" ] && fm_control_pid_descends_from "$pid" "$pane_pid"; then
+      keep=1
+    elif cwd=$(fm_control_process_cwd "$pid"); then
+      for root in ${roots[@]+"${roots[@]}"}; do
+        case "$cwd" in "$root"|"$root"/*) keep=0; break ;; esac
+      done
+    fi
+    [ "$keep" = 0 ] || printf '%s\n' "$pid"
+  done <<EOF
+$rooted
+EOF
+}
+
 # fm_control_endpoint_absence_verdict: the ONE owner of the per-backend proof
 # that an endpoint reading `missing` is actually GONE rather than merely
 # unreachable from this seat. Call it only for a `missing` raw state. Tmux and
@@ -432,7 +562,7 @@ EOF
         printf 'unproven\ttmux process %s exists while no socket answers' "${tmux_pids[0]}"
         return 0
       fi
-      if ! rooted=$(fm_agent_worktree_processes "$worktree"); then
+      if ! rooted=$(fm_control_rooted_processes tmux "$meta" "$worktree"); then
         printf 'unproven\tprocess absence in the recorded worktree could not be proven'
       elif [ -n "$rooted" ]; then
         printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
@@ -453,7 +583,7 @@ EOF
             return 0
           fi
           worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
-          if ! rooted=$(fm_agent_worktree_processes "$worktree"); then
+          if ! rooted=$(fm_control_rooted_processes herdr "$meta" "$worktree"); then
             printf 'unproven\tprocess absence in the recorded worktree could not be proven'
           elif [ -n "$rooted" ]; then
             printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
@@ -494,7 +624,7 @@ fm_control_dead_endpoint_process_verdict() {
       | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
         'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pane_pid=
   fi
-  if ! rooted=$(fm_agent_worktree_processes "$worktree" "$pane_pid"); then
+  if ! rooted=$(fm_control_rooted_processes "$backend" "$meta" "$worktree" "$pane_pid"); then
     printf 'unproven\tprocess absence in the recorded worktree could not be proven'
   elif [ -n "$rooted" ]; then
     printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"

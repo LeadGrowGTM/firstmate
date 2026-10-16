@@ -1373,6 +1373,102 @@ test_secondmate_relaunch_waits_for_exiting_home_process() {
   pass 'a secondmate restarts after a briefly rooted exit process clears'
 }
 
+# Regression (PR 79 fallout): a second mate's recorded worktree is its whole
+# home, so its own live crew workers - rooted in a crew copy under the home -
+# were counted as the old supervisor agent and the restart always refused.
+test_secondmate_relaunch_ignores_live_crew_processes() {
+  local dir home out rc=0 crew_pid
+  dir=$(new_case crew-live sm-crew)
+  home="$dir/home"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" \
+    "$dir/smhome/projects/crewcopy"
+  printf 'sm-crew\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo 'window=fmses:fm-sm-crew'
+    echo 'endpoint_task_id=sm-crew'
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo 'harness=claude'
+    echo 'kind=secondmate'
+    echo 'mode=secondmate'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+    echo "home=$dir/smhome"
+    echo 'backend=tmux'
+  } > "$home/state/sm-crew.meta"
+  {
+    echo 'window=fmses:fm-crew1'
+    echo 'endpoint_task_id=crew1'
+    echo "worktree=$dir/smhome/projects/crewcopy"
+    echo "project=$dir/proj"
+    echo 'harness=claude'
+    echo 'kind=ship'
+    echo 'mode=no-mistakes'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+  } > "$dir/smhome/state/crew1.meta"
+  printf 'fm-sm-crew\n' > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  ( cd "$dir/smhome/projects/crewcopy" && exec /bin/sleep 60 ) &
+  crew_pid=$!
+  ROOTED_PIDS+=("$crew_pid")
+  printf '%s\n' "$crew_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-crew relaunch) || rc=$?
+  expect_code 0 "$rc" "a secondmate with live crew should restart cleanly: $out"
+  assert_contains "$out" 'relaunched sm-crew' 'the replacement was not reported'
+  kill -0 "$crew_pid" 2>/dev/null \
+    || fail "the live crew worker did not survive its mate's restart"
+  pass 'a secondmate restarts cleanly while its own crew worker stays live'
+}
+
+test_secondmate_relaunch_refuses_a_live_home_process() {
+  local dir home out rc=0 agent_pid
+  dir=$(new_case home-live sm-home)
+  home="$dir/home"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin"
+  printf 'sm-home\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo 'window=fmses:fm-sm-home'
+    echo 'endpoint_task_id=sm-home'
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo 'harness=claude'
+    echo 'kind=secondmate'
+    echo 'mode=secondmate'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+    echo "home=$dir/smhome"
+    echo 'backend=tmux'
+  } > "$home/state/sm-home.meta"
+  printf 'fm-sm-home\n' > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  ( cd "$dir/smhome" && exec /bin/sleep 60 ) &
+  agent_pid=$!
+  ROOTED_PIDS+=("$agent_pid")
+  printf '%s\n' "$agent_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-home relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a secondmate whose home still holds a live process relaunched over it: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the refusal did not name the unsafe endpoint'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving home process'
+  kill -0 "$agent_pid" 2>/dev/null \
+    || fail "the surviving home process died during the refused relaunch check"
+  pass 'a secondmate with a live process rooted in its home is still refused'
+}
+
 # The watcher's secondmate auto-relaunch and a control-plane relaunch must not
 # both launch the same mate. The old agent's exit is exactly the gap a liveness
 # probe reads as a dead mate, so this drives the real watcher through that gap:
@@ -3802,6 +3898,8 @@ test_wiring_removal_failure_refuses_before_replacement_arm
 test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
 test_secondmate_relaunch_waits_for_exiting_home_process
+test_secondmate_relaunch_ignores_live_crew_processes
+test_secondmate_relaunch_refuses_a_live_home_process
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop
