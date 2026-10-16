@@ -357,6 +357,11 @@ PY
     if fm_agent_worktree_processes "$LAB/rooted-check" "$tree_shell_pid" >/dev/null 2>&1; then
       fail "an unreadable-cwd process inside the pane tree was skipped, treating a possible agent as absent"
     fi
+    # The same unreadable shape positively attributed to an excluded crew
+    # ancestor tree is that crew's worker, so it must not abort the proof.
+    rooted_out=$(fm_agent_worktree_processes "$LAB/rooted-check" "$exited_shell_pid" "$tree_shell_pid") \
+      || fail "an unreadable-cwd process under an excluded crew ancestor aborted the rooted absence proof"
+    [ -z "$rooted_out" ] || fail "crew-ancestor proof invented a process in an empty worktree: $rooted_out"
     kill "$nodump2_pid" "$tree_shell_pid" 2>/dev/null || true
     pass "rooted proof: an unreadable-cwd process outside the pane tree does not abort absence, a rooted live process still blocks, and an in-tree unreadable process still refuses"
   fi

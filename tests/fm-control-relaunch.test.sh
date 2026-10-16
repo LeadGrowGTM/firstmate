@@ -71,8 +71,12 @@ make_tmux_stub() {  # <dir>
 set -u
 D=$FM_FAKE_DIR
 if [ "${1:-}" = -S ]; then
-  [ -n "${FM_FAKE_REAL_TMUX:-}" ] || { echo "error connecting to ${2:-} (No such file or directory)" >&2; exit 1; }
-  exec "$FM_FAKE_REAL_TMUX" "$@"
+  if [ "${2:-}" = "$D/crew-socket" ]; then
+    shift 2
+  else
+    [ -n "${FM_FAKE_REAL_TMUX:-}" ] || { echo "error connecting to ${2:-} (No such file or directory)" >&2; exit 1; }
+    exec "$FM_FAKE_REAL_TMUX" "$@"
+  fi
 fi
 case "${1:-}" in
   has-session)
@@ -120,11 +124,19 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
+    target=
+    previous=
+    for a in "$@"; do
+      [ "$previous" != -t ] || target=$a
+      previous=$a
+    done
     for a in "$@"; do
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
-        *pane_pid*) [ ! -f "$D/pane-pid" ] || { cat "$D/pane-pid"; exit 0; } ;;
+        *pane_pid*)
+          [ -z "$target" ] || [ ! -f "$D/pane-pid-$target" ] || { cat "$D/pane-pid-$target"; exit 0; }
+          [ ! -f "$D/pane-pid" ] || { cat "$D/pane-pid"; exit 0; } ;;
         *socket_path*) printf '%s/recorded-socket\n' "$D"; exit 0 ;;
         *pane_current_path*)
           if [ -n "${FM_FAKE_CWD_RACE_READY:-}" ]; then
@@ -1371,6 +1383,205 @@ test_secondmate_relaunch_waits_for_exiting_home_process() {
   expect_code 0 "$rc" "a bare-shell secondmate should restart after its exiting process clears: $out"
   assert_contains "$out" 'relaunched sm-exit' 'the replacement was not reported'
   pass 'a secondmate restarts after a briefly rooted exit process clears'
+}
+
+# Regression (PR 79 fallout): a second mate's recorded worktree is its whole
+# home, so its own live crew workers - rooted in a crew copy under the home -
+# were counted as the old supervisor agent and the restart always refused.
+setup_secondmate_crew_case() {
+  local dir=$1 id=$2 home="$1/home" crew_socket=${3:-$1/fake/crew-socket}
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" \
+    "$dir/smhome/projects/crewcopy"
+  printf '%s\n' "$id" > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo "window=fmses:fm-$id"
+    echo "endpoint_task_id=$id"
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo 'harness=claude'
+    echo 'kind=secondmate'
+    echo 'mode=secondmate'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+    echo "home=$dir/smhome"
+    echo 'backend=tmux'
+  } > "$home/state/$id.meta"
+  {
+    echo 'window=fmses:fm-crew1'
+    echo 'endpoint_task_id=crew1'
+    echo "worktree=$dir/smhome/projects/crewcopy"
+    echo "project=$dir/proj"
+    echo 'harness=claude'
+    echo 'kind=ship'
+    echo 'mode=no-mistakes'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+  } > "$dir/smhome/state/crew1.meta"
+  printf 'tmux_socket=%s\n' "$crew_socket" >> "$dir/smhome/state/crew1.meta"
+  printf 'fm-%s\nfm-crew1\n' "$id" > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+}
+
+test_secondmate_relaunch_ignores_live_crew_processes() {
+  local dir out rc=0 crew_pid crew_shell_pid crew_home_pid i
+  dir=$(new_case crew-live sm-crew)
+  setup_secondmate_crew_case "$dir" sm-crew
+  ( cd "$dir/smhome/projects/crewcopy" && export FM_TASK_ID=crew1 && exec /bin/sleep 60 ) &
+  crew_pid=$!
+  ROOTED_PIDS+=("$crew_pid")
+  ( unset FM_TASK_ID; cd "$dir/smhome/projects/crewcopy" && /bin/bash -c '
+    cd "$1"
+    /bin/sleep 60 &
+    printf "%s\n" "$!" > "$2"
+    wait
+  ' bash "$dir/smhome" "$dir/crew-home-pid" ) &
+  crew_shell_pid=$!
+  ROOTED_PIDS+=("$crew_shell_pid")
+  printf '%s\n' "$crew_shell_pid" > "$dir/fake/pane-pid-=fmses:=fm-crew1"
+  for ((i=0; i<100; i++)); do
+    [ ! -s "$dir/crew-home-pid" ] || break
+    /bin/sleep 0.01
+  done
+  [ -s "$dir/crew-home-pid" ] || fail 'the crew command did not start'
+  crew_home_pid=$(cat "$dir/crew-home-pid")
+  ROOTED_PIDS+=("$crew_home_pid")
+  printf '%s\n%s\n%s\n' "$crew_pid" "$crew_shell_pid" "$crew_home_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-crew relaunch) || rc=$?
+  expect_code 0 "$rc" "a secondmate with live crew should restart cleanly: $out"
+  assert_contains "$out" 'relaunched sm-crew' 'the replacement was not reported'
+  kill -0 "$crew_pid" 2>/dev/null \
+    || fail "the live crew worker did not survive its mate's restart"
+  kill -0 "$crew_home_pid" 2>/dev/null \
+    || fail "the crew command rooted in the mate home did not survive restart"
+  pass 'a secondmate restarts while its crew copy and home-rooted command stay live'
+}
+
+test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy() {
+  local dir out rc=0 mate_pid
+  dir=$(new_case mate-in-crew-copy sm-foreign)
+  setup_secondmate_crew_case "$dir" sm-foreign
+  ( unset FM_TASK_ID; cd "$dir/smhome/projects/crewcopy" && exec /bin/sleep 60 ) &
+  mate_pid=$!
+  ROOTED_PIDS+=("$mate_pid")
+  printf '%s\n' "$mate_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-foreign relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a mate-launched process in a crew copy was excluded: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the mate process'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving mate process'
+  kill -0 "$mate_pid" 2>/dev/null || fail 'the mate process died during the refused restart'
+  pass 'a mate process in a crew copy blocks restart without a crew task marker'
+}
+
+test_secondmate_relaunch_refuses_borrowed_pane_for_absent_crew_window() {
+  local dir out rc=0 shell_pid child_pid i
+  dir=$(new_case stale-crew-window sm-stale)
+  setup_secondmate_crew_case "$dir" sm-stale
+  printf 'fm-sm-stale\n' > "$dir/fake/windows"
+  # The crew record names fmses:fm-crew1, which is absent from the session
+  # inventory (only the mate's own window exists). Tmux would answer a pane
+  # read for it from the active window; that borrowed pane must not attribute
+  # its home-rooted child as crew.
+  ( unset FM_TASK_ID; cd "$dir/smhome" && /bin/bash -c '
+    /bin/sleep 60 &
+    printf "%s\n" "$!" > "$1"
+    wait
+  ' bash "$dir/borrowed-child-pid" ) &
+  shell_pid=$!
+  ROOTED_PIDS+=("$shell_pid")
+  printf '%s\n' "$shell_pid" > "$dir/fake/pane-pid-=fmses:=fm-crew1"
+  for ((i=0; i<100; i++)); do
+    [ ! -s "$dir/borrowed-child-pid" ] || break
+    /bin/sleep 0.01
+  done
+  [ -s "$dir/borrowed-child-pid" ] || fail 'the borrowed-pane child did not start'
+  child_pid=$(cat "$dir/borrowed-child-pid")
+  ROOTED_PIDS+=("$child_pid")
+  printf '%s\n%s\n' "$shell_pid" "$child_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-stale relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "an absent crew window borrowed a pane and let the restart through: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the borrowed-pane process'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving home process'
+  kill -0 "$child_pid" 2>/dev/null || fail 'the home process died during the refused restart'
+  pass 'an absent crew window cannot borrow a pane to attribute a home process'
+}
+
+test_secondmate_relaunch_refuses_pane_on_wrong_crew_socket() {
+  local dir out rc=0 shell_pid child_pid i
+  dir=$(new_case stale-crew-socket sm-socket)
+  setup_secondmate_crew_case "$dir" sm-socket "$dir/tmux-root/old-socket"
+  ( unset FM_TASK_ID; cd "$dir/smhome" && /bin/bash -c '
+    /bin/sleep 60 &
+    printf "%s\n" "$!" > "$1"
+    wait
+  ' bash "$dir/borrowed-child-pid" ) &
+  shell_pid=$!
+  ROOTED_PIDS+=("$shell_pid")
+  printf '%s\n' "$shell_pid" > "$dir/fake/pane-pid-=fmses:=fm-crew1"
+  for ((i=0; i<100; i++)); do
+    [ ! -s "$dir/borrowed-child-pid" ] || break
+    /bin/sleep 0.01
+  done
+  [ -s "$dir/borrowed-child-pid" ] || fail 'the mate command did not start'
+  child_pid=$(cat "$dir/borrowed-child-pid")
+  ROOTED_PIDS+=("$child_pid")
+  printf '%s\n%s\n' "$shell_pid" "$child_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-socket relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a crew window on another socket hid the mate process: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the mate process'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving mate process'
+  kill -0 "$child_pid" 2>/dev/null || fail 'the mate process died during the refused restart'
+  pass 'a crew record on another socket cannot attribute a mate process'
+}
+
+test_secondmate_relaunch_refuses_a_live_home_process() {
+  local dir home out rc=0 agent_pid
+  dir=$(new_case home-live sm-home)
+  home="$dir/home"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin"
+  printf 'sm-home\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo 'window=fmses:fm-sm-home'
+    echo 'endpoint_task_id=sm-home'
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo 'harness=claude'
+    echo 'kind=secondmate'
+    echo 'mode=secondmate'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+    echo "home=$dir/smhome"
+    echo 'backend=tmux'
+  } > "$home/state/sm-home.meta"
+  printf 'fm-sm-home\n' > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  ( cd "$dir/smhome" && exec /bin/sleep 60 ) &
+  agent_pid=$!
+  ROOTED_PIDS+=("$agent_pid")
+  printf '%s\n' "$agent_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-home relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a secondmate whose home still holds a live process relaunched over it: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the refusal did not name the unsafe endpoint'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving home process'
+  kill -0 "$agent_pid" 2>/dev/null \
+    || fail "the surviving home process died during the refused relaunch check"
+  pass 'a secondmate with a live process rooted in its home is still refused'
 }
 
 # The watcher's secondmate auto-relaunch and a control-plane relaunch must not
@@ -3802,6 +4013,11 @@ test_wiring_removal_failure_refuses_before_replacement_arm
 test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
 test_secondmate_relaunch_waits_for_exiting_home_process
+test_secondmate_relaunch_ignores_live_crew_processes
+test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy
+test_secondmate_relaunch_refuses_borrowed_pane_for_absent_crew_window
+test_secondmate_relaunch_refuses_pane_on_wrong_crew_socket
+test_secondmate_relaunch_refuses_a_live_home_process
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop

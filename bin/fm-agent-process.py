@@ -109,7 +109,7 @@ def pane_input_shell(candidate, original):
             and descendant(candidate, original))
 
 
-def worktree_processes(root, original):
+def worktree_processes(root, original, excluded_ancestors=()):
     inventory = subprocess.run(['ps', '-u', str(os.geteuid()), '-o', 'pid='],
                                check=True, capture_output=True, text=True).stdout.split()
     if not inventory or any(not pid.isdigit() for pid in inventory):
@@ -143,6 +143,15 @@ def worktree_processes(root, original):
                 continue
             if state == 'Z':
                 continue
+            # A process positively attributed to an excluded ancestor tree
+            # (a second mate's own crew pane) is that crew's worker, never
+            # the agent this proof guards, even when its cwd cannot be read.
+            try:
+                if any(descendant(int(pid), ancestor)
+                       for ancestor in excluded_ancestors):
+                    continue
+            except (OSError, ValueError, IndexError):
+                pass
             # A live process whose cwd is unreadable (a non-dumpable process
             # the user owns, such as `systemd --user`) aborts the absence
             # proof only when it could be the surviving agent. With a pane
@@ -179,8 +188,9 @@ try:
     if sys.platform != 'linux':
         raise RuntimeError('Linux process proof unavailable')
     if mode == 'rooted':
-        root, pane = args
-        worktree_processes(root, int(pane) if pane else 0)
+        root, pane, *ancestors = args
+        worktree_processes(root, int(pane) if pane else 0,
+                           tuple(int(a) for a in ancestors))
     elif mode == 'input':
         sys.exit(0 if terminal_input_shell(int(args[0])) else 1)
     else:
