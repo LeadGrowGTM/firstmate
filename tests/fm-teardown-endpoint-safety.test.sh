@@ -1101,6 +1101,223 @@ test_own_and_absent_slot_claims_still_tear_down() {
   pass "fm-teardown: a task's own slot claim, and an unclaimed slot, both still tear down"
 }
 
+# A treehouse slot path the pool has since handed to another clone: the checkout
+# is a worktree of that clone, not of the task's recorded project, and the slot
+# claim names the task that took it. Dirty untracked files are the live owner's.
+# Teardown must treat the path as already gone - records only - and must not
+# inspect, reset, kill, or release anything under it.
+seed_foreign_clone_slot() {  # <case> <recorded-project> <foreign-project> <other-id> <other-home>
+  local dir=$1 recorded=$2 foreign=$3 other=$4 other_home=$5
+  mkdir -p "$(dirname "$recorded")" "$(dirname "$foreign")" "$dir/pool/1"
+  git init -q "$recorded"
+  git -C "$recorded" -c user.name=test -c user.email=test@example.invalid \
+    commit --allow-empty -qm recorded
+  git init -q "$foreign"
+  git -C "$foreign" -c user.name=test -c user.email=test@example.invalid \
+    commit --allow-empty -qm foreign
+  git -C "$foreign" worktree add -q --detach "$dir/pool/1/project"
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' \
+    "$dir/pool/1/project" > "$dir/pool/treehouse-state.json"
+  mkdir -p "$dir/pool/1/project/community/skool-outbound/skool-ready"
+  printf 'live owner leftover\n' \
+    > "$dir/pool/1/project/community/skool-outbound/skool-ready/library"
+  if [ -n "$other" ]; then
+    printf 'task=%s\nhome=%s\n' "$other" "$other_home" > "$dir/pool/1/.fm-slot-owner"
+  fi
+}
+
+assert_foreign_slot_untouched() {  # <case> <other-id> <description>
+  local dir=$1 other=$2 description=$3 leftover head
+  leftover="$dir/pool/1/project/community/skool-outbound/skool-ready/library"
+  assert_present "$leftover" "$description: the other clone's untracked file was removed"
+  assert_contains "$(cat "$leftover")" "live owner leftover" \
+    "$description: the other clone's untracked file was rewritten"
+  [ -n "$(git -C "$dir/pool/1/project" status --porcelain)" ] \
+    || fail "$description: the other clone's dirty copy was cleaned"
+  head=$(git -C "$dir/pool/1/project" rev-parse HEAD)
+  [ "$head" = "$(git -C "$dir/foreign/projects/legion" rev-parse HEAD)" ] \
+    || fail "$description: the other clone's worktree no longer matches its clone"
+  if [ -n "$other" ]; then
+    assert_present "$dir/pool/1/.fm-slot-owner" \
+      "$description: the other task's slot claim was released"
+    assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=$other" \
+      "$description: the other task's slot claim was rewritten"
+  fi
+  ! grep -F 'treehouse <return>' "$dir/runtime.log" \
+    || fail "$description: teardown returned the other clone's slot: $(cat "$dir/runtime.log")"
+  ! grep -F 'uncommitted changes' "$dir/stderr" \
+    || fail "$description: teardown ran the landed-work test on the other clone: $(cat "$dir/stderr")"
+}
+
+test_recycled_slot_of_another_clone_is_already_gone() {
+  local dir id=stale-child other=live-owner worker rc subhome parent leftover
+  local recorded foreign
+
+  # Ordinary teardown of the child, without --force. The landed-work test used
+  # to run against the live owner's dirty copy and refuse.
+  dir=$(make_case recycled-ordinary)
+  recorded="$dir/home/projects/legion"
+  foreign="$dir/foreign/projects/legion"
+  seed_foreign_clone_slot "$dir" "$recorded" "$foreign" "$other" "$dir/foreign"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/pool/1/project" "project=$recorded" \
+    "kind=ship" "mode=no-mistakes"
+  ( cd "$dir/pool/1/project" && exec sleep 30 ) &
+  worker=$!
+
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  if kill -0 "$worker" 2>/dev/null; then
+    kill "$worker" 2>/dev/null || true
+    wait "$worker" 2>/dev/null || true
+  else
+    wait "$worker" 2>/dev/null || true
+    fail "ordinary teardown killed a process under the other clone's copy: $(cat "$dir/stderr")"
+  fi
+  [ "$rc" -eq 0 ] || fail "ordinary teardown of a recycled foreign slot failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/$id.meta" \
+    "ordinary teardown left the stale child's record"
+  assert_foreign_slot_untouched "$dir" "$other" "ordinary teardown"
+  assert_contains "$(cat "$dir/stderr")" "$other" \
+    "ordinary teardown should name the task that now holds the slot"
+
+  # The same path with no claim file. The different git common dir is enough
+  # evidence on its own; a missing claim must not send teardown back to the
+  # landed-work test.
+  dir=$(make_case recycled-ordinary-no-claim)
+  recorded="$dir/home/projects/legion"
+  foreign="$dir/foreign/projects/legion"
+  seed_foreign_clone_slot "$dir" "$recorded" "$foreign" "" ""
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/pool/1/project" "project=$recorded" \
+    "kind=ship" "mode=no-mistakes"
+  ( cd "$dir/pool/1/project" && exec sleep 30 ) &
+  worker=$!
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  if kill -0 "$worker" 2>/dev/null; then
+    kill "$worker" 2>/dev/null || true
+    wait "$worker" 2>/dev/null || true
+  else
+    wait "$worker" 2>/dev/null || true
+    fail "no-claim foreign-clone teardown killed a process under the other copy: $(cat "$dir/stderr")"
+  fi
+  [ "$rc" -eq 0 ] || fail "teardown refused a foreign clone that has no claim file: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/$id.meta" \
+    "no-claim foreign-clone teardown left the stale record"
+  assert_foreign_slot_untouched "$dir" "" "no-claim foreign clone"
+  assert_contains "$(cat "$dir/stderr")" "different clone" \
+    "no-claim foreign-clone teardown should say why the path was left alone"
+
+  # A missing claim on this task's own clone proves nothing. Dirty untracked
+  # files still refuse, and the record stays.
+  dir=$(make_case recycled-own-clone-no-claim)
+  mark_case_as_treehouse_pool "$dir"
+  mkdir -p "$dir/worktree/community/skool-outbound/skool-ready"
+  printf 'our leftover\n' > "$dir/worktree/community/skool-outbound/skool-ready/library"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" \
+    "kind=ship" "mode=no-mistakes"
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a missing claim let teardown skip the landed-work test on its own dirty clone"
+  assert_present "$dir/home/state/$id.meta" \
+    "missing-claim refusal removed the task record"
+  assert_contains "$(cat "$dir/worktree/community/skool-outbound/skool-ready/library")" \
+    "our leftover" "missing-claim refusal cleaned the task's own untracked file"
+  assert_contains "$(cat "$dir/stderr")" "uncommitted changes" \
+    "missing-claim refusal should still come from the landed-work test"
+  ! grep -F 'treehouse <return>' "$dir/runtime.log" \
+    || fail "missing-claim refusal returned the task's own dirty slot: $(cat "$dir/runtime.log")"
+
+  # An unreadable claim plus a foreign clone is still positive evidence: the
+  # common dir differs. An unreadable claim on our own clone keeps refusing,
+  # which the earlier unreadable-claim case already pins.
+  dir=$(make_case recycled-unreadable-foreign)
+  recorded="$dir/home/projects/legion"
+  foreign="$dir/foreign/projects/legion"
+  seed_foreign_clone_slot "$dir" "$recorded" "$foreign" "" ""
+  printf 'not-a-claim\n' > "$dir/pool/1/.fm-slot-owner"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/pool/1/project" "project=$recorded" \
+    "kind=ship" "mode=no-mistakes"
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "an unreadable claim hid a foreign clone and refused teardown: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/$id.meta" \
+    "unreadable-claim foreign clone left the stale record"
+  assert_present "$dir/pool/1/.fm-slot-owner" \
+    "unreadable-claim foreign clone removed the claim file"
+  assert_foreign_slot_untouched "$dir" "" "unreadable claim on a foreign clone"
+
+  # Forced retirement of the secondmate that still records the child. The
+  # removal check used to refuse because the path is not a worktree of the
+  # child's recorded project, and retirement stopped with the live copy in the
+  # way.
+  dir=$(make_case recycled-force-retire)
+  parent="$dir/home"
+  subhome="$dir/subhome"
+  recorded="$subhome/projects/legion"
+  foreign="$dir/foreign/projects/legion"
+  mkdir -p "$parent/state" "$parent/data" "$subhome/state"
+  printf 'website-genie\n' > "$subhome/.fm-secondmate-home"
+  seed_foreign_clone_slot "$dir" "$recorded" "$foreign" "$other" "$dir/foreign"
+  fm_write_secondmate_meta "$parent/state/website-genie.meta" "$subhome" "" legion
+  printf '%s\n' "- website-genie - fixture (home: $subhome; scope: fixture; projects: legion; added 2026-10-15)" \
+    > "$parent/data/secondmates.md"
+  fm_write_meta "$subhome/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/pool/1/project" "project=$recorded" \
+    "kind=ship" "mode=no-mistakes"
+  ( cd "$dir/pool/1/project" && exec sleep 30 ) &
+  worker=$!
+  set +e
+  FM_HOME="$parent" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" website-genie --force > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  if kill -0 "$worker" 2>/dev/null; then
+    kill "$worker" 2>/dev/null || true
+    wait "$worker" 2>/dev/null || true
+  else
+    wait "$worker" 2>/dev/null || true
+    fail "forced retirement killed a process under the other clone's copy: $(cat "$dir/stderr")"
+  fi
+  [ "$rc" -eq 0 ] || fail "forced secondmate retirement stopped on a recycled foreign slot: $(cat "$dir/stderr")"
+  assert_absent "$parent/state/website-genie.meta" \
+    "forced retirement left the secondmate record"
+  assert_absent "$subhome/state/$id.meta" \
+    "forced retirement left the stale child record"
+  assert_foreign_slot_untouched "$dir" "$other" "forced retirement"
+  ! grep -F 'not a git worktree' "$dir/stderr" \
+    || fail "forced retirement still treated the foreign slot as a removal target: $(cat "$dir/stderr")"
+  leftover="$dir/pool/1/project/community/skool-outbound/skool-ready/library"
+  assert_present "$leftover" "forced retirement removed the other clone's untracked file"
+
+  pass "fm-teardown: a pool slot now owned by another clone is already gone"
+}
+
 # The tmux shim used by the endpoint-close tests below: every subcommand
 # reaches the real isolated server, so presence is always read from real tmux.
 # When FM_TEST_BLOCK_KILL is set, `kill-window` alone fails without forwarding,
@@ -1490,6 +1707,7 @@ test_returned_slot_prunes_only_its_own_project_pool
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
 test_stale_record_on_claimed_slot_retires_then_claimant_tears_down
 test_own_and_absent_slot_claims_still_tear_down
+test_recycled_slot_of_another_clone_is_already_gone
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot

@@ -106,9 +106,10 @@
 # cleanup step, teardown verifies record exclusivity: no OTHER task record in
 # this home or any locally registered Firstmate home may name the same live path
 # in its worktree= or home=. One live path with two task records is the reuse
-# collision itself, whichever record is stale. The one exception is a slot whose
-# owner claim (below) names another task: this teardown is then records-only and
-# touches nothing under the slot, so the scan is skipped rather than stranding
+# collision itself, whichever record is stale. The one exception is a path already gone for this record: its owner
+# claim (below) names another task, or its git common directory belongs to a
+# different clone. Teardown is then records-only and
+# touches nothing under the path, so the scan is skipped rather than stranding
 # the stale record and, with it, the claimant's own teardown.
 # That scan alone cannot prove THIS record is the current owner, because the task
 # that took the slot next may leave no record it can reach - its own worker may
@@ -123,16 +124,23 @@
 # status, records, checks, backlog - while every step that would read or touch
 # that slot is skipped: no process kill under it, no dirty or landed-work
 # inspection of it, no branch or hook removal in it, no Treehouse return, and
-# never the other task's claim. Skipping the inspection discards nothing of this
+# never the other task's claim. A recorded path whose git common directory
+# resolves to a different clone is the same outcome: the pool reused the path,
+# so it is already gone and is never a removal target, claim or not.
+# require_owned_worktree_slot_record owns that decision.
+# Skipping the inspection discards nothing of this
 # task's: whatever unlanded work it had in that slot was already destroyed when
 # the pool handed the slot on. Refusing instead would strand the record, because
 # bin/fm-backend.sh's endpoint validation refuses an empty or missing worktree=
 # unconditionally, so there is no line an operator could clear to get past it.
-# A claim that cannot be read proves nothing either way and refuses; inspect or
+# A claim that cannot be read proves nothing by itself and refuses unless the
+# common directory is proven to belong to another clone; inspect or
 # repair the claim file at the printed path and re-run - never remove it, since
-# an absent claim proceeds and would return a slot that may be another task's. An
+# an absent claim on this task's own clone proceeds and would return a slot that
+# may be another task's. An
 # absent claim - a slot taken before claims existed, or already returned - keeps
-# exactly the record-scan protection it had before, because refusing it would
+# exactly the record-scan protection it had before when the path is still this
+# project's clone, because refusing it would
 # strand every task in flight across that change on no evidence at all.
 # Why Treehouse's own state cannot answer this for crewmate slots, and why the
 # claim file sits on top of it, is owned by bin/fm-wake-lib.sh's slot-owner
@@ -2592,14 +2600,17 @@ collect_local_firstmate_states() {
 
 require_exclusive_worktree_slot_record() {
   local record_meta=$1 record_id=$2 record_state=$3 worktree=$4
-  local slot state_dir other other_id field other_path other_slot
+  local slot state_dir other other_id field other_path other_slot project owner_rc
   slot=$(canonical_existing_dir "$worktree") || return 0
-  # A slot whose owner claim names another task was reassigned, so this record's
-  # teardown is records-only and touches nothing under it; another record naming
-  # the slot is then no hazard, and refusing would strand this stale record and
-  # block the claimant's own teardown behind it.
-  fm_treehouse_slot_owner_state "$slot" "$record_id"
-  [ "$FM_TREEHOUSE_SLOT_OWNER" != other ] || return 0
+  # Already gone for this record: the shared disposition says another task
+  # claimed the slot, or the path is a worktree of another clone. Skip the
+  # collision scan. Refusing would strand this stale record. An unreadable
+  # claim is not that evidence and falls through, so a real collision is still
+  # named before the unreadable-claim refusal.
+  project=$(fm_meta_get "$record_meta" project)
+  owner_rc=0
+  teardown_recorded_worktree_disposition "$record_id" "$slot" "$project" || owner_rc=$?
+  [ "$owner_rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ] && return 0
   collect_local_firstmate_states "$record_state" || return 1
   for state_dir in "${TREEHOUSE_OWNER_STATES[@]}"; do
     for other in "$state_dir"/*.meta; do
@@ -2630,40 +2641,50 @@ require_exclusive_task_worktree_slot() {
   require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot"
 }
 
-# Positive slot ownership, read from the claim the task that took the slot wrote
-# into the slot itself (bin/fm-wake-lib.sh owns the claim and its states).
+# Positive evidence that a recorded worktree is already gone for this task.
+# bin/fm-wake-lib.sh owns the claim states and the clone relation. This is the
+# one decision; require_owned_worktree_slot_record prints it, and the
+# exclusivity scan uses the same function so the two cannot disagree.
 #
-# For a slot this task still claims, or one with no claim, the record scan above
-# proves that no OTHER task record names it. It cannot prove that THIS record is
-# not the stale one, because the task that took the slot next may leave no record
-# this scan can reach: its own worker may have exited and its record been cleaned
-# up, or it may belong to a home this machine does not register. The claim closes that gap from the other side - it names the
-# task that actually took the slot, and it is written under the same project lock
-# that allocates it - so a claim naming another task is proof the slot was
-# reassigned after this record was written.
-#
-# A claim naming another task does not refuse: it means the slot is no longer
-# this task's, so the record's own cleanup proceeds and every slot step is
-# skipped (see the script header for why refusing would strand the record and
-# why skipping discards nothing). Returns TEARDOWN_SLOT_REASSIGNED_RC for that
-# state so each caller gates its slot steps on one determination; the claimant
-# stays in FM_TREEHOUSE_SLOT_OWNER_ID and FM_TREEHOUSE_SLOT_OWNER_HOME.
-#
-# An absent claim proceeds as the slot's owner: a slot taken before claims
-# existed, or already returned to the pool, carries none, and refusing those
-# would strand every task in flight across the change for no evidence at all.
-# Those keep exactly the record-scan protection they had before.
+# Returns 0 when this task still owns the path, or when nothing proves it does
+# not: its own claim, or no claim, on a path that is still this project's clone
+# or whose clone cannot be proved. Returns TEARDOWN_SLOT_REASSIGNED_RC when a
+# claim names another task, or when the path's git common dir resolves to a
+# different clone than the recorded project. Either fact is enough. Returns 1
+# only for an unreadable claim that is not accompanied by a different clone.
+# Prints nothing.
 TEARDOWN_SLOT_REASSIGNED_RC=3
-require_owned_worktree_slot_record() {  # <task-id> <worktree>
-  local record_id=$1 worktree=$2 marker
+teardown_recorded_worktree_disposition() {  # <task-id> <worktree> [project]
+  local record_id=$1 worktree=$2 project=${3:-}
   fm_treehouse_slot_owner_state "$worktree" "$record_id"
+  # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
+  FM_TREEHOUSE_CLONE_RELATION=
+  if [ -n "$project" ]; then
+    fm_treehouse_same_clone "$project" "$worktree" || true
+  fi
+  if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ] || [ "${FM_TREEHOUSE_CLONE_RELATION:-}" = other ]; then
+    return "$TEARDOWN_SLOT_REASSIGNED_RC"
+  fi
   case "$FM_TREEHOUSE_SLOT_OWNER" in
     mine|absent) return 0 ;;
-    other)
-      echo "warning: task $record_id's recorded worktree $worktree was reassigned to task $FM_TREEHOUSE_SLOT_OWNER_ID${FM_TREEHOUSE_SLOT_OWNER_HOME:+ (home $FM_TREEHOUSE_SLOT_OWNER_HOME)}, which claimed that pool slot after this record was written; that slot is no longer $record_id's, so its processes, copy, and claim are left untouched and only $record_id's own cleanup runs." >&2
-      return "$TEARDOWN_SLOT_REASSIGNED_RC"
-      ;;
   esac
+  return 1
+}
+
+require_owned_worktree_slot_record() {  # <task-id> <worktree> [project]
+  local record_id=$1 worktree=$2 project=${3:-} marker rc=0 clone_note=
+  teardown_recorded_worktree_disposition "$record_id" "$worktree" "$project" || rc=$?
+  if [ "$rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ]; then
+    if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ]; then
+      [ "${FM_TREEHOUSE_CLONE_RELATION:-}" = other ] \
+        && clone_note="; its git common dir belongs to a different clone than $record_id's recorded project"
+      echo "warning: task $record_id's recorded worktree $worktree was reassigned to task $FM_TREEHOUSE_SLOT_OWNER_ID${FM_TREEHOUSE_SLOT_OWNER_HOME:+ (home $FM_TREEHOUSE_SLOT_OWNER_HOME)}, which claimed that pool slot after this record was written${clone_note}; that slot is no longer $record_id's, so its processes, copy, and claim are left untouched and only $record_id's own cleanup runs." >&2
+    else
+      echo "warning: task $record_id's recorded worktree $worktree is a worktree of a different clone than its recorded project ${project:-<missing>}; that path is no longer $record_id's, so its processes, copy, and claim are left untouched and only $record_id's own cleanup runs." >&2
+    fi
+    return "$TEARDOWN_SLOT_REASSIGNED_RC"
+  fi
+  [ "$rc" -eq 0 ] && return 0
   marker=$(fm_treehouse_slot_owner_marker "$worktree" 2>/dev/null) || marker="beside $worktree"
   echo "REFUSED: task $record_id's recorded worktree $worktree carries a slot-owner claim that cannot be read, so the slot cannot be proved to still be this task's; nothing was changed - not even with --force." >&2
   echo "Inspect or repair the claim file at $marker (task= and home= lines), then re-run teardown." >&2
@@ -2678,8 +2699,15 @@ TEARDOWN_SLOT_REASSIGNED_TO=
 TEARDOWN_SLOT_REASSIGNED_HOME=
 require_owned_task_worktree_slot() {
   local slot rc=0
-  slot=$(teardown_live_slot_path) || return 0
-  require_owned_worktree_slot_record "$ID" "$slot" || rc=$?
+  # A secondmate home is not a task worktree. A path that is already gone has
+  # nothing to protect. Every path that still exists is decided here, including
+  # one that is no longer a pool slot of this project because another clone
+  # took it. Gating that decision on fm_treehouse_pool_slot skipped the
+  # different-clone case and then ran the landed-work test on the live copy.
+  [ "$KIND" = secondmate ] && return 0
+  [ -d "$WT" ] || return 0
+  slot=$(canonical_existing_dir "$WT") || return 0
+  require_owned_worktree_slot_record "$ID" "$slot" "$PROJ" || rc=$?
   case "$rc" in
     0) return 0 ;;
     "$TEARDOWN_SLOT_REASSIGNED_RC")
@@ -3212,13 +3240,13 @@ preflight_descendant_treehouse_slots() {
     if [ "$kind" = secondmate ] || [ "$backend" = orca ]; then
       continue
     fi
-    if ! fm_treehouse_pool_slot "$project" "$worktree"; then
-      continue
+    if fm_treehouse_pool_slot "$project" "$worktree"; then
+      fm_backend_validate_task_endpoint "$meta" "$task_id" || return 1
+      require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
     fi
-    fm_backend_validate_task_endpoint "$meta" "$task_id" || return 1
-    require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
+    [ -d "$worktree" ] || continue
     owner_rc=0
-    require_owned_worktree_slot_record "$task_id" "$worktree" || owner_rc=$?
+    require_owned_worktree_slot_record "$task_id" "$worktree" "$project" || owner_rc=$?
     case "$owner_rc" in
       0|"$TEARDOWN_SLOT_REASSIGNED_RC") ;;
       *) return 1 ;;
@@ -3227,7 +3255,7 @@ preflight_descendant_treehouse_slots() {
 }
 
 validate_firstmate_home_children_removal() {
-  local home=$1 sub_state child_meta child_id child_wt child_proj child_kind child_home child_backend child_orca_worktree_id
+  local home=$1 sub_state child_meta child_id child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_owner_rc
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
   for child_meta in "$sub_state"/*.meta; do
@@ -3254,7 +3282,17 @@ validate_firstmate_home_children_removal() {
       fi
     elif [ -n "$child_wt" ] && [ -e "$child_wt" ]; then
       child_proj=$(meta_value "$child_meta" project)
-      validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+      child_owner_rc=0
+      if [ -d "$child_wt" ]; then
+        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" 2>/dev/null || child_owner_rc=$?
+      fi
+      if [ "$child_owner_rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ]; then
+        :
+      elif [ "$child_owner_rc" -ne 0 ]; then
+        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" || return 1
+      else
+        validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+      fi
     fi
   done
 }
@@ -3500,13 +3538,11 @@ cleanup_firstmate_home_children() {
       # or return, so only its records are cleaned up. The preflight above
       # already named the reassignment on stderr under the same lock.
       child_owner_rc=0
-      if fm_treehouse_pool_slot "$child_proj" "$child_wt"; then
-        require_owned_worktree_slot_record "$child_id" "$child_wt" 2>/dev/null || child_owner_rc=$?
-      fi
+      require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" 2>/dev/null || child_owner_rc=$?
       if [ "$child_owner_rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ]; then
         :
       elif [ "$child_owner_rc" -ne 0 ]; then
-        require_owned_worktree_slot_record "$child_id" "$child_wt" || return 1
+        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" || return 1
       else
         validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
         rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
@@ -4121,7 +4157,9 @@ if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT)"
-else
+elif [ -n "$TEARDOWN_SLOT_REASSIGNED_TO" ]; then
   echo "teardown $ID complete (window ${T:-none}; pool slot $WT left to task $TEARDOWN_SLOT_REASSIGNED_TO${TEARDOWN_SLOT_REASSIGNED_HOME:+ (home $TEARDOWN_SLOT_REASSIGNED_HOME)}, which it was reassigned to)"
+else
+  echo "teardown $ID complete (window ${T:-none}; recorded worktree $WT left untouched because it belongs to another clone)"
 fi
 backlog_refresh_reminder
