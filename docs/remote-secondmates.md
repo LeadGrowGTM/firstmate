@@ -580,7 +580,7 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < <request.json>
 The box generates its own normal worker brief and operational paths, allocates its own worktree, and calls the existing spawn command with merge authority off.
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
-A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
+A `no-mistakes` ship remains refused until the boat-eng home's `config/boat-no-mistakes-proven` holds one pull URL from a real box pipeline; a missing receipt never downgrades delivery, and `bin/fm-boat-worker.sh`'s header owns the exact check.
 Provision the dedicated `fm-code` Boat environment with GitHub access enabled and secrets, Boat credentials, and agent credentials disabled.
 The box acts as the captain's GitHub account through Boat's own GitHub connection; no PC credential or Infisical token is transferred.
 Set the remote `boat-eng` home's local `config/boat-github-account.json` to the expected public GitHub account, for example `{"id":194535094,"login":"MitchellkellerLG"}`; use the captain's current account ID and login for the home being provisioned.
