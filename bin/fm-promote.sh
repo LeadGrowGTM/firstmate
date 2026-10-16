@@ -69,7 +69,8 @@ YOLO=
 SHIP_GOAL=
 SHIP_OFF_LIMITS=
 SHIP_CONTRACTS=
-BRANCH_PREFIX=fm/
+BRANCH_PREFIX=
+BRANCH_PREFIX_SET=0
 MODE_SET=0
 YOLO_SET=0
 FORGE=none
@@ -86,7 +87,7 @@ for a in "$@"; do
       goal) SHIP_GOAL=$a ;;
       off-limits) SHIP_OFF_LIMITS=$a ;;
       contracts) SHIP_CONTRACTS=$a ;;
-      branch-prefix) BRANCH_PREFIX=$a ;;
+      branch-prefix) BRANCH_PREFIX=$a; BRANCH_PREFIX_SET=1 ;;
     esac
     want_value=
     continue
@@ -103,7 +104,7 @@ for a in "$@"; do
     --contracts) want_value=contracts ;;
     --contracts=*) SHIP_CONTRACTS=${a#--contracts=} ;;
     --branch-prefix) want_value="branch-prefix" ;;
-    --branch-prefix=*) BRANCH_PREFIX=${a#--branch-prefix=} ;;
+    --branch-prefix=*) BRANCH_PREFIX=${a#--branch-prefix=}; BRANCH_PREFIX_SET=1 ;;
     *) POS+=("$a") ;;
   esac
 done
@@ -147,6 +148,11 @@ refuse_impossible_forge_posture || exit 1
 
 ID=${POS[0]}
 fm_task_id_creation_valid "$ID" || { echo "error: invalid task id" >&2; exit 2; }
+if [ "$BRANCH_PREFIX_SET" -eq 0 ]; then
+  # shellcheck source=bin/fm-crew-name-lib.sh
+  . "$SCRIPT_DIR/fm-crew-name-lib.sh"
+  BRANCH_PREFIX=$(fm_crew_default_branch_prefix "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}") || exit 1
+fi
 BRANCH="$BRANCH_PREFIX$ID"
 if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
   echo "error: --branch-prefix and task id must form a valid git branch (got '$BRANCH')" >&2

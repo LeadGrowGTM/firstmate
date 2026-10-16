@@ -158,6 +158,24 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
   printf '%s\n' "$wid"
 }
 
+# Show <label> in the status bar for one window without renaming it, because
+# every lookup above addresses a task window by its name. The window's own
+# status formats become the server's current ones with the name (#W or
+# #{window_name}) replaced by the @fm_label window option, so styling is kept
+# and later server-wide format changes no longer reach that window. A format
+# that never shows the name is left alone, and the label stays hidden there.
+fm_backend_tmux_show_label() {  # <window-target> <label>
+  local target=$1 label=$2 opt fmt shown
+  tmux set-window-option -t "$target" @fm_label "$label" || return 1
+  for opt in window-status-format window-status-current-format; do
+    fmt=$(tmux show-window-options -gv "$opt") || return 1
+    shown=${fmt//'#{window_name}'/'#{@fm_label}'}
+    shown=${shown//'#W'/'#{@fm_label}'}
+    [ "$shown" = "$fmt" ] && continue
+    tmux set-window-option -t "$target" "$opt" "$shown" || return 1
+  done
+}
+
 # fm_backend_tmux_current_path: the live pane's current working directory, or
 # empty on any tmux error. Mirrors fm-spawn.sh's worktree-discovery poll:
 # `tmux display-message -p -t "$T" '#{pane_current_path}'`.

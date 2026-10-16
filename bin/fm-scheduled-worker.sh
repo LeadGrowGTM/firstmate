@@ -189,7 +189,10 @@ ARGS=(--harness "$HARNESS" --model "$MODEL" --effort "$EFFORT")
 RC=0
 if [ "$ACTION" = spawn ]; then
   ARGS+=(--backend "$(jq -r .backend "$PLAN")" --mode "$(jq -r .mode "$PLAN")" --yolo "$(jq -r .yolo "$PLAN")")
-  ARGS+=(--branch-prefix "$(jq -r '.branch_prefix // "fm/"' "$PLAN")")
+  # An absent branch_prefix leaves the spawn on this home's default crew prefix.
+  if jq -e '.branch_prefix != null' "$PLAN" >/dev/null; then
+    ARGS+=(--branch-prefix "$(jq -r '.branch_prefix' "$PLAN")")
+  fi
   BASE=$(jq -r '.base_branch // empty' "$PLAN")
   [ -z "$BASE" ] || ARGS+=(--base-branch "$BASE")
   FM_SPAWN_OUTCOME_FILE=$RECEIPT FM_SCHEDULED_WORKER_PLAN=$DIR/plan.json \

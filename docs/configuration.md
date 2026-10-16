@@ -8,7 +8,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | What you want to configure | Start here |
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
-| Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
+| Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend), [crew names](#crew-names-configmate-short-name), and [harness support](#harness-support) |
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Grok permission mode](#grok-permission-mode), [Muse permission mode](#muse-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
@@ -487,6 +487,31 @@ Linking the code-root copy into the home therefore forks the queue on the first 
 Run every routine Firstmate backlog command through [`bin/fm-tasks-axi.sh`](../bin/fm-tasks-axi.sh).
 Like lifecycle transitions, it addresses this home's backlog and archive from any working directory.
 Bootstrap reports a code-root `data/backlog.md` or `data/done-archive.md` that is not this home's own file as a `BACKLOG_RECONCILE: code-root ...` line, even in a read-only session.
+
+## Crew names (config/mate-short-name)
+
+By default every worker window shows `fm-<task-id>` and every ship branch is `fm/<task-id>`, so a second mate's crew reads as the first mate's own.
+Set `config/mate-short-name` in a home to the short form of the mate that owns it, for example `nap` in Napoleon's home or `chu` in the main home.
+New work that home starts then reads as that mate's crew:
+
+| What | Unset | Set to `nap` |
+| --- | --- | --- |
+| Worker or scout window label | `fm-<task-id>` | `nap-crew-<task-id>` |
+| Window label of a second mate this home launches | `fm-<id>` | `<id>`, its plain name |
+| Default ship branch | `fm/<task-id>` | `nap/crew/<task-id>` |
+
+The file holds one short form of 1-16 lowercase letters, digits, and inner dashes.
+Blank lines and lines starting with `#` are ignored.
+A missing or empty file keeps today's names exactly.
+Any other content stops new spawns and ship briefs in that home with an error naming the file, rather than guessing a name.
+[`bin/fm-crew-name-lib.sh`](../bin/fm-crew-name-lib.sh) owns the format and the names it produces.
+
+The branch is only a default: a project's registered `branch=<prefix>` and an explicit `--branch-prefix` still win, and `bin/fm-project-mode.sh --branch-prefix <project>` reports the resolved prefix.
+The label is display only.
+Scripts keep addressing every task window by its `fm-<task-id>` name, so steering, peeking, monitoring, and recovery are unchanged.
+Only the tmux backend shows the label, through that window's own status-bar formats with the name replaced by the label; tmux's window list and any status format that never shows the window name still show `fm-<task-id>`.
+Herdr, zellij, cmux, and Orca keep their current tab names, because those backends also use the tab name to find and recover a task.
+Existing branches, pull requests, and windows are never renamed, and a relaunched task keeps its window's existing display.
 
 ## Runtime backend (config/backend / FM_BACKEND)
 

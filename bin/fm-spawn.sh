@@ -32,12 +32,14 @@
 #   no-mistakes-prod-only is a registry policy rather than a task mode and is
 #   refused as a flag value.
 #   --branch-prefix is the optional prefix selected at intake for this ship's
-#   immutable branch, defaulting to "fm/". It must agree with the branch recorded
-#   in the brief, and is refused on scouts, secondmates, and relaunches. When the
-#   selected branch does not match the project's registered prefix, the spawn
-#   prints a one-line deviation notice and continues, because the registered
-#   prefix is the captain's standing preference and the brief agreement above
-#   already guarantees the worker's instructions match the branch.
+#   immutable branch, defaulting to this home's crew prefix ("fm/" unless
+#   config/mate-short-name is set; bin/fm-crew-name-lib.sh). It must agree with
+#   the branch recorded in the brief, and is refused on scouts, secondmates,
+#   and relaunches. When the selected branch does not match the project's
+#   registered prefix, the spawn prints a one-line deviation notice and
+#   continues, because the registered prefix is the captain's standing
+#   preference and the brief agreement above already guarantees the worker's
+#   instructions match the branch.
 #   --base-branch is the optional branch selected at intake for a ship or scout
 #   to start from and target instead of origin's default branch. A fresh launch
 #   resets its pooled copy to origin/<branch>, refusing when the project has no
@@ -749,6 +751,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-wsl-interop-lib.sh"
 # shellcheck source=bin/fm-project-capacity-lib.sh
 . "$SCRIPT_DIR/fm-project-capacity-lib.sh"
+# shellcheck source=bin/fm-crew-name-lib.sh
+. "$SCRIPT_DIR/fm-crew-name-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
 . "$SCRIPT_DIR/fm-worker-account-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
@@ -1839,11 +1843,20 @@ fm_task_id_creation_valid "$ID" || {
   exit 2
 }
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = ship ]; then
+  if [ "$BRANCH_PREFIX_SET" -eq 0 ]; then
+    BRANCH_PREFIX=$(fm_crew_default_branch_prefix "$CONFIG") || exit 1
+  fi
   BRANCH="$BRANCH_PREFIX$ID"
   if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
     echo "error: --branch-prefix and task id must form a valid git branch (got '$BRANCH')" >&2
     exit 1
   fi
+fi
+# A fresh endpoint's visible label (bin/fm-crew-name-lib.sh). Empty keeps
+# today's fm-<id> display. A relaunch keeps its endpoint's existing display.
+CREW_LABEL=
+if [ "$RELAUNCH" -eq 0 ]; then
+  CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
 fi
 if [ -e "$STATE" ] || [ -L "$STATE" ]; then
   fm_backlog_directory_present "$STATE" "state directory" || {
@@ -4282,6 +4295,12 @@ else
     # stays $T (the name form), which is safe now that rename is disabled.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     WT_TARGET="$WID"
+    # Only the displayed label changes; every script still addresses $T by
+    # its fm-<id> window name. Cosmetic, so a failure only warns.
+    if [ -n "$CREW_LABEL" ]; then
+      fm_backend_tmux_show_label "$WID" "$CREW_LABEL" ||
+        echo "warning: could not show label $CREW_LABEL on window $T; it still shows $W" >&2
+    fi
     ;;
   herdr)
     # fm_backend_herdr_workspace_label resolves the target workspace from

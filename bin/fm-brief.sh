@@ -61,13 +61,15 @@
 #                the configured merge authority approves, firstmate merges to local main
 # no-mistakes-prod-only is a registry policy, not a task mode; resolve it to one of
 # the three concrete modes at intake before calling this script.
-# --branch-prefix <prefix> optionally overrides the ship branch's "fm/" prefix, so
-# the resolved branch is "<prefix><task-id>" instead of the default "fm/<task-id>".
+# --branch-prefix <prefix> optionally overrides the ship branch's default prefix,
+# so the resolved branch is "<prefix><task-id>".
 # Pass an empty prefix ("--branch-prefix ''") for a bare "<task-id>" branch, or a
 # conventional prefix such as "fix/" - useful for a third-party project that does
-# not use this tooling and should not see an "fm/"-branded branch or PR. Defaults
-# to "fm/" when omitted, so every existing installation's branch names are
-# unchanged. Like --mode, this script never reads data/projects.md for it: the
+# not use this tooling and should not see an "fm/"-branded branch or PR. When
+# omitted it defaults to this home's crew prefix (bin/fm-crew-name-lib.sh's
+# fm_crew_default_branch_prefix), which is "fm/" unless config/mate-short-name
+# is set, so every unconfigured installation's branch names are unchanged.
+# Like --mode, this script never reads data/projects.md for it: the
 # registry's optional "branch=<prefix>" annotation (bin/fm-project-mode.sh's
 # header owns that format and its --branch-prefix query) is the captain's
 # standing per-project preference, and firstmate resolves it per task at intake
@@ -180,6 +182,8 @@ esac
 . "$SCRIPT_DIR/fm-dod-lib.sh"
 # shellcheck source=bin/fm-task-type-lib.sh
 . "$SCRIPT_DIR/fm-task-type-lib.sh"
+# shellcheck source=bin/fm-crew-name-lib.sh
+. "$SCRIPT_DIR/fm-crew-name-lib.sh"
 PAUSED_VERB=${FM_CLASSIFY_PAUSED_VERB:-$FM_CLASSIFY_PAUSED_VERB_DEFAULT}
 IFS= read -r -d '' CREWMATE_PAUSE_INSTRUCTIONS <<EOF || true
    Use \`$PAUSED_VERB: {why}\` - distinct from \`blocked:\` - when deliberately waiting for work or an external condition expected to clear on its own, including your own validation round.
@@ -322,6 +326,9 @@ fi
 if [ "$KIND" != ship ] && [ "$BRANCH_PREFIX_SET" -eq 1 ]; then
   echo "error: --branch-prefix applies only to ship briefs; a scout makes no branch and a secondmate charter is not a delivery contract" >&2
   exit 1
+fi
+if [ "$KIND" = ship ] && [ "$BRANCH_PREFIX_SET" -eq 0 ]; then
+  BRANCH_PREFIX=$(fm_crew_default_branch_prefix "$CONFIG") || exit 1
 fi
 case "$BRANCH_PREFIX" in
   *' '*) echo "error: --branch-prefix must not contain a space (got '$BRANCH_PREFIX')" >&2; exit 1 ;;

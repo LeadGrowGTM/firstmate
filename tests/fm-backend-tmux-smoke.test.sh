@@ -196,12 +196,46 @@ case "$large" in
 esac
 pass "real tmux: fm_backend_tmux_capture's -S -N bound trims old history for a small window and reaches it for a large one"
 
+# --- crew label: display changes, the addressed name does not ---------------
+
+# The label rides the window's own status formats, so it must replace the name
+# where the server's formats show it, keep their styling, leave the name every
+# lookup addresses untouched, and stay out of a format that never shows the name.
+tmux set-window-option -g window-status-format ' #I:#W#{?window_flags,#{window_flags}, }' \
+  || fail "could not set the server's window-status-format"
+tmux set-window-option -g window-status-current-format '[#{window_name}]' \
+  || fail "could not set the server's window-status-current-format"
+fm_backend_tmux_show_label "$TARGET" "nap-crew-smoke1" || fail "fm_backend_tmux_show_label failed"
+[ "$(tmux display-message -p -t "$TARGET" '#{window_name}')" = "$WINDOW" ] \
+  || fail "showing a label renamed the addressed window"
+[ "$(tmux show-window-options -v -t "$TARGET" @fm_label)" = "nap-crew-smoke1" ] \
+  || fail "the label was not recorded on the window"
+[ "$(tmux show-window-options -v -t "$TARGET" window-status-format)" = ' #I:#{@fm_label}#{?window_flags,#{window_flags}, }' ] \
+  || fail "the window's status format did not swap the name for the label"
+[ "$(tmux show-window-options -v -t "$TARGET" window-status-current-format)" = '[#{@fm_label}]' ] \
+  || fail "the window's current status format did not swap the long-form name for the label"
+shown=$(tmux display-message -p -t "$TARGET" "$(tmux show-window-options -v -t "$TARGET" window-status-current-format)")
+[ "$shown" = "[nap-crew-smoke1]" ] || fail "the status bar would show '$shown', not the label"
+tmux new-window -d -t "$SESSION:" -n fm-plain || fail "could not create an unlabeled window"
+[ -z "$(tmux show-window-options -v -t "$SESSION:fm-plain" window-status-format)" ] \
+  || fail "labeling one window changed another window's status format"
+tmux kill-window -t "$SESSION:fm-plain"
+tmux set-window-option -g window-status-current-format '#I' || fail "could not set a name-free format"
+fm_backend_tmux_create_task "$SESSION" fm-nameless "$HOME" >/dev/null || fail "could not create the name-free window"
+fm_backend_tmux_show_label "$SESSION:fm-nameless" "nap-crew-nameless" || fail "a name-free format refused the label"
+[ -z "$(tmux show-window-options -v -t "$SESSION:fm-nameless" window-status-current-format)" ] \
+  || fail "a format that never shows the name was overridden"
+tmux kill-window -t "$SESSION:fm-nameless"
+tmux set-window-option -gu window-status-format
+tmux set-window-option -gu window-status-current-format
+pass "real tmux: a crew label changes only the displayed name, never the addressed window name"
+
 # --- resolve_bare_selector (live-window-listing) -----------------------------
 
 resolved=$(fm_backend_tmux_resolve_bare_selector "$WINDOW") \
   || fail "fm_backend_tmux_resolve_bare_selector failed to find the live window"
 [ "$resolved" = "$TARGET" ] || fail "fm_backend_tmux_resolve_bare_selector resolved to '$resolved', expected '$TARGET'"
-pass "real tmux: fm_backend_tmux_resolve_bare_selector (list-live) finds the created window by name"
+pass "real tmux: fm_backend_tmux_resolve_bare_selector (list-live) finds the created, labeled window by name"
 
 if fm_backend_tmux_resolve_bare_selector "no-such-window-xyz" 2>/dev/null; then
   fail "fm_backend_tmux_resolve_bare_selector should fail for a nonexistent window"
