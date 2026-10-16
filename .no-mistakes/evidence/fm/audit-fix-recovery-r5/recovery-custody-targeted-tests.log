@@ -1,0 +1,482 @@
+FM_TEST_BEGIN 2026-10-16T05:01:37Z tests/fm-backlog-atomicity.test.sh family=session-bootstrap expected_gate_skip=none
+ok - Kimi readiness interruptions fail before backlog commit
+ok - retirement replay preserves active records until retirement is committed
+error: Boat three-worker cap reached
+ok - Boat capacity refuses a fourth worker after a postlaunch backlog failure
+notice: task-one ships mode=direct-PR while the standing posture for firstmate is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned task-one harness=codex kind=ship mode=direct-PR yolo=off window=firstmate:fm-task-one worktree=/tmp/fm-test-run.2GroNF/w1/tmp/fm-backlog-atomicity.ASaqY1/boat-intake-missing/wt
+notice: task-one ships mode=direct-PR while the standing posture for firstmate is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned task-one harness=codex kind=ship mode=direct-PR yolo=off window=firstmate:fm-task-one worktree=/tmp/fm-test-run.2GroNF/w1/tmp/fm-backlog-atomicity.ASaqY1/boat-intake-existing/wt
+ok - Boat intake adds or reuses an item in the provisioned backlog before real spawn
+ok - legacy retirement replay refuses without pre-retirement state
+ok - retirement replay leaves a later captain answer Done
+ok - session start requeues an interrupted unlanded claim even from Done
+ok - backend resolution preserves unreadable configuration errors for every caller
+ok - backend resolution preserves environment, project, user, and default precedence
+ok - backlog readers and mutations refuse unresolved backends without touching either backlog
+ok - captain hold refuses backend errors and preserves relocated addressing for valid configuration
+ok - dispatch publishes the record and moves the backlog item In flight in one run
+ok - dispatch omits the markdown file when probing a Beads backlog
+ok - a leftover markdown symlink does not brick a Beads home's dispatch
+ok - completion applies and closes a Beads backlog without any markdown file
+ok - dispatch refuses to supersede a pending authoritative close
+ok - dispatch refuses held rows before creating resources
+ok - dispatch refuses dependency-blocked rows before creating resources
+ok - dispatch refuses held In-flight rows before relaunch
+ok - dispatch reads backlog rows from the backlog addressing root
+ok - recovery uses the parent of a trailing-slash data record
+ok - completion targets nested relative data from the caller directory
+ok - an immediate-child absolute data path keeps one paired backlog
+ok - bare relative data addresses one backlog through dispatch and completion
+ok - dispatch refuses symlinked backlogs without crossing homes
+ok - automatic homes refuse lifecycle mutation without compatible tasks-axi
+ok - dispatch refuses an unresolvable backlog data directory
+ok - completion refuses before mutation when backlog data is unresolvable
+ok - dispatch refuses, before creating anything, when the home has no item for the id
+ok - dispatch distinguishes backlog read failures from missing items
+ok - dispatch refuses a closed item instead of silently reopening it
+ok - dispatch cannot commit without a verified task-record publication
+ok - a failed postlaunch backlog transition retains the worker's observable records
+ok - dispatch reports when failed-transition rollback cannot remove its record
+ok - dispatch verifies both task and busy records during rollback
+ok - dispatch commits neither record nor backlog state before launch delivery succeeds
+ok - dispatch retries interrupted transitions before honoring termination
+ok - a signal-deferred spawn verifies its preserved state and repairs a row that did not move
+ok - a signal-deferred spawn reports attempted preservation as attempted when it cannot be verified
+ok - a signal-deferred spawn bounds its verification so an unresponsive tasks-axi cannot hold the meta lock forever
+ok - fm_tasks_axi bounds the call through its perl watchdog when no timeout binary exists
+ok - fm_tasks_axi's perl watchdog passes the child status and output through unchanged
+ok - fm_tasks_axi fails closed rather than running unbounded when no bounding mechanism exists
+ok - fm_tasks_axi's GNU timeout kills a child that ignores SIGTERM after one further bound
+ok - dispatch does not resurrect a row closed after preflight
+ok - dispatch fails when its backlog row vanishes after preflight
+ok - completion closes a local-only ship, with its landing note, before reporting success
+ok - completion closes a scout item against its report
+ok - completion leaves legacy records open when no incarnation can be recorded
+ok - completion refuses ambiguous task incarnations
+ok - completion records relocated scout reports relative to the backlog root
+ok - space-containing scout report paths round-trip through recovery
+ok - control-byte data paths fail closed before paired transitions
+ok - unreplayable data paths are refused before destructive cleanup
+ok - completion preserves recovery state when task-record removal fails
+ok - completion refuses to report success while its item is still open, and records what it owes
+ok - restart recovers closes recorded before destructive cleanup
+ok - completion refuses directory-symlink close targets
+ok - completion reports failure until its durable close marker is removed
+ok - session start retries a close whose marker could not be removed
+ok - session start reports owned backlog rows it cannot read
+ok - Orca cleanup recovery is excluded from backlog lifecycle transitions
+ok - session start marks an item In flight when this home already owns a worker for it
+ok - session start rejects internal worker-record symlinks
+ok - session start rejects symlinked worker records
+ok - session start finishes a close an interrupted cleanup recorded but never landed
+ok - session start replays a recorded Gerrit close with its change URL as a note
+ok - recovery backfills recorded links onto already Done items
+ok - session start preserves a pending close across a transient backlog read failure
+ok - recovery preserves incomplete-cleanup evidence across a failed replay
+ok - session start finishes a close for the matching meta incarnation
+ok - recovery preserves closes for ambiguous task incarnations
+ok - recovery preserves both records when meta removal fails
+ok - recovery preserves closes beside symlinked metadata
+ok - recovery binds close-marker identity to its locked filename
+ok - recovery rejects close markers targeting another home's data
+ok - recovery validates an unterminated final marker field
+ok - recovery rejects lexical traversal before resolving marker data
+ok - recovery rejects marker control bytes before parsing
+ok - recovery rejects malformed PR URL values
+ok - a retained pending close is never started by reconciliation
+ok - recovery rejects close-marker arguments outside its protocol
+ok - recovery reports and rejects dangling symlink close markers
+ok - session start drops a close recorded for an older meta incarnation
+ok - session start rejects an unversioned close marker
+ok - bootstrap rechecks worker-record containment after locking
+ok - lifecycle files reject ancestor symlinks outside home roots
+ok - same-home state overrides remain supported
+ok - bootstrap refuses symlinked state before reconciliation
+ok - bootstrap stops when backlog data disappears before reconciliation
+ok - bootstrap preserves secondmate, manual, and absent-backlog exemptions
+ok - session start leaves a captain-held item where the captain put it
+ok - no-backlog teardown refuses symlinked records before resource actions
+ok - teardown rechecks record parents after locking
+ok - teardown refuses symlinked state before resource actions
+ok - a home with no backlog remains exempt from lifecycle transitions
+ok - spawn refuses a special-file tasks-axi config instead of blocking on it
+ok - spawn refuses an unsafe tasks-axi config before any exemption is derived from it
+ok - spawn refuses a data directory symlinked outside the home
+ok - a configured adapter refuses a data directory outside the home
+ok - dispatch and completion transition structurally with evidence
+ok - refused teardown leaves the backlog item in flight
+ok - environment-selected adapters bypass the legacy markdown file override
+ok - a manual-backlog home dispatches and completes without a hard failure
+ok - a secondmate home keeps its own books paired through dispatch and completion
+ok - dispatching a persistent secondmate needs no backlog item
+FM_TEST_END 2026-10-16T05:06:10Z tests/fm-backlog-atomicity.test.sh exit=0 duration_ms=272420 gate_skip=false
+FM_TEST_BEGIN 2026-10-16T05:06:10Z tests/fm-spawn-pool-base-freshen.test.sh family=standalone expected_gate_skip=none
+ok - returned pool copies refuse real active interactive builtin loops and unrelated-FD waits
+ok - failed pool dispatch releases only prelaunch own claims and keeps postlaunch or unreleasable claims paired
+# remote-seeded Treehouse spawn command
+$ FM_HOME=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/remote-seeded/home bin/fm-spawn.sh pool-remote-seeded-r13 /tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/remote-seeded/project --scout
+spawned pool-remote-seeded-r13 harness=codex kind=scout window=firstmate:fm-pool-remote-seeded-r13 worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/remote-seeded/pool
+exit=0
+published worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/remote-seeded/pool
+resolved project lock=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/remote-seeded/home/state/.treehouse-project-d5a3286e12dd605bb153268a4591da039c85f5c4.lock
+ok - a remote-seeded secondmate home allocates and launches from its Treehouse pool
+ok - a Treehouse slot claim names the launched task, refuses when unclaimable, and is dropped by a locked abort
+ok - spawn refuses a same-home pool custody collision before refresh and claim
+ok - spawn refuses a sibling-home pool custody collision before refresh and claim
+ok - spawn refuses a unreadable-sibling pool custody collision before refresh and claim
+ok - spawn refuses a alias pool custody collision before refresh and claim
+ok - spawn refuses a unsafe-metadata pool custody collision before refresh and claim
+ok - spawn refuses a other-claim pool custody collision before refresh and claim
+ok - returned pool copy is refused when a record claim arrives after preflight
+ok - returned pool copy is refused when a marker claim arrives after preflight
+ok - returned pool copy refuses survivor process evidence before refresh
+ok - returned pool copy refuses unreadable process evidence before refresh
+skip - nested idle-shell proof unavailable on this kernel; manual confirmation required
+ok - provider pool markers from sibling clones block both allocation preflights
+ok - pane preflight honors the resolved state override before provider acquisition
+# evidence begin: linked-home spawn, returned=primary
+$ bin/fm-spawn.sh pool-linked-primary-r12 /tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-primary/secondmate --scout
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-primary/project': it is the repository's primary checkout (its git dir is the spawning project's common git dir); spawning project '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-primary/secondmate'); inspect window firstmate:fm-pool-linked-primary-r12
+exit=1
+primary HEAD before=e14ba674170e6488a2a6296c66256f3b9d0c14d7 after=e14ba674170e6488a2a6296c66256f3b9d0c14d7
+primary reflog before:
+e14ba67 HEAD@{0}: commit (initial): initial
+primary reflog after:
+e14ba67 HEAD@{0}: commit (initial): initial
+FETCH_HEAD absent
+task metadata absent
+# evidence end
+ok - linked spawning home: primary preserves the primary before any refresh
+# evidence begin: linked-home spawn, returned=primary-alias
+$ bin/fm-spawn.sh pool-linked-primary-alias-r12 /tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-primary-alias/secondmate --scout
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-primary-alias/primary-alias': it is the repository's primary checkout (its git dir is the spawning project's common git dir); spawning project '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-primary-alias/secondmate'); inspect window firstmate:fm-pool-linked-primary-alias-r12
+exit=1
+primary HEAD before=2ebac97d2e9542cf66171aa638592555b672c1c9 after=2ebac97d2e9542cf66171aa638592555b672c1c9
+primary reflog before:
+2ebac97 HEAD@{0}: commit (initial): initial
+primary reflog after:
+2ebac97 HEAD@{0}: commit (initial): initial
+FETCH_HEAD absent
+task metadata absent
+# evidence end
+ok - linked spawning home: primary-alias preserves the primary before any refresh
+# evidence begin: linked-home spawn, returned=spawning
+$ bin/fm-spawn.sh pool-linked-spawning-r12 /tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-spawning/secondmate --scout
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-spawning/secondmate': it is the spawning project itself; spawning project '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-spawning/secondmate'); inspect window firstmate:fm-pool-linked-spawning-r12
+exit=1
+primary HEAD before=f19bfd7d55ae84c745dd94b79a57b5c5197a5f60 after=f19bfd7d55ae84c745dd94b79a57b5c5197a5f60
+primary reflog before:
+f19bfd7 HEAD@{0}: commit (initial): initial
+primary reflog after:
+f19bfd7 HEAD@{0}: commit (initial): initial
+FETCH_HEAD absent
+task metadata absent
+# evidence end
+ok - linked spawning home: spawning preserves the primary before any refresh
+# evidence begin: linked-home spawn, returned=scout
+$ bin/fm-spawn.sh pool-linked-scout-r12 /tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-scout/secondmate --scout
+spawned pool-linked-scout-r12 harness=codex kind=scout window=firstmate:fm-pool-linked-scout-r12 worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-scout/pool
+exit=0
+primary HEAD before=a4f474cbf3bda22d2dc2cc64196777008e267485 after=a4f474cbf3bda22d2dc2cc64196777008e267485
+primary reflog before:
+a4f474c HEAD@{0}: commit (initial): initial
+primary reflog after:
+a4f474c HEAD@{0}: commit (initial): initial
+FETCH_HEAD absent
+saved task metadata:
+window=firstmate:fm-pool-linked-scout-r12
+endpoint_task_id=pool-linked-scout-r12
+worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-scout/pool
+project=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/linked-scout/secondmate
+harness=codex
+kind=scout
+tasktmp=/tmp/fm-pool-linked-scout-r12
+model=default
+effort=default
+realized_effort=default
+spawn_gen=s1792127228.1438.3209
+worker HEAD=306d0df5081a5a9b0c19dc2c0325b9532a6022eb origin/main=306d0df5081a5a9b0c19dc2c0325b9532a6022eb
+# evidence end
+ok - linked spawning home: scout preserves the primary before any refresh
+# observed spawn: spawned pool-current-base-r1 harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-pool-current-base-r1 worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/current-base/pool
+# observed base: HEAD=49d6f90050207b4909edc4cb583769280b9d4645 origin/main=49d6f90050207b4909edc4cb583769280b9d4645 advanced-main=must survive a newly spawned branch
+ok - a stale pooled worktree refreshes to current origin/main before a crew branch is created
+ok - --base-branch picks the copy's starting point and is recorded; a missing or local-only base refuses
+ok - a spawn refuses when --base-branch and the brief's Base branch lines disagree
+ok - a Base branch line in the captain's intent neither blocks nor redirects a spawn
+ok - a based scout on a forge=gerrit project is refused at spawn
+ok - a stale pooled worktree resolves and refreshes a non-main default branch
+# observed direct-pr spawn: spawned pool-direct-pr-r3 harness=codex kind=ship mode=direct-PR yolo=off window=firstmate:fm-pool-direct-pr-r3 worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/direct-pr/pool
+# observed scout spawn: spawned pool-scout-r3 harness=codex kind=scout window=firstmate:fm-pool-scout-r3 worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/scout/pool
+ok - direct-PR ships and scouts both refresh stale pooled worktrees before launch
+# observed dirty refusal: error: pooled worktree '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/dirty-refusal/pool' is not clean; refusing to discard uncommitted work while refreshing its base; preserved=keep this local work
+ok - a dirty pooled worktree is refused without discarding its local work
+# observed unresolved-default refusal: error: could not resolve origin's current default branch for pooled worktree '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/unresolved-default/pool'; refusing to launch from a potentially stale base
+ok - an unresolved remote default branch refuses the pooled worktree
+# observed unreachable-origin refusal: error: could not fetch origin for pooled worktree '/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/unreachable-origin/pool'; refusing to launch from a potentially stale base
+ok - an unreachable origin refuses a potentially stale pooled worktree
+# observed origin-less launch: spawned pool-originless-r6 harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-pool-originless-r6 worktree=/tmp/fm-test-run.2GroNF/w2/tmp/fm-spawn-pool-base-freshen.C0Jmcu/originless/pool
+ok - an origin-less pooled worktree launches as-is, skipping the freshness gate
+ok - a dirty origin-less pooled worktree is refused without discarding its local work
+ok - an origin configuration without a URL refuses the pooled worktree
+ok - an empty origin configuration section refuses the pooled worktree
+ok - an empty-only included origin section documents the accepted detection boundary
+ok - an inactive conditional origin include leaves the pooled worktree origin-less
+# observed stale-pin refusal: error: submodule 'ui' is checked out at 342dc6c7e793ed825a87242421c2828cb793e215, but this base records b57370b79fa2205f5df2bbfe1e88d3e35d944c61
+ok - an origin-less pool with a stale submodule pin refuses while naming both pins and no remedy
+ok - an unpushed submodule commit keeps the uncommitted-work refusal and survives it
+ok - work inside a submodule is still refused as uncommitted work, not called stale
+ok - a stale pin carrying real work is refused conservatively, never called stale
+ok - a stale pin beside other dirt yields the conservative refusal alone, with no stale-pin line
+# all fm-spawn-pool-base-freshen tests passed
+FM_TEST_END 2026-10-16T05:08:26Z tests/fm-spawn-pool-base-freshen.test.sh exit=0 duration_ms=136106 gate_skip=false
+FM_TEST_BEGIN 2026-10-16T05:08:26Z tests/fm-control-relaunch.test.sh family=backend-dispatch expected_gate_skip=none
+ok - both relaunch interfaces preserve active builtin loops and unrelated-FD waits with unchanged interactive argv
+ok - control receipts bind live confirmation and preserve late-launch uncertainty
+ok - scheduled control fences stale and empty generations before mutation, and relaunches the matching one
+ok - scheduled control rechecks generation after lock admission and preserves the live worker
+ok - scheduled continuation distinguishes missing CLI from inconclusive account before stopping
+ok - fm-control removes the dialog file after exit and after relaunch
+ok - fm-control exit removes the dialog file before it releases the control lock
+ok - fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree
+ok - fm-control relaunch: pending composer text refuses before the exit command is typed
+ok - fm-control relaunch: an unreadable composer fails safe before the exit command is typed
+ok - fm-control relaunch and exit: --only-if-idle refuses a non-idle agent instead of interrupting it
+# evidence begin: linked-home relaunch
+$ bin/fm-control.sh rl42 relaunch --note "continue from linked home"
+warning: /tmp/fm-control-relaunch.fIr6jc/linked-home-928/home/data/rl42/launch-brief.md records no ship branch; defaulting to legacy branch fm/rl42
+warning: /tmp/fm-control-relaunch.fIr6jc/linked-home-928/home/data/rl42/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl42 harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl42 worktree=/tmp/fm-control-relaunch.fIr6jc/linked-home-928/wt
+exit=0
+worker HEAD before=21fe3291e7ea64a114a33dd4c936c36df8f8160d after=21fe3291e7ea64a114a33dd4c936c36df8f8160d
+saved task metadata:
+window=fmses:fm-rl42
+endpoint_task_id=rl42
+worktree=/tmp/fm-control-relaunch.fIr6jc/linked-home-928/wt
+project=/tmp/fm-control-relaunch.fIr6jc/linked-home-928/secondmate
+harness=claude
+kind=ship
+mode=no-mistakes
+yolo=off
+branch=fm/rl42
+tasktmp=/tmp/fm-rl42
+model=default
+effort=default
+realized_effort=default
+fallback_reason="continue from linked home"
+busy_gen=g1792127339.34814.1371
+spawn_gen=s1792127340.33683.27276
+tmux_socket=/tmp/fm-control-relaunch.fIr6jc/linked-home-928/fake/recorded-socket
+control_relaunch_tx=32824.20261016T050859Z.31874
+worker status:
+ M task.txt
+preserved task.txt:
+committed task work
+unfinished task work
+worker FETCH_HEAD absent
+# evidence end
+ok - fm-control relaunch: a linked spawning home preserves committed and unfinished work in the recorded copy
+ok - fm-control relaunch: durable task metadata survives replacement launch publication
+ok - fm-control relaunch: delivery and concurrent task metadata publication serialize
+ok - fm-control relaunch: disabling tracing clears metadata and pane context
+ok - fm-control relaunch: progress and the Firstmate-worktree worker identity reach the replacement
+ok - fm-control relaunch: a ship task refuses without the progress note its replacement needs
+ok - fm-control relaunch: switching harness is one ordinary relaunch, and the old wiring goes with the old agent
+ok - fm-control relaunch: a harness switch resets model and effort unless they are named too
+ok - fm-control relaunch: a prefixed recorded harness can switch adapters transactionally
+ok - fm-control relaunch: a prefixed command requires an explicit replacement harness
+ok - fm-control relaunch: a same-harness relaunch keeps the profile axes it was running with
+ok - direct spawn relaunch preserves recorded model and effort
+ok - control and direct spawn refuse unlisted or weaker configured fallbacks before mutation
+ok - rule-removed refuses before stopping or changing metadata
+ok - config-removed refuses before stopping or changing metadata
+ok - reclassified refuses before stopping or changing metadata
+ok - lower-effort refuses before stopping or changing metadata
+ok - ambiguous-legacy refuses before stopping or changing metadata
+ok - configured fallback refuses an effort the adapter would omit before stopping
+ok - declared equivalent fallback records the rule, class, realized profile, provider and reason
+ok - control and direct relaunch refuse a reordered rule
+ok - scheduled plan authorizes continuation beside unrelated crew dispatch
+ok - leading-option and Markdown relaunch notes reach the replacement
+ok - explicit default still clears a same-harness model and effort
+ok - native Ultra relaunch preserves its profile and rejects an unsupported model before stopping
+ok - fm-control relaunch: a signed-out worker account pin refuses before the old agent stops
+ok - fm-control relaunch: the replacement follows the home's current worker account pin
+ok - fm-control relaunch: a Pi replacement keeps the home's tool exclusions
+ok - fm-control relaunch: exclusion-list refusals happen before the running agent stops
+ok - fm-control relaunch: explicit model and effort win over the recorded ones
+ok - fm-control relaunch: refuses to relaunch onto an adapter with no verified mechanics
+ok - fm-control relaunch: the retired incarnation's global turn-end token is revoked
+ok - fm-control relaunch: wiring cleanup failure refuses replacement arming
+ok - fm-control-lib: one owner resolves each harness's turn-end registry entry, and refuses a malformed token
+ok - fm-control relaunch: a secondmate re-resolves its durable opus low override
+ok - fm-control relaunch: a secondmate relaunch arms a fresh semantic busy record without turn-end wakes
+ok - fm-control relaunch: a secondmate's operator-owned settings.local.json is never removed or replaced
+ok - fm-control relaunch: invalid configured effort is ignored before stop
+ok - fm-control relaunch: the watcher's auto-relaunch stands down while a secondmate relaunch is open
+ok - fm-control relaunch: an adapter unverified for this task kind refuses before the agent is stopped
+ok - fm-control relaunch: explicit secondmate harness resets unnamed profile axes
+ok - fm-control relaunch: a ship task keeps its recorded harness instead of re-reading crew config
+ok - fm-spawn --relaunch: with no explicit harness it reuses the task's recorded one, never the crew default
+ok - fm-spawn --relaunch: a promoted scout with a recorded custom branch relaunches on it instead of being refused
+ok - fm-promote/fm-spawn --relaunch: the current ship contract supersedes stale scout delivery text
+ok - fm-spawn --relaunch: wiring armed under a prefixed harness name is still retired
+ok - fm-spawn --relaunch: switching away from muse retires its session binding
+ok - fm-spawn --relaunch: switching away from cursor retires its session binding
+ok - fm-control relaunch: an unaccountable local copy refuses before the agent is touched
+ok - fm-control relaunch: a worker with nothing to work from is never launched
+ok - fm-control relaunch: a refusal before the agent is stopped leaves the durable record untouched
+ok - fm-control relaunch: checkpoint inspection failures refuse before stopping
+ok - fm-control relaunch: a launch failure after the stop keeps the prior record and reports the real state
+ok - fm-control relaunch: unpublished rollback keeps concurrent durable metadata
+ok - fm-control relaunch: post-publication failure keeps the new durable record
+ok - fm-control relaunch: partial stop reconciles actual agent state
+ok - fm-control relaunch: failed journal replacement preserves durable phase
+ok - fm-spawn relaunch: prepublication abort removes replacement state
+ok - fm-control relaunch: the checkpoint records the exact unlanded work it preserved
+ok - fm-control relaunch: a secondmate's child work is accounted for and its charter is left alone
+ok - fm-control relaunch: a secondmate home that is not this secondmate's is refused
+ok - fm-control relaunch: unreadable child records fail checkpoint
+ok - fm-control relaunch: unlistable state fails checkpoint
+ok - fm-control relaunch: a vanished watcher scratch file does not fail the child-record checkpoint
+ok - fm-control relaunch: two control actions on one task serialize instead of interleaving
+ok - fm-spawn relaunch: direct entry participates in lifecycle serialization
+ok - fm-promote: promotion participates in lifecycle serialization
+ok - fm-spawn --relaunch: refuses to launch a second agent into a live endpoint
+ok - fm-spawn --relaunch: symlinked records refuse before inspection
+ok - fm-spawn --relaunch: keeps its early meta lock continuous
+ok - fm-spawn --relaunch: pending closes refuse before replacement begins
+ok - fm-spawn --relaunch: every identity axis comes from the record, and a contradicting flag refuses
+ok - fm-spawn --relaunch: an unrecorded task is refused
+ok - fm-spawn --relaunch: refuses to start a replacement outside the copy holding its work
+ok - tmux: a window whose recorded server died is reclaimed in place with its work intact
+ok - tmux: aborted rebind closes its unlaunched window and preserves the task record
+ok - tmux: a new server on the recorded socket does not hide that the old window is gone
+ok - tmux: a window still alive on its recorded server is never duplicated
+ok - tmux: a legacy record is reclaimed once no server this user could address holds its window
+ok - tmux: a legacy record whose window is alive on another server is never duplicated
+ok - tmux: an unlinked socket does not license a duplicate worker
+ok - tmux: a renamed session stays unproven
+ok - tmux: a same-socket server older than the endpoint stays unproven
+ok - tmux: an older legacy candidate stays unproven
+ok - both relaunch verbs refuse another task record naming the same canonical worktree
+ok - both relaunch verbs refuse conflicting task ids and same-id sibling-home claims
+ok - tmux: a live same-user process rooted in the worktree or child blocks both relaunch paths
+ok - tmux: dead panes reject background descendants and an active shell script
+skip - spawn nested idle-shell proof unavailable on this kernel; manual confirmation required
+skip - control nested idle-shell proof unavailable on this kernel; manual confirmation required
+ok - tmux: missing legacy socket metadata never excuses a live rooted process
+ok - tmux: a legacy record can recover after process absence is proven
+ok - tmux: unreadable and ambiguous same-user process inventories fail closed
+ok - tmux: a prior-generation nondumpable survivor blocks endpoint absence proof
+ok - reclaim: an unclassifiable endpoint is still refused, so two agents cannot share one
+ok - fm-spawn --relaunch: resumes the bound Pi session only for a Pi registration
+ok - reclaim: a herdr pane that outlived its stopped server is adopted, never orphaned beside a new tab
+ok - fm-control exit: a herdr pane that outlived its stopped server is already-stopped, not gone
+ok - reclaim: a herdr rebind is created in the session the record names, never the ambient one
+ok - both Herdr relaunch paths refuse surviving processes beside missing and dead endpoints
+ok - reclaim: a herdr agent that came back with its server refuses, so one worktree keeps one agent
+ok - reclaim: a herdr reclaim rebinds the endpoint and leaves the whole rest of the task alone
+ok - reclaim: a herdr secondmate whose endpoint is gone is sent to its own respawn owner
+ok - reclaim: a rebind refused from a plain shell reports the real cause, not a fabricated session mismatch
+ok - relaunch re-reads the backlog item instead of blindly re-running the transition
+ok - relaunch heals an item that drifted out of In flight while the task stayed live
+FM_TEST_END 2026-10-16T05:12:33Z tests/fm-control-relaunch.test.sh exit=0 duration_ms=247043 gate_skip=false
+FM_TEST_BEGIN 2026-10-16T05:12:33Z tests/fm-teardown-endpoint-safety.test.sh family=backend-dispatch expected_gate_skip=none
+ok - retirement refuses real interactive builtin loops and unrelated-FD waits without changing custody
+hint: The '/tmp/fm-teardown-endpoint-safety.Qf1AiT/retire-partial-done/worktree/.git-hooks/pre-commit' hook was ignored because it's not set as executable.
+hint: You can disable this warning with `git config set advice.ignoredHook false`.
+hint: The '/tmp/fm-teardown-endpoint-safety.Qf1AiT/retire-partial-close-marker/worktree/.git-hooks/pre-commit' hook was ignored because it's not set as executable.
+hint: You can disable this warning with `git config set advice.ignoredHook false`.
+ok - retirement rolls back preparation and replays interrupted backlog transitions
+ok - fm-teardown: missing, empty, malformed, ambiguous, and task-mismatched endpoints refuse before every mutation or runtime call
+ok - fm-teardown: a concurrent lifecycle action refuses before mutation
+ok - fm-teardown: non-pool cleanup ignores unrelated task publication locks
+ok - fm-teardown: destructive cleanup serializes with metadata writers
+ok - cleanup identity: valid tmux, Herdr, Zellij, Orca, and cmux records validate while every empty backend target refuses
+ok - cleanup identity: an Orca record's real composite worktree id validates while a separatorless or newline-carrying id refuses
+ok - tmux backend: direct empty target returns nonzero without invoking tmux
+ok - process cleanup: creation-time PID identity removes only the exact child and preserves the control child
+ok - fm-teardown: exact tmux cleanup preserves invalid and prefix-matched neighbors while removing only the recorded target
+ok - fm-teardown: a close that genuinely failed refuses and keeps the record naming the surviving endpoint, and the same teardown finishes once the close works
+ok - fm-teardown: --force continues past a close it could not make while still reporting it, and the same case refuses without --force
+ok - fm-teardown: a close re-read that could not run refuses, while a definitively absent session or server still completes silently
+ok - fm-teardown: forced secondmate cleanup still refuses on a child endpoint close that failed
+ok - fm-teardown: an Orca close its missing CLI never attempted refuses even under --force, keeping the record naming the terminal
+ok - fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently
+ok - Treehouse locking resolves a bare local origin against its source project, matching the provisioned clone
+ok - fm-teardown: a pool slot named by a second task record is never returned, killed, or reset
+ok - fm-teardown: a pool slot held by another firstmate home is never returned
+ok - fm-teardown: a task that solely holds its slot still returns it
+ok - fm-teardown: a returned copy prunes only its own project's pool with safe flags, and a failed prune never fails cleanup
+ok - fm-teardown: a pool slot claimed by another task is left alone while the task's own cleanup finishes
+ok - fm-teardown: a stale record on a claimed slot retires, then the claimant tears down
+ok - fm-teardown: a task's own slot claim, and an unclaimed slot, both still tear down
+ok - fm-teardown: a pool slot now owned by another clone is already gone
+ok - fm-teardown: absent recorded slots hold the project lock through ordinary and descendant cleanup
+ok - a gone agent retires only its old claim and archives its original record
+ok - retire, public respawn, and second retirement preserve both claim records
+ok - legacy claims use distinct timestamp archives when spawn generation is absent
+ok - unlanded claim retirement requeues the backlog item with its preserved worktree and branch
+ok - cleared task temp root requires a readable process absence inventory
+skip - nested idle-shell proof unavailable on this kernel; manual confirmation required
+ok - retirement refuses an active foreground shell script
+ok - retirement sees a rooted process in a literal deleted-suffix directory
+ok - records-only retirement refuses a live recorded agent without closing it
+ok - records-only retirement refuses unreadable identity, incompatible records, force, and an orphan in the copy
+ok - retirement preserves task temp material and retries after late refusals
+ok - retirement refuses attributable parked and active runs without administering them
+ok - retirement rejects same-id cross-home claims and accepts a proven alias
+ok - fm-teardown: an exact recorded endpoint still tears down after changing cwd outside its worktree
+ok - Treehouse project locking anchors at the local root for main-home, local-secondmate, and remote-seeded layouts
+# remote-seeded Treehouse teardown command
+$ FM_HOME=/tmp/fm-teardown-endpoint-safety.Qf1AiT/remote-home-teardown/home bin/fm-teardown.sh remote-task --force
+stdout:
+teardown remote-task complete (window firstmate:fm-remote-task, worktree /tmp/fm-teardown-endpoint-safety.Qf1AiT/remote-home-teardown/worktree)
+Backlog: remote-task just finished (this home keeps no markdown backlog at /tmp/fm-teardown-endpoint-safety.Qf1AiT/remote-home-teardown/home/data/backlog.md). Update /tmp/fm-teardown-endpoint-safety.Qf1AiT/remote-home-teardown/home/data/backlog.md - move remote-task to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+stderr:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+exit=0
+runtime calls:
+treehouse <return> <--force> </tmp/fm-teardown-endpoint-safety.Qf1AiT/remote-home-teardown/worktree>
+tmux <kill-window> <-t> <=firstmate:=fm-remote-task>
+treehouse <prune> <--yes>
+task metadata=removed
+slot sentinel=present
+ok - fm-teardown: a remote-seeded secondmate home returns its own uncontested pool slot
+# remote-seeded cross-home collision command
+$ FM_HOME=/tmp/fm-teardown-endpoint-safety.Qf1AiT/remote-home-collision/home bin/fm-teardown.sh remote-stale --force
+stderr:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: task remote-stale's recorded worktree /tmp/fm-teardown-endpoint-safety.Qf1AiT/remote-home-collision/pool/1/project is also task child-task's recorded worktree.
+Returning that pool slot would kill child-task's processes and reset its copy, so nothing was changed - not even with --force.
+Reconcile whichever record is wrong (bin/fm-crew-state.sh remote-stale; bin/fm-crew-state.sh child-task), then re-run teardown.
+exit=1
+runtime calls=none
+remote metadata=preserved
+child metadata=preserved
+slot sentinel=preserved
+ok - fm-teardown: slot ownership across a remote-seeded home and its local child still refuses
+ok - Treehouse project locking still serializes two homes across the remote-seeded boundary
+FM_TEST_END 2026-10-16T05:15:20Z tests/fm-teardown-endpoint-safety.test.sh exit=0 duration_ms=167359 gate_skip=false
+FM_TEST_SUMMARY total=4 failed=0 skipped_gate=0 duration_ms=823211
+FM_TEST_SUMMARY_FAMILY family=backend-dispatch count=2 duration_ms=414402 failed=0
+FM_TEST_SUMMARY_FAMILY family=session-bootstrap count=1 duration_ms=272420 failed=0
+FM_TEST_SUMMARY_FAMILY family=standalone count=1 duration_ms=136106 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-backlog-atomicity.test.sh duration_ms=272420
+FM_TEST_SLOWEST rank=2 script=tests/fm-control-relaunch.test.sh duration_ms=247043
+FM_TEST_SLOWEST rank=3 script=tests/fm-teardown-endpoint-safety.test.sh duration_ms=167359
+FM_TEST_SLOWEST rank=4 script=tests/fm-spawn-pool-base-freshen.test.sh duration_ms=136106

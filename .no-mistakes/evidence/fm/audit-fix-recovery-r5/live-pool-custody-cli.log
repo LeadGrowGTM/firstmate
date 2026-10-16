@@ -1,0 +1,6 @@
+public command: bin/fm-treehouse-pool-check.sh <disposable-home> <disposable-project> <error-file> <state-dir>
+record claim: exit=1; output=process absence unproven: cannot read live process 272's cwd
+REFUSED: cannot prove the recorded pool copy /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51EJJKXNHBK7765NJ7FFX3B/.custody-live.f3KpFs/base/.treehouse/project-b5a5c2/1/project unavailable to allocation
+marker claim: exit=1; output=process absence unproven: cannot read live process 272's cwd
+REFUSED: pool slot /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51EJJKXNHBK7765NJ7FFX3B/.custody-live.f3KpFs/base/.treehouse/project-b5a5c2/1 has a retained claim and unproven process state
+claim retired: exit=0; output=
