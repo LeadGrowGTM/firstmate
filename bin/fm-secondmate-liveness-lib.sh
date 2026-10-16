@@ -50,7 +50,7 @@
 # A refused teardown exits and releases the lock.
 # state/.secondmate-retiring-<id> covers that gap: one line, started=<epoch>,
 # written when teardown takes the lock, left in place by a refused pass, and
-# removed only when retirement completes or --abandon-retirement clears it.
+# removed only when retirement completes.
 # This probe treats any existing inode, including an unsafe one, as skipped
 # without a probe, kill, or relaunch.
 # A retry keeps an existing regular file.

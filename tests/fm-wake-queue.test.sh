@@ -3665,52 +3665,6 @@ test_secondmate_liveness_tick_skips_relaunch_after_refused_retirement() {
   pass "watch liveness: a refused retirement stands relaunch down after its lock is gone"
 }
 
-test_secondmate_liveness_tick_relaunches_after_retirement_is_abandoned() {
-  local dir state home pid out rc=0
-  prepare_refused_secondmate_retirement liveness-retire-abandon
-  dir=$PREPARED_DIR
-  state="$dir/state"
-  home="$TMP_ROOT/liveness-retire-abandon-mate"
-  [ -f "$state/.secondmate-retiring-sm1" ] && [ ! -L "$state/.secondmate-retiring-sm1" ] \
-    || fail "refused retirement left no marker to abandon"
-
-  if PATH="$dir/fakebin:$PATH" TMUX='' FM_HOME="$dir" \
-      "$ROOT/bin/fm-teardown.sh" sm1 --abandon-retirement --force \
-      >"$dir/abandon-force.out" 2>"$dir/abandon-force.err"; then
-    fail "abandon combined with --force was accepted: $(cat "$dir/abandon-force.out")"
-  fi
-  grep -F 'cannot be combined' "$dir/abandon-force.err" >/dev/null \
-    || fail "abandon combined with --force was not rejected: $(cat "$dir/abandon-force.err" "$dir/abandon-force.out")"
-  [ -f "$home/AGENTS.md" ] || fail "a rejected abandon removed the secondmate home"
-  [ -f "$state/sm1.meta" ] || fail "a rejected abandon removed the endpoint record"
-  [ -f "$state/.secondmate-retiring-sm1" ] || fail "a rejected abandon cleared the retiring marker"
-
-  if PATH="$dir/fakebin:$PATH" TMUX='' FM_HOME="$dir" \
-      "$ROOT/bin/fm-teardown.sh" sm1 --abandon-retirement \
-      >"$dir/abandon.out" 2>"$dir/abandon.err"; then
-    rc=0
-  else
-    rc=$?
-  fi
-  [ "$rc" -eq 0 ] || fail "abandoning retirement failed: $(cat "$dir/abandon.out" "$dir/abandon.err")"
-  grep -F 'teardown sm1 retirement abandoned; liveness recovery is allowed again' "$dir/abandon.out" >/dev/null \
-    || fail "abandon did not report that liveness recovery is allowed: $(cat "$dir/abandon.out" "$dir/abandon.err")"
-  [ ! -e "$state/.secondmate-retiring-sm1" ] && [ ! -L "$state/.secondmate-retiring-sm1" ] \
-    || fail "abandon left the retiring marker"
-  [ -f "$home/AGENTS.md" ] || fail "abandon removed the secondmate home"
-  [ -f "$state/sm1.meta" ] || fail "abandon removed the endpoint record"
-  [ ! -s "$dir/tmux.log" ] || fail "abandon acted on the endpoint: $(cat "$dir/tmux.log")"
-
-  run_liveness_leg "$dir" abandon FM_FAKE_TMUX_CURRENT_COMMAND=zsh; pid=$LIVENESS_PID
-  wait_for_exit "$pid" 300 || fail "a non-retiring dead secondmate was not auto-relaunched: $(cat "$dir/watch-abandon.out" "$dir/watch-abandon.err")"
-  out="$dir/watch-abandon.out"
-  grep -F 'check: secondmate sm1 auto-relaunched' "$out" >/dev/null \
-    || fail "abandoning retirement did not allow the dead mate to relaunch: $(cat "$out" "$dir/watch-abandon.err")"
-  assert_contains "$(cat "$dir/tmux.log")" "new-window" \
-    "the non-retiring dead secondmate was not relaunched"
-  pass "watch liveness: abandoning retirement lets a dead secondmate relaunch"
-}
-
 test_self_held_lock_reclaims_instead_of_deadlocking
 test_subshell_lock_ownership_without_bashpid
 test_bounded_lock_handoff_after_contention
@@ -3781,4 +3735,3 @@ test_secondmate_liveness_tick_unqueued_outcome_is_an_error_not_a_wake
 test_secondmate_liveness_tick_skips_mate_whose_lock_is_held
 test_secondmate_liveness_tick_preserves_unreachable_remote
 test_secondmate_liveness_tick_skips_relaunch_after_refused_retirement
-test_secondmate_liveness_tick_relaunches_after_retirement_is_abandoned

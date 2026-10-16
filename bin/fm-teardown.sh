@@ -193,10 +193,8 @@
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
 # Secondmate retirement writes state/.secondmate-retiring-<id> as soon as it holds that mate's liveness lock and before any later refusal, and removes the marker only when retirement completes.
-# --abandon-retirement removes only that marker so liveness recovery is allowed again.
-# It applies only to a secondmate and cannot be combined with --force, --legacy-record, or --only-if-stopped.
 # bin/fm-secondmate-liveness-lib.sh owns the marker.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped] [--abandon-retirement]
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped]
 #   --only-if-stopped is the automatic sweep guard: under the lifecycle and
 #   metadata locks, accept only a positively dead or missing worker endpoint,
 #   with no open status decision or captain hold. Secondmates, remote records,
@@ -417,14 +415,12 @@ ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
 ONLY_IF_STOPPED=0
-ABANDON_RETIREMENT=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
     --only-if-stopped) ONLY_IF_STOPPED=1 ;;
-    --abandon-retirement) ABANDON_RETIREMENT=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -436,10 +432,6 @@ done
   echo "error: --only-if-stopped cannot discard work with --force" >&2
   exit 2
 }
-if [ "$ABANDON_RETIREMENT" = 1 ] && { [ -n "$FORCE" ] || [ "$ONLY_IF_STOPPED" = 1 ] || [ "$LEGACY_RECORD_GIVEN" = 1 ]; }; then
-  echo "error: --abandon-retirement cannot be combined with --force, --legacy-record, or --only-if-stopped" >&2
-  exit 2
-fi
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -592,10 +584,6 @@ fm_backlog_record_present "$META" "task record" "$STATE" || {
 }
 TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
-if [ "$ABANDON_RETIREMENT" = 1 ] && [ "$TEARDOWN_META_KIND" != secondmate ]; then
-  echo "error: --abandon-retirement applies only to a secondmate" >&2
-  exit 2
-fi
 if [ "$ONLY_IF_STOPPED" = 1 ]; then
   case "$TEARDOWN_META_KIND" in ship|scout) ;; *) exit 3 ;; esac
   [ -z "$(fm_meta_get "$META" remote_host)" ] || exit 3
@@ -646,11 +634,6 @@ if [ "$TEARDOWN_META_KIND" = secondmate ]; then
     exit 1
   }
   SM_LIVENESS_LOCK="$STATE/.secondmate-liveness-$ID.lock"
-  if [ "$ABANDON_RETIREMENT" = 1 ]; then
-    fm_secondmate_retirement_clear "$ID" || exit 1
-    echo "teardown $ID retirement abandoned; liveness recovery is allowed again"
-    exit 0
-  fi
   fm_secondmate_retirement_mark "$ID" || exit 1
 fi
 TEARDOWN_CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
