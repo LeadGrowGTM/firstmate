@@ -120,11 +120,19 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
+    target=
+    previous=
+    for a in "$@"; do
+      [ "$previous" != -t ] || target=$a
+      previous=$a
+    done
     for a in "$@"; do
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
-        *pane_pid*) [ ! -f "$D/pane-pid" ] || { cat "$D/pane-pid"; exit 0; } ;;
+        *pane_pid*)
+          [ -z "$target" ] || [ ! -f "$D/pane-pid-$target" ] || { cat "$D/pane-pid-$target"; exit 0; }
+          [ ! -f "$D/pane-pid" ] || { cat "$D/pane-pid"; exit 0; } ;;
         *socket_path*) printf '%s/recorded-socket\n' "$D"; exit 0 ;;
         *pane_current_path*)
           if [ -n "${FM_FAKE_CWD_RACE_READY:-}" ]; then
@@ -1377,7 +1385,7 @@ test_secondmate_relaunch_waits_for_exiting_home_process() {
 # home, so its own live crew workers - rooted in a crew copy under the home -
 # were counted as the old supervisor agent and the restart always refused.
 test_secondmate_relaunch_ignores_live_crew_processes() {
-  local dir home out rc=0 crew_pid
+  local dir home out rc=0 crew_pid crew_shell_pid crew_home_pid i
   dir=$(new_case crew-live sm-crew)
   home="$dir/home"
   mkdir -p "$home/config"
@@ -1419,13 +1427,31 @@ test_secondmate_relaunch_ignores_live_crew_processes() {
   ( cd "$dir/smhome/projects/crewcopy" && exec /bin/sleep 60 ) &
   crew_pid=$!
   ROOTED_PIDS+=("$crew_pid")
-  printf '%s\n' "$crew_pid" > "$dir/fake/process-pids"
+  ( cd "$dir/smhome/projects/crewcopy" && /bin/bash -c '
+    cd "$1"
+    /bin/sleep 60 &
+    printf "%s\n" "$!" > "$2"
+    wait
+  ' bash "$dir/smhome" "$dir/crew-home-pid" ) &
+  crew_shell_pid=$!
+  ROOTED_PIDS+=("$crew_shell_pid")
+  printf '%s\n' "$crew_shell_pid" > "$dir/fake/pane-pid-fmses:fm-crew1"
+  for ((i=0; i<100; i++)); do
+    [ ! -s "$dir/crew-home-pid" ] || break
+    /bin/sleep 0.01
+  done
+  [ -s "$dir/crew-home-pid" ] || fail 'the crew command did not start'
+  crew_home_pid=$(cat "$dir/crew-home-pid")
+  ROOTED_PIDS+=("$crew_home_pid")
+  printf '%s\n%s\n%s\n' "$crew_pid" "$crew_shell_pid" "$crew_home_pid" > "$dir/fake/process-pids"
   out=$(run_control "$dir" sm-crew relaunch) || rc=$?
   expect_code 0 "$rc" "a secondmate with live crew should restart cleanly: $out"
   assert_contains "$out" 'relaunched sm-crew' 'the replacement was not reported'
   kill -0 "$crew_pid" 2>/dev/null \
     || fail "the live crew worker did not survive its mate's restart"
-  pass 'a secondmate restarts cleanly while its own crew worker stays live'
+  kill -0 "$crew_home_pid" 2>/dev/null \
+    || fail "the crew command rooted in the mate home did not survive restart"
+  pass 'a secondmate restarts while its crew copy and home-rooted command stay live'
 }
 
 test_secondmate_relaunch_refuses_a_live_home_process() {

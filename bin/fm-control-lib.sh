@@ -420,10 +420,18 @@ EOF
     keep=1
     if [ -n "$pane_pid" ] && fm_control_pid_descends_from "$pid" "$pane_pid"; then
       keep=1
-    elif cwd=$(fm_control_process_cwd "$pid"); then
-      for root in ${roots[@]+"${roots[@]}"}; do
-        case "$cwd" in "$root"|"$root"/*) keep=0; break ;; esac
+    else
+      for root in ${ancestors[@]+"${ancestors[@]}"}; do
+        if fm_control_pid_descends_from "$pid" "$root"; then
+          keep=0
+          break
+        fi
       done
+      if [ "$keep" = 1 ] && cwd=$(fm_control_process_cwd "$pid"); then
+        for root in ${roots[@]+"${roots[@]}"}; do
+          case "$cwd" in "$root"|"$root"/*) keep=0; break ;; esac
+        done
+      fi
     fi
     [ "$keep" = 0 ] || printf '%s\n' "$pid"
   done <<EOF
