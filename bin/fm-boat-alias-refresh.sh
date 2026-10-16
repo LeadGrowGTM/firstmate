@@ -32,24 +32,23 @@
 #     previous block is dropped and the new one placed first;
 #   - one dedicated known-hosts file, ~/.ssh/known_hosts_<alias>, with every
 #     "-" in the alias written as "_".
-# The block records its sandbox id on a "# boat-sandbox <id>" line, names the
-# Boat CLI's own key (~/.ssh/ascii_box_ed25519, created by the first
+# The block records its sandbox id and an endpoint digest, but no address.
+# It names the Boat CLI's own key (~/.ssh/ascii_box_ed25519, created by the first
 # `boat ssh`), pins the host key through HostKeyAlias and that known-hosts file
 # with strict checking, and disables agent forwarding. It stores no secret and
 # touches nothing else in ~/.ssh, including the default known_hosts file.
 #
-# The block holds an address only while Boat reports the sandbox running. When
-# a refresh or a --verify finds the sandbox in any other state, an existing
-# block is parked: it retains a guarded Host entry with no address, and the
-# known-hosts file is deleted. The refresh then refuses.
+# When a refresh or a --verify finds the sandbox in any other state, an existing
+# block is parked: it retains a guarded Host entry without an endpoint digest,
+# and the known-hosts file is deleted. The refresh then refuses.
 #
 # --verify is the pre-connect check fm-on.sh runs for every route. It exits 3,
 # changing nothing and calling no Boat command, when ~/.ssh/config holds no
 # block for the alias. For a Boat alias it reads Boat at that moment and
 # connects nothing itself:
 #   - a sandbox that is not running parks the block and is refused (offline);
-#   - a running sandbox whose endpoint differs from the block, or whose block
-#     is parked, is refused until an explicit refresh;
+#   - a running sandbox whose endpoint digest differs from the block, or whose
+#     block is parked, is refused until an explicit refresh;
 #   - a running sandbox at the block's endpoint whose host key from Boat
 #     differs from the pinned key is refused unchanged; an explicit refresh is
 #     the deliberate way to accept it;
@@ -80,7 +79,7 @@
 #
 # Output of a refresh on success:
 #   sandbox=<id> state=<state>
-#   endpoint: <old host:port|none> -> <host:port>
+#   endpoint: <host:port>
 #   hostkey:  <old fingerprint|none> -> <fingerprint>
 #   hydrated=true waited=<n>s
 #
@@ -136,7 +135,7 @@ check_tools() {
   done
 }
 
-# Prints "<sandbox-id|none> <host:port|none>" for <alias>'s block, or nothing
+# Prints "<sandbox-id|none> <endpoint-hash|none>" for <alias>'s block, or nothing
 # when the config holds no block for it.
 block_fields() { # <alias>
   [ -f "$CONFIG" ] || return 0
@@ -144,11 +143,10 @@ block_fields() { # <alias>
     $0 == begin { on = 1; found = 1; next }
     $0 == end { on = 0; next }
     on && $1 == "#" && $2 == "boat-sandbox" { id = $3 }
-    on && $1 == "HostName" { h = $2 }
-    on && $1 == "Port" { p = $2 }
+    on && $1 == "#" && $2 == "boat-endpoint-sha256" { hash = $3 }
     END {
       if (on) exit 1
-      if (found) print (id == "" ? "none" : id), (h == "" ? "none" : h ":" p)
+      if (found) print (id == "" ? "none" : id), (hash == "" ? "none" : hash)
     }
   ' "$CONFIG" ||
     die "$CONFIG has a '# >>> boat-alias $1 >>>' line with no matching end line; repair that block by hand"
@@ -217,6 +215,13 @@ running() {
   case "$STATE" in ready|idle|running) return 0 ;; *) return 1 ;; esac
 }
 
+endpoint_hash() {
+  local digest
+  command -v shasum >/dev/null 2>&1 || die "shasum is required but does not resolve"
+  digest=$(printf '%s\0%s' "$HOST" "$PORT" | shasum -a 256) || die "could not hash the Boat endpoint"
+  printf '%s\n' "${digest%% *}"
+}
+
 # Sets HOSTKEY ("ssh-ed25519 <base64>"). The host key comes over the Boat API
 # command channel, not over SSH.
 read_hostkey() { # <sandbox-id>
@@ -228,22 +233,19 @@ read_hostkey() { # <sandbox-id>
 }
 
 # Writes <alias>'s block and pin for the running sandbox read into HOST, PORT,
-# and HOSTKEY, and sets OLD_TARGET, OLD_FP, and NEW_FP.
+# and HOSTKEY, and sets OLD_FP and NEW_FP.
 write_alias() { # <sandbox-id> <alias>
   OLD_FP=
   [ ! -f "$KNOWN" ] || OLD_FP=$(ssh-keygen -lf "$KNOWN" 2>/dev/null | awk '{print $2}')
-  OLD_TARGET=$(block_fields "$2")
-  OLD_TARGET=${OLD_TARGET#* }
-  OLD_TARGET=${OLD_TARGET:-none}
+  ENDPOINT_HASH=$(endpoint_hash)
   umask 077
   strip_config "$2"
   printf -v proxy_path '%q' "$SCRIPT_DIR/fm-boat-alias-refresh.sh"
   prepend_block <<EOF
 # >>> boat-alias $2 >>>
 # boat-sandbox $1
+# boat-endpoint-sha256 $ENDPOINT_HASH
 Host $2
-  HostName $HOST
-  Port $PORT
   User user
   IdentityFile $KEY
   IdentitiesOnly yes
@@ -311,10 +313,10 @@ if [ "${1:-}" = --park ]; then
   KNOWN="$SSH_DIR/known_hosts_${ALIAS//-/_}"
   fields=$(block_fields "$ALIAS")
   [ -z "$fields" ] || [ "${fields%% *}" = "$ID" ] || die "Boat alias $ALIAS does not name $ID"
+  park_alias "$ID" "$ALIAS"
   check_tools
   read_sandbox "$ID"
   running && die "Boat sandbox $ID is still running; refusing to park $ALIAS"
-  park_alias "$ID" "$ALIAS"
   exit 0
 fi
 
@@ -338,7 +340,7 @@ if [ "${1:-}" = --verify ]; then
   fields=$(block_fields "$ALIAS")
   [ -n "$fields" ] || exit 3
   ID=${fields%% *}
-  target=${fields#* }
+  saved_hash=${fields#* }
   [ "$ID" != none ] ||
     die "Boat alias $ALIAS names no sandbox, so it cannot be checked; run fm-boat-alias-refresh.sh <sandbox-id> $ALIAS"
   [ "$#" -eq 2 ] || [ "$ID" = "$3" ] || die "Boat alias $ALIAS names $ID rather than configured box $3"
@@ -350,9 +352,10 @@ if [ "${1:-}" = --verify ]; then
     die "Boat sandbox $ID behind $ALIAS is not running (state=${STATE:-unknown}); treating it as offline without connecting"
   fi
   read_hostkey "$ID"
-  [ "$target" != none ] || die "Boat alias $ALIAS is parked; run fm-boat-alias-refresh.sh $ID $ALIAS after resume"
-  [ "$target" = "$HOST:$PORT" ] ||
-    die "Boat sandbox $ID moved from $target to $HOST:$PORT; refusing to connect (run fm-boat-alias-refresh.sh $ID $ALIAS to accept Boat's endpoint deliberately)"
+  [ "$saved_hash" != none ] || die "Boat alias $ALIAS has no endpoint proof; run fm-boat-alias-refresh.sh $ID $ALIAS after resume"
+  current_hash=$(endpoint_hash)
+  [ "$saved_hash" = "$current_hash" ] ||
+    die "Boat sandbox $ID moved from its pinned endpoint; refusing to connect (run fm-boat-alias-refresh.sh $ID $ALIAS to accept Boat's endpoint deliberately)"
   pinned=
   [ ! -f "$KNOWN" ] || pinned=$(awk -v alias="$ALIAS" '$1 == alias { print $2, $3; exit }' "$KNOWN")
   [ "$pinned" = "$HOSTKEY" ] ||
@@ -386,7 +389,7 @@ read_hostkey "$ID"
 write_alias "$ID" "$ALIAS"
 
 printf 'sandbox=%s state=%s\n' "$ID" "$STATE"
-printf 'endpoint: %s -> %s:%s\n' "$OLD_TARGET" "$HOST" "$PORT"
+printf 'endpoint: %s:%s\n' "$HOST" "$PORT"
 printf 'hostkey:  %s -> %s\n' "${OLD_FP:-none}" "$NEW_FP"
 
 start=$(date +%s)

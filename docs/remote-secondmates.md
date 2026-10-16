@@ -476,15 +476,15 @@ To keep a remote second mate off the phone, set `config/claude-remote-control` t
 A Claude second mate launched on a Boat sandbox was listed in the Claude app and answered a message sent from a phone, while the entry from before a stop and resume was still listed and could not be messaged.
 The exact name the app lists the session under was not confirmed there.
 
-To watch the same second mate from a desktop terminal instead, including one inside Orca, open an SSH session to the alias and open its dedicated session with `herdr --session fm-remote`.
-Prefer that over registering the sandbox as a saved SSH host in a desktop app, because its address and host key change at every resume and only the alias is kept current.
+To watch the same second mate from a desktop terminal instead, including one inside Orca, refresh the alias after a resume, then open an SSH session to it and open its dedicated session with `herdr --session fm-remote`.
+Prefer that over registering the sandbox as a saved SSH host in a desktop app, because its address and host key change at every resume and the alias checks Boat before connecting.
 
 ### After every resume
 
 A resume moves the sandbox to a new machine, so its SSH host key changes every time, and its endpoint address and port can change with it.
 Before every connection, [`bin/fm-on.sh`](../bin/fm-on.sh) asks Boat whether the sandbox behind a Boat alias is running and dials only the address and host key Boat confirms at that moment.
-Direct SSH to the alias runs the same check through its guarded SSH config block.
-A stopped sandbox is never dialled: its alias is parked with no address, and the call reads like any other [unavailable transport](#ssh-exit-255-and-unavailable-homes): the remote home is unknown, and nothing is replaced locally.
+Direct SSH to the alias runs the same check through its guarded SSH config block, which stores no address.
+A stopped sandbox is never dialled: its alias has no stored address, a connection attempt parks it, and the call reads like any other [unavailable transport](#ssh-exit-255-and-unavailable-homes): the remote home is unknown, and nothing is replaced locally.
 The same holds for a sandbox still restoring its disk, and for one whose host key from Boat differs from the pin at an unchanged address.
 A sandbox that is running at a new address needs an explicit alias refresh before the connection.
 If the `boat-eng` alias block is missing, `fm-on.sh` recreates it only when Boat confirms the configured box is running and restored.

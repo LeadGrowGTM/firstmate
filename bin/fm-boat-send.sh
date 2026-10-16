@@ -33,7 +33,7 @@
 # identity from the GitHub connection injected on the box by fm-code.
 # Dispatch returns success only after the remote worker confirms fresh status.
 # FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh,
-# and a stop made here parks the boat-prove alias at once through its --verify.
+# and a stop made here parks the boat-prove alias at once through its --park.
 # On transport failure, remote completion is unknown: reconcile the SAME task
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
 # A definite spawn refusal stops a box this send resumed only after the
@@ -129,7 +129,7 @@ STOP_ON_REFUSAL=0
 instance=
 stop_refuse() {
   if [ "$STOP_ON_REFUSAL" -eq 1 ]; then
-    stop_current_instance >/dev/null 2>&1 || die "$1; dispatch refused (current-instance stop unavailable)"
+    stop_current_instance >/dev/null || die "$1; dispatch refused (current-instance stop unavailable)"
     die "$1; dispatch refused (stopped $BOX)"
   fi
   die "$1; dispatch refused"

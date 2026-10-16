@@ -120,7 +120,10 @@ SH
 cat > "$BIN/fm-boat-alias-refresh.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
-[ "$*" != "--park $(cat "$FIXTURES/box-id") boat-prove" ] || { [ ! -e "$FIXTURES/park.fail" ]; exit; }
+if [ "$*" = "--park $(cat "$FIXTURES/box-id") boat-prove" ]; then
+  [ ! -e "$FIXTURES/park.fail" ] || { printf 'error: boat info failed after stop\n' >&2; exit 1; }
+  exit 0
+fi
 [ "$*" = "$(cat "$FIXTURES/box-id") boat-prove" ] || exit 97
 [ ! -e "$FIXTURES/rotate-on-alias" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
 [ ! -e "$FIXTURES/alias.fail" ]
@@ -701,6 +704,7 @@ test_teardown_stop() {
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
   expect_code 1 "$CODE" 'a failed alias park must fail teardown'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'the box was not stopped before the park failed'
+  assert_contains "$OUT" 'boat info failed after stop' 'the API read failure must reach the operator'
   assert_contains "$OUT" 'current-instance Boat stop failed' 'the park failure must reach the operator'
   new_case another-task-remains
   seed_receipt
