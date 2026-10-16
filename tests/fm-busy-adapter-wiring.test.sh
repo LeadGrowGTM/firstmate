@@ -69,7 +69,7 @@ switch (process.env.MODE) {
     await handlers["agent_settled"]({}, ctx);
     await handlers["agent_start"]({}, ctx);
     break;
-  case "turn-end": await handlers["turn_end"]({}, ctx); break;
+  case "turn-end": await handlers["turn_end"]?.({}, ctx); break;
   case "progress": await handlers["codex-native:progress"]({ type: "commandExecution", phase: "completed" }); break;
   case "handlers": console.log(Object.keys(handlers).sort().join(" ")); break;
   default: throw new Error("unknown mode " + process.env.MODE);
