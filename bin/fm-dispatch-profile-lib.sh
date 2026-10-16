@@ -26,6 +26,8 @@ fm_dispatch_realized_effort() {
     rovo:low|rovo:medium|rovo:high|rovo:max) printf '%s' "$effort"; return ;;
     codex:max) [ "$model" != gpt-5.6-luna ] || { printf '%s' "$effort"; return; } ;;
     pi:ultra|pi-signed:ultra) case "$model" in codex-native/?*) printf '%s' "$effort"; return ;; esac ;;
+    commandcode:low|commandcode:high|commandcode:max)
+      case "$model" in deepseek/deepseek-v4.1-flash) printf '%s' "$effort"; return ;; esac ;;
     opencode:*) case "$model:$effort" in
       anthropic/*:high|anthropic/*:max|openai/*:low|openai/*:medium|openai/*:high|openai/*:xhigh) printf '%s' "$effort"; return ;;
     esac ;;

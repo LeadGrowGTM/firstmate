@@ -533,7 +533,7 @@ write_ship_brief() {  # <home> <id> [<contract-extras>]
   local home=$1 id=$2 extras=${3:-}
   mkdir -p "$home/data/$id"
   {
-    printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nExercise the role gate.\n\n## Firstmate spec\nVerify the boundary.\n\n# Definition of done\n'
+    printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nExercise the role gate.\n\n## Firstmate spec\nGoal: Verify the role boundary.\nVerify the boundary.\nOff-limits: Unrelated fixture state.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n\n# Definition of done\n'
     printf 'Delivery contract: mode=no-mistakes%s\nShip branch: fm/%s\n' "$extras" "$id"
   } > "$home/data/$id/brief.md"
 }
@@ -633,12 +633,12 @@ test_promote_gate_on_self_repo() {
   meta="$home/state/promote-r1.meta"
   printf 'window=fm-promote-r1\nkind=scout\nproject=%s\nworktree=/tmp/wt\n' "$ROOT" > "$meta"
   mkdir -p "$home/data/promote-r1"
-  printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nInvestigate a firstmate bug.\n\n## Firstmate spec\nReport findings.\n' \
+  printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nInvestigate a firstmate bug.\n\n## Firstmate spec\nGoal: Report role findings.\nReport findings.\nOff-limits: Unrelated fixture state.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n' \
     > "$home/data/promote-r1/brief.md"
 
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_CONFIG_OVERRIDE="$home/config" \
-    "$PROMOTE" promote-r1 --mode direct-PR --yolo off 2>&1); rc=$?
+    "$PROMOTE" promote-r1 --mode direct-PR --yolo off --goal "Verify the role boundary." --off-limits "Unrelated fixture state." --contracts none 2>&1); rc=$?
   expect_code 1 "$rc" "a user home must not promote a self-repo scout into a publishing ship"
   assert_contains "$out" "promotion refused for promote-r1" "the refusal must name the task"
   assert_contains "$out" "user/operator" "the refusal must name the role"
@@ -648,7 +648,7 @@ test_promote_gate_on_self_repo() {
   if [ -n "$PUB_TARGET" ]; then
     out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
       FM_CONFIG_OVERRIDE="$home/config" \
-      "$PROMOTE" promote-r1 --mode direct-PR --yolo off --upstream-consent "$PUB_TARGET" 2>&1); rc=$?
+      "$PROMOTE" promote-r1 --mode direct-PR --yolo off --goal "Verify the role boundary." --off-limits "Unrelated fixture state." --contracts none --upstream-consent "$PUB_TARGET" 2>&1); rc=$?
     expect_code 0 "$rc" "recorded consent must let the same promotion through (got: $out)"
     assert_grep 'upstream_consent=' "$meta" "the promoted task record must carry the consent"
     assert_grep "upstream-consent=$PUB_TARGET" "$home/data/promote-r1/ship-instructions.md" \

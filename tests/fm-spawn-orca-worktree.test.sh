@@ -258,6 +258,9 @@ test_orca_launch_uses_controlled_tmux_environment() {
 Verify the controlled Orca environment source.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Execute read-only environment checks.
 EOF
     cat > "$case_dir/probe.sh" <<'EOF'
@@ -400,6 +403,9 @@ test_orca_spawn_waits_for_a_slow_pane_before_a_later_failure() {
 Exercise a failed Orca spawn after launch delivery.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Confirm a slow pane still receives the staged launch file before the spawn fails later.
 EOF
   fb=$(make_orca_fakebin "$case_dir")
@@ -448,6 +454,9 @@ test_orca_unrun_launch_file_is_reclaimed() {
 Exercise an Orca pane that never runs the launch command.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Confirm the staged credential file is reclaimed.
 EOF
   fb=$(make_orca_fakebin "$case_dir")
@@ -490,6 +499,9 @@ test_orca_pane_wins_launch_file_race_at_deadline() {
 Exercise an Orca pane that unlinks the launch file at the reclaim deadline.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Confirm the spawn treats the launch as consumed.
 EOF
   fb=$(make_orca_fakebin "$case_dir")
@@ -541,6 +553,9 @@ test_orca_launch_file_delete_failure_keeps_terminal() {
 Exercise an Orca pane that cannot remove the launch file.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Confirm the worker is refused and the terminal stays open.
 EOF
   fb=$(make_orca_fakebin "$case_dir")
@@ -589,6 +604,9 @@ test_orca_interrupted_spawn_reclaims_launch_file() {
 Exercise an interrupted Orca spawn after launch delivery.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Confirm the staged credential file is reclaimed.
 EOF
       fb=$(make_orca_fakebin "$case_dir")
@@ -674,6 +692,9 @@ test_orca_interrupted_spawn_before_send_removes_launch_file() {
 Exercise an Orca spawn interrupted before launch delivery.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Confirm the staged credential file is removed.
 EOF
     fb=$(make_orca_fakebin "$case_dir")
@@ -772,6 +793,9 @@ test_orca_allowlist_without_source_warns() {
 Exercise an Orca allowlist without a configured source.
 
 ## Firstmate spec
+Goal: Exercise the Orca spawn behavior under test.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 Confirm the spawn reports where allowlisted values come from.
 EOF
     fb=$(make_orca_fakebin "$case_dir")

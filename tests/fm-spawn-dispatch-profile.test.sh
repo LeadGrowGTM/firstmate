@@ -80,6 +80,50 @@ enable_dispatch_profile() {
     > "$home/config/crew-dispatch.json"
 }
 
+test_commandcode_model_scoped_effort_survives_dispatch_guard() {
+  local rec id out status effort model supported
+  while read -r model effort supported; do
+    id="profile-commandcode-$effort-$supported"
+    rec=$(make_spawn_case "$id" commandcode "$id")
+    read_case_record "$rec"
+    cat > "$HOME_DIR/data/$id/brief.md" <<'EOF'
+# Task
+## Captain's intent
+Exercise Command Code dispatch effort.
+
+## Firstmate spec
+Goal: Verify model-scoped effort reaches the launch.
+Off-limits: Unrelated fixture state.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+EOF
+    fm_fake_exit0 "$FAKEBIN_DIR" commandcode
+    if [ "$supported" = yes ]; then
+      printf '{"default":{"harness":"commandcode","model":"%s","effort":"%s","reasoning_class":"strong"}}\n' "$model" "$effort" \
+        > "$HOME_DIR/config/crew-dispatch.json"
+    fi
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+      "$id" "$PROJ_DIR" --harness commandcode --model "$model" --effort "$effort")
+    status=$?
+    expect_code 0 "$status" "Command Code model-scoped effort should launch"$'\n'"$out"
+    if [ "$supported" = yes ]; then
+      assert_grep "realized_effort=$effort" "$HOME_DIR/state/$id.meta" "supported effort was dropped"
+      assert_contains "$(cat "$LAUNCH_LOG")" "--effort '$effort'" "supported effort flag missing"
+      assert_grep 'reasoning_class=strong' "$HOME_DIR/state/$id.meta" "configured class missing"
+    else
+      assert_grep 'realized_effort=default' "$HOME_DIR/state/$id.meta" "unsupported effort must realize default"
+      ! grep -q -- '--effort ' "$LAUNCH_LOG" || fail "unsupported effort reached Command Code"
+    fi
+  done <<'EOF'
+deepseek/deepseek-v4.1-flash low yes
+deepseek/deepseek-v4.1-flash high yes
+deepseek/deepseek-v4.1-flash max yes
+deepseek/deepseek-v4.1-flash medium no
+deepseek/deepseek-v4.1-flash xhigh no
+unverified/model high no
+EOF
+  pass "Command Code retains supported model-scoped effort and omits unsupported axes"
+}
+
 test_selected_dispatch_rule_and_class_are_recorded() {
   local rec id out status fingerprint reason=$'codex provider quota\ndeclared strong alternative'
   id="profile-class-receipt"
@@ -3000,6 +3044,7 @@ SH
 test_launch_preserves_inherited_git_config
 test_worker_launch_delivers_role_scope
 test_selected_dispatch_rule_and_class_are_recorded
+test_commandcode_model_scoped_effort_survives_dispatch_guard
 test_resolver_selected_duplicate_condition_launches
 test_unrealizable_reasoning_class_refuses_before_launch
 test_invalid_dispatch_receipt_fields_refuse_before_launch
