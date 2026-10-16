@@ -454,6 +454,34 @@ test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
   pass "fm-control relaunch: a same-harness relaunch replaces the agent in the same endpoint and worktree"
 }
 
+# An ordinary relaunch adopts the live window and restores the label its task
+# recorded, never one recomputed from the home's current short form; a task
+# that recorded none stays unlabeled.
+test_relaunch_restores_the_recorded_crew_label_on_the_live_window() {
+  local dir out rc
+  dir=$(new_case crew-label rl-label)
+  add_ship_task "$dir" rl-label claude
+  printf 'crew_label=nap-crew-rl-label\nbranch=nap/crew/rl-label\n' >> "$dir/home/state/rl-label.meta"
+  mkdir -p "$dir/home/config"
+  printf 'leg\n' > "$dir/home/config/mate-short-name"
+  out=$(run_control "$dir" rl-label relaunch --note "the window lost its label"); rc=$?
+  expect_code 0 "$rc" "a relaunch with a recorded label should succeed"$'\n'"$out"
+  assert_absent "$dir/fake/created-windows" "a relaunch must adopt the live window, not create one"
+  [ "$(cat "$dir/fake/label")" = nap-crew-rl-label ] || fail "a relaunch did not restore the recorded crew label"
+  [ "$(meta_field "$dir" rl-label window)" = "fmses:fm-rl-label" ] || fail "a relaunch changed the addressed window"
+  [ "$(meta_field "$dir" rl-label crew_label)" = nap-crew-rl-label ] || fail "a relaunch changed the recorded crew label"
+  [ "$(meta_field "$dir" rl-label branch)" = nap/crew/rl-label ] || fail "a relaunch changed the recorded branch"
+
+  dir=$(new_case crew-label-legacy rl-nolabel)
+  add_ship_task "$dir" rl-nolabel claude
+  mkdir -p "$dir/home/config"
+  printf 'leg\n' > "$dir/home/config/mate-short-name"
+  out=$(run_control "$dir" rl-nolabel relaunch --note "an older task"); rc=$?
+  expect_code 0 "$rc" "a relaunch without a recorded label should succeed"$'\n'"$out"
+  assert_absent "$dir/fake/label" "a relaunch gave a task without a recorded label a new one"
+  pass "fm-control relaunch: the live window gets back its recorded crew label, and an unlabeled task stays unlabeled"
+}
+
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text() {
   local dir out rc
   dir=$(new_case pending-exit rl43)
@@ -3778,6 +3806,7 @@ test_scheduled_control_preflight_keeps_worker_live
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
+test_relaunch_restores_the_recorded_crew_label_on_the_live_window
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
 test_only_if_idle_refuses_instead_of_interrupting

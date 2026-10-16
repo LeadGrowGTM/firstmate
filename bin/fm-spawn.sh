@@ -4195,6 +4195,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
     T=$RELAUNCH_TARGET
     WT_TARGET=$T
     SES=${T%%:*}
+    # Restore the recorded label on the adopted window, never a recomputed one.
+    if [ "$BACKEND" = tmux ] && [ -n "$CREW_LABEL" ]; then
+      fm_backend_tmux_show_label "$T" "$CREW_LABEL" ||
+        echo "warning: could not show label $CREW_LABEL on window $T; it still shows $W" >&2
+    fi
   elif [ "$BACKEND" = tmux ]; then
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh window for the same task, opened directly in the
