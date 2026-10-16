@@ -9,7 +9,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
-| Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Grok permission mode](#grok-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
+| Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Grok permission mode](#grok-permission-mode), [Muse permission mode](#muse-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
 | Automatic reversible work and numeric goals | [Idle sweep and standing targets](#idle-sweep-and-standing-targets) |
@@ -1015,6 +1015,15 @@ The exception is the Grok counterpart of [Claude permission mode](#claude-permis
 The safety boundary lives in the worker's instructions instead: no merges, deploys, spend, client sends, or destructive actions without the captain's word.
 Client data never goes to a Grok worker.
 The [Grok adapter reference](../.agents/skills/harness-adapters/references/harness/grok.md) records the verified launch shape and the narrower postures that failed.
+
+## Muse permission mode
+
+Every Muse worker launch - crewmates and scouts - runs with `--yolo`, by captain exception (2026-10-16).
+`--yolo` is the single flag that makes a Muse pane viable: Muse ships approval prompts and a filesystem and network sandbox on by default and gates a fresh workspace behind a trust dialog, so the one flag disables approval, disables the sandbox so git and network work, and trusts the workspace so no dialog appears on the fresh per-task worktree (verified reason recorded above the muse launch case in [`bin/fm-spawn.sh`](../bin/fm-spawn.sh)).
+The exception is the Muse counterpart of [Claude permission mode](#claude-permission-mode-configclaude-permission-mode)'s bypass setting and [Grok permission mode](#grok-permission-mode).
+The safety boundary lives in the worker's instructions instead: no merges, deploys, spend, client sends, or destructive actions without the captain's word.
+Client repos, client data, secrets, and the captain's Gmail never go to a Muse worker.
+The [Muse adapter reference](../.agents/skills/harness-adapters/references/harness/muse.md) records the verified launch shape.
 
 ## Claude Remote Control (config/claude-remote-control)
 
