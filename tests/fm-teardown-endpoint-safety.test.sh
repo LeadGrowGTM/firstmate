@@ -1197,6 +1197,34 @@ test_recycled_slot_of_another_clone_is_already_gone() {
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$dir/pool/1/project" "project=$recorded" \
     "kind=ship" "mode=no-mistakes"
+  lock=$(resolve_project_lock "$dir/home" "$recorded") \
+    || fail "could not resolve the ordinary child's recorded project lock"
+  (
+    . "$ROOT/bin/fm-wake-lib.sh"
+    fm_lock_try_acquire "$lock" || exit 1
+    : > "$dir/lock-held"
+    exec sleep 30
+  ) &
+  holder=$!
+  waited=0
+  while [ ! -e "$dir/lock-held" ] && [ "$waited" -lt 100 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  [ -e "$dir/lock-held" ] || fail "the ordinary child's slot lock holder did not start"
+  set +e
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  [ "$rc" -ne 0 ] || fail "ordinary teardown crossed the recorded project's held slot lock"
+  assert_contains "$(cat "$dir/stderr")" "another Treehouse slot allocation or return is in progress" \
+    "ordinary teardown should refuse at the recorded project's slot lock"
+  assert_present "$dir/home/state/$id.meta" "slot-lock refusal removed the ordinary child record"
+  assert_foreign_slot_untouched "$dir" "" "ordinary slot-lock refusal"
   ( cd "$dir/pool/1/project" && exec sleep 30 ) &
   worker=$!
   set +e

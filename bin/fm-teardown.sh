@@ -465,7 +465,7 @@ if [ -f "$META" ] && [ ! -L "$META" ]; then
   TEARDOWN_LOCK_PROJECT=$(fm_meta_get "$META" project)
   if [ "$TEARDOWN_LOCK_KIND" != secondmate ] \
      && [ "$TEARDOWN_LOCK_BACKEND" != orca ] \
-     && fm_treehouse_pool_slot "$TEARDOWN_LOCK_PROJECT" "$TEARDOWN_LOCK_WT"; then
+     && [ -d "$TEARDOWN_LOCK_WT" ]; then
     TREEHOUSE_SLOT_LOCK_REQUIRED=1
     TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$TEARDOWN_LOCK_PROJECT") || {
       echo "REFUSED: cannot resolve the shared Treehouse project lock for ${TEARDOWN_LOCK_PROJECT:-<missing>}; nothing was changed" >&2
@@ -1240,7 +1240,7 @@ CLEANUP_RECOVERY=$TEARDOWN_CLEANUP_RECOVERY
 KIND=$TEARDOWN_META_KIND
 EXPECTED_TREEHOUSE_PROJECT_LOCK=
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] \
-   && fm_treehouse_pool_slot "$PROJ" "$WT"; then
+   && [ -d "$WT" ]; then
   EXPECTED_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ") || {
     echo "REFUSED: cannot resolve the shared Treehouse project lock for ${PROJ:-<missing>}; nothing was changed" >&2
     exit 1
