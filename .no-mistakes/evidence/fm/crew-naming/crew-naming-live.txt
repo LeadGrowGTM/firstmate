@@ -1,26 +1,58 @@
-Fresh worker on configured home
-name=claude label=
-name=fm-crew-proof label=nap-crew-crew-proof
-status_bar=1:nap-crew-crew-proof 
-recorded_branch=nap/crew/crew-proof
-actual_branch=nap/crew/crew-proof
-fm-send response=● CREW_ROUTE_OK
+Real private tmux lab, captured from a running Claude worker
+Session: primary on bin/fm-lab-home.sh private socket
+Current themed status:  1:nap-crew-email-waterfall-order 
+Tmux address: fm-email-waterfall-order
+Window @fm_label: nap-crew-email-waterfall-order
+Actual Git branch: nap/crew/email-waterfall-order
+Steering message moved into handled/: True
 
-Change short form after spawn to chu
-name=claude label=
-name=fm-crew-proof label=nap-crew-crew-proof
-existing_recorded_branch=nap/crew/crew-proof
-new_default_prefix=chu/crew/
+Unconfigured worker status:  2:fm-default-order 
+Unconfigured tmux address: fm-default-order
+Unconfigured brief: Ship branch: fm/default-order
 
-Unset short form for future work
-unset_default_prefix=fm/
-Ship branch: fm/unset-proof
-existing_window_after_unset=nap-crew-crew-proof
+Worker pane capture:
+bash '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/bin/fm-treehouse-pool-check.sh' '/home/
+mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-lab-23849' '/home/mitch/.no-mistakes/workt
+rees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-lab-23849/projects/crew-fixture' '/home/mitch/.no-mistakes/worktre
+es/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-lab-23849/state/.fm-treehouse-pool.1MUhDY' && treehouse get
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-lab-23849/projects/crew-fixture
+$ bash '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/bin/fm-treehouse-pool-check.sh' '/hom
+ ▝▝   ▝▝   ~/…/01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-pool-23849/.treehouse/crew-fixture-20ab81/1/crew-fixture
 
-Project branch override in configured home
-registered_prefix=fix/
-Ship branch: fix/override-proof
 
-Malformed short form refuses new branch selection
-refusal=error: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-crew-naming-38372/config/mate-short-name holds 'Nap'; a short form is 1-16 lowercase letters, digits and inner dashes
-existing_window_after_invalid_config=nap-crew-crew-proof
+❯ : Firstmate operational input waiting: read '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HV
+  BQ/.nm-crew-lab-23849/state/operational-inbox/1792173494-7e1b65146377e8ea.msg' and handle its contents as Firstmate
+  operational input.
+
+  Read 1 file, ran 2 shell commands
+
+● The worker is on branch nap/crew/email-waterfall-order in a disposable treehouse worktree, not the primary checkout. I
+  edited no project files.
+
+  - Path check: pwd -P and git rev-parse --show-toplevel both resolve to /home/mitch/.no-mistakes/worktrees/5782b7185c5e
+    /01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-pool-23849/.treehouse/crew-fixture-20ab81/1/crew-fixture.
+  - Branch: the new branch sits at commit 97ed3b2, the same commit main points to, so it fast-forwards cleanly. There
+    was nothing to commit.
+  - Worktree: clean, and the steering inbox had no pending messages.
+  - Proof: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-lab-23849/data/email-wate
+    rfall-order/proof.md.
+  - Status: I appended done: ready in branch nap/crew/email-waterfall-order to /home/mitch/.no-mistakes/worktrees/5782b7
+    185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.nm-crew-lab-23849/state/email-waterfall-order.status.
+
+✻ Cogitated for 17s · done 1:58 PM
+
+❯ : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'email-waterfall-order.inbox' steering inbox,
+  read and act on each in numeric order, then mv each into its handled/.
+
+  Ran 2 shell commands
+
+● The active Git branch is nap/crew/email-waterfall-order. I edited no files. I read the one waiting message (001.msg)
+  and moved it into handled/.
+
+✻ Baked for 10s · done 2:01 PM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ crew-fixture  ▸ email-waterfall-order  ◆ Sonnet 5.5  ⎇ nap/crew/email-waterfall-order  ctx 5%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
