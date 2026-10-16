@@ -41,10 +41,17 @@
 #              `missing` is put through the control plane's per-backend absence
 #              proof (fm_control_endpoint_absence_verdict) before anything is
 #              claimed about it, because `missing` also covers an endpoint that
-#              is merely unreachable from this seat. The proof's owner defines
-#              the tmux socket/process evidence and Herdr session recheck.
-#              Proven gone reports `endpoint-gone`; surviving endpoints take
-#              the ordinary agent-state path, and unproven absence refuses.
+#              is merely unreachable from this seat. Herdr proves it by
+#              re-reading the session the record names, and tmux by reading the
+#              server the endpoint lived on through its own socket: proven gone
+#              reports `endpoint-gone` rather than `already-stopped`, because
+#              the endpoint this verb normally preserves did not survive; a
+#              Herdr pane that turns out to be there and idle is the ordinary
+#              `already-stopped`; one whose agent is back takes the ordinary
+#              interrupt-then-exit path. Anything the proof cannot establish -
+#              including a tmux window still held by a live server this process
+#              does not address - REFUSES, because this verb will not claim a
+#              stop it cannot see.
 #              --only-if-idle refuses instead of interrupting, exactly as for
 #              relaunch below: unless the semantic busy-state verdict reads
 #              exactly idle, the agent is left running and the command exits
@@ -55,9 +62,15 @@
 #              still exists - on the same or a newly chosen
 #              harness/model/effort - so switching harness is one ordinary use
 #              of this verb. When the recorded endpoint is instead proven gone -
-#              a tmux window/server or Herdr pane destroyed in churn - the
-#              launch owner recreates it in that worktree and republishes its
-#              binding. Both callers use fm_control_endpoint_absence_verdict.
+#              a Herdr pane or workspace destroyed in churn, or a tmux window
+#              whose server died - the launch owner re-creates one in that
+#              worktree (in the herdr session the record names, or in this
+#              process's tmux container session), and the task's record
+#              rebinds to it; that is how a task whose terminal was destroyed
+#              is reclaimed by the home that owns it, rather than being
+#              stranded with a parked approval nobody can answer. An endpoint
+#              whose absence cannot be proven refuses, for the reason `exit`
+#              gives above.
 #              An explicit `default` model or effort clears that
 #              axis for the replacement. With no explicit axis, a secondmate
 #              re-resolves its durable config/secondmate-harness pin (harness
@@ -412,12 +425,6 @@ fm_control_harness_supported "$HARNESS" \
   || die "task $ID records harness '${RECORDED_HARNESS:-none}', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command"
 
 fm_backend_validate "$BACKEND" || exit 1
-if [ "$BACKEND" = tmux ]; then
-  CONTROL_CALLER_TMUX=${TMUX-}
-  CONTROL_CALLER_TMUX_PANE=${TMUX_PANE-}
-  fm_backend_source tmux || exit 1
-  fm_backend_tmux_bind_record "$META" || die "task $ID has malformed tmux socket identity"
-fi
 
 # --- shared helpers ---------------------------------------------------------
 
@@ -699,7 +706,8 @@ do_exit() {
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
       # - and report what that proof actually established, never more.
-      absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" "$META")
+      absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" \
+        "$(fm_meta_get "$META" tmux_socket)" "$(fm_meta_get "$META" spawn_gen)")
       case "${absence%%$'\t'*}" in
         gone)
           # Proven gone, so the agent that lived in it went with it: exit's
@@ -1237,32 +1245,6 @@ do_relaunch() {
     SM_LIVENESS_LOCK="$STATE/.secondmate-liveness-$ID.lock"
   fi
   safe_checkpoint
-  state=$(agent_state)
-  case "$state" in
-    alive|dead|missing) ;;
-    *) die "task $ID's endpoint reads '$state'; cannot prove the old agent gone; nothing was changed" ;;
-  esac
-  if [ "$state" = dead ]; then
-    local dead_process_verdict
-    dead_process_verdict=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$T" "$META")
-    [ "${dead_process_verdict%%$'\t'*}" = clear ] \
-      || die "task $ID's dead endpoint is not safe to relaunch; cannot prove the old agent gone: ${dead_process_verdict#*$'\t'}"
-  fi
-  if [ "$KIND" != secondmate ]; then
-    local project custody_lock custody_status=0
-    project=$(fm_meta_get "$META" project)
-    custody_lock=$(fm_treehouse_project_lock_path "$project") \
-      || die "cannot resolve the shared project lock for task $ID"
-    fm_lock_try_acquire "$custody_lock" \
-      || die "another allocation or cleanup holds task $ID's shared project lock"
-    fm_worktree_custody_check "$STATE" "$META" "$WT" "$ID" || custody_status=1
-    if fm_treehouse_pool_slot "$project" "$WT"; then
-      fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
-      case "$FM_TREEHOUSE_SLOT_OWNER" in mine|absent) ;; *) custody_status=1 ;; esac
-    fi
-    fm_lock_release "$custody_lock"
-    [ "$custody_status" = 0 ] || die "task $ID's worktree custody is disputed; nothing was stopped"
-  fi
   cp -p "$META" "$META_PRIOR" || die "could not preserve task $ID's durable record before relaunching"
   RELAUNCH_ACTIVE=1
   journal_write checkpoint "${CHECKPOINT_LINES[@]}" "$note_line"
@@ -1289,8 +1271,6 @@ do_relaunch() {
   fi
   local spawn_status=0
   FM_SPAWN_OUTCOME_FILE="$child_outcome" FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
-    FM_CONTROL_CALLER_TMUX="${CONTROL_CALLER_TMUX-}" \
-    FM_CONTROL_CALLER_TMUX_PANE="${CONTROL_CALLER_TMUX_PANE-}" \
     "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null || spawn_status=$?
   if [ -n "$child_outcome" ]; then
     if jq -e '.launch_sent == true' "$child_outcome" >/dev/null 2>&1; then
@@ -1314,9 +1294,6 @@ do_relaunch() {
     if fm_backend_validate_task_endpoint "$META" "$ID" >/dev/null \
        && [ -n "$FM_BACKEND_VALIDATED_TARGET" ]; then
       T=$FM_BACKEND_VALIDATED_TARGET
-      if [ "$BACKEND" = tmux ]; then
-        fm_backend_tmux_bind_record "$META" || die "task $ID has malformed replacement tmux socket identity"
-      fi
     else
       die "the replacement agent for $ID was launched, but task $ID's republished record no longer passes endpoint validation (the refusal above names the row), so this transaction cannot say which endpoint to confirm it on; reconcile $META before any further control action"
     fi

@@ -303,8 +303,9 @@ fm_control_backend_state_verified() {  # <backend>
 
 # fm_control_endpoint_absence_verdict: the ONE owner of the per-backend proof
 # that an endpoint reading `missing` is actually GONE rather than merely
-# unreachable from this seat. Call it only for a `missing` raw state. Tmux and
-# Herdr callers pass the task record.
+# unreachable from this seat. Call it only for a `missing` raw state. A tmux
+# caller passes the record's `tmux_socket=` and `spawn_gen=` values; every other
+# backend ignores them.
 #
 # Prints "<verdict>\t<reason>" - always exactly one TAB, so a caller splits
 # unambiguously with ${raw%%$'\t'*} and ${raw#*$'\t'}. The reason is empty
@@ -330,35 +331,22 @@ fm_control_backend_state_verified() {  # <backend>
 # reading:
 #   herdr CAN prove it. Every read goes through fm_backend_herdr_cli, which
 #     passes `--session <session>`, so the recheck starts and reads the session
-#     the RECORD names, through that session's own socket. A missing pane also
-#     needs a worktree process inventory before absence is proven.
-#   tmux requires socket and server attribution plus a same-user process-cwd
-#     inventory proving no process remains rooted in the recorded worktree.
-#     A legacy record without a socket must pass the same conservative proof.
+#     the RECORD names, through that session's own socket. The answer is about
+#     the task's endpoint and nothing else.
+#   tmux CAN prove it only when every relevant socket is silent or answers
+#     with a server newer than the recorded endpoint, and every live tmux
+#     server process is accounted for by an answering socket.
 #
 # Both control-plane callers share this one implementation so the proof cannot
 # drift into two answers for the same endpoint.
-fm_control_endpoint_absence_verdict() {  # <backend> <target> [<meta-file>]
-  local backend=${1-} target=${2-} meta=${3-} socket spawn_gen worktree rooted
+fm_control_endpoint_absence_verdict() {  # <backend> <target> [<tmux-socket>] [<spawn-gen>]
+  local backend=${1-} target=${2-} socket=${3-} spawn_gen=${4-}
   local sock candidates probe kind pid started epoch process_inventory process_type process_pid found i
   local -a answering_pids=() answering_sockets=() server_pids=() tmux_pids=()
   fm_backend_source "$backend" \
     || { printf 'unproven\tbackend %s could not be loaded to prove anything about that endpoint' "'$backend'"; return 0; }
   case "$backend" in
     tmux)
-      if [ ! -f "$meta" ] || [ -L "$meta" ] || [ ! -r "$meta" ]; then
-        printf 'unproven\ttmux absence requires a readable regular task record'
-        return 0
-      fi
-      if grep -q '^tmux_socket=' "$meta"; then
-        socket=$(fm_backend_meta_exact_value "$meta" tmux_socket) || socket=
-        case "$socket" in /*) ;; *) printf 'unproven\tthe recorded tmux socket identity is malformed'; return 0 ;; esac
-        case "$socket" in *[$'\n\r\t']*) printf 'unproven\tthe recorded tmux socket identity is malformed'; return 0 ;; esac
-      else
-        socket=
-      fi
-      spawn_gen=$(fm_meta_get "$meta" spawn_gen)
-      worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
       case "$target" in
         *:*:*|'':*|*:'') printf 'unproven\ttmux target %s is not an exact session:window address' "'$target'"; return 0 ;;
         *:*) ;;
@@ -432,13 +420,7 @@ EOF
         printf 'unproven\ttmux process %s exists while no socket answers' "${tmux_pids[0]}"
         return 0
       fi
-      if ! rooted=$(fm_agent_worktree_processes "$worktree"); then
-        printf 'unproven\tprocess absence in the recorded worktree could not be proven'
-      elif [ -n "$rooted" ]; then
-        printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
-      else
-        printf 'gone\tno live process is rooted in the recorded worktree'
-      fi
+      printf 'gone\t'
       ;;
     herdr)
       # Start the RECORDED session's server (only the server - nothing is
@@ -447,20 +429,7 @@ EOF
       case "$(fm_backend_herdr_endpoint_absence_recheck "$target")" in
         dead) printf 'dead\t' ;;
         alive) printf 'alive\t' ;;
-        missing)
-          if [ ! -f "$meta" ] || [ -L "$meta" ] || [ ! -r "$meta" ]; then
-            printf 'unproven\therdr absence requires a readable regular task record'
-            return 0
-          fi
-          worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
-          if ! rooted=$(fm_agent_worktree_processes "$worktree"); then
-            printf 'unproven\tprocess absence in the recorded worktree could not be proven'
-          elif [ -n "$rooted" ]; then
-            printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
-          else
-            printf 'gone\tno live process is rooted in the recorded worktree'
-          fi
-          ;;
+        missing) printf 'gone\t' ;;
         *) printf 'unproven\tthe recorded herdr session'"'"'s server could not be started, or its pane could not be classified once it was running' ;;
       esac
       ;;
@@ -468,39 +437,6 @@ EOF
       printf 'unproven\tbackend %s has no recovery-grade classifier, so absence cannot be proven on it at all' "'$backend'"
       ;;
   esac
-}
-
-fm_control_dead_endpoint_process_verdict() {
-  local backend=$1 target=$2 meta=$3 worktree pane_pid='' pane_comm rooted
-  case "$backend" in
-    tmux|herdr) ;;
-    *) printf 'clear\t'; return 0 ;;
-  esac
-  if [ ! -f "$meta" ] || [ -L "$meta" ] || [ ! -r "$meta" ]; then
-    printf 'unproven\tprocess absence requires a readable regular task record'
-    return 0
-  fi
-  fm_backend_source "$backend" || { printf 'unproven\t%s backend could not be loaded' "$backend"; return 0; }
-  worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
-  if [ "$backend" = tmux ]; then
-    pane_pid=$(tmux display-message -p -t "$target" '#{pane_pid}' 2>/dev/null) || pane_pid=
-    case "$pane_pid" in ''|*[!0-9]*) pane_pid= ;; esac
-    if [ -n "$pane_pid" ]; then
-      pane_comm=$(ps -p "$pane_pid" -o comm= 2>/dev/null) || pane_comm=
-      [ "$(fm_agent_process_classify_name "$pane_comm")" = shell ] || pane_pid=
-    fi
-  elif fm_backend_herdr_parse_target "$target"; then
-    pane_pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
-      | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
-        'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pane_pid=
-  fi
-  if ! rooted=$(fm_agent_worktree_processes "$worktree" "$pane_pid"); then
-    printf 'unproven\tprocess absence in the recorded worktree could not be proven'
-  elif [ -n "$rooted" ]; then
-    printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
-  else
-    printf 'clear\t'
-  fi
 }
 
 # A .claude/settings.local.json that never invokes fm-busy-event.sh was not

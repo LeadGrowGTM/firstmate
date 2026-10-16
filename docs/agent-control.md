@@ -98,13 +98,10 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 
 ### Reclaiming a task whose endpoint is gone
 
-A tmux window or server, or a Herdr pane or workspace, can disappear during a session restart.
+A Herdr pane or workspace can be destroyed out from under a live task by churn or a session restart, and a tmux window goes with its server when that server dies.
 The task's worktree, branch, commits, and uncommitted changes all survive that; only its terminal does not.
 
-Tmux and Herdr support preserved-copy reclaim through the same relaunch command.
-[Pool custody checks](configuration.md#worktree-pool-guard) also apply before allocation and relaunch under the project allocation lock.
-
-Two endpoint verdicts can license a relaunch after the recorded worktree's process check also clears:
+Two endpoint verdicts are agent-free, and both license a relaunch:
 
 - `dead` - the endpoint exists and confidently holds no agent. It is **adopted**, so the task keeps its exact recorded address.
 - gone, **proven** - there is no endpoint and therefore no agent, and it cannot be adopted, so the launch owner **creates one fresh endpoint in the recorded worktree** and the republished record rebinds the task to it.
@@ -114,7 +111,7 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
 
 - **Herdr can prove it.** Every read goes through the adapter's `--session <session>` CLI, so the recheck starts and reads the session the *record* names, through that session's own socket.
   It starts that server (only the server: no workspace and no tab are created) and **re-reads the recorded pane**.
-  `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; a second `missing` proves the pane itself did not survive, but reclaim still requires a readable process inventory showing no live process rooted in the recorded worktree ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
+  `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; only a second `missing` proves the pane itself did not survive ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
   That server start is a real side effect, and the parenthetical above does not cover it: when the recorded session's server no longer exists at all, the probe stands a fresh empty one up in order to ask, and nothing afterwards uses it.
   So in that state `exit` - which otherwise reads as a read-only inspection - leaves an idle herdr server behind.
 - **tmux proves server death.** A tmux task records `tmux_socket=`, the socket path its server reported at spawn.
@@ -124,8 +121,6 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
   The proof also checks every live tmux server process owned by the user: each must match the `#{pid}` of an answering socket, including the recorded socket and all candidate-directory sockets.
   A live server with an unlinked socket, a server that is too old, or a server process that cannot be reconciled with the socket reads refuses recovery.
   When no socket answers, any tmux process still visible also blocks recovery.
-  The same-user process inventory must also prove no process has its cwd in the recorded worktree or a subdirectory; an unreadable possible worker or process inventory refuses.
-  Linux reads kernel cwd links, and macOS reads a bounded cwd-only `lsof` inventory.
   A renamed session or moved window on a live server is never proof of server death.
   The re-created window opens in the recovering process's tmux container session, and the republished record carries the new window and its socket.
   Until that record is published the new window is the relaunch's own, so a refused attempt closes it rather than leaving it to collide with a retry.
@@ -158,16 +153,6 @@ The stray pane holds a bare shell - the harness is not delivered until after pub
 That self-heals only when the retry resolves the *same* workspace, which the placement rule above does not guarantee.
 The worktree and the task's records are unaffected either way.
 
-### Retiring a stale pool claim
-
-A record for a proven-stopped worker can be retired through the records-only `--retire-claim` teardown path.
-The original metadata is archived with the task material; the worktree and remaining task artifacts, including hooks and the steering inbox, stay in place.
-Another holder's slot marker remains untouched.
-Retirement refuses a surviving process under the copy or recorded task temp root, an attributable active validation run, and a same-id marker whose home cannot be proved to match.
-Unfinished work remains in its copy and branch; when the backlog row can be updated, retirement requeues it with a preserved-work note while preserving a later Done answer.
-`bin/fm-teardown.sh`'s header and help own the command, proof requirements, locking, and incompatible options.
-This retirement closes the task's reservation; ordinary teardown continues to enforce landed-work checks whenever it owns and returns the copy.
-
 ### Failure and rollback
 
 - A refusal **before** the agent is stopped leaves the durable record and the instructions byte-identical.
@@ -195,8 +180,8 @@ This retirement closes the task's reservation; ordinary teardown continues to en
 - An ambiguous or unreadable endpoint state refuses.
   Only a positively classified state acts.
 - `exit`'s composer-empty check, above, is itself a fail-closed boundary that `relaunch` inherits by stopping the old agent through `exit`.
-- `fm-spawn --relaunch` independently refuses unless the endpoint is positively agent-free - either a `dead` endpoint that survives, or a tmux or Herdr endpoint proven gone by the absence proof above - so a replacement can never join a live agent.
-  An `alive`, `ambiguous`, or `unreadable` verdict all refuse, and so does any endpoint whose absence is not provable, including a surviving process in a missing tmux endpoint's recorded copy; absence is claimed only from positive evidence of it.
+- `fm-spawn --relaunch` independently refuses unless the endpoint is positively agent-free - either a `dead` endpoint that survives, or a Herdr or tmux endpoint proven gone by the absence proof above - so a replacement can never join a live agent.
+  An `alive`, `ambiguous`, or `unreadable` verdict all refuse, as does a `missing` endpoint whose absence cannot be proven; absence is claimed only from positive evidence of it.
   It also requires the shell to be in the recorded worktree: every backend but Orca (which owns its own task worktree with no current-path probe) gets one explicit `cd` to the recorded path, then a pre-launch path read that refuses before any harness starts unless it confirms the endpoint is sitting in the recorded copy.
 
 ## Capability matrix
@@ -226,5 +211,5 @@ The portable regression [`tests/fm-scheduled-worker.test.sh`](../tests/fm-schedu
 ## Verification
 
 - `tests/fm-control.test.sh` - the adapter contract for its verified-harness lane (adapters outside the lane pin their control mechanics in their own harness suites), the backend capability matrix, exact-id scoping, the closed verb list, the busy, idle, dead, and idempotent lifecycle cases, and marker non-regression, all against a stubbed session provider.
-- `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, the `--only-if-idle` refusal, checkpoint refusals, rollback after a failed launch, and the endpoint-absence proof both verbs share - the Herdr reclaim of a destroyed endpoint, and tmux reclaim with dirty work preserved, plus refusal on surviving processes or unreadable evidence.
+- `tests/fm-control-relaunch.test.sh` - the relaunch transaction: identity preservation, harness switching, the progress note, the `--only-if-idle` refusal, checkpoint refusals, rollback after a failed launch, and the endpoint-absence proof both verbs share - Herdr reclaim of a destroyed endpoint, tmux reclaim after server death, and refusal when tmux absence remains unproven.
 - `tests/fm-control-herdr-smoke.test.sh` - the second state-verified backend against the real herdr binary, on an isolated throwaway lab session.

@@ -1222,10 +1222,7 @@ apply_pending_retained_artifact() {  # <task-id>
   [ -e "$marker" ] || [ -L "$marker" ] || return 0
   fm_backlog_close_marker_validate "$marker" "$DATA" "$id" "$STATE" \
     || { report_retained_artifact_failure "$id" "$marker"; return 1; }
-  case "$FM_BACKLOG_CLOSE_VALIDATED_MODE" in
-    retain|retire-retain) ;;
-    *) return 0 ;;
-  esac
+  [ "$FM_BACKLOG_CLOSE_VALIDATED_MODE" = retain ] || return 0
   args=("${FM_BACKLOG_CLOSE_VALIDATED_ARGS[@]+"${FM_BACKLOG_CLOSE_VALIDATED_ARGS[@]}"}")
   case "${args[0]-}" in
     --pr|--report)
