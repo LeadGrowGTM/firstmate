@@ -236,8 +236,8 @@ path_forbidden() {
     part=${part,,}
     case "$part" in
       data|.ssh|.aws|.azure|.kube|.gnupg|.docker|gcloud|gh|1password|..|.) return 0 ;;
-      *chrome*|*chromium*|*edge*|*msedge*|*firefox*|*mozilla*|*brave*|*opera*|*vivaldi*|*safari*|*profile*|*cookies*|*history*|*login*data*|*local*state*|*keyring*|*keychain*) return 0 ;;
-      .env*|*.env|*.env.*|*dotenv*|*cert*|*crt*|*pem*|*key*|*p12*|*pfx*|*jks*|*keystore*|*.cer|*.der|*.p8|*.p7b|*.p7c|*.pub|*token*|*oauth*|*credential*|*secret*|*auth*|*cookie*|*password*|*passwd*|.netrc|.npmrc|id_rsa|id_ed25519|id_ecdsa) return 0 ;;
+      *chrome*|*chromium*|*edge*|*firefox*|*mozilla*|*brave*|*opera*|*vivaldi*|*safari*|*profile*|*cookies*|*history*|*login*data*|*local*state*|*keyring*|*keychain*) return 0 ;;
+      .env*|*.env|*.env.*|*dotenv*|*cert*|*crt*|*pem*|*key*|*p12*|*pfx*|*jks*|*.cer|*.der|*.p8|*.p7b|*.p7c|*.pub|*token*|*oauth*|*credential*|*secret*|*auth*|*cookie*|*password*|*passwd*|.netrc|.npmrc|id_rsa|id_ed25519|id_ecdsa) return 0 ;;
     esac
     case "$p" in
       */*) p=${p#*/} ;;
