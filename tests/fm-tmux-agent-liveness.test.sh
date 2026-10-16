@@ -252,11 +252,29 @@ comms_classify_agent "$SESSION:launcher" \
   || fail "the launcher's harness child must be visible in the foreground process group"
 pass "tmux liveness: a launcher whose own identity reads as a bare shell classifies alive from its harness child"
 
-# --- an idle shell is still confidently dead --------------------------------
+for builtin_mode in busy fd; do
+  builtin_pid=$(fm_test_active_tmux_shell "$SOCKET" "builtin-$builtin_mode" task \
+    "$LAB/wt" "$builtin_mode" "$LAB/$builtin_mode") \
+    || fail "could not start a real interactive builtin $builtin_mode"
+  wait_for_state "builtin-$builtin_mode:task" ambiguous \
+    || fail "an active interactive builtin $builtin_mode was classified dead"
+  kill -0 "$builtin_pid" || fail "the active builtin $builtin_mode disappeared"
+  [ ! -e "$LAB/$builtin_mode/finished" ] || fail 'the unrelated-FD wait ended before its verdict'
+  "$REAL_TMUX" -L "$SOCKET" kill-session -t "=builtin-$builtin_mode" \
+    || fail "could not close the private builtin $builtin_mode fixture"
+done
+pass 'tmux liveness: real busy builtin loops and unrelated-FD waits stay ambiguous'
 
-wait_for_state "$SESSION:idle" dead \
-  || fail "an idle shell pane must classify dead"
-pass "tmux liveness: an idle shell pane classifies dead"
+# --- an idle shell needs positive terminal-input proof ----------------------
+
+idle_pid=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$SESSION:idle" '#{pane_pid}')
+if fm_test_terminal_read_available "$idle_pid"; then
+  wait_for_state "$SESSION:idle" dead || fail "a proven terminal-input shell must classify dead"
+  pass "tmux liveness: a shell with terminal-input proof classifies dead"
+else
+  wait_for_state "$SESSION:idle" ambiguous || fail "an unproven shell must stay ambiguous"
+  echo 'skip - positive idle-shell proof unavailable on this kernel; ambiguous refusal verified'
+fi
 
 # --- a harness-named BACKGROUND process must not fake an agent --------------
 # Scoping to the foreground process group is what prevents this false alive; a
@@ -273,11 +291,14 @@ done
 [ -n "$bg_pid" ] || fail "the background harness-named process never started"
 kill -0 "$bg_pid" 2>/dev/null \
   || fail "the background harness-named process is not running, so this case would prove nothing"
-wait_for_state "$SESSION:background" dead \
-  || fail "a pane whose only harness-named process is backgrounded must classify dead"
+background_pid=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$SESSION:background" '#{pane_pid}')
+background_state=ambiguous
+if fm_test_terminal_read_available "$background_pid"; then background_state=dead; fi
+wait_for_state "$SESSION:background" "$background_state" \
+  || fail "a background harness must not supply foreground attribution"
 kill -0 "$bg_pid" 2>/dev/null \
   || fail "the background harness-named process died during the check, so this case proves nothing"
-pass "tmux liveness: a harness-named background process in an idle pane still classifies dead"
+pass "tmux liveness: a background harness never supplies foreground attribution"
 
 # --- an absent window never inherits tmux's active-window fallback ----------
 # tmux answers a display-message for an absent target from the CLIENT's active

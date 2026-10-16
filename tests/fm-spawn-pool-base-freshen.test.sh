@@ -13,6 +13,20 @@ set -u
 
 TMP_ROOT=$(fm_test_tmproot fm-spawn-pool-base-freshen)
 
+make_private_process_inventory() {  # <fakebin>
+  cat > "$1/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] && [ "$#" -eq 4 ]; then
+  [ "${FM_TEST_PS_FAIL:-0}" = 0 ] || exit 1
+  printf '%s\n' "$PPID"
+  [ -z "${FM_TEST_PROCESS_PIDS:-}" ] || cat "$FM_TEST_PROCESS_PIDS"
+else
+  exec /bin/ps "$@"
+fi
+SH
+  chmod +x "$1/ps"
+}
+
 make_case() {
   local name=$1 id=$2 default=${3:-main} case_dir home project origin pool publisher fakebin initial
   case_dir="$TMP_ROOT/$name"
@@ -22,6 +36,7 @@ make_case() {
   pool="$case_dir/pool"
   publisher="$case_dir/publisher"
   fakebin=$(make_spawn_fakebin "$case_dir/fake")
+  make_private_process_inventory "$fakebin"
 
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
   printf 'codex\n' > "$home/config/crew-harness"
@@ -164,7 +179,7 @@ test_linked_spawning_home_rejects_primary_before_refresh() {
 }
 
 test_stale_pool_base_refreshes_before_branching() {
-  local rec id out status current branch_head
+  local rec id out status current branch_head repeat_pool
   id='pool-current-base-r1'
   rec=$(make_case current-base "$id")
   read_case_record "$rec"
@@ -185,6 +200,9 @@ test_stale_pool_base_refreshes_before_branching() {
 
   id='pool-current-base-repeat-r1'
   fm_test_spawn_brief "$HOME_DIR" "$id"
+  repeat_pool="$CASE_DIR/pool-repeat"
+  git -C "$PROJECT_DIR" worktree add --quiet --detach "$repeat_pool" "$current"
+  POOL_DIR=$repeat_pool
   out=$(run_spawn "$id" --mode no-mistakes --yolo off)
   status=$?
   expect_code 0 "$status" "repeating the base refresh should be idempotent"
@@ -222,6 +240,7 @@ make_originless_case() {  # <name> <id>
   project="$case_dir/project"
   pool="$case_dir/pool"
   fakebin=$(make_spawn_fakebin "$case_dir/fake")
+  make_private_process_inventory "$fakebin"
 
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
   printf 'codex\n' > "$home/config/crew-harness"
@@ -469,6 +488,7 @@ make_submodule_case() {  # <name> <id>
   publisher="$case_dir/publisher"
   sub="$case_dir/sub-origin"
   fakebin=$(make_spawn_fakebin "$case_dir/fake")
+  make_private_process_inventory "$fakebin"
 
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
   printf 'codex\n' > "$home/config/crew-harness"
@@ -528,6 +548,8 @@ strand_submodule_pin_via_spawn() {  # <seed-id>
     || fail "the first spawn did not move the pooled base across the moved submodule pin"
   [ "$(git -C "$POOL_DIR/ui" rev-parse HEAD)" = "$SUBPIN1" ] \
     || fail "the first spawn did not strand the submodule on the pin the old base recorded"
+  mkdir -p "$CASE_DIR/retired"
+  mv "$HOME_DIR/state/$id.meta" "$CASE_DIR/retired/$id.meta"
 }
 
 test_stale_submodule_pin_explains_itself() {
@@ -689,6 +711,500 @@ lay_out_as_pool_slot() {
   SLOT_CLAIM="$slot_root/1/.fm-slot-owner"
 }
 
+test_pool_custody_refuses_unreadable_nested_registry() {
+  local mode=${1:-file} rec id first sibling descendant registry blocked_path restore_mode out status before_head before_reflog
+  id="pool-nested-registry-$mode"
+  rec=$(make_case "nested-registry-$mode" "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  first="$CASE_DIR/first-home"
+  sibling="$CASE_DIR/later-home"
+  descendant="$CASE_DIR/grandchild-home"
+  mkdir -p "$first/state" "$first/data" "$sibling/state" "$sibling/data" \
+    "$descendant/state" "$descendant/data"
+  printf '%s\n' \
+    "- first - fixture (home: $first; scope: test; projects: project; added 2026-01-01)" \
+    "- later - fixture (home: $sibling; scope: test; projects: project; added 2026-01-01)" \
+    > "$HOME_DIR/data/secondmates.md"
+  registry="$first/data/secondmates.md"
+  printf '%s\n' "- child - fixture (home: $descendant; scope: test; projects: project; added 2026-01-01)" \
+    > "$registry"
+  : > "$sibling/data/secondmates.md"
+  fm_write_meta "$descendant/state/prior-worker.meta" \
+    'window=firstmate:fm-prior-worker' 'endpoint_task_id=prior-worker' \
+    "worktree=$POOL_DIR" "project=$PROJECT_DIR" 'kind=scout'
+  blocked_path=$registry
+  restore_mode=600
+  if [ "$mode" = parent ]; then
+    blocked_path="$first/data"
+    restore_mode=700
+  fi
+  chmod 000 "$blocked_path"
+  if ( : < "$registry" ) 2>/dev/null; then
+    chmod "$restore_mode" "$blocked_path"
+    echo "skip - current user can read a registry with mode-000 $mode"
+    return 0
+  fi
+  before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  before_reflog=$(git -C "$POOL_DIR" reflog)
+  out=$(FM_FAKE_PANE_LOG="$CASE_DIR/pane.log" FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" \
+    run_spawn "$id" --scout)
+  status=$?
+  chmod "$restore_mode" "$blocked_path"
+  [ "$status" -ne 0 ] || fail 'spawn accepted custody after omitting a registered grandchild'
+  assert_contains "$out" 'local Firstmate registry' 'spawn did not name the unreadable registry'
+  assert_absent "$HOME_DIR/state/$id.meta" 'unreadable registry refusal published a new task record'
+  assert_present "$descendant/state/prior-worker.meta" 'unreadable registry refusal removed the prior reservation'
+  assert_absent "$SLOT_CLAIM" 'unreadable registry refusal claimed the copy'
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] \
+    || fail 'unreadable registry refusal refreshed the copy'
+  [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] \
+    || fail 'unreadable registry refusal changed the reflog'
+  [ ! -s "$CASE_DIR/launch.log" ] || fail 'unreadable registry refusal launched a worker'
+  if [ -f "$CASE_DIR/pane.log" ]; then
+    assert_no_grep 'treehouse get' "$CASE_DIR/pane.log" 'unreadable registry refusal happened after acquisition'
+  fi
+  pass "spawn refuses an unreadable registry $mode despite a later readable sibling"
+}
+
+test_pool_custody_refuses_before_refresh_or_claim() {
+  local variant rec id other other_home recorded before_head before_remote before_reflog before_claim out status launch_log pane_log
+  for variant in same-home sibling-home unreadable-sibling alias unsafe-metadata other-claim; do
+    id="pool-custody-${variant}-r1"
+    other="prior-${variant}-r1"
+    rec=$(make_case "custody-$variant" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    other_home=$HOME_DIR
+    recorded=$POOL_DIR
+    case "$variant" in
+      sibling-home|unreadable-sibling)
+        other_home="$CASE_DIR/secondmate-home"
+        mkdir -p "$other_home/state" "$other_home/data" "$other_home/config"
+        printf '%s\n' "- mate - fixture (home: $other_home; scope: test; projects: project; added 2026-01-01)" \
+          > "$HOME_DIR/data/secondmates.md"
+        ;;
+      alias)
+        ln -s "$POOL_DIR" "$CASE_DIR/pool-alias"
+        recorded="$CASE_DIR/pool-alias"
+        ;;
+    esac
+    if [ "$variant" != other-claim ]; then
+      if [ "$variant" = unsafe-metadata ]; then
+        printf 'worktree=%s\nworktree=%s\n' "$POOL_DIR" "$POOL_DIR" \
+          > "$other_home/state/$other.meta"
+      else
+        fm_write_meta "$other_home/state/$other.meta" \
+          "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+          "worktree=$recorded" "project=$PROJECT_DIR" "kind=scout"
+      fi
+    fi
+    if [ "$variant" = unreadable-sibling ]; then
+      chmod 000 "$other_home/state"
+    fi
+    before_claim=
+    if [ "$variant" = other-claim ]; then
+      printf 'task=%s\nhome=%s\n' "$other" "$other_home" > "$SLOT_CLAIM"
+      before_claim=$(cat "$SLOT_CLAIM")
+    fi
+    before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+    before_remote=$(git -C "$POOL_DIR" rev-parse --verify -q refs/remotes/origin/main || true)
+    before_reflog=$(git -C "$POOL_DIR" reflog)
+    launch_log="$CASE_DIR/launch.log"
+    pane_log="$CASE_DIR/pane.log"
+    out=$(FM_FAKE_PANE_LOG="$pane_log" FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+    status=$?
+    if [ "$variant" = unreadable-sibling ]; then
+      chmod 700 "$other_home/state"
+    fi
+    [ "$status" -ne 0 ] || fail "$variant: spawn accepted a slot already held by $other"
+    assert_absent "$HOME_DIR/state/$id.meta" "$variant: refused spawn published metadata"
+    if [ "$variant" = other-claim ]; then
+      [ "$(cat "$SLOT_CLAIM")" = "$before_claim" ] \
+        || fail "$variant: refused spawn overwrote the owner marker"
+    else
+      assert_absent "$SLOT_CLAIM" "$variant: refused spawn wrote a new owner marker"
+    fi
+    [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] \
+      || fail "$variant: refused spawn moved HEAD"
+    [ "$(git -C "$POOL_DIR" rev-parse --verify -q refs/remotes/origin/main || true)" = "$before_remote" ] \
+      || fail "$variant: refused spawn fetched the remote base"
+    [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] \
+      || fail "$variant: refused spawn changed the reflog"
+    [ ! -e "$POOL_DIR/advanced-main.txt" ] \
+      || fail "$variant: refused spawn refreshed the checkout"
+    [ ! -s "$launch_log" ] || fail "$variant: refused spawn launched a worker"
+    if [ -f "$pane_log" ]; then
+      assert_no_grep 'treehouse get' "$pane_log" "$variant: custody refusal happened after pool acquisition"
+    fi
+    pass "spawn refuses a $variant pool custody collision before refresh and claim"
+  done
+}
+
+test_returned_pool_copy_rechecks_custody_before_refresh() {
+  local rec id=new-worker old=old-worker out status before_head before_reflog before_status launch_log collision
+  for collision in record marker; do
+  rec=$(make_case "returned-custody-$collision" "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  printf 'preserve tracked work\n' >> "$POOL_DIR/README.md"
+  printf 'preserve untracked work\n' > "$POOL_DIR/untracked.txt"
+  before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  before_reflog=$(git -C "$POOL_DIR" reflog)
+  before_status=$(git -C "$POOL_DIR" status --porcelain)
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_RACE_EXITED" ]; then printf '%s\n' "$FM_TEST_RACE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*)
+    if [ "$FM_TEST_RACE_KIND" = record ]; then
+      printf 'worktree=%s\nproject=%s\nkind=scout\n' \
+        "$FM_TEST_RACE_COPY" "$FM_TEST_RACE_PROJECT" > "$FM_TEST_RACE_META"
+    else
+      printf 'task=%s\nhome=%s\n' "$FM_TEST_RACE_OLD" "$FM_TEST_RACE_HOME" > "$FM_TEST_RACE_MARKER"
+    fi
+    : > "$FM_TEST_RACE_REACHED"
+    ;;
+  *' exit Enter'*) : > "$FM_TEST_RACE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+  cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = status ] && [ -f "$FM_TEST_RACE_EXITED" ]; then
+  printf '1  available  %s\n' "$FM_TEST_RACE_COPY"
+  exit
+fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/treehouse"
+  launch_log="$CASE_DIR/launch.log"
+  out=$(FM_TEST_RACE_KIND="$collision" FM_TEST_RACE_COPY="$POOL_DIR" FM_TEST_RACE_PROJECT="$PROJECT_DIR" \
+    FM_TEST_RACE_META="$HOME_DIR/state/$old.meta" FM_TEST_RACE_MARKER="$SLOT_CLAIM" \
+    FM_TEST_RACE_OLD="$old" FM_TEST_RACE_HOME="$HOME_DIR" \
+    FM_TEST_RACE_REACHED="$CASE_DIR/reached" FM_TEST_RACE_EXITED="$CASE_DIR/exited" \
+    FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail 'spawn accepted a copy claimed after preflight'
+  assert_present "$CASE_DIR/reached" 'spawn never reached the Treehouse handoff'
+  assert_present "$CASE_DIR/exited" 'spawn did not leave the disputed interactive copy'
+  if [ "$collision" = record ]; then
+    assert_contains "$out" 'custody conflict' 'spawn did not refuse the returned record'
+    assert_grep "worktree=$POOL_DIR" "$HOME_DIR/state/$old.meta" 'spawn changed the old record'
+    assert_absent "$SLOT_CLAIM" 'spawn added a slot marker on record refusal'
+  else
+    assert_contains "$out" 'retains a slot claim' 'spawn did not refuse the returned marker'
+    assert_absent "$HOME_DIR/state/$old.meta" 'spawn added an old record on marker refusal'
+    assert_grep "task=$old" "$SLOT_CLAIM" 'spawn changed the old slot marker'
+  fi
+  assert_absent "$HOME_DIR/state/$id.meta" 'spawn published a conflicting record'
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] || fail 'spawn changed the copy HEAD'
+  [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] || fail 'spawn changed the copy reflog'
+  [ "$(git -C "$POOL_DIR" status --porcelain)" = "$before_status" ] || fail 'spawn changed preserved work'
+  [ ! -s "$launch_log" ] || fail 'spawn launched a worker on the disputed copy'
+  pass "returned pool copy is refused when a $collision claim arrives after preflight"
+  done
+}
+
+test_returned_pool_copy_rechecks_process_evidence() {
+  local rec id=process-worker variant out status survivor='' launch_log
+  for variant in survivor unreadable; do
+    rec=$(make_case "returned-process-$variant" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+    cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_PANE_EXITED" ]; then printf '%s\n' "$FM_TEST_PANE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*) : > "$FM_TEST_PANE_REACHED" ;;
+  *' exit Enter'*) : > "$FM_TEST_PANE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/tmux"
+    mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+    cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = status ] && [ -f "$FM_TEST_PANE_EXITED" ]; then
+  printf '1  available  %s\n' "$FM_TEST_PANE_COPY"
+  exit
+fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/treehouse"
+    if [ "$variant" = survivor ]; then
+      (cd "$POOL_DIR" && exec /bin/sleep 60) &
+      survivor=$!
+      printf '%s\n' "$survivor" > "$CASE_DIR/process-pids"
+    fi
+    launch_log="$CASE_DIR/launch.log"
+    out=$(FM_TEST_PANE_COPY="$POOL_DIR" FM_TEST_PANE_PROJECT="$PROJECT_DIR" \
+      FM_TEST_PANE_REACHED="$CASE_DIR/reached" FM_TEST_PANE_EXITED="$CASE_DIR/exited" \
+      FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" FM_TEST_PS_FAIL=$([ "$variant" = unreadable ] && echo 1 || echo 0) \
+      FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+    status=$?
+    if [ -n "$survivor" ]; then kill "$survivor" 2>/dev/null || true; wait "$survivor" 2>/dev/null || true; survivor=; fi
+    [ "$status" -ne 0 ] || fail "$variant: spawn accepted unproven process custody"
+    assert_present "$CASE_DIR/reached" "$variant: spawn never reached the returned copy"
+    assert_present "$CASE_DIR/exited" "$variant: spawn did not leave the returned copy"
+    if [ "$variant" = survivor ]; then
+      assert_contains "$out" 'other live processes' "$variant: spawn did not refuse the rooted process"
+    else
+      assert_contains "$out" 'process custody' "$variant: spawn did not refuse unreadable evidence"
+    fi
+    assert_absent "$HOME_DIR/state/$id.meta" "$variant: spawn published task metadata"
+    [ ! -s "$launch_log" ] || fail "$variant: spawn launched a worker"
+    pass "returned pool copy refuses $variant process evidence before refresh"
+  done
+}
+
+test_returned_pool_copy_refuses_active_interactive_builtins() {
+  local mode rec id label pane out status
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  for mode in busy fd; do
+    id="pool-builtin-$mode"
+    rec=$(make_case "$id" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    label="$id-$RANDOM"
+    pane=$(fm_test_active_tmux_shell "$label" nested task "$POOL_DIR" "$mode" "$CASE_DIR/activity") \
+      || fail "$mode: could not start an active allocation pane"
+    printf '%s\n' "$pane" > "$CASE_DIR/process-pids"
+    printf '%s\n' "$pane" > "$CASE_DIR/pane-pid"
+    mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+    cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_pid}'*) cat "$FM_TEST_PANE_PID_FILE"; exit ;;
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_PANE_EXITED" ]; then printf '%s\n' "$FM_TEST_PANE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*) : > "$FM_TEST_PANE_REACHED" ;;
+  *' exit Enter'*) : > "$FM_TEST_PANE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/tmux"
+    out=$(FM_TEST_PANE_COPY="$POOL_DIR" FM_TEST_PANE_PROJECT="$PROJECT_DIR" \
+      FM_TEST_PANE_PID_FILE="$CASE_DIR/pane-pid" FM_TEST_PANE_REACHED="$CASE_DIR/reached" \
+      FM_TEST_PANE_EXITED="$CASE_DIR/exited" FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" \
+      FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" run_spawn "$id" --scout)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$mode: allocation accepted an active interactive builtin: $out"
+    assert_present "$CASE_DIR/reached" "$mode: allocation never reached the returned copy"
+    assert_contains "$out" 'cannot prove' "$mode: allocation did not explain unproven absence"
+    assert_absent "$HOME_DIR/state/$id.meta" "$mode: allocation published task metadata"
+    assert_absent "$SLOT_CLAIM" "$mode: allocation claimed the busy slot"
+    assert_absent "$POOL_DIR/advanced-main.txt" "$mode: allocation refreshed the active copy"
+    [ ! -s "$CASE_DIR/launch.log" ] || fail "$mode: allocation launched a worker"
+    tmux -L "$label" has-session -t nested || fail "$mode: allocation closed the active pane"
+    [ ! -e "$CASE_DIR/activity/finished" ] || fail "$mode: the unrelated-FD wait ended before refusal"
+    tmux -L "$label" kill-server
+  done
+  pass 'returned pool copies refuse real active interactive builtin loops and unrelated-FD waits'
+}
+
+test_returned_pool_copy_accepts_its_foreground_task_shell() {
+  local rec id=nested-shell-worker label=pulse-nested-shell pane nested capture out status
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  rec=$(make_case returned-nested-shell "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  tmux -L "$label" new-session -d -s nested -n task -c "$POOL_DIR" 'bash --noprofile --norc -i'
+  pane=$(tmux -L "$label" display-message -p -t nested:task '#{pane_pid}')
+  tmux -L "$label" send-keys -t nested:task 'bash --noprofile --norc -i' Enter
+  nested=
+  for _ in $(seq 1 30); do
+    tmux -L "$label" send-keys -t nested:task 'printf "NESTED=%s\n" "$$"' Enter
+    sleep 0.05
+    capture=$(tmux -L "$label" capture-pane -p -t nested:task)
+    nested=$(printf '%s\n' "$capture" | sed -n 's/^NESTED=\([0-9][0-9]*\).*$/\1/p' | tail -1)
+    [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
+  done
+  [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private tmux did not start a nested foreground task shell'
+  if ! fm_test_terminal_read_available "$nested"; then
+    tmux -L "$label" kill-server
+    echo 'skip - nested idle-shell proof unavailable on this kernel; manual confirmation required'
+    return 0
+  fi
+  printf '%s\n%s\n' "$pane" "$nested" > "$CASE_DIR/process-pids"
+  printf '%s\n' "$pane" > "$CASE_DIR/pane-pid"
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_pid}'*) cat "$FM_TEST_PANE_PID_FILE"; exit ;;
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_PANE_EXITED" ]; then printf '%s\n' "$FM_TEST_PANE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*) : > "$FM_TEST_PANE_REACHED" ;;
+  *' exit Enter'*) : > "$FM_TEST_PANE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+  cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = status ] && [ -f "$FM_TEST_PANE_EXITED" ]; then
+  printf '1  available  %s\n' "$FM_TEST_PANE_COPY"
+  exit
+fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/treehouse"
+  out=$(FM_TEST_PANE_COPY="$POOL_DIR" FM_TEST_PANE_PROJECT="$PROJECT_DIR" \
+    FM_TEST_PANE_PID_FILE="$CASE_DIR/pane-pid" FM_TEST_PANE_REACHED="$CASE_DIR/reached" \
+    FM_TEST_PANE_EXITED="$CASE_DIR/exited" FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" \
+    run_spawn "$id" --scout)
+  status=$?
+  expect_code 0 "$status" "the returned copy's foreground nested shell was refused: $out"
+  assert_present "$CASE_DIR/reached" 'nested-shell spawn did not reach Treehouse allocation'
+  assert_grep "worktree=$POOL_DIR" "$HOME_DIR/state/$id.meta" 'nested-shell spawn did not publish the returned copy'
+  tmux -L "$label" kill-server
+  pass 'returned pool copy accepts its verified nested foreground task shell'
+}
+
+test_provider_pool_marker_from_sibling_clone_blocks_allocation() {
+  local rec id=pool-cross-clone-r1 provider sibling marker before_head out status launch_log
+  rec=$(make_case cross-clone "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/user-home/.config/treehouse"
+  printf 'root = "%s"\n' "$CASE_DIR" > "$HOME_DIR/user-home/.config/treehouse/config.toml"
+  provider=$(FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" bash -c \
+    '. "$1"; fm_treehouse_pool_check "$2" "$3" "$4"; printf "%s" "$FM_TREEHOUSE_POOL_RESOLVED"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home") \
+    || fail 'the private provider pool could not be resolved'
+  sibling="$CASE_DIR/sibling/project"
+  mkdir -p "${sibling%/*}" "$provider/29"
+  git clone --quiet "file://$CASE_DIR/origin.git" "$sibling"
+  git -C "$sibling" worktree add --quiet --detach "$provider/29/project" HEAD
+  printf '{"worktrees":[{"name":"29","path":"%s"}]}\n' "$provider/29/project" \
+    > "$provider/treehouse-state.json"
+  marker="$provider/29/.fm-slot-owner"
+  printf 'task=old-task\nhome=%s\n' "$CASE_DIR/other-home" > "$marker"
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = send-keys ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *fm-treehouse-pool-check.sh*'&& treehouse get'*) bash -c "$arg"; exit $? ;;
+    esac
+  done
+fi
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  cat > "$FAKEBIN_DIR/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] && [ "$#" -eq 4 ]; then
+  printf '%s\n' "$$"
+else
+  exec /bin/ps "$@"
+fi
+SH
+  chmod +x "$FAKEBIN_DIR/ps"
+  before_head=$(git -C "$provider/29/project" rev-parse HEAD)
+  launch_log="$CASE_DIR/launch.log"
+  out=$(FM_FAKE_LAUNCH_LOG="$launch_log" run_spawn "$id" --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn allocated while a sibling clone retained a provider slot marker: $out"
+  assert_contains "$out" 'slot claim' 'spawn did not name the provider marker refusal'
+  assert_absent "$HOME_DIR/state/$id.meta" 'refused spawn published task metadata'
+  [ ! -s "$launch_log" ] || fail 'spawn launched a worker after the provider marker refusal'
+  [ "$(git -C "$provider/29/project" rev-parse HEAD)" = "$before_head" ] \
+    || fail 'refused spawn moved the sibling clone copy'
+  assert_grep 'task=old-task' "$marker" 'refused spawn changed the sibling claim'
+  out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
+    bash "$ROOT/bin/fm-treehouse-pool-check.sh" "$HOME_DIR" "$PROJECT_DIR" "$CASE_DIR/refusal" 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail 'pane preflight accepted the sibling clone marker'
+  assert_contains "$out" 'slot claim' 'pane preflight did not name the marker refusal'
+  pass 'provider pool markers from sibling clones block both allocation preflights'
+}
+
+test_state_override_pane_preflight_blocks_retained_claim() {
+  local rec id=pool-override-new-r1 old=pool-override-old-r1 state provider out status survivor
+  local before_head before_reflog before_status
+  rec=$(make_case state-override-custody "$id")
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/user-home/.config/treehouse"
+  printf 'root = "%s"\n' "$CASE_DIR" > "$HOME_DIR/user-home/.config/treehouse/config.toml"
+  provider=$(FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" bash -c \
+    '. "$1"; fm_treehouse_pool_check "$2" "$3" "$4"; printf "%s" "$FM_TREEHOUSE_POOL_RESOLVED"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home") \
+    || fail 'the private provider pool could not be resolved'
+  mkdir -p "$provider/1"
+  git -C "$PROJECT_DIR" worktree move "$POOL_DIR" "$provider/1/project"
+  POOL_DIR="$provider/1/project"
+  printf '{"worktrees":[{"name":"1","path":"%s"}]}\n' "$POOL_DIR" \
+    > "$provider/treehouse-state.json"
+  state="$CASE_DIR/override-state"
+  mkdir -p "$state"
+  fm_write_meta "$state/$old.meta" "window=firstmate:fm-$old" \
+    "endpoint_task_id=$old" "worktree=$POOL_DIR" "project=$PROJECT_DIR" "kind=scout"
+  printf 'preserve tracked work\n' >> "$POOL_DIR/README.md"
+  printf 'preserve untracked work\n' > "$POOL_DIR/untracked.txt"
+  before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  before_reflog=$(git -C "$POOL_DIR" reflog)
+  before_status=$(git -C "$POOL_DIR" status --porcelain)
+  (cd "$POOL_DIR" && exec /bin/sleep 60) &
+  survivor=$!
+  printf '%s\n' "$survivor" > "$CASE_DIR/process-pids"
+  /bin/sleep 0.1
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = send-keys ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *fm-treehouse-pool-check.sh*'&& treehouse get'*)
+        : > "$FM_TEST_PANE_ENTERED"
+        kill "$FM_TEST_EXIT_PID"
+        /bin/sleep 0.1
+        bash -c "$arg"
+        exit $?
+        ;;
+    esac
+  done
+fi
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+  cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = get ]; then : > "$FM_TEST_PROVIDER_ENTERED"; fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/treehouse"
+  out=$(FM_TEST_STATE_OVERRIDE="$state" FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" \
+    FM_TEST_EXIT_PID="$survivor" FM_TEST_PANE_ENTERED="$CASE_DIR/pane-entered" \
+    FM_TEST_PROVIDER_ENTERED="$CASE_DIR/provider-entered" run_spawn "$id" --scout)
+  status=$?
+  kill "$survivor" 2>/dev/null || true
+  wait "$survivor" 2>/dev/null || true
+  [ "$status" -ne 0 ] || fail 'spawn accepted a retained claim in the overridden state directory'
+  assert_present "$CASE_DIR/pane-entered" 'spawn did not reach the pane preflight'
+  assert_absent "$CASE_DIR/provider-entered" 'pane entered the provider despite the retained claim'
+  assert_contains "$out" 'still reserved' 'pane preflight did not refuse the retained claim'
+  assert_grep "worktree=$POOL_DIR" "$state/$old.meta" 'pane preflight changed the old record'
+  assert_absent "$state/$id.meta" 'refused spawn published a new record'
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] || fail 'refused spawn moved HEAD'
+  [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] || fail 'refused spawn changed the reflog'
+  [ "$(git -C "$POOL_DIR" status --porcelain)" = "$before_status" ] || fail 'refused spawn changed preserved work'
+  pass 'pane preflight honors the resolved state override before provider acquisition'
+}
+
 # The spawn side of the slot-owner claim that bin/fm-teardown.sh later reads:
 # a launched task's claim names it, a slot that cannot be claimed refuses before
 # anything is published, and an abort while the allocation lock is still held
@@ -720,7 +1236,7 @@ test_pool_slot_claim_follows_the_spawn_outcome() {
   out=$(run_spawn "$id" --scout)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn launched a worker on a slot it could not claim"
-  assert_contains "$out" "could not claim Treehouse pool slot" \
+  assert_contains "$out" "unreadable custody" \
     "spawn did not name the unclaimable slot as the reason"
   [ -d "$SLOT_CLAIM" ] || fail "spawn replaced the directory blocking its slot claim"
   [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "spawn published a record for an unclaimable slot"
@@ -874,8 +1390,106 @@ test_scout_base_branch_refused_on_gerrit_forge() {
   pass "a based scout on a forge=gerrit project is refused at spawn"
 }
 
+test_pool_rollback_preserves_or_releases_custody() {
+  local phase rec id out status real_tasks
+  command -v tasks-axi >/dev/null 2>&1 || { echo 'skip - tasks-axi not installed'; return 0; }
+  real_tasks=$(command -v tasks-axi)
+  for phase in prelaunch postlaunch foreign release-failure; do
+    id="pool-rollback-$phase"
+    rec=$(make_case "rollback-$phase" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$HOME_DIR/.tasks.toml"
+    printf '# Backlog\n\n## Queued\n\n## In flight\n\n## Done\n' > "$HOME_DIR/data/backlog.md"
+    tasks-axi add "$id" 'Exercise failed dispatch custody' --kind ship --file "$HOME_DIR/data/backlog.md" >/dev/null
+    mkdir -p "$CASE_DIR/other-home"
+    printf '#!/usr/bin/env bash\nreal=%q\n' "$real_tasks" > "$FAKEBIN_DIR/tasks-axi"
+    cat >> "$FAKEBIN_DIR/tasks-axi" <<'SH'
+if [ "$FM_R12_PHASE" = postlaunch ] && [ "${1:-}" = start ]; then
+  cp "$FM_R12_HOME/state/$FM_R12_ID.meta" "$FM_R12_CASE/observed.meta" || exit 2
+  cp "$FM_R12_SLOT" "$FM_R12_CASE/observed.claim" || exit 2
+  : > "$FM_R12_CASE/reached"
+  printf 'injected backlog start failure\n' >&2
+  exit 1
+fi
+exec "$real" "$@"
+SH
+    cat > "$FAKEBIN_DIR/mv" <<'SH'
+#!/usr/bin/env bash
+if [ "$FM_R12_PHASE" != postlaunch ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      */launch.s*.sh)
+        cp "$FM_R12_HOME/state/$FM_R12_ID.meta" "$FM_R12_CASE/observed.meta" || exit 2
+        cp "$FM_R12_SLOT" "$FM_R12_CASE/observed.claim" || exit 2
+        : > "$FM_R12_CASE/reached"
+        if [ "$FM_R12_PHASE" = foreign ]; then
+          printf 'task=other-task\nhome=%s/other-home\n' "$FM_R12_CASE" > "$FM_R12_SLOT"
+        fi
+        printf 'injected prelaunch staging failure\n' >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /bin/mv "$@"
+SH
+    cat > "$FAKEBIN_DIR/rm" <<'SH'
+#!/usr/bin/env bash
+if [ "$FM_R12_PHASE" = release-failure ]; then
+  for arg in "$@"; do
+    [ "$arg" != "$FM_R12_SLOT" ] || exit 1
+  done
+fi
+exec /bin/rm "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/tasks-axi" "$FAKEBIN_DIR/mv" "$FAKEBIN_DIR/rm"
+    out=$(FM_R12_PHASE="$phase" FM_R12_CASE="$CASE_DIR" FM_R12_HOME="$HOME_DIR" \
+      FM_R12_SLOT="$SLOT_CLAIM" FM_R12_ID="$id" FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" \
+      run_spawn "$id" --mode no-mistakes --yolo off)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$phase dispatch unexpectedly succeeded"
+    assert_present "$CASE_DIR/reached" "$phase fixture never reached the provisional record and slot claim"
+    assert_grep "task=$id" "$CASE_DIR/observed.claim" "$phase never held its own claim before the failure"
+    assert_grep "worktree=$POOL_DIR" "$CASE_DIR/observed.meta" "$phase never published the allocated worktree"
+    if [ "$phase" = postlaunch ] || [ "$phase" = release-failure ]; then
+      assert_present "$HOME_DIR/state/$id.meta" "$phase removed the observable task record"
+      assert_grep "task=$id" "$SLOT_CLAIM" "$phase lost its own retained claim"
+    else
+      assert_absent "$HOME_DIR/state/$id.meta" "$phase retained the prelaunch provisional record"
+      assert_absent "$HOME_DIR/state/$id.busy-state" "$phase retained the prelaunch busy generation"
+      if [ "$phase" = foreign ]; then
+        assert_grep 'task=other-task' "$SLOT_CLAIM" 'rollback released another task claim'
+        assert_grep "home=$CASE_DIR/other-home" "$SLOT_CLAIM" 'rollback changed another home claim'
+      else
+        assert_absent "$SLOT_CLAIM" 'prelaunch rollback orphaned its own slot claim'
+      fi
+    fi
+    if [ "$phase" = postlaunch ]; then
+      assert_present "$CASE_DIR/launch.log" 'backlog failure happened before launch delivery'
+      assert_contains "$out" 'worker may be active' 'postlaunch failure did not explain custody preservation'
+    else
+      [ ! -s "$CASE_DIR/launch.log" ] || fail "$phase attempted to launch a worker"
+    fi
+    [ "$(tasks-axi show "$id" --file "$HOME_DIR/data/backlog.md" | sed -n 's/^  state: *//p')" = queued ] \
+      || fail "$phase changed the failed-dispatch backlog row"
+  done
+  pass 'failed pool dispatch releases only prelaunch own claims and keeps postlaunch or unreleasable claims paired'
+}
+
+test_pool_custody_refuses_unreadable_nested_registry
+test_pool_custody_refuses_unreadable_nested_registry parent
+test_returned_pool_copy_refuses_active_interactive_builtins
+test_pool_rollback_preserves_or_releases_custody
+
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
+test_pool_custody_refuses_before_refresh_or_claim
+test_returned_pool_copy_rechecks_custody_before_refresh
+test_returned_pool_copy_rechecks_process_evidence
+test_returned_pool_copy_accepts_its_foreground_task_shell
+test_provider_pool_marker_from_sibling_clone_blocks_allocation
+test_state_override_pane_preflight_blocks_retained_claim
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
 test_named_base_branch_starts_from_that_branch
