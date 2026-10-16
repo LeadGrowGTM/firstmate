@@ -7,6 +7,8 @@
 #   fm-data-manage.sh --help
 #
 # Dry-run is the default. `clean` prints what it would free and deletes nothing.
+# Live cleanup requires a regular config/data-management.live-authorized file
+# in the first listed home, which must be the root Firstmate home.
 # `--live` deletes only aged regular files under configured tmp, log, and cache
 # roots, then may run `fm-treehouse-guard.sh prune` for a project whose linked
 # pool slots are landed, clean, and idle. It never removes a worktree directory
@@ -43,19 +45,17 @@
 # that home's `.tmp`, `tmp`, or `state/logs`, or a directory under one of those.
 # Other deletion roots must sit outside every configured home. A deletion root
 # that is inside a git worktree is skipped rather than cleaned. Log roots only
-# yield files named `*.log`, `*.log.N`, or `*.log.gz`. File basenames `.env`,
-# `.env.*`, `credentials`, `credentials.json`, `.credentials.json`,
-# `secrets.json`, `.netrc`, `.npmrc`, `.git-credentials`, `auth.json`,
-# `id_rsa`, `id_ed25519`, `id_ecdsa`, `*.pem`, and `*.key` are never deleted.
+# yield files named `*.log`, `*.log.N`, or `*.log.gz`. Dotenv variants,
+# credential-bearing names, and certificate and key files are never deleted.
 # `procevent-result` removes only an old handled inbox group whose source is
 # not still registered, and only when none of that group's files are open.
 # `claude-sessions` removes only old `*.jsonl` files that are not open, not
-# inside a surveyed worktree, and whose first 8192 bytes do not name one.
+# inside a checkout, and whose first 8192 bytes do not name a surveyed one.
 # `codex-sessions` runs `codex-session-prune` when that program is installed,
 # passing `--dry-run` unless this command was given `--live`.
 # `cache-tool` runs that tool's own purge bound to the configured directory
 # (`npm --cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`, or `GOCACHE`) and skips a
-# store that has an open file or cannot be proved idle. Without `/proc`,
+# store that has an open file, protected path, or checkout, or cannot be proved idle. Without `/proc`,
 # those stores and the codex prune are skipped. Dry-run prints at most 30
 # paths for the procevent and claude categories and still counts the rest.
 # A live pool prune is bounded so a stuck prune cannot hold the cleanup open.
@@ -64,14 +64,15 @@
 # deletion.
 #
 # Copies a task record still names are kept, including when the pool walk did
-# not list that copy. A file inside a surveyed worktree is never deleted, even
-# when a deletion root contains that worktree. Pool slots are recognized when
+# not list that copy. A file inside any checkout is never deleted, even when
+# a deletion root contains that checkout. Pool slots are recognized when
 # `.git` is on the slot or one directory deeper. Stopped Firstmate tasks stay
 # with `fm-deadweight-sweep.sh`. Docker is measured when the client answers and
 # is never pruned. `fm-clutter-check.sh` remains the read-only threshold check.
 # Category totals overlap: do not add a path to its children.
 #
 # Output records are tab-separated:
+#   measure phase=<before|after>
 #   measure df mount=<m> size-kib=<n> used-kib=<n> avail-kib=<n> capacity=<pct>
 #   measure path category=<c> bytes=<n|timeout|error|absent> path=<p>
 #   measure docker status=<ok|unavailable> detail=<text>
@@ -230,9 +231,11 @@ path_forbidden() {
   p=${p#/}
   while [ -n "$p" ]; do
     part=${p%%/*}
+    part=${part,,}
     case "$part" in
-      data|.ssh|.aws|.kube|.gnupg|.mozilla|google-chrome|chromium|Brave-Browser|BraveSoftware|..|.) return 0 ;;
+      data|.ssh|.aws|.azure|.kube|.gnupg|.docker|.mozilla|google-chrome|chromium|brave-browser|bravesoftware|gcloud|gh|1password|firefox|chrome|brave|edge|..|.) return 0 ;;
     esac
+    file_name_protected "$part" && return 0
     case "$p" in
       */*) p=${p#*/} ;;
       *) p= ;;
@@ -242,8 +245,9 @@ path_forbidden() {
 }
 
 file_name_protected() {
-  case "$1" in
-    .env|.env.*|credentials|credentials.json|.credentials.json|secrets.json|.netrc|.npmrc|.git-credentials|auth.json|id_rsa|id_ed25519|id_ecdsa|*.pem|*.key) return 0 ;;
+  local base=${1,,}
+  case "$base" in
+    .env*|*.env|*.env.*|*dotenv*|*token*|*oauth*|*credential*|*secret*|*cookie*|*auth*|*key*|*password*|.netrc|.npmrc|id_rsa|id_ed25519|id_ecdsa|*.pem|*.p12|*.pfx|*.crt|*.cer|*.der|*.p8|*.p7b|*.p7c|*.jks|*.pub) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -399,7 +403,7 @@ resolve_deletion_roots() {
       die "deletion root must be a real directory: $path"
     fi
     phys=$(physical_dir "$path") || die "deletion root must be a real directory: $path"
-    if ! deletion_root_allowed "$phys"; then
+    if path_forbidden "$phys" || ! deletion_root_allowed "$phys"; then
       die "deletion root inside a home must be under .tmp, tmp, or state/logs: $phys"
     fi
     DEL_PATH[i]=$phys
@@ -417,6 +421,7 @@ resolve_real_dir() {
     die "$kind root must be a real directory: $path"
   fi
   phys=$(physical_dir "$path") || die "$kind root must be a real directory: $path"
+  path_forbidden "$phys" && die "$kind root is protected: $phys"
   printf '%s\n' "$phys"
 }
 
@@ -970,16 +975,43 @@ log_name_ok() {
   esac
 }
 
-file_inside_known_worktree() {
-  local file=$1 wt i=0
+cleanup_file_safe() {
+  local file=$1 root=$2 dir base phys wt i=0
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  dir=$(physical_dir "${file%/*}") || return 1
+  base=${file##*/}
+  phys=$dir/$base
+  case "$phys" in "$root"/*) ;; *) return 1 ;; esac
+  path_forbidden "$phys" && return 1
   while [ "$i" -lt "${#WT_PATH[@]}" ]; do
     wt=${WT_PATH[$i]}
-    case "$file" in
-      "$wt"|"$wt"/*) return 0 ;;
-    esac
+    case "$phys" in "$wt"|"$wt"/*) return 1 ;; esac
     i=$((i + 1))
   done
-  return 1
+  while :; do
+    [ ! -e "$dir/.git" ] && [ ! -L "$dir/.git" ] || return 1
+    [ "$dir" = "$root" ] && break
+    dir=${dir%/*}
+  done
+  return 0
+}
+
+cache_store_safe() {
+  local root=$1 path walked=0 list=$WORK/cache-paths
+  root_inside_worktree "$root" && return 1
+  find -P "$root" -xdev -print0 > "$list" 2>/dev/null || return 1
+  while IFS= read -r -d '' path; do
+    walked=$((walked + 1))
+    [ "$walked" -le "$WALK_CAP" ] || return 1
+    [ ! -L "$path" ] || return 1
+    path_forbidden "$path" && return 1
+    if [ -f "$path" ]; then
+      cleanup_file_safe "$path" "$root" || return 1
+    elif [ -e "$path/.git" ] || [ -L "$path/.git" ]; then
+      return 1
+    fi
+  done < "$list"
+  return 0
 }
 
 add_category_bytes() {
@@ -1030,12 +1062,7 @@ scan_root() {
     fi
     [ -f "$file" ] && [ ! -L "$file" ] || continue
     base=${file##*/}
-    if file_name_protected "$base"; then
-      continue
-    fi
-    if file_inside_known_worktree "$file"; then
-      continue
-    fi
+    cleanup_file_safe "$file" "$root" || continue
     if [ "$kind" = log ] && ! log_name_ok "$base"; then
       continue
     fi
@@ -1053,7 +1080,7 @@ scan_root() {
       ''|*[!0-9]*) continue ;;
     esac
     # Re-check immediately before any unlink so a swapped symlink is not removed as a file.
-    [ -f "$file" ] && [ ! -L "$file" ] || continue
+    cleanup_file_safe "$file" "$root" || continue
     if [ "$LIVE" -eq 1 ]; then
       rc=0
       rm -f -- "$file" || rc=$?
@@ -1182,11 +1209,10 @@ procevent_group_old() {
 }
 
 emit_or_free_file() {
-  local category=$1 file=$2 now=$3 bucket=$4
+  local category=$1 file=$2 now=$3 bucket=$4 root=$5
   local mtime age bytes rc base
   base=${file##*/}
-  file_name_protected "$base" && return 0
-  file_inside_known_worktree "$file" && return 0
+  cleanup_file_safe "$file" "$root" || return 0
   file_in_use "$file" && return 0
   mtime=$(file_mtime "$file" 2>/dev/null || true)
   case "$mtime" in
@@ -1197,7 +1223,7 @@ emit_or_free_file() {
   case "$bytes" in
     ''|*[!0-9]*) return 0 ;;
   esac
-  [ -f "$file" ] && [ ! -L "$file" ] || return 0
+  cleanup_file_safe "$file" "$root" || return 0
   if [ "$LIVE" -eq 1 ]; then
     rc=0
     rm -f -- "$file" || rc=$?
@@ -1228,7 +1254,7 @@ emit_or_free_file() {
 }
 
 clean_procevent() {
-  local home i inbox handled base stem id now suffix f busy
+  local home i inbox handled base stem id now suffix f busy phys
   [ -n "$PROC_DAYS" ] || return 0
   now=$(date +%s)
   i=0
@@ -1236,6 +1262,12 @@ clean_procevent() {
     home=${HOMES[$i]}
     inbox="$home/state/procevent-inbox"
     if [ -d "$inbox" ] && [ ! -L "$inbox" ]; then
+      phys=$(physical_dir "$inbox") || { i=$((i + 1)); continue; }
+      if path_forbidden "$phys" || root_inside_worktree "$phys"; then
+        i=$((i + 1))
+        continue
+      fi
+      inbox=$phys
       for handled in "$inbox"/*.handled; do
         [ -f "$handled" ] && [ ! -L "$handled" ] || continue
         base=${handled##*/}
@@ -1262,7 +1294,7 @@ clean_procevent() {
           continue
         fi
         for suffix in result adapter owner-task handled; do
-          emit_or_free_file procevent-result "$inbox/$stem.$suffix" "$now" proc
+          emit_or_free_file procevent-result "$inbox/$stem.$suffix" "$now" proc "$inbox"
         done
       done
     fi
@@ -1298,12 +1330,11 @@ clean_claude_sessions() {
       fi
       [ -f "$file" ] && [ ! -L "$file" ] || continue
       base=${file##*/}
+      cleanup_file_safe "$file" "$root" || continue
       case "$base" in
         *.jsonl) ;;
         *) continue ;;
       esac
-      file_name_protected "$base" && continue
-      file_inside_known_worktree "$file" && continue
       mtime=$(file_mtime "$file" 2>/dev/null || true)
       case "$mtime" in
         ''|*[!0-9]*) continue ;;
@@ -1314,7 +1345,7 @@ clean_claude_sessions() {
       rc=0
       session_names_worktree "$file" || rc=$?
       [ "$rc" -eq 1 ] || continue
-      emit_or_free_file claude-sessions "$file" "$now" claude
+      emit_or_free_file claude-sessions "$file" "$now" claude "$root"
     done < <(find -P "$root" -xdev \( -name .ssh -o -name .aws -o -name .kube -o -name .gnupg -o -name .mozilla -o -name google-chrome -o -name chromium -o -name Brave-Browser -o -name BraveSoftware -o -name data \) -prune -o -type f -name '*.jsonl' -print0 2>/dev/null)
     i=$((i + 1))
   done
@@ -1359,7 +1390,7 @@ clean_cache_tools() {
       i=$((i + 1))
       continue
     fi
-    if [ ! -d /proc ] || path_has_live_child "$path"; then
+    if [ ! -d /proc ] || path_has_live_child "$path" || ! cache_store_safe "$path"; then
       emit "$(printf 'clean\tskip\treason=in-use\tcategory=%s\tpath=%s' "$name" "$path")"
       i=$((i + 1))
       continue
@@ -1426,7 +1457,7 @@ run_clean_actions() {
 }
 
 main() {
-  local cmd=${1:-}
+  local cmd=${1:-} marker
   shift || true
   case "$cmd" in
     --help|-h|help) usage; exit 0 ;;
@@ -1462,8 +1493,16 @@ main() {
   trap 'exit 1' HUP INT TERM
   take_lock
   parse_config
+  if [ "$LIVE" -eq 1 ]; then
+    marker=${HOMES[0]}/config/data-management.live-authorized
+    if [ ! -f "$marker" ] || [ -L "$marker" ] || [ -L "${HOMES[0]}/config" ]; then
+      LIVE=0
+      emit "$(printf 'clean\tskip\treason=first-live-not-authorized')"
+    fi
+  fi
   resolve_deletion_roots
   resolve_tool_roots
+  emit "$(printf 'measure\tphase=before')"
   measure_all
   if [ "$MODE" = measure ]; then
     exit 0
@@ -1476,6 +1515,9 @@ main() {
   run_clean_actions
   emit_categories
   if [ "$LIVE" -eq 1 ]; then
+    emit "$(printf 'measure\tphase=after')"
+    : > "$SEEN_MOUNT_FILE"
+    measure_all
     emit "$(printf 'summary\tmode=live\twould-free-bytes=%s\tfreed-bytes=%s\tdelegate-upper-bound-bytes=%s\tkept-worktrees=%s\tcandidate-worktrees=%s' "$WOULD_FREE" "$FREED" "$DELEGATE_BYTES" "$KEPT_WT" "$CAND_WT")"
   else
     emit "$(printf 'summary\tmode=dry-run\twould-free-bytes=%s\tfreed-bytes=0\tdelegate-upper-bound-bytes=%s\tkept-worktrees=%s\tcandidate-worktrees=%s' "$WOULD_FREE" "$DELEGATE_BYTES" "$KEPT_WT" "$CAND_WT")"

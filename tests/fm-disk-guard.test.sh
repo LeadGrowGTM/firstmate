@@ -34,7 +34,7 @@ reset_guard() {
     "$home/state/disk-guard.sample" "$home/state/disk-guard.log" \
     "$home/state/disk-guard.cleanup" "$home/state/.wake-queue" \
     "$home/state/.wake-queue.seq" "$home/config/disk-guard" \
-    "$home/config/data-management"
+    "$home/config/data-management" "$home/config/data-management.live-authorized"
   rm -rf "$home/state/disk-guard.lock" "$home/config/data-management.lock"
 }
 
@@ -171,6 +171,18 @@ EOF
 write_metrics 1000 8000000 30 1000000 300000 700000 200000000 absent
 out=$(run_guard)
 assert_contains "$out" "action=paused-cleanup-0" "pressure runs the configured cleanup once"
+assert_contains "$(cat "$home/state/disk-guard.cleanup")" "mode=dry-run" "pressure without authorization plans cleanup"
+assert_present "$old" "pressure without authorization leaves aged files"
+reset_guard
+: > "$home/config/data-management.live-authorized"
+cat > "$home/config/data-management" <<EOF
+home $home_phys
+tmp $home_phys/.tmp 1
+EOF
+out=$(run_guard)
+assert_contains "$out" "action=paused-cleanup-0" "authorized pressure runs cleanup once"
+assert_contains "$(cat "$home/state/disk-guard.cleanup")" "measure	phase=before" "cleanup records before measurement"
+assert_contains "$(cat "$home/state/disk-guard.cleanup")" "measure	phase=after" "cleanup records after measurement"
 assert_absent "$old" "the cleanup removes an aged temp file"
 assert_present "$fresh" "the cleanup leaves a fresh temp file"
 assert_present "$envf" "the cleanup leaves a dotenv file"

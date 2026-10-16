@@ -1,4 +1,6 @@
 # Copy to the home as config/data-management and replace every placeholder path.
+# List the root Firstmate home first; live cleanup requires its regular
+# config/data-management.live-authorized marker after dry-run review.
 # The script header of bin/fm-data-manage.sh owns this grammar.
 # Days are the retention. A missing category is not deleted.
 # home and pool-root are measured. This script never removes a pool slot itself.

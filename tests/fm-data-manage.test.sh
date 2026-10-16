@@ -5,6 +5,14 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 TOOL="$ROOT/bin/fm-data-manage.sh"
 TMP_ROOT=$(fm_test_tmproot fm-data-manage)
+stubbin="$TMP_ROOT/bin"
+mkdir -p "$stubbin"
+cat > "$stubbin/realpath" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$stubbin/realpath"
+export PATH="$stubbin:$PATH"
 holder=
 holders=
 cleanup() {
@@ -23,7 +31,7 @@ home="$TMP_ROOT/home"
 pool="$TMP_ROOT/pool"
 proj="$home/projects/fm-data-manage-fixture"
 bare="$TMP_ROOT/origin.git"
-mkdir -p "$home/state" "$home/projects" "$home/.tmp" "$home/data" "$home/state/logs" "$pool/repo"
+mkdir -p "$home/state" "$home/config" "$home/projects" "$home/.tmp" "$home/data" "$home/state/logs" "$pool/repo"
 printf 'keep-me\n' > "$home/data/record.txt"
 git init --bare "$bare" >/dev/null
 git init "$proj" >/dev/null
@@ -65,16 +73,25 @@ git -C "$idle" push -u origin idle >/dev/null
 old="$home/.tmp/old.txt"
 fresh="$home/.tmp/fresh.txt"
 envf="$home/.tmp/.env"
+envrc="$home/.tmp/.envrc"
+oauthf="$home/.tmp/oauth-token.json"
 openf="$home/.tmp/open.txt"
 outside="$TMP_ROOT/outside.txt"
 printf 'old\n' > "$old"
 printf 'fresh\n' > "$fresh"
 printf 'secret\n' > "$envf"
+printf 'secret\n' > "$envrc"
+printf 'oauth\n' > "$oauthf"
 printf 'open\n' > "$openf"
 printf 'outside\n' > "$outside"
 ln -s "$outside" "$home/.tmp/link"
 now=$(date +%s)
-fm_touch_epoch $((now - 3 * 86400)) "$old" "$envf" "$openf"
+fm_touch_epoch $((now - 3 * 86400)) "$old" "$envf" "$envrc" "$oauthf" "$openf"
+unknown_checkout="$home/.tmp/nested-checkout"
+git init "$unknown_checkout" >/dev/null
+unknown_file="$unknown_checkout/dirty-old.txt"
+printf 'uncommitted\n' > "$unknown_file"
+fm_touch_epoch $((now - 3 * 86400)) "$unknown_file"
 tail -f "$openf" >/dev/null &
 holder=$!
 
@@ -104,6 +121,9 @@ assert_contains "$out" "mode=dry-run" "clean defaults to dry-run"
 assert_contains "$out" "would-free	reason=aged-file	category=tmp" "dry-run lists an aged temp file"
 assert_contains "$out" "path=$old" "dry-run names the aged temp file"
 assert_not_contains "$out" "path=$envf" "dry-run does not select a dotenv file"
+assert_not_contains "$out" "path=$envrc" "dry-run does not select an envrc file"
+assert_not_contains "$out" "path=$oauthf" "dry-run does not select an OAuth token"
+assert_not_contains "$out" "path=$unknown_file" "dry-run does not select an undiscovered checkout file"
 assert_not_contains "$out" "path=$fresh" "dry-run does not select a fresh temp file"
 assert_not_contains "$out" "path=$openf" "dry-run does not select an open temp file"
 assert_contains "$out" "reason=uncommitted-changes	category=worktree	path=$dirty" "dirty worktree is kept"
@@ -122,11 +142,22 @@ assert_present "$old" "dry-run leaves the aged file"
 assert_present "$outside" "dry-run leaves a symlink target"
 
 out=$(run clean --config "$cfg" --live)
+assert_contains "$out" "mode=dry-run" "live request stays dry-run without authorization"
+assert_present "$old" "an unauthorized live request leaves aged files"
+: > "$home/config/data-management.live-authorized"
+out=$(run clean --config "$cfg" --live)
 assert_contains "$out" "mode=live" "live mode says so"
+assert_contains "$out" "measure	phase=before" "live output includes the before measurement"
+assert_contains "$out" "measure	phase=after" "live output includes the after measurement"
+after=${out#*$'measure\tphase=after'}
+assert_contains "$after" "measure	df	" "after measurement includes filesystem capacity"
 assert_contains "$out" "freed	reason=aged-file	category=tmp" "live mode removes the aged temp file"
 assert_absent "$old" "the aged temp file is gone"
 assert_present "$fresh" "a fresh temp file stays"
 assert_present "$envf" "a dotenv file stays"
+assert_present "$envrc" "an envrc file stays"
+assert_present "$oauthf" "an OAuth token stays"
+assert_present "$unknown_file" "an undiscovered dirty checkout stays"
 assert_present "$openf" "an open temp file stays"
 assert_present "$outside" "a symlink target stays"
 assert_present "$dirty/README" "a dirty worktree stays"
@@ -185,6 +216,33 @@ run clean --config "$bad" >/dev/null 2>"$TMP_ROOT/bad.err" || rc=$?
 assert_equals 1 "$rc" "a symlink deletion root refuses the run"
 assert_present "$envf" "a refused run deletes nothing"
 
+unconfigured="$TMP_ROOT/unconfigured/data"
+mkdir -p "$unconfigured/archive"
+aliased_file="$unconfigured/archive/old.txt"
+printf 'private\n' > "$aliased_file"
+fm_touch_epoch $((now - 3 * 86400)) "$aliased_file"
+ln -s "$unconfigured" "$TMP_ROOT/alias"
+cat > "$bad" <<EOF
+home $home_phys
+tmp $TMP_ROOT/alias/archive 1
+EOF
+rc=0
+run clean --config "$bad" --live >/dev/null 2>"$TMP_ROOT/bad.err" || rc=$?
+assert_equals 1 "$rc" "a parent symlink into another home's data refuses the run"
+assert_present "$aliased_file" "the protected data record remains"
+
+gh_store="$TMP_ROOT/unconfigured/.config/gh"
+mkdir -p "$gh_store"
+printf 'credential\n' > "$gh_store/hosts.yml"
+cat > "$bad" <<EOF
+home $home_phys
+cache-tool npm $gh_store
+EOF
+rc=0
+run clean --config "$bad" --live >/dev/null 2>"$TMP_ROOT/bad.err" || rc=$?
+assert_equals 1 "$rc" "a CLI credential store refuses the run"
+assert_present "$gh_store/hosts.yml" "the CLI credential remains"
+
 wtcfg="$TMP_ROOT/wt.conf"
 scratch="$landed/scratch-old.txt"
 printf 'scratch\n' > "$scratch"
@@ -216,8 +274,7 @@ printf 'worktree=%s\n' "$missing" > "$home/state/missing.meta"
 sessions="$TMP_ROOT/sessions"
 npm_cache="$TMP_ROOT/npm-cache"
 pip_cache="$TMP_ROOT/pip-cache"
-stubbin="$TMP_ROOT/bin"
-mkdir -p "$sessions" "$npm_cache" "$pip_cache" "$stubbin" \
+mkdir -p "$sessions" "$npm_cache" "$pip_cache" \
   "$home/state/procevent-inbox" "$home/state/procevent"
 old_session="$sessions/old.jsonl"
 fresh_session="$sessions/fresh.jsonl"
@@ -225,6 +282,9 @@ named_session="$sessions/named.jsonl"
 keep_session="$sessions/keep.jsonl"
 open_session="$sessions/open.jsonl"
 env_session="$sessions/.env.jsonl"
+nested_session="$sessions/nested-checkout/old.jsonl"
+git init "${nested_session%/*}" >/dev/null
+printf 'uncommitted session\n' > "$nested_session"
 printf 'old session\n' > "$old_session"
 printf 'fresh session\n' > "$fresh_session"
 printf 'cwd %s\n' "$named_phys" > "$named_session"
@@ -243,7 +303,7 @@ done
 printf 'partial\n' > "$unhandled"
 printf 'source\n' > "$home/state/procevent/live-evt.source"
 fm_touch_epoch $((now - 3 * 86400)) \
-  "$old_session" "$named_session" "$keep_session" "$open_session" "$env_session" \
+  "$old_session" "$named_session" "$keep_session" "$open_session" "$env_session" "$nested_session" \
   "$home/state/procevent-inbox/old-evt.1.result" \
   "$home/state/procevent-inbox/old-evt.1.adapter" \
   "$home/state/procevent-inbox/old-evt.1.owner-task" \
@@ -302,6 +362,7 @@ assert_not_contains "$out" "path=$named_session" "dry-run leaves a session that 
 assert_not_contains "$out" "path=$keep_session" "dry-run leaves a session that names a surveyed copy"
 assert_not_contains "$out" "path=$open_session" "dry-run leaves an open session log"
 assert_not_contains "$out" "path=$env_session" "dry-run leaves a dotenv session name"
+assert_not_contains "$out" "path=$nested_session" "dry-run leaves a nested checkout session"
 assert_contains "$out" "external	tool=codex-session-prune	status=0" "dry-run invokes the session prune"
 assert_contains "$(cat "$TMP_ROOT/codex.log")" "--dry-run" "the session prune is asked not to delete"
 assert_contains "$out" "would-run	tool=npm	path=$npm_cache" "dry-run plans the npm purge"
@@ -324,9 +385,22 @@ assert_present "$named_session" "live mode leaves a session that names a recorde
 assert_present "$keep_session" "live mode leaves a session that names a surveyed copy"
 assert_present "$open_session" "live mode leaves an open session log"
 assert_present "$env_session" "live mode leaves a dotenv session name"
+assert_present "$nested_session" "live mode leaves a nested checkout session"
 assert_contains "$(cat "$TMP_ROOT/npm.log")" "--cache $npm_cache" "live mode purges only the configured npm cache"
 assert_absent "$TMP_ROOT/pip.log" "live mode does not purge a store that has an open file"
 assert_not_contains "$(tail -n 1 "$TMP_ROOT/codex.log")" "--dry-run" "live mode asks the session prune to delete"
 assert_present "$pip_open" "the open cache file stays"
+
+unsafe_cache="$TMP_ROOT/unsafe-npm-cache"
+mkdir -p "$unsafe_cache"
+git init "$unsafe_cache/hidden-checkout" >/dev/null
+cat > "$tiercfg" <<EOF
+home $home_phys
+cache-tool npm $unsafe_cache
+EOF
+npm_before=$(wc -l < "$TMP_ROOT/npm.log")
+out=$(PATH="$stubbin:$PATH" run clean --config "$tiercfg" --live)
+assert_contains "$out" "reason=in-use	category=npm	path=$unsafe_cache" "a cache with a nested checkout is not purged"
+assert_equals "$npm_before" "$(wc -l < "$TMP_ROOT/npm.log")" "the cache tool was not called on a nested checkout"
 
 pass "fm-data-manage keeps unlanded work and treats dry-run as read-only"

@@ -36,8 +36,9 @@
 # and the decision.
 #
 # Entering pressure appends one `check` wake with key `disk-guard`. The same
-# transition runs `fm-data-manage.sh clean --live` once, and only when the
-# root home's `config/data-management` is a regular file. A later healthy
+# transition runs `fm-data-manage.sh clean` once when the root home's
+# `config/data-management` is regular, adding `--live` only when
+# `config/data-management.live-authorized` is also regular. A later healthy
 # sample removes the flag and wakes once. This script does not trim the page
 # cache. It may stat the configured virtual-disk file and read free space on
 # `/mnt/c`. It does not walk `/mnt`.
@@ -414,7 +415,7 @@ announce() {
 }
 
 run_cleanup() {
-  local cfg=$ROOT/config/data-management out=$STATE/disk-guard.cleanup rc=0
+  local cfg=$ROOT/config/data-management marker=$ROOT/config/data-management.live-authorized out=$STATE/disk-guard.cleanup rc=0
   if [ ! -f "$cfg" ] || [ -L "$cfg" ]; then
     printf 'none\n'
     return 0
@@ -423,7 +424,11 @@ run_cleanup() {
     printf 'skipped\n'
     return 0
   fi
-  fm_run_timed 900 bash "$SCRIPT_DIR/fm-data-manage.sh" clean --config "$cfg" --live > "$out" 2>&1 || rc=$?
+  if [ -f "$marker" ] && [ ! -L "$marker" ] && [ ! -L "$ROOT/config" ]; then
+    fm_run_timed 900 bash "$SCRIPT_DIR/fm-data-manage.sh" clean --config "$cfg" --live > "$out" 2>&1 || rc=$?
+  else
+    fm_run_timed 900 bash "$SCRIPT_DIR/fm-data-manage.sh" clean --config "$cfg" > "$out" 2>&1 || rc=$?
+  fi
   printf '%s\n' "$rc"
 }
 

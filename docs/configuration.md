@@ -2216,6 +2216,8 @@ Arm it in the root home with `bin/fm-clutter-check.sh arm`, which writes `state/
 [`bin/fm-data-manage.sh`](../bin/fm-data-manage.sh) measures the homes, pool roots, and stores named in the optional local `config/data-management`, then plans retention cleanup.
 Dry-run is the default.
 Live deletion requires `--live` on `clean`.
+It also requires a regular `config/data-management.live-authorized` file in the first configured home, which must be the root Firstmate home.
+Create that marker only after reviewing the dry-run report; the tool checks its existence and does not create it.
 The script header owns the config grammar, the protected-path rules, the landed-work classification, and the output records.
 Category totals overlap, so a home is not added to its children.
 
@@ -2226,9 +2228,9 @@ Stopped workers remain the job of [`bin/fm-deadweight-sweep.sh`](../bin/fm-deadw
 [`bin/fm-clutter-check.sh`](../bin/fm-clutter-check.sh) remains the read-only threshold check.
 
 The script does not delete `data/` records, home `config/`, live task records, secrets, dotenv files, browser profiles, SSH or cloud CLI configuration, or anything under `/mnt`.
-A file inside a surveyed worktree is left in place when a deletion root contains that worktree.
+A file inside any checkout or task-named copy is left in place when a deletion root contains it.
 A `cache` deletion root removes aged regular files, so it must not point at a package-manager store or a session store.
-`cache-tool` runs that tool's own purge, bound to the configured directory, and skips the store when a file there is open.
+`cache-tool` runs that tool's own purge, bound to the configured directory, and skips stores with an open file, protected path, or checkout.
 `claude-sessions` removes only old session logs, and `codex-sessions` runs `codex-session-prune` when it is installed.
 `procevent-result` removes only an old handled result group whose source is no longer registered.
 The script header owns which files those directives can touch.
@@ -2236,7 +2238,7 @@ Docker is measured when the client answers and is never pruned.
 
 Copy [`fm-data-manage.service`](examples/data-management/fm-data-manage.service) and [`fm-data-manage.timer`](examples/data-management/fm-data-manage.timer) from [`docs/examples/data-management/`](examples/data-management/) into `~/.config/systemd/user/`, replace the path placeholders, then enable the timer.
 The shipped service runs a dry-run.
-Adding `--live` to that `ExecStart`, then `systemctl --user daemon-reload`, is the switch to deletion after a dry-run report has been reviewed.
+After reviewing the dry-run report, create the authorization marker and add `--live` to that `ExecStart`, then run `systemctl --user daemon-reload` to enable scheduled deletion.
 
 ## Disk guard (config/disk-guard)
 
@@ -2249,7 +2251,7 @@ The guard writes `state/disk-guard.pause` in that root home when a floor is alre
 [`bin/fm-spawn.sh`](../bin/fm-spawn.sh) refuses a fresh ship or scout while that regular file exists: it launches nothing, creates no record, leaves the backlog item queued, and exits 75.
 A relaunch and a secondmate are not deferred.
 The guard removes the flag when the sample is healthy, and it does not follow a symlink there.
-The sample that first writes the flag runs [`bin/fm-data-manage.sh`](../bin/fm-data-manage.sh) `clean --live` once, and only when the root home's `config/data-management` is a regular file.
+The sample that first writes the flag runs [`bin/fm-data-manage.sh`](../bin/fm-data-manage.sh) `clean` once when the root home's `config/data-management` is regular, adding `--live` only when the authorization marker is regular too.
 The nightly data-management timer stays a dry-run until its own service command gains `--live`.
 The guard does not trim the page cache.
 The machine's existing root cron owns that trim.

@@ -3,7 +3,8 @@
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now fm-data-manage.timer
 # The command below is a dry-run. It deletes nothing.
-# After a dry-run report is reviewed, switch to deletion by adding --live
+# After reviewing the dry-run report, create the regular
+# config/data-management.live-authorized marker in the root home, add --live
 # before --config on ExecStart, then reload the user daemon.
 [Unit]
 Description=Firstmate data management dry-run
