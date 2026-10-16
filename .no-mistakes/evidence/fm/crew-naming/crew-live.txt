@@ -1,0 +1,23 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.fm-live-crew.XNTG9D/lab
+starting Codex primary on private lab tmux socket
+primary pane: node 120x40
+loading Firstmate status theme
+spawning configured worker
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.fm-live-crew.XNTG9D/lab
+notice: naming-a1 ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned naming-a1 harness=codex kind=ship mode=local-only yolo=off window=primary:fm-naming-a1 worktree=/home/mitch/.treehouse/project-c09d89/1/project
+configured record: window=primary:fm-naming-a1
+worktree=/home/mitch/.treehouse/project-c09d89/1/project
+crew_label=nap-crew-naming-a1
+branch=nap/crew/naming-a1
+configured window/address: fm-naming-a1|nap-crew-naming-a1|nap-crew-naming-a1
+configured branch: removing short form for fresh fallback worker
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.fm-live-crew.XNTG9D/lab
+notice: naming-b1 ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned naming-b1 harness=codex kind=ship mode=local-only yolo=off window=primary:fm-naming-b1 worktree=/home/mitch/.treehouse/project-c09d89/2/project
+fallback record: window=primary:fm-naming-b1
+worktree=/home/mitch/.treehouse/project-c09d89/2/project
+branch=fm/naming-b1
+both live window labels/addresses: fm-naming-a1|nap-crew-naming-a1|nap-crew-naming-a1
+fm-naming-b1||fm-naming-b1
+fallback branch: existing configured label after config removal: nap-crew-naming-a1

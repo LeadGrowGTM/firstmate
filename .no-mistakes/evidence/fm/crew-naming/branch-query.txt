@@ -1,0 +1,2 @@
+override: exit=0 stdout='fix/' stderr=''
+default: exit=1 stdout='' stderr="error: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.fm-crew-query.susya206/config/mate-short-name holds 'Nap'; a short form is 1-16 lowercase letters, digits and inner dashes"

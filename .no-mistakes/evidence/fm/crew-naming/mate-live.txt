@@ -1,0 +1,6 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.fm-live-mate.cvpP5d/lab
+starting Codex primary on private lab tmux socket
+primary pane: node 120x40
+spawning named second mate
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.fm-live-mate.cvpP5d/lab
+error: secondmate home cannot be inside the firstmate repo: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52TZSY8W7F0AX6GZV10HVBQ/.fm-live-mate.cvpP5d/napoleon
