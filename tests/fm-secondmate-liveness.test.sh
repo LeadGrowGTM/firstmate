@@ -53,7 +53,10 @@ make_probe_tmux() {
 set -u
 case "\${1:-}" in
   display-message)
-    for a in "\$@"; do case "\$a" in *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;; esac; done
+    for a in "\$@"; do case "\$a" in
+      *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;;
+      *pane_tty*) printf 'fakepane\n'; exit 0 ;;
+    esac; done
     exit 0 ;;
   list-windows) printf '%s\n' win; exit 0 ;;
 esac
@@ -104,9 +107,13 @@ test_tmux_agent_state_classifies() {
   done
 
   for shell in zsh bash -zsh; do
-    fb=$(make_probe_tmux "$TMP_ROOT/tmux-${shell#-}" "$shell")
+    fb=$(make_probe_tmux "$TMP_ROOT/tmux-$shell" "$shell")
     out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
-    [ "$out" = dead ] || fail "a bare $shell foreground process should classify as dead, got '$out'"
+    [ "$out" = ambiguous ] || fail "a shell name alone must stay ambiguous, got '$out'"
+    printf '%s\n' "$shell" > "$fb/command"
+    fm_test_fake_shell_input_proof "$fb" "$fb/command"
+    out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
+    [ "$out" = dead ] || fail "a shell with explicit modelled input proof should classify dead, got '$out'"
   done
 
   fb=$(make_probe_tmux "$TMP_ROOT/tmux-node" node)
@@ -284,6 +291,7 @@ case "${1:-}" in
             *) printf '%s\n' "$mode"; exit 0 ;;
           esac
           ;;
+        *pane_tty*) printf 'fakepane\n'; exit 0 ;;
       esac
     done
     exit 0
@@ -307,6 +315,8 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  printf 'zsh\n' > "$dir/foreground-command"
+  fm_test_fake_shell_input_proof "$fakebin" "$dir/foreground-command"
   printf '%s\n' "$fakebin"
 }
 
@@ -351,6 +361,7 @@ add_sm_home() {
 
 run_bootstrap() {  # <fakebin> <home> <pane-cmd> <call-log> [extra env...] -> stdout
   local fb=$1 home=$2 cmd=$3 log=$4; shift 4
+  printf '%s\n' "$cmd" > "${home%/home}/foreground-command"
   PATH="$fb:$BASE_PATH" TMUX='' FM_BACKEND=tmux FM_HOME="$home" \
     FM_TEST_PANE_CMD="$cmd" FM_TMUX_CALL_LOG="$log" \
     env "$@" "$ROOT/bin/fm-bootstrap.sh" 2>&1

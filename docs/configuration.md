@@ -1392,13 +1392,13 @@ After the [pool placement check](#pool-selection-limits), a fresh launch asks Tr
 When treehouse hands it another clone's idle copy, the launch leaves that copy at once and attempts to lease a worktree of its own clone using this home's per-home pool folder.
 The per-home pool folder is named under `${XDG_STATE_HOME:-~/.local/state}/firstmate/<home>-<hash>/.treehouse/`; a clone-local `treehouse.toml` root can select a different Treehouse location.
 `<home>` is the home's folder name and `<hash>` is the first six hex digits of the sha256 of the home's physical path, so two homes with one folder name stay apart.
-On the ordinary fallback path, treehouse resets the idle copy it offered to the default branch before handing it over, and takes it back unleased when the launch leaves it; no copy is added there.
+On a fallback path that passes the custody check, treehouse resets the idle copy it offered to the default branch before handing it over, and takes it back unleased when the launch leaves it; no copy is added there.
 Treehouse reads its default pool location from `HOME`, so that lease and its prune run treehouse with `HOME` set to the pool folder, while every git process it starts keeps the operator's `HOME`, git configuration, and credential helpers.
 The user-level treehouse configuration therefore does not apply to this pool; a `treehouse.toml` in the clone still does.
 The lease is bounded to 600 seconds, and a fetch that would prompt for credentials fails instead of waiting.
 A launch that still cannot get a worktree of its own clone stops before the worker starts.
-Relaunch resumes in the recorded worktree; a Claude relaunch refuses an old record whose worktree belongs to another clone and names both the worktree and recorded project.
-Non-Claude relaunches continue to use their recorded worktree.
+Relaunch resumes in the recorded worktree only when no other reachable local task record or conflicting slot claim still reserves it; a Claude relaunch also refuses an old record whose worktree belongs to another clone and names both the worktree and recorded project.
+Non-Claude relaunches continue to use their recorded worktree after that custody check.
 If a clone-local `treehouse.toml` root redirects the fallback lease to another clone's copy, the launch refuses it and does not force-return that foreign copy.
 An abort before worker launch returns its own clone's lease from the recorded project clone only after proving it has no uncommitted work or commits absent from its remotes.
 Leases containing work, leases whose safety checks fail, and leases used by a launched worker stay in place for teardown, even if the worker endpoint closes.
@@ -1408,12 +1408,15 @@ The optional pool sweep's extra per-home prune and size checks use the pool path
 
 ### Pool-selection limits
 
+Before asking Treehouse for a copy, Firstmate refuses an idle pooled copy still reserved by a reachable local task record or slot claim.
+Unreadable custody or process evidence also refuses allocation; reconcile the reservation or use guarded `--retire-claim` teardown for a proven-stopped worker.
 Before the initial `treehouse get`, Firstmate resolves the pool inside the pane using that pane's HOME and configuration.
 Before a fallback lease, it resolves the pool using the lease HOME.
 It refuses either allocation when the resolved pool is inside the spawning home or project clone.
 Every pool placement check requires `python3`; when a repository or user Treehouse TOML config exists, `python3` with `tomllib` is required to verify the treehouse pool location.
 A spawn is refused when the applicable requirement is unavailable.
 After either allocation, Firstmate resolves the worktree and refuses to launch a worker there if it is inside either boundary; [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns both path checks.
+It also checks the returned copy for another task's record, a retained slot claim, or a surviving process before refreshing its base or launching the worker.
 For a refused initial interactive copy, Firstmate confirms that the pane left it and that plain `treehouse status` reports that exact copy available; otherwise the spawn reports an unconfirmed return for Treehouse prune.
 An untouched same-clone fallback lease is returned by the existing abort cleanup.
 If a clone-local `treehouse.toml` root is added after a per-home pool already exists, the guard's extra per-home prune follows the new root and can prune that configured pool twice while leaving the earlier pool unpruned.

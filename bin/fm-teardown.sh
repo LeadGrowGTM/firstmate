@@ -96,6 +96,14 @@
 # session-start sweep could still close, while a journal bound to any other pane
 # - or a version 1 attempt whose workspace is still present or unreadable - may
 # name a live quarantined space and is retained for that sweep.
+# --retire-claim performs records-only cleanup of a stale pooled-copy claim.
+# It requires a recovery-grade proof that the old agent is gone and no live
+# process rooted in its copy, under the same project/control/meta locks as
+# ordinary teardown. It archives the original metadata in
+# data/<id>/retired-worktree-claim.<incarnation>.meta and preserves the copy, branch, commits,
+# dirty files and hooks. Only this task's own slot marker is released; another
+# holder's marker is untouched. It cannot be combined with --force and never
+# applies to secondmate homes or backend-owned Orca worktrees.
 # data/<id>/ is deliberately left in place: a successor spawn reads brief.md
 # from it.
 # Worktree-slot ownership (teardown-slot-collision): a treehouse pool slot is
@@ -192,7 +200,7 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped]
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped] [--retire-claim]
 #   --only-if-stopped is the automatic sweep guard: under the lifecycle and
 #   metadata locks, accept only a positively dead or missing worker endpoint,
 #   with no open status decision or captain hold. Secondmates, remote records,
@@ -413,12 +421,14 @@ ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
 ONLY_IF_STOPPED=0
+RETIRE_CLAIM=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
     --only-if-stopped) ONLY_IF_STOPPED=1 ;;
+    --retire-claim) RETIRE_CLAIM=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -426,6 +436,17 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+[ "$RETIRE_CLAIM" = 0 ] || [ -z "$FORCE" ] || {
+  echo "error: --retire-claim cannot be combined with --force" >&2
+  exit 2
+}
+if [ "$RETIRE_CLAIM" = 1 ] && [ -f "$STATE/$ID.meta" ]; then
+  if [ "$(fm_meta_get "$STATE/$ID.meta" kind)" = secondmate ] \
+     || [ "$(fm_meta_get "$STATE/$ID.meta" backend)" = orca ]; then
+    echo "REFUSED: --retire-claim applies only to a local pooled worker copy" >&2
+    exit 1
+  fi
+fi
 [ "$ONLY_IF_STOPPED" = 0 ] || [ -z "$FORCE" ] || {
   echo "error: --only-if-stopped cannot discard work with --force" >&2
   exit 2
@@ -1737,7 +1758,9 @@ backlog_done_args() {
       BACKLOG_DONE_ARGS=(--report "$data_relative/$ID/report.md")
       ;;
     *)
-      if [ "$MODE" = local-only ]; then
+      if [ "$RETIRE_CLAIM" = 1 ] && [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+        BACKLOG_DONE_ARGS=(--note "Preserved unfinished work: worktree $WT; branch $retirement_branch")
+      elif [ "$MODE" = local-only ]; then
         BACKLOG_DONE_ARGS=(--note "local main")
       elif [ -n "$PR_URL" ]; then
         BACKLOG_DONE_ARGS=(--pr "$PR_URL")
@@ -1764,7 +1787,13 @@ backlog_refresh_reminder() {
   else
     backlog_display="${DATA%/}/backlog.md"
   fi
-  if [ "$BACKLOG_CLOSED" = 1 ] && [ "$BACKLOG_TRANSITION" = retain ]; then
+  if [ "$RETIRE_CLAIM" = 1 ] && [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+    if [ "$BACKLOG_CLOSED" = 1 ]; then
+      printf '%s\n' "Backlog: $ID was requeued in $backlog_display with its preserved worktree and branch recorded."
+    else
+      printf '%s\n' "Backlog: $ID was not changed automatically in $backlog_display ($BACKLOG_SKIP_REASON); its unfinished work remains at $WT on $retirement_branch."
+    fi
+  elif [ "$BACKLOG_CLOSED" = 1 ] && [ "$BACKLOG_TRANSITION" = retain ]; then
     printf '%s\n' "Backlog: $ID stays open in $backlog_display, still held for the captain with its deliverable recorded. Relay the question and close it only with bin/fm-captain-hold.sh answer."
   elif [ "$BACKLOG_CLOSED" = 1 ]; then
     printf '%s\n' "Backlog: $ID is closed in $backlog_display. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due."
@@ -2245,8 +2274,8 @@ case "$NM_TEARDOWN_TIMEOUT" in ''|*[!0-9]*) NM_TEARDOWN_TIMEOUT=10 ;; esac
 NM_TEARDOWN_RUNS_LIMIT=${FM_TEARDOWN_NM_RUNS_LIMIT:-200}
 case "$NM_TEARDOWN_RUNS_LIMIT" in ''|*[!0-9]*) NM_TEARDOWN_RUNS_LIMIT=200 ;; esac
 TASK_RUN_ID=
-task_status_is_own_parked_run() {  # <worktree> <axi-status-output>
-  local wt=$1 out=$2 branch run_id run_branch run_head status outcome awaiting has_gate ledger
+task_status_is_own_parked_run() {  # <worktree> <axi-status-output> [any-active]
+  local wt=$1 out=$2 any_active=${3:-0} branch run_id run_branch run_head status outcome awaiting has_gate ledger
   TASK_RUN_ID=
   branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 1
   [ -n "$branch" ] || return 1
@@ -2260,10 +2289,16 @@ task_status_is_own_parked_run() {  # <worktree> <axi-status-output>
   [ -z "$outcome" ] || return 1
   status=$(fm_nm_strip_quotes "$(fm_nm_field "$out" status)")
   [ -n "$status" ] || return 1
-  case "$status" in
-    completed|failed|cancelled|passed|checks-passed|running|fixing|ci) return 1 ;;
-  esac
-  if ! fm_nm_head_matches_worktree "$wt" "$run_head"; then
+  if [ "$any_active" = 1 ]; then
+    case "$status" in passed|checks-passed) return 1 ;; esac
+    fm_nm_run_is_active "$out" || return 1
+  else
+    case "$status" in
+      completed|failed|cancelled|passed|checks-passed) return 1 ;;
+    esac
+  fi
+  if ! { [ "$any_active" = 1 ] && fm_nm_run_is_pipeline_owned_active "$out"; } \
+    && ! fm_nm_head_matches_worktree "$wt" "$run_head"; then
     # The strict object-local rule rejected this run head. That rejection is
     # final when the head object resolves in this copy (diverged or rewritten
     # tips are genuine mismatches), but when the object is absent entirely -
@@ -2280,6 +2315,10 @@ task_status_is_own_parked_run() {  # <worktree> <axi-status-output>
     [ -z "$(fm_nm_resolve_commit "$wt" "$run_head")" ] || return 1
     ledger=$(fm_nm_run "$wt" "$NM_TEARDOWN_TIMEOUT" runs --limit "$NM_TEARDOWN_RUNS_LIMIT")
     [ "$(fm_nm_runs_status_for_worktree "$wt" "$branch" "$ledger" "$run_head")" = running ] || return 1
+  fi
+  if [ "$any_active" = 1 ]; then
+    TASK_RUN_ID=$run_id
+    return 0
   fi
   awaiting=$(printf '%s\n' "$out" | grep -E '^[[:space:]]*awaiting_agent:' | head -1 || true)
   has_gate=$(printf '%s\n' "$out" | grep -Eq '^[[:space:]]*gate:[[:space:]]*' && echo 1 || echo 0)
@@ -2632,7 +2671,7 @@ require_exclusive_worktree_slot_record() {
   # named before the unreadable-claim refusal.
   project=$(fm_meta_get "$record_meta" project)
   owner_rc=0
-  teardown_recorded_worktree_disposition "$record_id" "$slot" "$project" || owner_rc=$?
+  teardown_recorded_worktree_disposition "$record_id" "$slot" "$project" "$record_state/.." || owner_rc=$?
   [ "$owner_rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ] && return 0
   collect_local_firstmate_states "$record_state" || return 1
   for state_dir in "${TREEHOUSE_OWNER_STATES[@]}"; do
@@ -2660,6 +2699,7 @@ require_exclusive_worktree_slot_record() {
 
 require_exclusive_task_worktree_slot() {
   local slot
+  [ "$RETIRE_CLAIM" != 1 ] || return 0
   slot=$(teardown_live_slot_path) || return 0
   require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot"
 }
@@ -2677,9 +2717,9 @@ require_exclusive_task_worktree_slot() {
 # only for an unreadable claim that is not accompanied by a different clone.
 # Prints nothing.
 TEARDOWN_SLOT_REASSIGNED_RC=3
-teardown_recorded_worktree_disposition() {  # <task-id> <worktree> <project>
-  local record_id=$1 worktree=$2 project=$3
-  fm_treehouse_slot_owner_state "$worktree" "$record_id"
+teardown_recorded_worktree_disposition() {  # <task-id> <worktree> <project> <home>
+  local record_id=$1 worktree=$2 project=$3 home=$4
+  fm_treehouse_slot_owner_state "$worktree" "$record_id" "$home"
   fm_treehouse_same_clone "$project" "$worktree" || true
   if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ] || [ "$FM_TREEHOUSE_OTHER_CLONE" = 1 ]; then
     return "$TEARDOWN_SLOT_REASSIGNED_RC"
@@ -2690,9 +2730,9 @@ teardown_recorded_worktree_disposition() {  # <task-id> <worktree> <project>
   return 1
 }
 
-require_owned_worktree_slot_record() {  # <task-id> <worktree> <project>
-  local record_id=$1 worktree=$2 project=$3 marker rc=0 clone_note=
-  teardown_recorded_worktree_disposition "$record_id" "$worktree" "$project" || rc=$?
+require_owned_worktree_slot_record() {  # <task-id> <worktree> <project> <home>
+  local record_id=$1 worktree=$2 project=$3 home=$4 marker rc=0 clone_note=
+  teardown_recorded_worktree_disposition "$record_id" "$worktree" "$project" "$home" || rc=$?
   if [ "$rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ]; then
     if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ]; then
       [ "$FM_TREEHOUSE_OTHER_CLONE" = 1 ] \
@@ -2718,6 +2758,10 @@ TEARDOWN_SLOT_REASSIGNED_TO=
 TEARDOWN_SLOT_REASSIGNED_HOME=
 require_owned_task_worktree_slot() {
   local slot rc=0
+  if [ "$RETIRE_CLAIM" = 1 ]; then
+    TEARDOWN_SLOT_REASSIGNED=1
+    return 0
+  fi
   # A secondmate home is not a task worktree. A path that is already gone has
   # nothing to protect. Every path that still exists is decided here, including
   # one that is no longer a pool slot of this project because another clone
@@ -2726,7 +2770,7 @@ require_owned_task_worktree_slot() {
   [ "$KIND" = secondmate ] && return 0
   [ -d "$WT" ] || return 0
   slot=$(canonical_existing_dir "$WT") || return 0
-  require_owned_worktree_slot_record "$ID" "$slot" "$PROJ" || rc=$?
+  require_owned_worktree_slot_record "$ID" "$slot" "$PROJ" "$FM_HOME" || rc=$?
   case "$rc" in
     0) return 0 ;;
     "$TEARDOWN_SLOT_REASSIGNED_RC")
@@ -3266,7 +3310,7 @@ preflight_descendant_treehouse_slots() {
     fi
     [ -d "$worktree" ] || continue
     owner_rc=0
-    require_owned_worktree_slot_record "$task_id" "$worktree" "$project" || owner_rc=$?
+    require_owned_worktree_slot_record "$task_id" "$worktree" "$project" "$state/.." || owner_rc=$?
     case "$owner_rc" in
       0|"$TEARDOWN_SLOT_REASSIGNED_RC") ;;
       *) return 1 ;;
@@ -3304,12 +3348,12 @@ validate_firstmate_home_children_removal() {
       child_proj=$(meta_value "$child_meta" project)
       child_owner_rc=0
       if [ -d "$child_wt" ]; then
-        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" 2>/dev/null || child_owner_rc=$?
+        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" "$sub_state/.." 2>/dev/null || child_owner_rc=$?
       fi
       if [ "$child_owner_rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ]; then
         :
       elif [ "$child_owner_rc" -ne 0 ]; then
-        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" || return 1
+        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" "$sub_state/.." || return 1
       else
         validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
       fi
@@ -3558,11 +3602,11 @@ cleanup_firstmate_home_children() {
       # or return, so only its records are cleaned up. The preflight above
       # already named the reassignment on stderr under the same lock.
       child_owner_rc=0
-      require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" 2>/dev/null || child_owner_rc=$?
+      require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" "$sub_state/.." 2>/dev/null || child_owner_rc=$?
       if [ "$child_owner_rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ]; then
         :
       elif [ "$child_owner_rc" -ne 0 ]; then
-        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" || return 1
+        require_owned_worktree_slot_record "$child_id" "$child_wt" "$child_proj" "$sub_state/.." || return 1
       else
         validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
         rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
@@ -3570,7 +3614,7 @@ cleanup_firstmate_home_children() {
           "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
         if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
           if teardown_treehouse_return "$child_wt" "$child_proj" "child worktree"; then
-            fm_treehouse_slot_owner_release "$child_wt" "$child_id"
+            fm_treehouse_slot_owner_release "$child_wt" "$child_id" "$sub_state/.."
           else
             child_return_rc=$?
             if [ "$child_return_rc" -eq "$TEARDOWN_TREEHOUSE_LOCK_REFUSED" ]; then
@@ -3622,6 +3666,111 @@ remove_secondmate_registry_entry() {
   return "$rc"
 }
 
+if [ "$RETIRE_CLAIM" = 1 ]; then
+  if [ "$KIND" = secondmate ] || [ "$BACKEND" = orca ] \
+    || ! fm_treehouse_pool_slot "$PROJ" "$WT"; then
+    echo "REFUSED: --retire-claim requires a recorded local Treehouse pool copy; nothing was changed" >&2
+    exit 1
+  fi
+  fm_control_backend_state_verified "$BACKEND" || {
+    echo "REFUSED: this backend cannot prove the stale claim's agent gone" >&2
+    exit 1
+  }
+  fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+  [ "$FM_TREEHOUSE_SLOT_OWNER" != unsafe ] && [ "$FM_TREEHOUSE_SLOT_OWNER" != disputed ] || {
+    echo "REFUSED: stale claim's slot marker is unreadable or ambiguous; nothing was changed" >&2
+    exit 1
+  }
+  fm_backend_source "$BACKEND" || exit 1
+  if [ "$BACKEND" = tmux ]; then
+    fm_backend_tmux_bind_record "$META" || exit 1
+  fi
+  retirement_state=$(fm_backend_agent_state "$BACKEND" "$T")
+  case "$retirement_state" in
+    missing)
+      retirement_absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" "$META")
+      [ "${retirement_absence%%$'\t'*}" = gone ] || {
+        echo "REFUSED: stale claim's agent absence is unproven: ${retirement_absence#*$'\t'}; nothing was changed" >&2
+        exit 1
+      }
+      ;;
+    dead) ;;
+    *) echo "REFUSED: stale claim's agent is $retirement_state; cannot prove the old agent gone; nothing was changed" >&2; exit 1 ;;
+  esac
+  retirement_pane_pid=
+  if [ "$retirement_state" = dead ] && [ "$BACKEND" = tmux ]; then
+    retirement_pane_pid=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || retirement_pane_pid=
+  elif [ "$retirement_state" = dead ] && [ "$BACKEND" = herdr ] && fm_backend_herdr_parse_target "$T"; then
+    retirement_pane_pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+      | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
+        'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || retirement_pane_pid=
+  fi
+  for retirement_root in "$WT" "$TASK_TMP"; do
+    [ -n "$retirement_root" ] || continue
+    retirement_missing_option=
+    [ "$retirement_root" != "$TASK_TMP" ] || retirement_missing_option=allow-missing
+    retirement_processes=$(fm_agent_worktree_processes "$retirement_root" "$retirement_pane_pid" "$retirement_missing_option") || {
+      echo "REFUSED: stale claim's process absence is unproven under $retirement_root; cannot prove the old agent gone; nothing was changed" >&2
+      exit 1
+    }
+    [ -z "$retirement_processes" ] || {
+      echo "REFUSED: live processes still have cwd under $retirement_root; cannot prove the old agent gone; nothing was changed" >&2
+      exit 1
+    }
+  done
+  if [ "$KIND" = ship ]; then
+    retirement_branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+      echo "REFUSED: stale claim's validation branch is unproven; nothing was changed" >&2
+      exit 1
+    }
+    retirement_dirty=$(git -C "$WT" status --porcelain --untracked-files=all 2>/dev/null) || {
+      echo "REFUSED: stale claim's worktree state is unproven; nothing was changed" >&2
+      exit 1
+    }
+    if [ -n "$retirement_dirty" ] || ! work_is_landed "$retirement_branch"; then
+      RETIREMENT_UNLANDED=1
+      TEARDOWN_BACKLOG_TRANSITION=retain
+    fi
+    retirement_overview=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi) || {
+      echo "REFUSED: stale claim's validation run inventory is unproven; nothing was changed" >&2
+      exit 1
+    }
+    retirement_choice=$(fm_nm_select_run "$retirement_branch" "$retirement_overview" "$WT" "$NM_TEARDOWN_TIMEOUT")
+    case "$retirement_choice" in
+      absent) ;;
+      selected\|*)
+        IFS='|' read -r _ _ _ retirement_run_ids <<< "$retirement_choice"
+        IFS=',' read -r -a retirement_candidates <<< "$retirement_run_ids"
+        for retirement_run_id in "${retirement_candidates[@]}"; do
+          retirement_run_id=$(fm_nm_trim "$retirement_run_id")
+          retirement_run=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi status --run "$retirement_run_id") || {
+            echo "REFUSED: stale claim's validation run $retirement_run_id is unreadable; nothing was changed" >&2
+            exit 1
+          }
+          retirement_run_status=$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" status)")
+          [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" id)")" = "$retirement_run_id" ] \
+            && [ "$(fm_nm_strip_quotes "$(fm_nm_field "$retirement_run" branch)")" = "$retirement_branch" ] \
+            && [ "$(fm_nm_run_status_class "$retirement_run_status")" != unknown ] || {
+            echo "REFUSED: stale claim's validation run $retirement_run_id identity or state is unproven; nothing was changed" >&2
+            exit 1
+          }
+          if fm_nm_run_is_active "$retirement_run"; then
+            if task_status_is_own_parked_run "$WT" "$retirement_run" 1; then
+              echo "REFUSED: no-mistakes run $TASK_RUN_ID for $ID is still active; nothing was changed" >&2
+            else
+              echo "REFUSED: stale claim's active validation run attribution is unproven; nothing was changed" >&2
+            fi
+            exit 1
+          fi
+        done
+        ;;
+      *)
+        echo "REFUSED: stale claim's validation run inventory is unproven: $retirement_choice; nothing was changed" >&2
+        exit 1
+        ;;
+    esac
+  fi
+fi
 require_exclusive_task_worktree_slot || exit 1
 require_owned_task_worktree_slot || exit 1
 
@@ -3785,13 +3934,9 @@ teardown_legacy_stamp_rollback() {
   [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
 }
 
-  # The accepted legacy incarnation is stamped under the meta lock already
-  # held, right before the close marker binds to it: every refusal above leaves
-  # the record byte-identical, and every later replay reads the same stamped
-  # token the marker carries. A failed close-marker write rolls the stamp back
-  # to the record's pre-stamp bytes, so a retried teardown re-runs the
-  # dead-or-agent-less endpoint gate instead of sailing past it on a stamp the
-  # abandoned attempt left behind.
+# Stamp under the meta lock just before the close marker binds its token.
+# Claim retirement defers this until its original record has been archived.
+teardown_legacy_stamp_apply() {
   if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ] && [ -z "$TEARDOWN_LEGACY_RETAINED_STAMP" ]; then
     TEARDOWN_LEGACY_PRESTAMP_SIZE=$(wc -c < "$META" | tr -d ' ')
     TEARDOWN_LEGACY_STAMP_FAILED=
@@ -3814,12 +3959,26 @@ teardown_legacy_stamp_rollback() {
       else
         echo "error: could not stamp the accepted legacy incarnation into task $ID's record; refusing destructive teardown" >&2
       fi
-      exit 1
+      return 1
     fi
+  fi
+  return 0
+}
+  if [ "$RETIRE_CLAIM" != 1 ]; then
+    teardown_legacy_stamp_apply || exit 1
   fi
   BACKLOG_CLOSED=1
   META_SPAWN_GEN=$TEARDOWN_META_SPAWN_GEN
-  if ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
+  if [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+    retirement_mode=$(fm_backlog_requeue_mode "$DATA" "$ID") || {
+      echo "REFUSED: cannot record the pre-retirement backlog state for $ID" >&2
+      exit 1
+    }
+    BACKLOG_TRANSITION_FLAGS=(--mode "$retirement_mode")
+  elif [ "$RETIRE_CLAIM" = 1 ]; then
+    BACKLOG_TRANSITION_FLAGS=(--mode "retire-$BACKLOG_TRANSITION")
+  fi
+  if [ "$RETIRE_CLAIM" != 1 ] && ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
       "${BACKLOG_TRANSITION_FLAGS[@]+"${BACKLOG_TRANSITION_FLAGS[@]}"}" \
       "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
     if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ] && [ -z "$TEARDOWN_LEGACY_RETAINED_STAMP" ] \
@@ -3848,6 +4007,7 @@ fi
 # kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
 # dedicated process-event and firstmate-home removal machinery further below,
 # not by task-worktree cleanup.
+if [ "$RETIRE_CLAIM" != 1 ]; then
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
   conclude_task_no_mistakes_run "$WT"
   reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
@@ -3927,7 +4087,7 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # it here - and only after a return that succeeded - keeps a returned slot
   # unclaimed until its next holder claims it, and leaves the claim in place
   # whenever the return did not actually happen.
-  fm_treehouse_slot_owner_release "$WT" "$ID"
+  fm_treehouse_slot_owner_release "$WT" "$ID" "$FM_HOME"
   TREEHOUSE_COPY_RETURNED=1
 fi
 
@@ -4056,7 +4216,7 @@ remove_kimi_turnend_auth "$STATE" "$ID" || exit 1
 fm_backend_clear_transition "$BACKEND" "$STATE" "$T" || true
 # Remove the per-task temp root (/tmp/fm-<id>/, incl. its gotmp/) recorded by spawn.
 # Read before the state-file rm below; empty (pre-fix tasks without tasktmp=) is a no-op.
-[ -n "$TASK_TMP" ] && rm -rf "$TASK_TMP"
+[ -z "$TASK_TMP" ] || rm -rf "$TASK_TMP"
 # Retire only this Firstmate home's launch namespace. Its never-reused per-spawn
 # files leave the equal task-id namespace of every other home untouched.
 teardown_launch_home_token() {
@@ -4120,18 +4280,157 @@ if [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ];
     echo "warning: retaining herdr presentation journal for $ID; it still names a projected workspace the session-start sweep owns, not the closed endpoint" >&2
   fi
 fi
+fi
 # The record is gone, so the backlog must not still show this task in flight
 # when teardown reports success. Still under this task's meta lock, so a steer
 # racing the same id stays serialized exactly as it was before. A captain-held
 # row takes the retain transition here instead of the close: same record, same
 # ordering, the row returns to Queued with its deliverable recorded.
+retirement_archive_created=0
+retirement_owner_released=0
+retirement_backup=
+retirement_prepare() {
+  [ ! -L "$DATA/$ID" ] && { [ ! -e "$DATA/$ID" ] || [ -d "$DATA/$ID" ]; } || return 1
+  mkdir -p "$DATA/$ID" || return 1
+  retirement_gen=$(fm_backend_meta_exact_value "$META" spawn_gen) || retirement_gen=
+  if [[ $retirement_gen =~ ^s[0-9]{1,12}\.[0-9]+\.[0-9]+$ ]]; then
+    retirement_archive="$DATA/$ID/retired-worktree-claim.$retirement_gen.meta"
+  else
+    retirement_stamp=$(date -u +%Y%m%dT%H%M%S) || return 1
+    retirement_suffix=0
+    retirement_archive="$DATA/$ID/retired-worktree-claim.$retirement_stamp.$$.meta"
+    while [ -e "$retirement_archive" ] || [ -L "$retirement_archive" ]; do
+      retirement_suffix=$((retirement_suffix + 1))
+      retirement_archive="$DATA/$ID/retired-worktree-claim.$retirement_stamp.$$.$retirement_suffix.meta"
+    done
+  fi
+  retirement_tmp=$(mktemp "$DATA/$ID/.retired-worktree-claim.XXXXXX") || return 1
+  retirement_backup=$(mktemp "$DATA/$ID/.retired-worktree-record.XXXXXX") || { rm -f "$retirement_tmp"; return 1; }
+  if ! cp "$META" "$retirement_backup"; then
+    rm -f "$retirement_tmp" "$retirement_backup"
+    retirement_backup=
+    return 1
+  fi
+  if ! cp "$META" "$retirement_tmp"; then
+    rm -f "$retirement_tmp"
+    return 1
+  fi
+  if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ] \
+    && ! perl -e 'truncate($ARGV[0], $ARGV[1]) or exit 1' -- \
+      "$retirement_tmp" "$TEARDOWN_LEGACY_PRESTAMP_SIZE"; then
+    rm -f "$retirement_tmp"
+    return 1
+  fi
+  if [ -e "$retirement_archive" ] || [ -L "$retirement_archive" ]; then
+    if [ ! -f "$retirement_archive" ] || [ -L "$retirement_archive" ] \
+      || ! cmp -s "$retirement_tmp" "$retirement_archive"; then
+      rm -f "$retirement_tmp"
+      return 1
+    fi
+    rm -f "$retirement_tmp"
+  else
+    if ! mv -f "$retirement_tmp" "$retirement_archive"; then
+      rm -f "$retirement_tmp"
+      return 1
+    fi
+    retirement_archive_created=1
+  fi
+  fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+  case "$FM_TREEHOUSE_SLOT_OWNER" in
+    absent|other) return 0 ;;
+    mine)
+      retirement_owner_released=1
+      fm_treehouse_slot_owner_release "$WT" "$ID" "$FM_HOME"
+      fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+      [ "$FM_TREEHOUSE_SLOT_OWNER" = absent ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+retirement_rollback() {
+  local rc=0 restore_tmp=
+  if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ]; then
+    teardown_legacy_stamp_rollback || rc=1
+  fi
+  if [ -n "$retirement_backup" ] && [ -f "$retirement_backup" ]; then
+    if [ -e "$META" ] || [ -L "$META" ]; then
+      cmp -s "$retirement_backup" "$META" || rc=1
+    else
+      restore_tmp=$(mktemp "$STATE/.$ID.retirement-restore.XXXXXX") || rc=1
+      if [ "$rc" = 0 ]; then
+        cp "$retirement_backup" "$restore_tmp" \
+          && fm_backlog_atomic_transition publish "$restore_tmp" "$META" "task record" "$STATE" \
+          || rc=1
+      fi
+      [ "$rc" != 0 ] || cmp -s "$retirement_backup" "$META" || rc=1
+      [ -z "$restore_tmp" ] || rm -f "$restore_tmp"
+    fi
+  elif [ ! -f "$META" ] || [ -L "$META" ]; then
+    rc=1
+  fi
+  if [ "$retirement_owner_released" = 1 ]; then
+    fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+    case "$FM_TREEHOUSE_SLOT_OWNER" in
+      mine) ;;
+      absent) fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME" || rc=1 ;;
+      *) rc=1 ;;
+    esac
+  fi
+  if [ "$rc" = 0 ] && [ "$BACKLOG_CLOSED" = 1 ]; then
+    fm_backlog_close_marker_remove "$BACKLOG_CLOSE_MARKER" "$STATE" || rc=1
+  fi
+  if [ "$rc" = 0 ]; then
+    [ "$retirement_archive_created" = 0 ] || rm -f "$retirement_archive" || rc=1
+    [ -z "$retirement_backup" ] || rm -f "$retirement_backup" || rc=1
+  fi
+  [ "$rc" = 0 ] || echo "error: could not restore the stale claim after retirement refused" >&2
+  return "$rc"
+}
 if [ "$BACKLOG_CLOSED" = 1 ]; then
   BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
-  if ! fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
-      "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
+fi
+if [ "$RETIRE_CLAIM" = 1 ]; then
+  retirement_prepare || {
+    retirement_rollback || true
+    echo "REFUSED: stale claim archive or slot release failed; its active record was retained" >&2
+    exit 1
+  }
+  if [ "$BACKLOG_CLOSED" = 1 ] && ! teardown_legacy_stamp_apply; then
+    retirement_rollback || true
+    exit 1
+  fi
+  # The retirement intent must never be replayable before its archive and
+  # slot transition exist. An active record also blocks replay after rollback.
+  if [ "$BACKLOG_CLOSED" = 1 ] && ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
+      "${BACKLOG_TRANSITION_FLAGS[@]+"${BACKLOG_TRANSITION_FLAGS[@]}"}" \
+      "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
+    retirement_rollback || true
+    echo "REFUSED: stale claim backlog intent could not be recorded; recovery material was retained" >&2
+    exit 1
+  fi
+fi
+if [ "$BACKLOG_CLOSED" = 1 ]; then
+  retirement_transition() {
+    if [ "$RETIRE_CLAIM" = 1 ]; then
+      if fm_backlog_atomic_transition remove "$META" "task record" "$STATE"; then
+        fm_backlog_close_marker_replay "$STATE" "$BACKLOG_CLOSE_MARKER" "$DATA"
+      else
+        if [ -e "$META" ] || [ -L "$META" ]; then
+          retirement_rollback || true
+        fi
+        return 1
+      fi
+    else
+      fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$META" "$BACKLOG_CLOSE_MARKER" \
+        "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"
+    fi
+  }
+  if ! retirement_transition; then
     fm_lock_release "$META_LOCK"
     META_LOCK_HELD=0
-    if [ "$BACKLOG_TRANSITION" = retain ]; then
+    if [ "$RETIRE_CLAIM" = 1 ]; then
+      echo "error: stale claim $ID's backlog $BACKLOG_TRANSITION failed ($FM_BACKLOG_TRANSITION_ERROR); recovery material was retained for guarded retirement" >&2
+    elif [ "$BACKLOG_TRANSITION" = retain ]; then
       echo "error: $ID's endpoint and local copy are cleaned up, but its captain-held backlog item could not be returned to Queued atomically ($FM_BACKLOG_TRANSITION_ERROR); the pending retention is recorded and the next session start retries it" >&2
     else
       echo "error: $ID's endpoint and local copy are cleaned up, but its backlog item could not be closed atomically ($FM_BACKLOG_TRANSITION_ERROR); the pending close is recorded and the next session start retries it" >&2
@@ -4145,6 +4444,7 @@ elif [ "$KIND" = secondmate ] && [ ! -e "$STATE" ] && [ ! -L "$STATE" ]; then
   :
 else
   if ! fm_backlog_atomic_transition remove "$STATE/$ID.meta" "task record" "$STATE"; then
+    [ "$RETIRE_CLAIM" != 1 ] || retirement_rollback || true
     fm_lock_release "$META_LOCK"
     META_LOCK_HELD=0
     echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
@@ -4153,6 +4453,9 @@ else
 fi
 if [ "$KIND" = secondmate ]; then
   fm_secondmate_retirement_clear "$ID" || exit 1
+fi
+if [ "$RETIRE_CLAIM" = 1 ] && [ -n "$retirement_backup" ]; then
+  rm -f "$retirement_backup"
 fi
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
@@ -4175,7 +4478,13 @@ fi
 if [ -d "$STATE" ]; then
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 fi
-if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
+if [ "$RETIRE_CLAIM" = 1 ]; then
+  if [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+    echo "stale claim $ID retired (unfinished work queued; copy $WT and branch $retirement_branch preserved; metadata archived at $retirement_archive)"
+  else
+    echo "stale claim $ID retired (copy $WT preserved; metadata archived at $retirement_archive)"
+  fi
+elif [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT)"

@@ -154,6 +154,22 @@ Observed output:
 ok - real tmux: default spawn and inventory share the exact session, with no prefix fallback
 ```
 
+The preserved-copy absence proof was verified on 2026-10-15 on Linux 6.6.87.2-microsoft-standard-WSL2 with tmux 3.4, using the same smoke command above.
+The public control command reads a recorded private socket and a real process inventory; a descendant process blocks recovery even when its arguments contain no worktree path.
+Observed output:
+
+```text
+ok - real tmux: a second private server can hide a live endpoint from the current socket
+ok - real tmux: control proves a missing recorded endpoint gone through its socket and process inventory
+ok - real process: kernel cwd identifies a rooted process that command arguments do not
+```
+
+Strict shell refusal was verified on 2026-10-16 UTC on Linux 6.6.87.2-microsoft-standard-WSL2 with tmux 3.4 through private named servers.
+`bash bin/fm-test-run.sh tests/fm-tmux-agent-liveness.test.sh` keeps a real interactive builtin loop and a timed read on an unrelated FIFO descriptor ambiguous while their argv remain interactive-shell argv.
+On this kernel, idle Bash and the unrelated-descriptor wait both expose `do_select`, and syscall details are unreadable.
+The positive idle-shell proof is capability-skipped, and the idle-shell ambiguous refusal is verified instead.
+The current recovery rule for an unproven idle shell is in [tmux backend](../tmux-backend.md#agent-liveness-probe).
+
 Foreground-process behavior was verified on 2026-07-07 with tmux 3.6a on macOS.
 
 ```sh
@@ -2231,7 +2247,7 @@ Resolution prints the STABLE launcher rather than the canonical target, because 
 
 `node` matches no harness name pattern, so a cursor pane is identified from Cursor's own name or install tree in the path or argv[0].
 An unrelated `node` or `agent` matches neither and classifies `other`, which the liveness callers fold into `ambiguous` rather than `dead`.
-A live cursor pane returned `alive`; a plain shell pane in the same run returned `dead`.
+A live cursor pane returned `alive`.
 
 ### Environment markers and detection ordering
 

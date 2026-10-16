@@ -252,11 +252,116 @@ comms_classify_agent "$SESSION:launcher" \
   || fail "the launcher's harness child must be visible in the foreground process group"
 pass "tmux liveness: a launcher whose own identity reads as a bare shell classifies alive from its harness child"
 
-# --- an idle shell is still confidently dead --------------------------------
+for builtin_mode in busy fd; do
+  builtin_pid=$(fm_test_active_tmux_shell "$SOCKET" "builtin-$builtin_mode" task \
+    "$LAB/wt" "$builtin_mode" "$LAB/$builtin_mode") \
+    || fail "could not start a real interactive builtin $builtin_mode"
+  wait_for_state "builtin-$builtin_mode:task" ambiguous \
+    || fail "an active interactive builtin $builtin_mode was classified dead"
+  kill -0 "$builtin_pid" || fail "the active builtin $builtin_mode disappeared"
+  [ ! -e "$LAB/$builtin_mode/finished" ] || fail 'the unrelated-FD wait ended before its verdict'
+  "$REAL_TMUX" -L "$SOCKET" kill-session -t "=builtin-$builtin_mode" \
+    || fail "could not close the private builtin $builtin_mode fixture"
+done
+pass 'tmux liveness: real busy builtin loops and unrelated-FD waits stay ambiguous'
 
-wait_for_state "$SESSION:idle" dead \
-  || fail "an idle shell pane must classify dead"
-pass "tmux liveness: an idle shell pane classifies dead"
+# --- an idle shell needs positive terminal-input proof ----------------------
+
+idle_pid=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$SESSION:idle" '#{pane_pid}')
+if fm_test_terminal_read_available "$idle_pid" \
+  || python3 "$ROOT/bin/fm-agent-process.py" input "$idle_pid" 2>/dev/null; then
+  wait_for_state "$SESSION:idle" dead || fail "a proven terminal-input shell must classify dead"
+  pass "tmux liveness: a shell with terminal-input proof classifies dead"
+else
+  wait_for_state "$SESSION:idle" ambiguous || fail "an unproven shell must stay ambiguous"
+  echo 'skip - positive idle-shell proof unavailable on this kernel; ambiguous refusal verified'
+fi
+
+# --- an agent that exits to a bare bash shell -------------------------------
+# The incident shape: the pane shell launched a harness, the harness exited,
+# and the shell went back to its prompt. Bash readline waits in do_select on
+# its terminal descriptors rather than in a tty-read wait, so a proof that
+# only accepts the tty-read wait names this pane ambiguous forever and no
+# restart or relaunch can ever proceed.
+
+new_window exited bash --noprofile --norc -i
+sleep 0.5
+"$REAL_TMUX" -L "$SOCKET" send-keys -t "$SESSION:exited" -l "$LAB/bin/claude-link 900" \
+  || fail "could not launch the exiting agent fixture"
+"$REAL_TMUX" -L "$SOCKET" send-keys -t "$SESSION:exited" Enter || fail "could not submit the agent fixture"
+wait_for_state "$SESSION:exited" alive \
+  || fail "the agent fixture must classify alive before it exits"
+exited_agent_pid=
+for _ in $(seq 1 100); do
+  exited_agent_pid=$(ps --ppid "$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$SESSION:exited" '#{pane_pid}')" -o pid= 2>/dev/null | tr -d ' ' | head -1)
+  [ -n "$exited_agent_pid" ] && break
+  sleep 0.1
+done
+[ -n "$exited_agent_pid" ] || fail "the agent fixture never became the pane shell's child"
+kill "$exited_agent_pid" 2>/dev/null || fail "could not exit the agent fixture"
+exited_shell_pid=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$SESSION:exited" '#{pane_pid}')
+if python3 "$ROOT/bin/fm-agent-process.py" input "$exited_shell_pid" 2>/dev/null; then
+  wait_for_state "$SESSION:exited" dead \
+    || fail "an agent that exited to a bare bash shell must classify dead, not ambiguous"
+  pass "tmux liveness: an agent that exited to a bare bash shell classifies dead"
+else
+  wait_for_state "$SESSION:exited" ambiguous \
+    || fail "a bare shell without terminal-input proof must stay ambiguous"
+  echo 'skip - positive bare-shell proof unavailable on this kernel; ambiguous refusal verified'
+fi
+
+# --- rooted proof with an unreadable-cwd process ----------------------------
+# A same-user non-dumpable process (such as `systemd --user`) has an
+# unreadable /proc/<pid>/cwd. It must not abort the worktree absence proof
+# unless it could be the surviving agent, while a readable process rooted in
+# the worktree must still be reported.
+
+if [ -d /proc/self/cwd ] && command -v python3 >/dev/null 2>&1; then
+  cat > "$LAB/nodump.py" <<'PY'
+import ctypes, os, sys, time
+ctypes.CDLL(None).prctl(4, 0, 0, 0, 0)
+with open(sys.argv[1], 'w') as ready:
+    ready.write(str(os.getpid()))
+time.sleep(60)
+PY
+  mkdir -p "$LAB/rooted-check/nested"
+  ( cd "$LAB" && exec python3 "$LAB/nodump.py" "$LAB/nodump.ready" ) &
+  nodump_launcher=$!
+  for _ in $(seq 1 100); do [ -s "$LAB/nodump.ready" ] && break; sleep 0.05; done
+  nodump_pid=$(cat "$LAB/nodump.ready" 2>/dev/null)
+  [ -n "$nodump_pid" ] || fail "the unreadable-cwd fixture never started"
+  printf '%s\n' "$nodump_pid" >> "$LAB/extra-pids"
+  if readlink "/proc/$nodump_pid/cwd" >/dev/null 2>&1; then
+    echo 'skip - this kernel lets the owner read a non-dumpable cwd; rooted unreadable case not exercised'
+  else
+    rooted_out=$(fm_agent_worktree_processes "$LAB/rooted-check" "$exited_shell_pid") \
+      || fail "an unreadable-cwd process outside the pane tree aborted the rooted absence proof"
+    [ -z "$rooted_out" ] || fail "rooted proof invented a process in an empty worktree: $rooted_out"
+    ( cd "$LAB/rooted-check/nested" && exec /bin/sleep 60 ) &
+    rooted_live_pid=$!
+    printf '%s\n' "$rooted_live_pid" >> "$LAB/extra-pids"
+    rooted_out=$(fm_agent_worktree_processes "$LAB/rooted-check" "$exited_shell_pid") \
+      || fail "rooted proof failed beside the unreadable-cwd fixture"
+    printf '%s\n' "$rooted_out" | grep -qx "$rooted_live_pid" \
+      || fail "a live readable process rooted in the worktree was treated as absent: [$rooted_out]"
+    kill "$rooted_live_pid" 2>/dev/null || true
+    wait "$rooted_live_pid" 2>/dev/null || true
+    # The same unreadable shape inside the pane's own tree still refuses:
+    # there it could be the surviving agent, so absence stays unproven.
+    ( exec bash -c 'exec python3 "$1" "$2"' _ "$LAB/nodump.py" "$LAB/nodump2.ready" ) &
+    tree_shell_pid=$!
+    for _ in $(seq 1 100); do [ -s "$LAB/nodump2.ready" ] && break; sleep 0.05; done
+    nodump2_pid=$(cat "$LAB/nodump2.ready" 2>/dev/null)
+    [ -n "$nodump2_pid" ] || fail "the in-tree unreadable-cwd fixture never started"
+    printf '%s\n' "$nodump2_pid" >> "$LAB/extra-pids"
+    if fm_agent_worktree_processes "$LAB/rooted-check" "$tree_shell_pid" >/dev/null 2>&1; then
+      fail "an unreadable-cwd process inside the pane tree was skipped, treating a possible agent as absent"
+    fi
+    kill "$nodump2_pid" "$tree_shell_pid" 2>/dev/null || true
+    pass "rooted proof: an unreadable-cwd process outside the pane tree does not abort absence, a rooted live process still blocks, and an in-tree unreadable process still refuses"
+  fi
+  kill "$nodump_pid" "$nodump_launcher" 2>/dev/null || true
+fi
 
 # --- a harness-named BACKGROUND process must not fake an agent --------------
 # Scoping to the foreground process group is what prevents this false alive; a
@@ -273,11 +378,15 @@ done
 [ -n "$bg_pid" ] || fail "the background harness-named process never started"
 kill -0 "$bg_pid" 2>/dev/null \
   || fail "the background harness-named process is not running, so this case would prove nothing"
-wait_for_state "$SESSION:background" dead \
-  || fail "a pane whose only harness-named process is backgrounded must classify dead"
+background_pid=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$SESSION:background" '#{pane_pid}')
+background_state=ambiguous
+if fm_test_terminal_read_available "$background_pid" \
+  || python3 "$ROOT/bin/fm-agent-process.py" input "$background_pid" 2>/dev/null; then background_state=dead; fi
+wait_for_state "$SESSION:background" "$background_state" \
+  || fail "a background harness must not supply foreground attribution"
 kill -0 "$bg_pid" 2>/dev/null \
   || fail "the background harness-named process died during the check, so this case proves nothing"
-pass "tmux liveness: a harness-named background process in an idle pane still classifies dead"
+pass "tmux liveness: a background harness never supplies foreground attribution"
 
 # --- an absent window never inherits tmux's active-window fallback ----------
 # tmux answers a display-message for an absent target from the CLIENT's active

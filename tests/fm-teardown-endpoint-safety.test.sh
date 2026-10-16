@@ -4,6 +4,7 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
 TEARDOWN="$ROOT/bin/fm-teardown.sh"
 TMP_ROOT=$(fm_test_tmproot fm-teardown-endpoint-safety)
@@ -32,7 +33,11 @@ printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
 printf '\n' >> "${FM_RUNTIME_LOG:?}"
 exit 0
 SH
-  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse"
+  cat > "$TMP_ROOT/$dir/fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse" "$TMP_ROOT/$dir/fakebin/no-mistakes"
   printf '%s\n' "$TMP_ROOT/$dir"
 }
 
@@ -1444,6 +1449,761 @@ test_absent_recorded_slot_still_holds_project_lock() {
   pass "fm-teardown: absent recorded slots hold the project lock through ordinary and descendant cleanup"
 }
 
+run_retire_claim() {  # <case> <id> [extra flags]
+  local dir=$1 id=$2
+  shift 2
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" FM_TEST_RUN_STATUS="$dir/run.status" \
+  FM_TEST_RUN_OVERVIEW="$dir/run.overview" FM_TEST_GLOBAL_STATUS="$dir/global.status" \
+  FM_TEST_REAL_PS="$(command -v ps)" FM_TEST_REAL_TASKS_AXI="$(command -v tasks-axi)" \
+  FM_TEST_PROCESS_PIDS="$dir/process-pids" FM_TEST_CLEARED_ROOT="${FM_TEST_CLEARED_ROOT:-}" \
+  PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" --retire-claim "$@"
+}
+
+make_retire_claim_case() {  # <name> <id>
+  local dir id=$2
+  dir=$(make_case "$1")
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=no-mistakes" \
+    "spawn_gen=s$(date +%s).$$.$RANDOM"
+  claim_pool_slot "$dir" "$id"
+  git -C "$dir/worktree" switch -q -c "fm/$id"
+  mkdir -p "$dir/worktree/.git-hooks"
+  printf 'keep hook\n' > "$dir/worktree/.git-hooks/pre-commit"
+  git -C "$dir/worktree" config --local core.hooksPath "$dir/worktree/.git-hooks"
+  cat > "$dir/fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+printf 'no-mistakes <%s> <%s> <%s> <%s>\n' "${1:-}" "${2:-}" "${3:-}" "${4:-}" >> "$FM_RUNTIME_LOG"
+case "$*" in
+  axi)
+    if [ -f "$FM_TEST_RUN_OVERVIEW" ]; then cat "$FM_TEST_RUN_OVERVIEW"; exit; fi
+    printf 'repo: %s\n' "$PWD"
+    if [ ! -f "$FM_TEST_RUN_STATUS" ]; then
+      printf 'count: 0 of 0 total\nruns[0]{id,branch,status,head,pr}:\n'
+      exit
+    fi
+    printf 'count: 1 of 1 total\nruns[1]{id,branch,status,head,pr}:\n'
+    printf '  %s,%s,%s,%s,\n' \
+      "$(sed -n 's/^id: //p' "$FM_TEST_RUN_STATUS")" \
+      "$(sed -n 's/^branch: //p' "$FM_TEST_RUN_STATUS")" \
+      "$(sed -n 's/^status: //p' "$FM_TEST_RUN_STATUS" | sed 's/^fixing$/running/')" \
+      "$(sed -n 's/^head: //p' "$FM_TEST_RUN_STATUS")"
+    ;;
+  'axi status --run '*)
+    if [ -f "$FM_TEST_RUN_STATUS.${4:-}" ]; then
+      cat "$FM_TEST_RUN_STATUS.${4:-}"
+    else
+      cat "$FM_TEST_RUN_STATUS"
+    fi
+    ;;
+  'axi status')
+    if [ -f "$FM_TEST_GLOBAL_STATUS" ]; then cat "$FM_TEST_GLOBAL_STATUS"; else cat "$FM_TEST_RUN_STATUS"; fi
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$dir/fakebin/no-mistakes"
+  cat > "$dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'-o pid=,command='*) printf 'remote sweep called\n' >> "$FM_RUNTIME_LOG"; exit 0 ;;
+  *'-o stat= -o comm= -o args='*) "$FM_TEST_REAL_PS" "$@" | awk '!/tmux: (server|client)/' ;;
+  *'-o pid='*) printf '%s\n' "$PPID"; [ ! -f "$FM_TEST_PROCESS_PIDS" ] || cat "$FM_TEST_PROCESS_PIDS" ;;
+  *) exec "$FM_TEST_REAL_PS" "$@" ;;
+esac
+SH
+  chmod +x "$dir/fakebin/ps"
+  printf '%s\n' "$dir"
+}
+
+assert_retire_refused_unchanged() {  # <case> <id> <reason> [extra flags]
+  local dir=$1 id=$2 reason=$3 rc before_meta before_claim before_head
+  shift 3
+  before_meta=$(cat "$dir/home/state/$id.meta")
+  before_claim=$(cat "$dir/pool/1/.fm-slot-owner")
+  before_head=$(git -C "$dir/worktree" rev-parse HEAD)
+  set +e
+  run_retire_claim "$dir" "$id" "$@" > "$dir/retire.out" 2> "$dir/retire.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "$reason: records-only retirement unexpectedly succeeded"
+  [ "$(cat "$dir/home/state/$id.meta")" = "$before_meta" ] \
+    || fail "$reason: retirement changed the task record"
+  [ "$(cat "$dir/pool/1/.fm-slot-owner")" = "$before_claim" ] \
+    || fail "$reason: retirement changed the slot owner"
+  [ "$(git -C "$dir/worktree" rev-parse HEAD)" = "$before_head" ] \
+    || fail "$reason: retirement changed HEAD"
+  assert_present "$dir/worktree/.git-hooks/pre-commit" "$reason: retirement removed a hook"
+  if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+    fail "$reason: refused retirement archived metadata"
+  fi
+  assert_no_grep 'kill-window' "$dir/runtime.log" "$reason: retirement closed an endpoint"
+  assert_no_grep 'treehouse <return>' "$dir/runtime.log" "$reason: retirement returned the pool copy"
+}
+
+test_retire_claim_archives_only_the_gone_agents_record() {
+  local dir id=old-task other=other-task original before_head before_reflog archive
+  dir=$(make_retire_claim_case retire-gone "$id")
+  original=$(cat "$dir/home/state/$id.meta")
+  before_head=$(git -C "$dir/worktree" rev-parse HEAD)
+  before_reflog=$(git -C "$dir/worktree" reflog)
+  mkdir -p "$dir/home/state/$id.git-hooks" "$dir/home/state/$id.inbox"
+  printf 'keep state hook\n' > "$dir/home/state/$id.git-hooks/commit-msg"
+  printf 'keep steering request\n' > "$dir/home/state/$id.inbox/pending"
+  printf 'keep progress\n' > "$dir/home/state/$id.progress"
+  chmod 500 "$dir/home/state/$id.git-hooks"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/other-worktree" "project=$dir/project" "kind=scout"
+  mkdir -p "$dir/pool/2"
+  printf 'task=%s\nhome=%s\n' "$other" "$dir/home" > "$dir/pool/2/.fm-slot-owner"
+
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "a definitively gone agent could not retire its old claim: $(cat "$dir/retire.err")"
+  assert_no_grep 'remote sweep called' "$dir/runtime.log" 'retirement swept unrelated remote jobs'
+  assert_absent "$dir/home/state/$id.meta" "retirement left the active task record"
+  archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  assert_present "$archive" \
+    "retirement did not archive the original metadata"
+  [ "$(cat "$archive")" = "$original" ] \
+    || fail "retirement did not archive the original metadata verbatim"
+  assert_absent "$dir/pool/1/.fm-slot-owner" "retirement left its own old slot marker"
+  assert_present "$dir/home/state/$other.meta" "retirement removed another task record"
+  assert_grep "task=$other" "$dir/pool/2/.fm-slot-owner" \
+    "retirement changed another task's slot marker"
+  assert_present "$dir/worktree/sentinel" "retirement altered worktree files"
+  assert_present "$dir/worktree/.git-hooks/pre-commit" "retirement removed a hook"
+  [ "$(cat "$dir/home/state/$id.git-hooks/commit-msg")" = 'keep state hook' ] \
+    || fail 'retirement changed the state hook contents'
+  [ "$(cat "$dir/home/state/$id.inbox/pending")" = 'keep steering request' ] \
+    || fail 'retirement changed the steering inbox contents'
+  [ "$(cat "$dir/home/state/$id.progress")" = 'keep progress' ] \
+    || fail 'retirement changed the progress record'
+  [ "$(git -C "$dir/worktree" config --local --get core.hooksPath)" = "$dir/worktree/.git-hooks" ] \
+    || fail "retirement changed the worktree hook configuration"
+  [ "$(git -C "$dir/worktree" symbolic-ref --short HEAD)" = "fm/$id" ] \
+    || fail "retirement changed the worktree branch"
+  [ "$(git -C "$dir/worktree" rev-parse HEAD)" = "$before_head" ] \
+    || fail "retirement reset the worktree"
+  [ "$(git -C "$dir/worktree" reflog)" = "$before_reflog" ] \
+    || fail "retirement changed the worktree reflog"
+  assert_no_grep 'kill-window' "$dir/runtime.log" "retirement closed an endpoint"
+  assert_no_grep 'treehouse <return>' "$dir/runtime.log" "retirement returned the pool copy"
+  pass "a gone agent retires only its old claim and archives its original record"
+}
+
+test_retire_claim_preserves_archives_across_task_id_reuse() {
+  local dir id=reused-worker first_archive first_record second_archive second_record out
+  dir=$(make_retire_claim_case retire-reused "$id")
+  first_record=$(cat "$dir/home/state/$id.meta")
+  run_retire_claim "$dir" "$id" > "$dir/first.out" 2> "$dir/first.err" \
+    || fail "first retirement failed: $(cat "$dir/first.err")"
+  first_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  assert_present "$first_archive" 'first retirement did not retain its record'
+  mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.retire"
+  fm_test_fake_tmux_spawn "$dir/fakebin"
+  printf 'codex\n' > "$dir/home/config/crew-harness"
+  mkdir -p "$dir/home/projects" "$dir/pool/2"
+  fm_test_spawn_brief "$dir/home" "$id"
+  git -C "$dir/project" worktree add -q --detach "$dir/pool/2/project"
+  printf '{"worktrees":[{"name":"1","path":"%s"},{"name":"2","path":"%s"}]}\n' \
+    "$dir/pool/1/project" "$dir/pool/2/project" > "$dir/pool/treehouse-state.json"
+  if ! out=$(fm_test_run_spawn "$dir/home" "$dir/pool/2/project" "$dir/fakebin" \
+    "$id" "$dir/project" --mode no-mistakes --yolo off); then
+    fail "public spawn could not reuse the retired ID: $out"
+  fi
+  git -C "$dir/pool/2/project" switch -q -c "fm/$id-second"
+  second_record=$(cat "$dir/home/state/$id.meta")
+  [ "$second_record" != "$first_record" ] || fail 'respawn did not publish a new claim'
+  mv "$dir/fakebin/tmux.retire" "$dir/fakebin/tmux"
+  run_retire_claim "$dir" "$id" > "$dir/second.out" 2> "$dir/second.err" \
+    || fail "second retirement failed: $(cat "$dir/second.err")"
+  second_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  [ "$(printf '%s\n' "$second_archive" | wc -l)" -eq 2 ] \
+    || fail 'task ID reuse did not preserve two separate archives'
+  [ "$(cat "$first_archive")" = "$first_record" ] || fail 'respawn changed the first archive'
+  for archive in $second_archive; do
+    [ "$archive" = "$first_archive" ] && continue
+    [ "$(cat "$archive")" = "$second_record" ] || fail 'second archive does not match the respawned record'
+  done
+  assert_absent "$dir/home/state/$id.meta" 'second retirement left its active record'
+  pass 'retire, public respawn, and second retirement preserve both claim records'
+}
+
+test_retire_claim_archives_without_spawn_generation() {
+  local dir id=legacy-archive first_record second_record first_archive second_archive archive
+  dir=$(make_retire_claim_case retire-legacy-archive "$id")
+  sed '/^spawn_gen=/d' "$dir/home/state/$id.meta" > "$dir/legacy.meta"
+  mv "$dir/legacy.meta" "$dir/home/state/$id.meta"
+  first_record=$(cat "$dir/home/state/$id.meta")
+  run_retire_claim "$dir" "$id" > "$dir/first.out" 2> "$dir/first.err" \
+    || fail "first legacy retirement failed: $(cat "$dir/first.err")"
+  first_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  assert_present "$first_archive" 'first legacy retirement did not archive its record'
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=no-mistakes" \
+    "harness=codex"
+  claim_pool_slot "$dir" "$id"
+  second_record=$(cat "$dir/home/state/$id.meta")
+  run_retire_claim "$dir" "$id" > "$dir/second.out" 2> "$dir/second.err" \
+    || fail "second legacy retirement failed: $(cat "$dir/second.err")"
+  second_archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  [ "$(printf '%s\n' "$second_archive" | wc -l)" -eq 2 ] \
+    || fail 'legacy claims did not receive separate timestamp archives'
+  [ "$(cat "$first_archive")" = "$first_record" ] || fail 'legacy retry changed the first archive'
+  for archive in $second_archive; do
+    [ "$archive" = "$first_archive" ] && continue
+    [ "$(cat "$archive")" = "$second_record" ] || fail 'second legacy archive changed the claim'
+  done
+  pass 'legacy claims use distinct timestamp archives when spawn generation is absent'
+}
+
+test_legacy_retirement_refusal_preserves_original_bytes() {
+  local dir id mode rc archive
+  for mode in snapshot archive marker remove; do
+    id="retire-legacy-refusal-$mode"
+    dir=$(make_retire_claim_case "$id" "$id")
+    sed '/^spawn_gen=/d' "$dir/home/state/$id.meta" > "$dir/legacy.meta"
+    mv "$dir/legacy.meta" "$dir/home/state/$id.meta"
+    printf 'harness=codex' >> "$dir/home/state/$id.meta"
+    cp "$dir/home/state/$id.meta" "$dir/original.meta"
+    cp "$dir/pool/1/.fm-slot-owner" "$dir/original.claim"
+    printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
+    tasks-axi add "$id" 'legacy retirement fixture' --kind ship --file "$dir/home/data/backlog.md" >/dev/null
+    tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    cp "$dir/home/data/backlog.md" "$dir/original.backlog"
+    printf '%s\n' "$mode" > "$dir/fail-mode"
+    cat > "$dir/fakebin/perl" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+if [ "$(cat "$base/fail-mode" 2>/dev/null)" = snapshot ] \
+  && [ "${1:-}" = -MDigest::SHA=sha256_hex ] && [ "${2:-}" = -0777 ]; then
+  : > "$base/fault-hit"
+  exit 1
+fi
+exec /usr/bin/perl "$@"
+SH
+    cat > "$dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+mode=$(cat "$base/fail-mode" 2>/dev/null || true)
+case "$mode:${1:-}" in
+  archive:*/.retired-worktree-claim.*)
+    : > "$base/fault-hit"
+    exit 1
+    ;;
+esac
+exec /usr/bin/mktemp "$@"
+SH
+    cat > "$dir/fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+if [ "$(cat "$base/fail-mode" 2>/dev/null)" = marker ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      */state/retire-legacy-refusal-marker.backlog-close)
+        : > "$base/fault-hit"
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /bin/mv "$@"
+SH
+    cat > "$dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+if [ "$(cat "$base/fail-mode" 2>/dev/null)" = remove ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      */state/retire-legacy-refusal-remove.meta)
+        : > "$base/fault-hit"
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /bin/rm "$@"
+SH
+    chmod +x "$dir/fakebin/perl" "$dir/fakebin/mktemp" "$dir/fakebin/mv" "$dir/fakebin/rm"
+    rc=0
+    run_retire_claim "$dir" "$id" --legacy-record > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "$mode: legacy retirement accepted the injected failure"
+    assert_present "$dir/fault-hit" "$mode: fixture failed before reaching its intended refusal"
+    cmp -s "$dir/original.backlog" "$dir/home/data/backlog.md" \
+      || fail "$mode: refused legacy retirement changed the backlog before record removal"
+    cmp -s "$dir/original.meta" "$dir/home/state/$id.meta" \
+      || fail "$mode: refused legacy retirement changed the original record bytes"
+    cmp -s "$dir/original.claim" "$dir/pool/1/.fm-slot-owner" \
+      || fail "$mode: refused legacy retirement changed its slot claim"
+    assert_absent "$dir/home/state/$id.backlog-close" "$mode: refused legacy retirement left replay intent"
+    if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+      fail "$mode: refused legacy retirement left an archive"
+    fi
+    rm "$dir/fail-mode"
+    run_retire_claim "$dir" "$id" --legacy-record > "$dir/retry.out" 2> "$dir/retry.err" \
+      || fail "$mode: legacy retirement retry failed: $(cat "$dir/retry.err")"
+    archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+    assert_present "$archive" "$mode: successful retry did not preserve its archive"
+    cmp -s "$dir/original.meta" "$archive" || fail "$mode: retry archived an abandoned legacy stamp"
+    assert_absent "$dir/home/state/$id.meta" "$mode: successful retry retained the task record"
+    assert_absent "$dir/pool/1/.fm-slot-owner" "$mode: successful retry retained the slot claim"
+    assert_absent "$dir/home/state/$id.backlog-close" "$mode: successful retry retained replay intent"
+    assert_present "$dir/worktree/.git-hooks/pre-commit" "$mode: retirement changed the worktree hooks"
+  done
+  pass 'refused legacy retirement preserves exact original bytes through failure and retry'
+}
+
+test_retire_claim_preserves_partial_backlog_transitions() {
+  local dir id mode rc before archive row expected
+  for mode in prepare backup 'done' reopen update remove marker-remove close-marker; do
+    id="retire-partial-$mode"
+    dir=$(make_retire_claim_case "retire-partial-$mode" "$id")
+    printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
+    tasks-axi add "$id" 'retirement fixture task' --kind ship --file "$dir/home/data/backlog.md" >/dev/null
+    tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    if [ "$mode" = reopen ]; then
+      tasks-axi hold "$id" --reason 'captain answer pending' --kind captain --file "$dir/home/data/backlog.md" >/dev/null
+    elif [ "$mode" = update ]; then
+      tasks-axi 'done' "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    elif [ "$mode" = 'done' ] || [ "$mode" = close-marker ]; then
+      git -C "$dir/worktree" add -A
+      git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid commit -qm landed
+      git -C "$dir/project" merge --ff-only "fm/$id" >/dev/null
+    fi
+    before="$dir/original.meta"
+    cp "$dir/home/state/$id.meta" "$before"
+    printf '%s\n' "$mode" > "$dir/fail-mode"
+    cat > "$dir/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if { [ "$mode" != update ] && [ "${1:-}" = "$mode" ]; } \
+   || { [ "$mode" = update ] && [ "${1:-}" = update ] && [[ " $* " == *' --body-file '* ]]; }; then
+  printf 'injected %s failure\n' "$mode" >&2
+  exit 1
+fi
+exec "$FM_TEST_REAL_TASKS_AXI" "$@"
+SH
+    cat > "$dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "$mode" = remove ] || [ "$mode" = marker-remove ] || [ "$mode" = close-marker ]; then
+  for arg in "$@"; do
+    case "$mode:$arg" in
+      remove:*/state/retire-partial-remove.meta)
+      /bin/rm "$@"
+      exit 1
+      ;;
+      marker-remove:*/state/retire-partial-marker-remove.backlog-close|close-marker:*/state/retire-partial-close-marker.backlog-close)
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /bin/rm "$@"
+SH
+    cat > "$dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "$mode" = prepare ]; then
+  case "${1:-}" in
+    */.retired-worktree-claim.*)
+      base=${FM_RUNTIME_LOG%/runtime.log}
+      if [ -e "$base/home/state/retire-partial-prepare.backlog-close" ]; then
+        cp "$base/home/state/retire-partial-prepare.backlog-close" "$base/premature-marker"
+      fi
+      exit 1
+      ;;
+  esac
+fi
+exec /usr/bin/mktemp "$@"
+SH
+    cat > "$dir/fakebin/cp" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "$mode" = backup ]; then
+  for arg in "$@"; do
+    case "$arg" in */.retired-worktree-record.*)
+      printf 'partial backup\n' > "$arg"
+      exit 1
+      ;;
+    esac
+  done
+fi
+exec /bin/cp "$@"
+SH
+    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mktemp" "$dir/fakebin/cp"
+    rc=0
+    run_retire_claim "$dir" "$id" > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "$mode: injected retirement failure was accepted"
+    assert_absent "$dir/premature-marker" "$mode: retirement published replay intent before archival and claim release"
+    if [ "$mode" = prepare ] || [ "$mode" = backup ]; then
+      cmp -s "$before" "$dir/home/state/$id.meta" || fail "$mode: exact task record was not restored"
+      assert_absent "$dir/home/state/$id.backlog-close" "$mode: failed preparation left a replayable close marker"
+      assert_present "$dir/pool/1/.fm-slot-owner" "$mode: own marker was not restored"
+      if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+        fail "$mode: failed preparation discarded its rollback record"
+      fi
+    else
+      assert_absent "$dir/home/state/$id.meta" "$mode: interrupted retirement restored an active record: $(cat "$dir/failed.err")"
+      assert_present "$dir/home/state/$id.backlog-close" "$mode: interrupted retirement lost its replay intent"
+      assert_absent "$dir/pool/1/.fm-slot-owner" "$mode: interrupted retirement restored its old claim"
+      archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+      cmp -s "$before" "$archive" || fail "$mode: interrupted retirement lost its archived record"
+      if [ "$mode" = update ] || [ "$mode" = marker-remove ] || [ "$mode" = close-marker ]; then
+        row=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
+        expected=queued
+        [ "$mode" != close-marker ] || expected='done'
+        assert_contains "$row" "state: $expected" "$mode: fixture did not reach its partial backlog mutation"
+      fi
+    fi
+    assert_present "$dir/worktree/.git-hooks/pre-commit" "$mode: task hook was removed"
+    rm "$dir/fail-mode"
+    if [ "$mode" = prepare ] || [ "$mode" = backup ]; then
+      run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
+        || fail "$mode: retirement retry failed: $(cat "$dir/retry.err")"
+    else
+      FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_BOOTSTRAP_NETWORK=skip \
+        FM_RUNTIME_LOG="$dir/runtime.log" FM_TEST_REAL_TASKS_AXI="$(command -v tasks-axi)" \
+        PATH="$dir/fakebin:$PATH" "$ROOT/bin/fm-bootstrap.sh" > "$dir/retry.out" 2> "$dir/retry.err" \
+        || fail "$mode: retirement replay failed: $(cat "$dir/retry.err")"
+      expected=queued
+      [ "$mode" != 'done' ] && [ "$mode" != close-marker ] || expected='done'
+      row=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
+      assert_contains "$row" "state: $expected" "$mode: replay did not finish its backlog transition"
+      assert_absent "$dir/home/state/$id.backlog-close" "$mode: replay kept the retirement marker"
+    fi
+    assert_absent "$dir/home/state/$id.meta" "$mode: retry retained task record"
+  done
+  pass 'retirement rolls back preparation and replays interrupted backlog transitions'
+}
+
+test_retire_claim_requeues_unlanded_work() {
+  local dir id=retire-unlanded shown
+  dir=$(make_retire_claim_case retire-unlanded "$id")
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
+  tasks-axi add "$id" 'unfinished retirement fixture' --kind ship --file "$dir/home/data/backlog.md" >/dev/null
+  tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+  printf 'unfinished\n' > "$dir/worktree/dirty.txt"
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "unlanded claim did not retire: $(cat "$dir/retire.err")"
+  shown=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
+  assert_contains "$shown" 'queued' 'unlanded claim was not requeued'
+  assert_contains "$shown" "Preserved unfinished work: worktree $dir/worktree; branch fm/$id" \
+    'requeued item does not name the preserved worktree and branch'
+  assert_contains "$(cat "$dir/retire.out")" 'stale claim' 'retirement reported task completion'
+  assert_not_contains "$(cat "$dir/retire.out")" 'complete' 'retirement reported task completion'
+  assert_present "$dir/worktree/dirty.txt" 'retirement lost unlanded work'
+  pass 'unlanded claim retirement requeues the backlog item with its preserved worktree and branch'
+}
+
+test_retire_claim_accepts_cleared_task_temp_with_process_proof() {
+  local dir id=retire-cleared-temp
+  dir=$(make_retire_claim_case retire-cleared-temp "$id")
+  printf 'tasktmp=%s\n' "$dir/cleared-temp" >> "$dir/home/state/$id.meta"
+  if [ "$(uname -s)" = Linux ]; then
+    mv "$dir/fakebin/ps" "$dir/fakebin/ps.fixture"
+    cat > "$dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ]; then
+  parent_command=$(tr '\0' ' ' < "/proc/$PPID/cmdline")
+  case "$parent_command" in
+    *"$FM_TEST_CLEARED_ROOT"*) printf 'unreadable\n'; exit 0 ;;
+  esac
+fi
+exec "$(dirname "$0")/ps.fixture" "$@"
+SH
+    chmod +x "$dir/fakebin/ps"
+    FM_TEST_CLEARED_ROOT="$dir/cleared-temp" \
+      assert_retire_refused_unchanged "$dir" "$id" 'missing task temp root with unreadable inventory'
+    assert_grep "process absence is unproven under $dir/cleared-temp" "$dir/retire.err" \
+      'unreadable evidence did not reach the cleared temp root check'
+    mv "$dir/fakebin/ps.fixture" "$dir/fakebin/ps"
+  fi
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "missing task temp root with readable absence evidence refused: $(cat "$dir/retire.err")"
+  assert_absent "$dir/home/state/$id.meta" 'cleared task temp claim was not retired'
+  pass 'cleared task temp root requires a readable process absence inventory'
+}
+
+test_retire_claim_refuses_active_interactive_builtins() {
+  local mode dir id label socket pane
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  for mode in busy fd; do
+    id="retire-builtin-$mode"
+    dir=$(make_retire_claim_case "$id" "$id")
+    label="$id-$RANDOM"
+    pane=$(fm_test_active_tmux_shell "$label" firstmate "fm-$id" "$dir/worktree" "$mode" "$dir/activity") \
+      || fail "$mode: could not start an active retirement pane"
+    socket=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{socket_path}')
+    printf 'tmux_socket=%s\n' "$socket" >> "$dir/home/state/$id.meta"
+    printf '%s\n' "$pane" > "$dir/process-pids"
+    mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
+    ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
+    assert_retire_refused_unchanged "$dir" "$id" "active interactive builtin $mode"
+    assert_grep 'cannot prove' "$dir/retire.err" "$mode: retirement did not explain unproven absence"
+    tmux -L "$label" has-session -t firstmate || fail "$mode: retirement closed the active pane"
+    [ ! -e "$dir/activity/finished" ] || fail "$mode: the unrelated-FD wait ended before refusal"
+    tmux -L "$label" kill-server
+    if tmux -L "$label" has-session 2>/dev/null; then
+      fail "$mode: the private retirement fixture's server did not stop"
+    fi
+    rm -f -- "$socket"
+  done
+  pass 'retirement refuses real interactive builtin loops and unrelated-FD waits without changing custody'
+}
+
+test_retire_claim_accepts_its_nested_foreground_shell() {
+  local dir id=retire-nested-shell label socket pane nested capture
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  dir=$(make_retire_claim_case retire-nested-shell "$id")
+  label="retire-nested-$RANDOM"
+  tmux -L "$label" new-session -d -s firstmate -n "fm-$id" -c "$dir/worktree" 'bash --noprofile --norc -i'
+  socket=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{socket_path}')
+  pane=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{pane_pid}')
+  printf 'tmux_socket=%s\n' "$socket" >> "$dir/home/state/$id.meta"
+  tmux -L "$label" send-keys -t "firstmate:fm-$id" 'bash --noprofile --norc -i' Enter
+  nested=
+  for _ in $(seq 1 30); do
+    tmux -L "$label" send-keys -t "firstmate:fm-$id" 'printf "NESTED=%s\n" "$$"' Enter
+    sleep 0.05
+    capture=$(tmux -L "$label" capture-pane -p -t "firstmate:fm-$id")
+    nested=$(printf '%s\n' "$capture" | sed -n 's/^NESTED=\([0-9][0-9]*\).*$/\1/p' | tail -1)
+    [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
+  done
+  [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private retirement pane did not start a nested foreground shell'
+  if ! fm_test_terminal_read_available "$nested"; then
+    tmux -L "$label" kill-server
+    rm -f -- "$socket"
+    echo 'skip - nested idle-shell proof unavailable on this kernel; manual confirmation required'
+    return 0
+  fi
+  printf '%s\n%s\n' "$pane" "$nested" > "$dir/process-pids"
+  mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
+  ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "retirement refused its nested foreground shell: $(cat "$dir/retire.err")"
+  assert_absent "$dir/home/state/$id.meta" 'retirement kept its active claim record'
+  tmux -L "$label" has-session -t firstmate \
+    || fail 'records-only retirement closed the private task pane'
+  tmux -L "$label" kill-server
+  rm -f "$socket"
+  pass 'retirement accepts its verified nested foreground shell without closing the pane'
+}
+
+test_retire_claim_refuses_active_nested_shell_script() {
+  local dir id=retire-nested-script label socket pane active capture
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  dir=$(make_retire_claim_case retire-nested-script "$id")
+  label="retire-script-$RANDOM"
+  tmux -L "$label" new-session -d -s firstmate -n "fm-$id" -c "$dir/worktree" 'bash --noprofile --norc -i'
+  socket=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{socket_path}')
+  pane=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{pane_pid}')
+  printf 'tmux_socket=%s\n' "$socket" >> "$dir/home/state/$id.meta"
+  tmux -L "$label" send-keys -t "firstmate:fm-$id" \
+    'bash -c '\''printf "ACTIVE=%s\n" "$$"; while :; do :; done'\''' Enter
+  active=
+  for _ in $(seq 1 30); do
+    sleep 0.05
+    capture=$(tmux -L "$label" capture-pane -p -t "firstmate:fm-$id")
+    active=$(printf '%s\n' "$capture" | sed -n 's/^ACTIVE=\([0-9][0-9]*\).*$/\1/p' | tail -1)
+    [ -z "$active" ] || break
+  done
+  [ -n "$active" ] && [ "$active" != "$pane" ] || fail 'private pane did not start the active nested script'
+  printf '%s\n%s\n' "$pane" "$active" > "$dir/process-pids"
+  mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
+  ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
+  assert_retire_refused_unchanged "$dir" "$id" 'active nested shell script'
+  assert_grep "agent is ambiguous; cannot prove the old agent gone" "$dir/retire.err" \
+    "active shell did not reach the strict endpoint refusal: $(cat "$dir/retire.err")"
+  kill -0 "$active" 2>/dev/null || fail 'retirement killed the active shell script'
+  tmux -L "$label" kill-server
+  rm -f "$socket"
+  pass 'retirement refuses an active foreground shell script'
+}
+
+test_retire_claim_refuses_deleted_suffix_process_path() {
+  local dir id=retire-deleted-suffix worker
+  dir=$(make_retire_claim_case retire-deleted-suffix "$id")
+  mkdir -p "$dir/tasktmp (deleted)"
+  printf 'tasktmp=%s\n' "$dir/tasktmp (deleted)" >> "$dir/home/state/$id.meta"
+  ( cd "$dir/tasktmp (deleted)" && exec sleep 60 ) &
+  worker=$!
+  printf '%s\n' "$worker" > "$dir/process-pids"
+  assert_retire_refused_unchanged "$dir" "$id" 'literal deleted-suffix task root'
+  assert_grep 'live processes still have cwd' "$dir/retire.err" 'literal deleted-suffix path was lost'
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+  pass 'retirement sees a rooted process in a literal deleted-suffix directory'
+}
+
+test_retire_claim_refuses_unsafe_identity_and_options() {
+  local dir id=retire-refusal worker
+
+  dir=$(make_retire_claim_case retire-unreadable "$id")
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=not-an-endpoint" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" \
+    "spawn_gen=s$(date +%s).fixture"
+  assert_retire_refused_unchanged "$dir" "$id" "unreadable endpoint identity"
+
+  dir=$(make_retire_claim_case retire-secondmate "$id")
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=secondmate" "mode=secondmate" \
+    "spawn_gen=s$(date +%s).fixture"
+  assert_retire_refused_unchanged "$dir" "$id" "incompatible secondmate record"
+
+  dir=$(make_retire_claim_case retire-orca "$id")
+  printf 'backend=orca\norca_worktree_id=worktree-9::/orca/worktree-9\n' \
+    >> "$dir/home/state/$id.meta"
+  assert_retire_refused_unchanged "$dir" "$id" "incompatible Orca record"
+
+  dir=$(make_retire_claim_case retire-force "$id")
+  assert_retire_refused_unchanged "$dir" "$id" "explicit force combination" --force
+
+  dir=$(make_retire_claim_case retire-orphan-cwd "$id")
+  ( cd "$dir/worktree" && : > "$dir/orphan-ready" && exec sleep 30 ) &
+  worker=$!
+  while [ ! -e "$dir/orphan-ready" ]; do sleep 0.01; done
+  printf '%s\n' "$worker" > "$dir/process-pids"
+  assert_retire_refused_unchanged "$dir" "$id" "orphan process in the recorded worktree"
+  kill -0 "$worker" 2>/dev/null || fail "retirement killed the orphan process"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+  rm "$dir/process-pids"
+  pass "records-only retirement refuses unreadable identity, incompatible records, force, and an orphan in the copy"
+}
+
+test_retire_claim_preserves_tasktmp_and_retries_after_refusals() {
+  local dir id=retire-retry worker
+  dir=$(make_retire_claim_case retire-tasktmp "$id")
+  mkdir -p "$dir/tasktmp"
+  printf 'keep\n' > "$dir/tasktmp/sentinel"
+  printf 'tasktmp=%s\n' "$dir/tasktmp" >> "$dir/home/state/$id.meta"
+  ( cd "$dir/tasktmp" && : > "$dir/tasktmp-ready" && exec sleep 30 ) &
+  worker=$!
+  while [ ! -e "$dir/tasktmp-ready" ]; do sleep 0.01; done
+  printf '%s\n' "$worker" > "$dir/process-pids"
+  assert_retire_refused_unchanged "$dir" "$id" "orphan process in the task temp root"
+  kill -0 "$worker" 2>/dev/null || fail "retirement signaled the task temp process"
+  assert_present "$dir/tasktmp/sentinel" "retirement removed task temp material"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+  rm "$dir/process-pids"
+  ln -s "$dir/tasktmp/sentinel" "$dir/home/state/$id.check.sh"
+  assert_retire_refused_unchanged "$dir" "$id" "unsafe PR artifact after process exit"
+  rm "$dir/home/state/$id.check.sh"
+  run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
+    || fail "retirement retry failed: $(cat "$dir/retry.err")"
+  assert_absent "$dir/home/state/$id.meta" "retirement retry kept the active record"
+  assert_absent "$dir/pool/1/.fm-slot-owner" "retirement retry kept the old claim"
+  assert_present "$dir/tasktmp/sentinel" "retirement retry removed task temp material"
+  pass "retirement preserves task temp material and retries after late refusals"
+}
+
+test_retire_claim_refuses_attributable_validation_runs() {
+  local dir id=retire-run head
+  dir=$(make_retire_claim_case retire-run "$id")
+  head=$(git -C "$dir/worktree" rev-parse HEAD)
+  printf 'id: run-fixture\nbranch: fm/%s\nhead: %s\nstatus: running\ngate: review\n' \
+    "$id" "$head" > "$dir/run.status"
+  assert_retire_refused_unchanged "$dir" "$id" "parked validation run"
+  assert_no_grep 'no-mistakes <axi> <abort>' "$dir/runtime.log" "retirement administered the parked run"
+  printf 'id: unrelated\nbranch: other-branch\nhead: %s\nstatus: completed\noutcome: passed\n' \
+    "$head" > "$dir/global.status"
+  printf 'repo: %s\ncount: 2 of 2 total\nruns[2]{id,branch,status,head,pr}:\n  unrelated,other-branch,completed,%s,\n  run-fixture,fm/%s,running,%s,\n' \
+    "$dir/project" "$head" "$id" "$head" > "$dir/run.overview"
+  assert_retire_refused_unchanged "$dir" "$id" "own parked run behind another branch's latest run"
+  printf 'id: newer-failed\nbranch: fm/%s\nhead: %s\nstatus: failed\noutcome: failed\n' \
+    "$id" "$head" > "$dir/run.status.newer-failed"
+  printf 'repo: %s\ncount: 2 of 2 total\nruns[2]{id,branch,status,head,pr}:\n  newer-failed,fm/%s,failed,%s,\n  run-fixture,fm/%s,running,%s,\n' \
+    "$dir/project" "$id" "$head" "$id" "$head" > "$dir/run.overview"
+  assert_retire_refused_unchanged "$dir" "$id" "older active run behind a newer failure"
+  rm "$dir/run.status.newer-failed"
+  printf 'id: run-fixture\nbranch: fm/%s\nhead: deadbeef\nstatus: fixing\nbranch_sync:\n  state: pipeline_owned\n' \
+    "$id" > "$dir/run.status"
+  rm "$dir/run.overview"
+  assert_retire_refused_unchanged "$dir" "$id" "active pipeline-owned validation run"
+  assert_no_grep 'no-mistakes <axi> <abort>' "$dir/runtime.log" "retirement administered the active run"
+  printf 'id: run-fixture\nbranch: fm/%s\nhead: %s\nstatus: completed\noutcome: passed\n' \
+    "$id" "$head" > "$dir/run.status"
+  run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
+    || fail "retirement after terminal run failed: $(cat "$dir/retry.err")"
+  assert_absent "$dir/home/state/$id.meta" "retirement after terminal run kept the active record"
+  pass "retirement refuses attributable parked and active runs without administering them"
+}
+
+test_retire_claim_rejects_same_id_from_another_home() {
+  local dir other_dir id=retire-cross-home
+  dir=$(make_retire_claim_case retire-cross-home "$id")
+  mkdir -p "$dir/sibling-home"
+  claim_pool_slot "$dir" "$id" "$dir/sibling-home"
+  assert_retire_refused_unchanged "$dir" "$id" "same task id from another home"
+  ln -s "$dir/home" "$dir/home-alias"
+  claim_pool_slot "$dir" "$id" "$dir/home-alias"
+  run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
+    || fail "retirement through a proven home alias failed: $(cat "$dir/retry.err")"
+  assert_absent "$dir/home/state/$id.meta" "alias retirement kept the active record"
+  assert_absent "$dir/pool/1/.fm-slot-owner" "alias retirement kept its old marker"
+  other_dir=$(make_retire_claim_case retire-other-holder "$id")
+  claim_pool_slot "$other_dir" newer-task "$other_dir/sibling-home"
+  run_retire_claim "$other_dir" "$id" > "$other_dir/retry.out" 2> "$other_dir/retry.err" \
+    || fail "retirement beside another holder failed: $(cat "$other_dir/retry.err")"
+  assert_absent "$other_dir/home/state/$id.meta" "retirement beside another holder kept the old record"
+  assert_grep 'task=newer-task' "$other_dir/pool/1/.fm-slot-owner" "retirement removed another holder's marker"
+  pass "retirement rejects same-id cross-home claims and accepts a proven alias"
+}
+
+test_retire_claim_refuses_live_agent() {
+  local dir id=retire-live socket=retire.sock session=retire-live rc observed attempts=0
+  [ -n "$REAL_TMUX" ] || { echo "skip - tmux not installed"; return 0; }
+  dir=$(make_retire_claim_case retire-live "$id")
+  rm "$dir/fakebin/ps"
+  # Use a real, long-running process with the harness's kernel name. Creating
+  # an idle shell alone would exercise the allowed dead endpoint path.
+  cp "$(command -v sleep)" "$dir/codex"
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" new-session -d -s "$session" -n control )
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" new-window -d -t "=$session:" -n "fm-$id" -c "$dir/worktree" "$dir/codex 120" )
+  write_close_failing_tmux_shim "$dir" "$socket" "$REAL_TMUX"
+  while [ "$attempts" -lt 100 ]; do
+    # shellcheck disable=SC2016 # Positional arguments expand in the child shell.
+    observed=$(env -u TMUX -u TMUX_PANE \
+      FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+      bash -c '. "$1/bin/fm-backend.sh"; fm_backend_agent_state tmux "$2"' \
+      _ "$ROOT" "$session:fm-$id")
+    [ "$observed" != alive ] || break
+    sleep 0.1
+    attempts=$((attempts + 1))
+  done
+  [ "$observed" = alive ] || fail "live retirement fixture never started its agent (state $observed)"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=$session:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=no-mistakes" \
+    "spawn_gen=s$(date +%s).fixture"
+  set +e
+  env -u TMUX -u TMUX_PANE FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" --retire-claim > "$dir/retire.out" 2> "$dir/retire.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "retirement accepted a live recorded agent"
+  isolated_tmux_window_exists "$dir" "$socket" "$session" "fm-$id" \
+    || fail "retirement closed the live recorded agent"
+  assert_present "$dir/home/state/$id.meta" "retirement removed the live agent's record"
+  assert_present "$dir/pool/1/.fm-slot-owner" "retirement removed the live agent's claim"
+  if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+    fail "retirement archived a live agent's record"
+  fi
+  assert_no_grep 'kill-window' "$dir/runtime.log" "retirement tried to close the live agent"
+  ( cd "$dir" && env -u TMUX -u TMUX_PANE "$REAL_TMUX" -S "$socket" kill-server 2>/dev/null ) || true
+  pass "records-only retirement refuses a live recorded agent without closing it"
+}
+
 # The tmux shim used by the endpoint-close tests below: every subcommand
 # reaches the real isolated server, so presence is always read from real tmux.
 # When FM_TEST_BLOCK_KILL is set, `kill-window` alone fails without forwarding,
@@ -1810,6 +2570,9 @@ test_already_gone_endpoint_still_completes_without_a_refusal() {
   pass "fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently"
 }
 
+test_legacy_retirement_refusal_preserves_original_bytes
+test_retire_claim_refuses_active_interactive_builtins
+test_retire_claim_preserves_partial_backlog_transitions
 test_invalid_endpoint_records_refuse_before_mutation
 test_control_lock_contention_refuses_before_mutation
 test_non_pool_teardown_ignores_task_set_lock
@@ -1835,6 +2598,19 @@ test_stale_record_on_claimed_slot_retires_then_claimant_tears_down
 test_own_and_absent_slot_claims_still_tear_down
 test_recycled_slot_of_another_clone_is_already_gone
 test_absent_recorded_slot_still_holds_project_lock
+test_retire_claim_archives_only_the_gone_agents_record
+test_retire_claim_preserves_archives_across_task_id_reuse
+test_retire_claim_archives_without_spawn_generation
+test_retire_claim_requeues_unlanded_work
+test_retire_claim_accepts_cleared_task_temp_with_process_proof
+test_retire_claim_accepts_its_nested_foreground_shell
+test_retire_claim_refuses_active_nested_shell_script
+test_retire_claim_refuses_deleted_suffix_process_path
+test_retire_claim_refuses_live_agent
+test_retire_claim_refuses_unsafe_identity_and_options
+test_retire_claim_preserves_tasktmp_and_retries_after_refusals
+test_retire_claim_refuses_attributable_validation_runs
+test_retire_claim_rejects_same_id_from_another_home
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot

@@ -717,9 +717,10 @@ The generic Herdr agent-liveness probe reuses that pane classifier, then applies
 | A registered agent with a live process | `alive` |
 | Every other unexpected read | `unreadable` |
 
+The [shared relaunch checks](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone) still apply to `dead` and `missing` verdicts.
 Neither the stopped-server exception nor the stale-registration verdict widens husk detection or any close authority.
 Those paths still refuse an unreadable pane.
-A `stale-agent` pane is reused by recovery, never closed as a husk, because the shell it holds may be a nested worktree shell.
+A `stale-agent` pane is adopted by an allowed relaunch, never closed as a husk, because the shell it holds may be a nested worktree shell.
 
 Native registration still identifies Pi by name where tmux would see a generic interpreter.
 The process-level proof only decides whether that registration is backed by a running process.

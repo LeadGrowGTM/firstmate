@@ -81,12 +81,9 @@
 #   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
-#   merely unreachable from here: HERDR must still read the recorded pane as
-#   gone once that session's server is running again, and TMUX must prove its
-#   server died through socket age and process attribution. A re-created tmux window opens in this process's
-#   container session, and the republished record carries its new socket. An
-#   endpoint that turns out to have survived, or that cannot be proven absent,
-#   refuses. The worktree is reused untouched either way; a
+#   merely unreachable from here. fm_control_endpoint_absence_verdict owns the
+#   tmux socket/process proof and Herdr recorded-session recheck. A surviving
+#   agent or unprovable absence refuses. The worktree is reused untouched either way; a
 #   rebind is a recovery, never a teardown. Only a crewmate or scout rebinds: a
 #   secondmate whose endpoint is gone is respawned by its own owner
 #   (`--secondmate`, driven by the session-start liveness sweep).
@@ -1428,13 +1425,62 @@ TMUX_REBIND_ABORT_TARGET=
 SPAWN_ENDPOINT_CLOSED=0
 
 spawn_fresh_commit_rollback() {
-  if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
-    "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
+  local result=0 acquired=0
+  if [ "$SPAWN_LAUNCH_ATTEMPTED" != 0 ] || [ "$SPAWN_LAUNCH_SENT" != 0 ]; then
     SPAWN_FRESH_COMMIT_PENDING=0
-    return 0
+    FM_BACKLOG_TRANSITION_ERROR="${FM_BACKLOG_TRANSITION_ERROR:+$FM_BACKLOG_TRANSITION_ERROR; }launch delivery began; the task record and slot claim were retained because the worker may be active"
+    echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    return 1
   fi
-  echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
-  return 1
+  if [ "$SPAWN_SLOT_CLAIMED" = 1 ]; then
+    if [ -z "${WT:-}" ] || [ -z "$SPAWN_TREEHOUSE_PROJECT_LOCK" ]; then
+      FM_BACKLOG_TRANSITION_ERROR="cannot resolve the task's claimed slot for safe rollback"
+      result=1
+    elif [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" != 1 ]; then
+      # Never wait in the inverse project/meta lock order. On contention the
+      # existing record and claim remain paired for guarded recovery.
+      if fm_lock_try_acquire "$SPAWN_TREEHOUSE_PROJECT_LOCK"; then
+        SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
+        acquired=1
+      else
+        FM_BACKLOG_TRANSITION_ERROR="cannot lock the claimed slot for rollback; task record and claim retained"
+        result=1
+      fi
+    fi
+    if [ "$result" = 0 ]; then
+      fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+      case "$FM_TREEHOUSE_SLOT_OWNER" in
+        mine|absent|other)
+          fm_treehouse_slot_owner_release "$WT" "$ID" "$FM_HOME"
+          fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+          case "$FM_TREEHOUSE_SLOT_OWNER" in
+            absent|other) SPAWN_SLOT_CLAIMED=0 ;;
+            *) result=1 ;;
+          esac
+          ;;
+        *) result=1 ;;
+      esac
+      if [ "$result" != 0 ]; then
+        FM_BACKLOG_TRANSITION_ERROR="cannot release this task's own slot claim; task record and claim retained"
+      fi
+    fi
+  fi
+  # Release only our claim before removing the record, under the same project
+  # lock. A failed release therefore leaves an observable task, never an orphan
+  # claim; a failed record removal still protects the copy through custody scans.
+  if [ "$result" = 0 ] && ! fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
+      "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
+    result=1
+  fi
+  if [ "$acquired" = 1 ]; then
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK" || result=1
+  fi
+  SPAWN_FRESH_COMMIT_PENDING=0
+  if [ "$result" != 0 ]; then
+    echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
+  fi
+  return "$result"
 }
 
 parse_orca_worktree_result() {
@@ -1580,18 +1626,16 @@ spawn_abort_cleanup() {
     fm_lock_release "$SPAWN_META_LOCK" || true
   fi
   # A spawn that aborts after claiming its slot but before its record survives
-  # must not leave a claim naming a task no record describes. The release is a
-  # read-then-remove, so it runs only while the project lock that wrote the
-  # claim is still held (aborts before metadata publication); a later abort has
-  # already released that lock and leaves the claim for the next spawn's
-  # atomic replacement rather than racing it. The release itself never removes
-  # another task's claim.
+  # must not leave a claim naming a task no record describes. Published-record
+  # rollback above retakes the project lock without waiting, releases only its
+  # own claim, and keeps both records when launch or claim release is unproven.
+  # This fallback covers earlier aborts, while the allocation lock is held.
   if [ "$SPAWN_SLOT_CLAIMED" = 1 ] && [ -n "${WT:-}" ] &&
     [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] &&
     fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
     SPAWN_SLOT_CLAIMED=0
     if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
-      fm_treehouse_slot_owner_release "$WT" "$ID" || true
+      fm_treehouse_slot_owner_release "$WT" "$ID" "$FM_HOME" || true
     else
       echo "warning: leaving task $ID's slot claim on $WT in place; the Treehouse project lock is no longer held, so the next spawn's claim replaces it" >&2
     fi
@@ -2007,6 +2051,14 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
+  if [ "$BACKEND" = tmux ]; then
+    SPAWN_CALLER_TMUX=${FM_CONTROL_CALLER_TMUX-${TMUX-}}
+    SPAWN_CALLER_TMUX_PANE=${FM_CONTROL_CALLER_TMUX_PANE-${TMUX_PANE-}}
+    fm_backend_tmux_bind_record "$RELAUNCH_META" || {
+      echo "error: task $ID has malformed tmux socket identity" >&2
+      exit 1
+    }
+  fi
   # A relaunch must PROVE the previous agent is gone before it launches another
   # one into the same endpoint, and only tmux and herdr have a recovery-grade
   # classifier that can (bin/fm-control-lib.sh owns that capability table).
@@ -2026,14 +2078,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # endpoint was DESTROYED" with "the endpoint is UNREACHABLE from here right
   # now", and an unreachable endpoint can still hold the live agent this
   # relaunch would duplicate. So absence is PROVEN before it may rebind, never
-  # inferred from a failed read:
-  #   herdr - the recorded session's server is started, and the recorded pane is
-  #           RE-READ through that session's own socket. `dead` means the pane
-  #           survived the restart and is adopted after all; `alive` means the
-  #           agent came back and refuses; only a second `missing` proves the
-  #           pane itself did not survive.
-  #   tmux  - the server's death is proven from socket age and process
-  #           attribution, never from a missing session or window.
+  # inferred from a failed read. fm_control_endpoint_absence_verdict owns the
+  # per-backend proof, including the recorded tmux socket and process scan.
   # Every transient or self-contradicting read stays `unreadable`/`ambiguous`
   # and refuses as it always did (bin/fm-backend.sh's fm_backend_agent_state
   # owns that vocabulary). The proof itself lives in one place for the whole
@@ -2041,8 +2087,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # `relaunch` cannot reach two different answers about one endpoint.
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
   if [ "$RELAUNCH_STATE" = missing ]; then
-    RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET" \
-      "$(fm_meta_get "$RELAUNCH_META" tmux_socket)" "$(fm_meta_get "$RELAUNCH_META" spawn_gen)")
+    RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
     case "${RELAUNCH_ABSENCE%%$'\t'*}" in
       gone) RELAUNCH_STATE=missing ;;
       dead) RELAUNCH_STATE=dead ;;
@@ -2054,10 +2099,16 @@ if [ "$RELAUNCH" -eq 1 ]; then
     esac
   fi
   case "$RELAUNCH_STATE" in
-    dead) ;;
+    dead)
+      RELAUNCH_ABSENCE=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
+      if [ "${RELAUNCH_ABSENCE%%$'\t'*}" != clear ]; then
+        echo "error: task $ID's dead endpoint is not safe to relaunch; cannot prove the old agent gone: ${RELAUNCH_ABSENCE#*$'\t'}" >&2
+        exit 1
+      fi
+      ;;
     missing) RELAUNCH_REBIND=1 ;;
     *)
-      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
+      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; cannot prove the old agent gone; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
       exit 1
       ;;
   esac
@@ -3507,7 +3558,7 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
   SPAWN_PROJECT_CAPACITY=$FM_PROJECT_CAPACITY
   SPAWN_PROJECT_CAPACITY_ANY=$FM_PROJECT_CAPACITY_ANY
 fi
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] &&
+if [ "$KIND" != secondmate ] &&
   { [ "$BACKEND" != orca ] || [ -n "$SPAWN_PROJECT_CAPACITY_ANY" ]; }; then
   SPAWN_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ_ABS") || {
     echo "error: could not resolve the shared Treehouse project lock for $PROJ_ABS" >&2
@@ -3522,6 +3573,23 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] &&
     exit 1
   fi
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
+fi
+if [ "$RELAUNCH" = 1 ] && [ "$KIND" != secondmate ]; then
+  fm_worktree_custody_check "$STATE" "$RELAUNCH_META" "$RELAUNCH_WT" "$ID" || exit 1
+  if fm_treehouse_pool_slot "$PROJ_ABS" "$RELAUNCH_WT"; then
+    fm_treehouse_slot_owner_state "$RELAUNCH_WT" "$ID" "$FM_HOME"
+    case "$FM_TREEHOUSE_SLOT_OWNER" in
+      mine|absent) ;;
+      *) echo "error: task $ID's recorded pool copy has conflicting or unreadable custody; refusing to relaunch" >&2; exit 1 ;;
+    esac
+  fi
+fi
+if [ "$RELAUNCH" = 1 ] && [ "$RELAUNCH_STATE" = dead ]; then
+  RELAUNCH_ABSENCE=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
+  if [ "${RELAUNCH_ABSENCE%%$'\t'*}" != clear ]; then
+    echo "error: task $ID's dead endpoint is not safe to relaunch: ${RELAUNCH_ABSENCE#*$'\t'}" >&2
+    exit 1
+  fi
 fi
 if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
   if ! fm_project_capacity_occupants "$SPAWN_TREEHOUSE_PROJECT_LOCK" "$PROJ_ABS" "$STATE" "$ID"; then
@@ -4107,6 +4175,18 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # untouched. Until that record is published the window is this launch's to
     # close on abort, so a refused attempt leaves no window behind to collide
     # with a retry.
+    if [ -n "$SPAWN_CALLER_TMUX" ]; then
+      TMUX=$SPAWN_CALLER_TMUX
+      export TMUX
+    else
+      unset TMUX
+    fi
+    if [ -n "$SPAWN_CALLER_TMUX_PANE" ]; then
+      TMUX_PANE=$SPAWN_CALLER_TMUX_PANE
+      export TMUX_PANE
+    else
+      unset TMUX_PANE
+    fi
     SES=$(fm_backend_tmux_container_ensure) || {
       echo "error: could not resolve the tmux container session to re-create task $ID's endpoint in" >&2
       exit 1
@@ -4886,7 +4966,7 @@ spawn_wait_treehouse_returned() {  # <path>
 spawn_lease_clone_worktree() {
   local errfile leased pool rc=0
   pool=$(fm_treehouse_home_pool "$FM_HOME") || return 1
-  fm_treehouse_pool_check "$FM_HOME" "$PROJ_ABS" "$pool" || return 1
+  fm_treehouse_pool_custody_check "$FM_HOME" "$PROJ_ABS" "$pool" || return 1
   errfile=$(umask 077; mktemp "$STATE/.fm-treehouse-lease.XXXXXX") || return 1
   leased=$(
     {
@@ -4914,6 +4994,44 @@ spawn_lease_clone_worktree() {
   fi
   SPAWN_PRIVATE_LEASE_PATH=$leased
   fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$leased"
+}
+
+spawn_allocated_copy_custody_check() {  # <worktree>
+  local copy=$1 pane_pid='' processes marker pane_capture line
+  fm_worktree_custody_check "$STATE" "$STATE/$ID.meta" "$copy" "$ID" || return 1
+  if fm_treehouse_pool_slot "$PROJ_ABS" "$copy"; then
+    fm_treehouse_slot_owner_state "$copy" "$ID" "$FM_HOME"
+    [ "$FM_TREEHOUSE_SLOT_OWNER" = absent ] || {
+      echo "REFUSED: allocated pool copy $copy retains a slot claim; nothing was refreshed" >&2
+      return 1
+    }
+  fi
+  if [ "$BACKEND" = tmux ]; then
+    pane_pid=$(tmux display-message -p -t "$WT_TARGET" '#{pane_pid}' 2>/dev/null) || pane_pid=
+  elif [ "$BACKEND" = herdr ] && fm_backend_herdr_target_ready "$WT_TARGET"; then
+    pane_pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+      | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
+        'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pane_pid=
+  elif [ "$BACKEND" = zellij ] || [ "$BACKEND" = cmux ]; then
+    marker="__FM_PANE_PID_${BASHPID}_${RANDOM}__"
+    if spawn_send_text_line "$WT_TARGET" "printf '%s%s\\n' '$marker' \"\$\$\""; then
+      sleep 0.3
+      pane_capture=$(fm_backend_capture "$BACKEND" "$WT_TARGET" 100 "$W" 2>/dev/null) || pane_capture=
+      while IFS= read -r line; do
+        case "$line" in
+          "$marker"[0-9]*) pane_pid=${line#"$marker"} ;;
+        esac
+      done <<< "$pane_capture"
+    fi
+  fi
+  processes=$(fm_agent_worktree_processes "$copy" "$pane_pid") || {
+    echo "REFUSED: process custody for allocated copy $copy is unreadable; cannot prove the previous worker gone; nothing was refreshed" >&2
+    return 1
+  }
+  [ -z "$processes" ] || {
+    echo "REFUSED: allocated copy $copy has other live processes rooted in it ($processes); cannot prove the previous worker gone; nothing was refreshed" >&2
+    return 1
+  }
 }
 
 if [ "$RELAUNCH" -eq 1 ] && [ "$BACKEND" = orca ]; then
@@ -4952,8 +5070,9 @@ elif [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+  fm_treehouse_pool_custody_check "$FM_HOME" "$PROJ_ABS" "$HOME" records || exit 1
   pool_refusal_file=$(umask 077; mktemp "$STATE/.fm-treehouse-pool.XXXXXX") || exit 1
-  if ! spawn_send_text_line "$WT_TARGET" "bash $(shell_quote "$SCRIPT_DIR/fm-treehouse-pool-check.sh") $(shell_quote "$FM_HOME") $(shell_quote "$PROJ_ABS") $(shell_quote "$pool_refusal_file") && treehouse get"; then
+  if ! spawn_send_text_line "$WT_TARGET" "bash $(shell_quote "$SCRIPT_DIR/fm-treehouse-pool-check.sh") $(shell_quote "$FM_HOME") $(shell_quote "$PROJ_ABS") $(shell_quote "$pool_refusal_file") $(shell_quote "$STATE") && treehouse get"; then
     rm -f -- "$pool_refusal_file"
     exit 1
   fi
@@ -4968,6 +5087,13 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     exit 1
   fi
   rm -f -- "$pool_refusal_file"
+  if ! spawn_allocated_copy_custody_check "$WT"; then
+    if ! spawn_send_text_line "$WT_TARGET" 'exit' ||
+      ! spawn_wait_left_path "$WT" || ! spawn_wait_treehouse_returned "$WT"; then
+      echo "error: disputed Treehouse copy $WT was not confirmed returned; its work was left untouched" >&2
+    fi
+    exit 1
+  fi
   if ! fm_treehouse_worktree_check "$FM_HOME" "$PROJ_ABS" "$WT"; then
     if ! spawn_send_text_line "$WT_TARGET" 'exit' ||
       ! spawn_wait_left_path "$WT" || ! spawn_wait_treehouse_returned "$WT"; then
@@ -5004,6 +5130,10 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
       echo "error: pane settled in '$WT' instead of the leased worktree '$SPAWN_PRIVATE_LEASE_PATH' of '$PROJ_ABS'; refusing to launch" >&2
       exit 1
     fi
+    if ! spawn_allocated_copy_custody_check "$WT"; then
+      SPAWN_PRIVATE_LEASE_PATH=
+      exit 1
+    fi
     validate_spawn_worktree "per-home treehouse lease" "$T"
   fi
 
@@ -5022,6 +5152,11 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # A per-home lease is still a pool slot once its common dir is this clone, so
   # the same claim covers it.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
+    fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+    if [ "$FM_TREEHOUSE_SLOT_OWNER" != absent ] && [ "$FM_TREEHOUSE_SLOT_OWNER" != mine ]; then
+      echo "error: Treehouse pool slot $WT still belongs to task $FM_TREEHOUSE_SLOT_OWNER_ID; retire that stale claim before allocation" >&2
+      exit 1
+    fi
     if ! fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME"; then
       echo "error: could not claim Treehouse pool slot $WT for task $ID; refusing to launch a worker whose slot cannot later be proved to be its own; inspect window $T" >&2
       exit 1
@@ -6408,7 +6543,10 @@ else
 fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
-    if spawn_fresh_commit_rollback; then
+    if [ "$SPAWN_LAUNCH_ATTEMPTED" != 0 ] || [ "$SPAWN_LAUNCH_SENT" != 0 ]; then
+      SPAWN_FRESH_COMMIT_PENDING=0
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); launch delivery began and the worker may be active, so its task record, busy generation and slot claim were retained; repair the backlog before guarded recovery" >&2
+    elif spawn_fresh_commit_rollback; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
