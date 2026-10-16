@@ -1498,6 +1498,12 @@ fm_local_firstmate_state_dirs() {  # <first-state>
     done
     [ "$known" = 1 ] || FM_LOCAL_FIRSTMATE_STATES+=("$home/state")
     reg="$home/data/secondmates.md"
+    if [ -e "$home/data" ] || [ -L "$home/data" ]; then
+      [ -d "$home/data" ] && [ -r "$home/data" ] && [ -x "$home/data" ] || {
+        FM_LOCAL_FIRSTMATE_ERROR="local Firstmate registry parent is inaccessible at $home/data"
+        return 1
+      }
+    fi
     [ ! -e "$reg" ] && [ ! -L "$reg" ] && continue
     [ -f "$reg" ] && [ ! -L "$reg" ] || {
       FM_LOCAL_FIRSTMATE_ERROR="local Firstmate registry is unsafe at $reg"

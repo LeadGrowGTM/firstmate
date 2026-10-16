@@ -712,8 +712,9 @@ lay_out_as_pool_slot() {
 }
 
 test_pool_custody_refuses_unreadable_nested_registry() {
-  local rec id=pool-nested-registry first sibling descendant registry out status before_head before_reflog
-  rec=$(make_case nested-registry "$id")
+  local mode=${1:-file} rec id first sibling descendant registry blocked_path restore_mode out status before_head before_reflog
+  id="pool-nested-registry-$mode"
+  rec=$(make_case "nested-registry-$mode" "$id")
   read_case_record "$rec"
   lay_out_as_pool_slot
   first="$CASE_DIR/first-home"
@@ -732,10 +733,16 @@ test_pool_custody_refuses_unreadable_nested_registry() {
   fm_write_meta "$descendant/state/prior-worker.meta" \
     'window=firstmate:fm-prior-worker' 'endpoint_task_id=prior-worker' \
     "worktree=$POOL_DIR" "project=$PROJECT_DIR" 'kind=scout'
-  chmod 000 "$registry"
+  blocked_path=$registry
+  restore_mode=600
+  if [ "$mode" = parent ]; then
+    blocked_path="$first/data"
+    restore_mode=700
+  fi
+  chmod 000 "$blocked_path"
   if ( : < "$registry" ) 2>/dev/null; then
-    chmod 600 "$registry"
-    echo 'skip - current user can read a mode-000 registry'
+    chmod "$restore_mode" "$blocked_path"
+    echo "skip - current user can read a registry with mode-000 $mode"
     return 0
   fi
   before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
@@ -743,7 +750,7 @@ test_pool_custody_refuses_unreadable_nested_registry() {
   out=$(FM_FAKE_PANE_LOG="$CASE_DIR/pane.log" FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" \
     run_spawn "$id" --scout)
   status=$?
-  chmod 600 "$registry"
+  chmod "$restore_mode" "$blocked_path"
   [ "$status" -ne 0 ] || fail 'spawn accepted custody after omitting a registered grandchild'
   assert_contains "$out" 'local Firstmate registry' 'spawn did not name the unreadable registry'
   assert_absent "$HOME_DIR/state/$id.meta" 'unreadable registry refusal published a new task record'
@@ -757,7 +764,7 @@ test_pool_custody_refuses_unreadable_nested_registry() {
   if [ -f "$CASE_DIR/pane.log" ]; then
     assert_no_grep 'treehouse get' "$CASE_DIR/pane.log" 'unreadable registry refusal happened after acquisition'
   fi
-  pass 'spawn refuses an unreadable intermediate registry despite a later readable sibling'
+  pass "spawn refuses an unreadable registry $mode despite a later readable sibling"
 }
 
 test_pool_custody_refuses_before_refresh_or_claim() {
@@ -1471,6 +1478,7 @@ SH
 }
 
 test_pool_custody_refuses_unreadable_nested_registry
+test_pool_custody_refuses_unreadable_nested_registry parent
 test_returned_pool_copy_refuses_active_interactive_builtins
 test_pool_rollback_preserves_or_releases_custody
 

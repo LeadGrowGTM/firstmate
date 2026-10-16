@@ -1664,7 +1664,7 @@ test_retire_claim_archives_without_spawn_generation() {
 
 test_legacy_retirement_refusal_preserves_original_bytes() {
   local dir id mode rc archive
-  for mode in snapshot archive marker; do
+  for mode in snapshot archive marker remove; do
     id="retire-legacy-refusal-$mode"
     dir=$(make_retire_claim_case "$id" "$id")
     sed '/^spawn_gen=/d' "$dir/home/state/$id.meta" > "$dir/legacy.meta"
@@ -1675,6 +1675,7 @@ test_legacy_retirement_refusal_preserves_original_bytes() {
     printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
     tasks-axi add "$id" 'legacy retirement fixture' --kind ship --file "$dir/home/data/backlog.md" >/dev/null
     tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    cp "$dir/home/data/backlog.md" "$dir/original.backlog"
     printf '%s\n' "$mode" > "$dir/fail-mode"
     cat > "$dir/fakebin/perl" <<'SH'
 #!/usr/bin/env bash
@@ -1713,11 +1714,28 @@ if [ "$(cat "$base/fail-mode" 2>/dev/null)" = marker ]; then
 fi
 exec /bin/mv "$@"
 SH
-    chmod +x "$dir/fakebin/perl" "$dir/fakebin/mktemp" "$dir/fakebin/mv"
+    cat > "$dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+if [ "$(cat "$base/fail-mode" 2>/dev/null)" = remove ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      */state/retire-legacy-refusal-remove.meta)
+        : > "$base/fault-hit"
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /bin/rm "$@"
+SH
+    chmod +x "$dir/fakebin/perl" "$dir/fakebin/mktemp" "$dir/fakebin/mv" "$dir/fakebin/rm"
     rc=0
     run_retire_claim "$dir" "$id" --legacy-record > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
     [ "$rc" -ne 0 ] || fail "$mode: legacy retirement accepted the injected failure"
     assert_present "$dir/fault-hit" "$mode: fixture failed before reaching its intended refusal"
+    cmp -s "$dir/original.backlog" "$dir/home/data/backlog.md" \
+      || fail "$mode: refused legacy retirement changed the backlog before record removal"
     cmp -s "$dir/original.meta" "$dir/home/state/$id.meta" \
       || fail "$mode: refused legacy retirement changed the original record bytes"
     cmp -s "$dir/original.claim" "$dir/pool/1/.fm-slot-owner" \

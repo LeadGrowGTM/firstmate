@@ -4412,8 +4412,14 @@ fi
 if [ "$BACKLOG_CLOSED" = 1 ]; then
   retirement_transition() {
     if [ "$RETIRE_CLAIM" = 1 ]; then
-      fm_backlog_atomic_transition remove "$META" "task record" "$STATE" \
-        && fm_backlog_close_marker_replay "$STATE" "$BACKLOG_CLOSE_MARKER" "$DATA"
+      if fm_backlog_atomic_transition remove "$META" "task record" "$STATE"; then
+        fm_backlog_close_marker_replay "$STATE" "$BACKLOG_CLOSE_MARKER" "$DATA"
+      else
+        if [ -e "$META" ] || [ -L "$META" ]; then
+          retirement_rollback || true
+        fi
+        return 1
+      fi
     else
       fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$META" "$BACKLOG_CLOSE_MARKER" \
         "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"
