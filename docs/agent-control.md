@@ -102,8 +102,7 @@ A tmux window or server, or a Herdr pane or workspace, can disappear during a se
 The task's worktree, branch, commits, and uncommitted changes all survive that; only its terminal does not.
 
 Tmux and Herdr support preserved-copy reclaim through the same relaunch command.
-Allocation checks idle recorded custody before Treehouse acquisition and checks the returned copy again before Firstmate's base refresh or worker launch.
-Relaunch checks recorded custody under the project allocation lock before replacing the agent.
+[Pool custody checks](configuration.md#worktree-pool-guard) also apply before allocation and relaunch under the project allocation lock.
 
 Two endpoint verdicts can license a relaunch after the recorded worktree's process check also clears:
 
