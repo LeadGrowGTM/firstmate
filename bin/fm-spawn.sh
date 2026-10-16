@@ -1421,13 +1421,62 @@ TMUX_REBIND_ABORT_TARGET=
 SPAWN_ENDPOINT_CLOSED=0
 
 spawn_fresh_commit_rollback() {
-  if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
-    "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
+  local result=0 acquired=0
+  if [ "$SPAWN_LAUNCH_ATTEMPTED" != 0 ] || [ "$SPAWN_LAUNCH_SENT" != 0 ]; then
     SPAWN_FRESH_COMMIT_PENDING=0
-    return 0
+    FM_BACKLOG_TRANSITION_ERROR="${FM_BACKLOG_TRANSITION_ERROR:+$FM_BACKLOG_TRANSITION_ERROR; }launch delivery began; the task record and slot claim were retained because the worker may be active"
+    echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    return 1
   fi
-  echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
-  return 1
+  if [ "$SPAWN_SLOT_CLAIMED" = 1 ]; then
+    if [ -z "${WT:-}" ] || [ -z "$SPAWN_TREEHOUSE_PROJECT_LOCK" ]; then
+      FM_BACKLOG_TRANSITION_ERROR="cannot resolve the task's claimed slot for safe rollback"
+      result=1
+    elif [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" != 1 ]; then
+      # Never wait in the inverse project/meta lock order. On contention the
+      # existing record and claim remain paired for guarded recovery.
+      if fm_lock_try_acquire "$SPAWN_TREEHOUSE_PROJECT_LOCK"; then
+        SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=1
+        acquired=1
+      else
+        FM_BACKLOG_TRANSITION_ERROR="cannot lock the claimed slot for rollback; task record and claim retained"
+        result=1
+      fi
+    fi
+    if [ "$result" = 0 ]; then
+      fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+      case "$FM_TREEHOUSE_SLOT_OWNER" in
+        mine|absent|other)
+          fm_treehouse_slot_owner_release "$WT" "$ID" "$FM_HOME"
+          fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+          case "$FM_TREEHOUSE_SLOT_OWNER" in
+            absent|other) SPAWN_SLOT_CLAIMED=0 ;;
+            *) result=1 ;;
+          esac
+          ;;
+        *) result=1 ;;
+      esac
+      if [ "$result" != 0 ]; then
+        FM_BACKLOG_TRANSITION_ERROR="cannot release this task's own slot claim; task record and claim retained"
+      fi
+    fi
+  fi
+  # Release only our claim before removing the record, under the same project
+  # lock. A failed release therefore leaves an observable task, never an orphan
+  # claim; a failed record removal still protects the copy through custody scans.
+  if [ "$result" = 0 ] && ! fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
+      "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
+    result=1
+  fi
+  if [ "$acquired" = 1 ]; then
+    SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK" || result=1
+  fi
+  SPAWN_FRESH_COMMIT_PENDING=0
+  if [ "$result" != 0 ]; then
+    echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
+  fi
+  return "$result"
 }
 
 parse_orca_worktree_result() {
@@ -1573,12 +1622,10 @@ spawn_abort_cleanup() {
     fm_lock_release "$SPAWN_META_LOCK" || true
   fi
   # A spawn that aborts after claiming its slot but before its record survives
-  # must not leave a claim naming a task no record describes. The release is a
-  # read-then-remove, so it runs only while the project lock that wrote the
-  # claim is still held (aborts before metadata publication); a later abort has
-  # already released that lock and leaves the claim for the next spawn's
-  # atomic replacement rather than racing it. The release itself never removes
-  # another task's claim.
+  # must not leave a claim naming a task no record describes. Published-record
+  # rollback above retakes the project lock without waiting, releases only its
+  # own claim, and keeps both records when launch or claim release is unproven.
+  # This fallback covers earlier aborts, while the allocation lock is held.
   if [ "$SPAWN_SLOT_CLAIMED" = 1 ] && [ -n "${WT:-}" ] &&
     [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ] &&
     fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
@@ -6482,7 +6529,10 @@ else
 fi
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
-    if spawn_fresh_commit_rollback; then
+    if [ "$SPAWN_LAUNCH_ATTEMPTED" != 0 ] || [ "$SPAWN_LAUNCH_SENT" != 0 ]; then
+      SPAWN_FRESH_COMMIT_PENDING=0
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); launch delivery began and the worker may be active, so its task record, busy generation and slot claim were retained; repair the backlog before guarded recovery" >&2
+    elif spawn_fresh_commit_rollback; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
     else
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2

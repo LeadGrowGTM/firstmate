@@ -1283,6 +1283,95 @@ test_scout_base_branch_refused_on_gerrit_forge() {
   pass "a based scout on a forge=gerrit project is refused at spawn"
 }
 
+test_pool_rollback_preserves_or_releases_custody() {
+  local phase rec id out status real_tasks
+  command -v tasks-axi >/dev/null 2>&1 || { echo 'skip - tasks-axi not installed'; return 0; }
+  real_tasks=$(command -v tasks-axi)
+  for phase in prelaunch postlaunch foreign release-failure; do
+    id="pool-rollback-$phase"
+    rec=$(make_case "rollback-$phase" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$HOME_DIR/.tasks.toml"
+    printf '# Backlog\n\n## Queued\n\n## In flight\n\n## Done\n' > "$HOME_DIR/data/backlog.md"
+    tasks-axi add "$id" 'Exercise failed dispatch custody' --kind ship --file "$HOME_DIR/data/backlog.md" >/dev/null
+    mkdir -p "$CASE_DIR/other-home"
+    printf '#!/usr/bin/env bash\nreal=%q\n' "$real_tasks" > "$FAKEBIN_DIR/tasks-axi"
+    cat >> "$FAKEBIN_DIR/tasks-axi" <<'SH'
+if [ "$FM_R12_PHASE" = postlaunch ] && [ "${1:-}" = start ]; then
+  cp "$FM_R12_HOME/state/$FM_R12_ID.meta" "$FM_R12_CASE/observed.meta" || exit 2
+  cp "$FM_R12_SLOT" "$FM_R12_CASE/observed.claim" || exit 2
+  : > "$FM_R12_CASE/reached"
+  printf 'injected backlog start failure\n' >&2
+  exit 1
+fi
+exec "$real" "$@"
+SH
+    cat > "$FAKEBIN_DIR/mv" <<'SH'
+#!/usr/bin/env bash
+if [ "$FM_R12_PHASE" != postlaunch ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      */launch.s*.sh)
+        cp "$FM_R12_HOME/state/$FM_R12_ID.meta" "$FM_R12_CASE/observed.meta" || exit 2
+        cp "$FM_R12_SLOT" "$FM_R12_CASE/observed.claim" || exit 2
+        : > "$FM_R12_CASE/reached"
+        if [ "$FM_R12_PHASE" = foreign ]; then
+          printf 'task=other-task\nhome=%s/other-home\n' "$FM_R12_CASE" > "$FM_R12_SLOT"
+        fi
+        printf 'injected prelaunch staging failure\n' >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /bin/mv "$@"
+SH
+    cat > "$FAKEBIN_DIR/rm" <<'SH'
+#!/usr/bin/env bash
+if [ "$FM_R12_PHASE" = release-failure ]; then
+  for arg in "$@"; do
+    [ "$arg" != "$FM_R12_SLOT" ] || exit 1
+  done
+fi
+exec /bin/rm "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/tasks-axi" "$FAKEBIN_DIR/mv" "$FAKEBIN_DIR/rm"
+    out=$(FM_R12_PHASE="$phase" FM_R12_CASE="$CASE_DIR" FM_R12_HOME="$HOME_DIR" \
+      FM_R12_SLOT="$SLOT_CLAIM" FM_R12_ID="$id" FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" \
+      run_spawn "$id" --mode no-mistakes --yolo off)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$phase dispatch unexpectedly succeeded"
+    assert_present "$CASE_DIR/reached" "$phase fixture never reached the provisional record and slot claim"
+    assert_grep "task=$id" "$CASE_DIR/observed.claim" "$phase never held its own claim before the failure"
+    assert_grep "worktree=$POOL_DIR" "$CASE_DIR/observed.meta" "$phase never published the allocated worktree"
+    if [ "$phase" = postlaunch ] || [ "$phase" = release-failure ]; then
+      assert_present "$HOME_DIR/state/$id.meta" "$phase removed the observable task record"
+      assert_grep "task=$id" "$SLOT_CLAIM" "$phase lost its own retained claim"
+    else
+      assert_absent "$HOME_DIR/state/$id.meta" "$phase retained the prelaunch provisional record"
+      assert_absent "$HOME_DIR/state/$id.busy-state" "$phase retained the prelaunch busy generation"
+      if [ "$phase" = foreign ]; then
+        assert_grep 'task=other-task' "$SLOT_CLAIM" 'rollback released another task claim'
+        assert_grep "home=$CASE_DIR/other-home" "$SLOT_CLAIM" 'rollback changed another home claim'
+      else
+        assert_absent "$SLOT_CLAIM" 'prelaunch rollback orphaned its own slot claim'
+      fi
+    fi
+    if [ "$phase" = postlaunch ]; then
+      assert_present "$CASE_DIR/launch.log" 'backlog failure happened before launch delivery'
+      assert_contains "$out" 'worker may be active' 'postlaunch failure did not explain custody preservation'
+    else
+      [ ! -s "$CASE_DIR/launch.log" ] || fail "$phase attempted to launch a worker"
+    fi
+    [ "$(tasks-axi show "$id" --file "$HOME_DIR/data/backlog.md" | sed -n 's/^  state: *//p')" = queued ] \
+      || fail "$phase changed the failed-dispatch backlog row"
+  done
+  pass 'failed pool dispatch releases only prelaunch own claims and keeps postlaunch or unreleasable claims paired'
+}
+
+test_pool_rollback_preserves_or_releases_custody
+
 test_remote_seeded_home_spawns_from_treehouse_pool
 test_pool_slot_claim_follows_the_spawn_outcome
 test_pool_custody_refuses_before_refresh_or_claim
