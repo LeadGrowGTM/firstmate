@@ -910,6 +910,52 @@ SH
   done
 }
 
+test_returned_pool_copy_refuses_active_interactive_builtins() {
+  local mode rec id label pane out status
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  for mode in busy fd; do
+    id="pool-builtin-$mode"
+    rec=$(make_case "$id" "$id")
+    read_case_record "$rec"
+    lay_out_as_pool_slot
+    label="$id-$RANDOM"
+    pane=$(fm_test_active_tmux_shell "$label" nested task "$POOL_DIR" "$mode" "$CASE_DIR/activity") \
+      || fail "$mode: could not start an active allocation pane"
+    printf '%s\n' "$pane" > "$CASE_DIR/process-pids"
+    printf '%s\n' "$pane" > "$CASE_DIR/pane-pid"
+    mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+    cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_pid}'*) cat "$FM_TEST_PANE_PID_FILE"; exit ;;
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_PANE_EXITED" ]; then printf '%s\n' "$FM_TEST_PANE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*) : > "$FM_TEST_PANE_REACHED" ;;
+  *' exit Enter'*) : > "$FM_TEST_PANE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/tmux"
+    out=$(FM_TEST_PANE_COPY="$POOL_DIR" FM_TEST_PANE_PROJECT="$PROJECT_DIR" \
+      FM_TEST_PANE_PID_FILE="$CASE_DIR/pane-pid" FM_TEST_PANE_REACHED="$CASE_DIR/reached" \
+      FM_TEST_PANE_EXITED="$CASE_DIR/exited" FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" \
+      FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" run_spawn "$id" --scout)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$mode: allocation accepted an active interactive builtin: $out"
+    assert_present "$CASE_DIR/reached" "$mode: allocation never reached the returned copy"
+    assert_contains "$out" 'cannot prove' "$mode: allocation did not explain unproven absence"
+    assert_absent "$HOME_DIR/state/$id.meta" "$mode: allocation published task metadata"
+    assert_absent "$SLOT_CLAIM" "$mode: allocation claimed the busy slot"
+    assert_absent "$POOL_DIR/advanced-main.txt" "$mode: allocation refreshed the active copy"
+    [ ! -s "$CASE_DIR/launch.log" ] || fail "$mode: allocation launched a worker"
+    tmux -L "$label" has-session -t nested || fail "$mode: allocation closed the active pane"
+    [ ! -e "$CASE_DIR/activity/finished" ] || fail "$mode: the unrelated-FD wait ended before refusal"
+    tmux -L "$label" kill-server
+  done
+  pass 'returned pool copies refuse real active interactive builtin loops and unrelated-FD waits'
+}
+
 test_returned_pool_copy_accepts_its_foreground_task_shell() {
   local rec id=nested-shell-worker label=pulse-nested-shell pane nested capture out status
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
@@ -928,6 +974,11 @@ test_returned_pool_copy_accepts_its_foreground_task_shell() {
     [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
   done
   [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private tmux did not start a nested foreground task shell'
+  if ! fm_test_terminal_read_available "$nested"; then
+    tmux -L "$label" kill-server
+    echo 'skip - nested idle-shell proof unavailable on this kernel; manual confirmation required'
+    return 0
+  fi
   printf '%s\n%s\n' "$pane" "$nested" > "$CASE_DIR/process-pids"
   printf '%s\n' "$pane" > "$CASE_DIR/pane-pid"
   mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
@@ -1370,6 +1421,7 @@ SH
   pass 'failed pool dispatch releases only prelaunch own claims and keeps postlaunch or unreleasable claims paired'
 }
 
+test_returned_pool_copy_refuses_active_interactive_builtins
 test_pool_rollback_preserves_or_releases_custody
 
 test_remote_seeded_home_spawns_from_treehouse_pool

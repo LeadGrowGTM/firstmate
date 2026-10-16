@@ -1819,6 +1819,33 @@ SH
   pass 'cleared task temp root requires a readable process absence inventory'
 }
 
+test_retire_claim_refuses_active_interactive_builtins() {
+  local mode dir id label socket pane
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  for mode in busy fd; do
+    id="retire-builtin-$mode"
+    dir=$(make_retire_claim_case "$id" "$id")
+    label="$id-$RANDOM"
+    pane=$(fm_test_active_tmux_shell "$label" firstmate "fm-$id" "$dir/worktree" "$mode" "$dir/activity") \
+      || fail "$mode: could not start an active retirement pane"
+    socket=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{socket_path}')
+    printf 'tmux_socket=%s\n' "$socket" >> "$dir/home/state/$id.meta"
+    printf '%s\n' "$pane" > "$dir/process-pids"
+    mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
+    ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
+    assert_retire_refused_unchanged "$dir" "$id" "active interactive builtin $mode"
+    assert_grep 'cannot prove' "$dir/retire.err" "$mode: retirement did not explain unproven absence"
+    tmux -L "$label" has-session -t firstmate || fail "$mode: retirement closed the active pane"
+    [ ! -e "$dir/activity/finished" ] || fail "$mode: the unrelated-FD wait ended before refusal"
+    tmux -L "$label" kill-server
+    if tmux -L "$label" has-session 2>/dev/null; then
+      fail "$mode: the private retirement fixture's server did not stop"
+    fi
+    rm -f -- "$socket"
+  done
+  pass 'retirement refuses real interactive builtin loops and unrelated-FD waits without changing custody'
+}
+
 test_retire_claim_accepts_its_nested_foreground_shell() {
   local dir id=retire-nested-shell label socket pane nested capture
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
@@ -1838,6 +1865,12 @@ test_retire_claim_accepts_its_nested_foreground_shell() {
     [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
   done
   [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private retirement pane did not start a nested foreground shell'
+  if ! fm_test_terminal_read_available "$nested"; then
+    tmux -L "$label" kill-server
+    rm -f -- "$socket"
+    echo 'skip - nested idle-shell proof unavailable on this kernel; manual confirmation required'
+    return 0
+  fi
   printf '%s\n%s\n' "$pane" "$nested" > "$dir/process-pids"
   mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
   ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
@@ -1874,7 +1907,8 @@ test_retire_claim_refuses_active_nested_shell_script() {
   mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
   ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
   assert_retire_refused_unchanged "$dir" "$id" 'active nested shell script'
-  assert_grep 'live processes still have cwd' "$dir/retire.err" 'active shell was treated as idle'
+  assert_grep "agent is ambiguous; cannot prove the old agent gone" "$dir/retire.err" \
+    "active shell did not reach the strict endpoint refusal: $(cat "$dir/retire.err")"
   kill -0 "$active" 2>/dev/null || fail 'retirement killed the active shell script'
   tmux -L "$label" kill-server
   rm -f "$socket"
@@ -2425,6 +2459,7 @@ test_already_gone_endpoint_still_completes_without_a_refusal() {
   pass "fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently"
 }
 
+test_retire_claim_refuses_active_interactive_builtins
 test_retire_claim_restores_partial_backlog_transitions
 test_invalid_endpoint_records_refuse_before_mutation
 test_control_lock_contention_refuses_before_mutation

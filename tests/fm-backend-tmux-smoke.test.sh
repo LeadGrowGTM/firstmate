@@ -143,7 +143,8 @@ pass "real tmux: fm_backend_tmux_create_task creates a window and refuses a dupl
 wait_for_shell_ready "$TARGET" || fail "the tmux task shell did not become ready"
 
 tmux send-keys -t "$TARGET" "cd /tmp && PS1='smoke\$ ' && clear && printf 'setup-%s\\n' ready" Enter
-wait_for_capture_text "$TARGET" "setup-ready" || fail "the tmux task shell did not complete setup"
+wait_for_capture_text "$TARGET" "setup-ready" \
+  || fail "the tmux task shell did not complete setup: $(fm_backend_tmux_capture "$TARGET" 80 2>&1)"
 
 fm_backend_tmux_send_text_line "$TARGET" "printf 'captain-on-deck-%s\\n' line" \
   || fail "fm_backend_tmux_send_text_line failed"

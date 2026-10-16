@@ -2098,13 +2098,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
     dead)
       RELAUNCH_ABSENCE=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
       if [ "${RELAUNCH_ABSENCE%%$'\t'*}" != clear ]; then
-        echo "error: task $ID's dead endpoint is not safe to relaunch: ${RELAUNCH_ABSENCE#*$'\t'}" >&2
+        echo "error: task $ID's dead endpoint is not safe to relaunch; cannot prove the old agent gone: ${RELAUNCH_ABSENCE#*$'\t'}" >&2
         exit 1
       fi
       ;;
     missing) RELAUNCH_REBIND=1 ;;
     *)
-      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
+      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; cannot prove the old agent gone; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
       exit 1
       ;;
   esac
@@ -5011,11 +5011,11 @@ spawn_allocated_copy_custody_check() {  # <worktree>
     fi
   fi
   processes=$(fm_agent_worktree_processes "$copy" "$pane_pid") || {
-    echo "REFUSED: process custody for allocated copy $copy is unreadable; nothing was refreshed" >&2
+    echo "REFUSED: process custody for allocated copy $copy is unreadable; cannot prove the previous worker gone; nothing was refreshed" >&2
     return 1
   }
   [ -z "$processes" ] || {
-    echo "REFUSED: allocated copy $copy has other live processes rooted in it ($processes); nothing was refreshed" >&2
+    echo "REFUSED: allocated copy $copy has other live processes rooted in it ($processes); cannot prove the previous worker gone; nothing was refreshed" >&2
     return 1
   }
 }

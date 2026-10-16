@@ -217,6 +217,7 @@ fi
 exec /bin/ps "$@"
 SH
   chmod +x "$fb/ps"
+  fm_test_fake_shell_input_proof "$fb" "$1/fake/command"
   printf '%s\n' "$fb"
 }
 

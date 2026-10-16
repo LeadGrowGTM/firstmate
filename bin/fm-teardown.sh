@@ -3695,7 +3695,7 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
       }
       ;;
     dead) ;;
-    *) echo "REFUSED: stale claim's agent is $retirement_state; nothing was changed" >&2; exit 1 ;;
+    *) echo "REFUSED: stale claim's agent is $retirement_state; cannot prove the old agent gone; nothing was changed" >&2; exit 1 ;;
   esac
   retirement_pane_pid=
   if [ "$retirement_state" = dead ] && [ "$BACKEND" = tmux ]; then
@@ -3710,11 +3710,11 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
     retirement_missing_option=
     [ "$retirement_root" != "$TASK_TMP" ] || retirement_missing_option=allow-missing
     retirement_processes=$(fm_agent_worktree_processes "$retirement_root" "$retirement_pane_pid" "$retirement_missing_option") || {
-      echo "REFUSED: stale claim's process absence is unproven under $retirement_root; nothing was changed" >&2
+      echo "REFUSED: stale claim's process absence is unproven under $retirement_root; cannot prove the old agent gone; nothing was changed" >&2
       exit 1
     }
     [ -z "$retirement_processes" ] || {
-      echo "REFUSED: live processes still have cwd under $retirement_root; nothing was changed" >&2
+      echo "REFUSED: live processes still have cwd under $retirement_root; cannot prove the old agent gone; nothing was changed" >&2
       exit 1
     }
   done

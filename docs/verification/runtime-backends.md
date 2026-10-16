@@ -164,6 +164,12 @@ ok - real tmux: control proves a missing recorded endpoint gone through its sock
 ok - real process: kernel cwd identifies a rooted process that command arguments do not
 ```
 
+Strict shell refusal was verified on 2026-10-16 UTC on Linux 6.6.87.2-microsoft-standard-WSL2 with tmux 3.4 through private named servers.
+`bash bin/fm-test-run.sh tests/fm-tmux-agent-liveness.test.sh` keeps a real interactive builtin loop and a timed read on an unrelated FIFO descriptor ambiguous while their argv remain interactive-shell argv.
+On this kernel, idle Bash and the unrelated-descriptor wait both expose `do_select`, and syscall details are unreadable.
+The positive idle-shell proof is capability-skipped, and the idle-shell ambiguous refusal is verified instead.
+Recovery of an idle shell pane therefore needs manual confirmation on such kernels; a missing server still uses the separate socket and rooted-process absence proof.
+
 Foreground-process behavior was verified on 2026-07-07 with tmux 3.6a on macOS.
 
 ```sh

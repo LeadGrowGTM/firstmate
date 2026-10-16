@@ -55,7 +55,7 @@ relaunch_cleanup() {
   done
   fm_test_remove_tree "$TMP_ROOT"
 }
-trap 'relaunch_cleanup; fm_test_tmux_cleanup' EXIT
+trap 'fm_test_tmux_cleanup; relaunch_cleanup' EXIT
 # Socket-scoped reads (`tmux -S <socket> ...`) reach real, isolated tmux servers
 # through tests/tmux-helpers.sh's wrapper; every other call stays on the stub.
 export FM_FAKE_REAL_TMUX="$FM_TEST_TMUX_ROOT/bin/tmux"
@@ -224,6 +224,7 @@ else
 fi
 SH
   chmod +x "$fb/ps"
+  fm_test_fake_shell_input_proof "$fb" "$1/fake/command"
 }
 
 # new_case <name> [id] -> echoes a case dir with a live claude ship task.
@@ -2820,8 +2821,45 @@ test_tmux_dead_checks_background_descendants() {
   pass 'tmux: dead panes reject background descendants and an active shell script'
 }
 
+test_tmux_dead_refuses_active_interactive_builtins() {
+  local mode api dir id label pane out rc before_meta before_brief
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  for mode in busy fd; do
+    for api in spawn control; do
+      id="rl-builtin-$mode-$api"
+      dir=$(new_case "$id" "$id")
+      add_ship_task "$dir" "$id" claude
+      printf 'zsh' > "$dir/fake/command"
+      label="$id-$RANDOM"
+      pane=$(fm_test_active_tmux_shell "$label" firstmate "fm-$id" "$dir/wt" "$mode" "$dir/activity") \
+        || fail "$api/$mode: could not start a real active interactive shell"
+      printf '%s\n' "$pane" > "$dir/fake/pane-pid"
+      printf '%s\n' "$pane" > "$dir/fake/process-pids"
+      printf 'preserved work\n' > "$dir/wt/uncommitted.txt"
+      before_meta=$(cat "$dir/home/state/$id.meta")
+      before_brief=$(cat "$dir/home/data/$id/brief.md")
+      rc=0
+      if [ "$api" = spawn ]; then
+        out=$(run_spawn "$dir" "$id" --relaunch --harness claude) || rc=$?
+      else
+        out=$(run_control "$dir" "$id" relaunch --note continue) || rc=$?
+      fi
+      expect_code 1 "$rc" "$api/$mode accepted an active interactive shell: $out"
+      assert_contains "$out" 'cannot prove' "$api/$mode did not explain the unproven absence"
+      [ "$(cat "$dir/home/state/$id.meta")" = "$before_meta" ] || fail "$api/$mode changed the task record"
+      [ "$(cat "$dir/home/data/$id/brief.md")" = "$before_brief" ] || fail "$api/$mode changed the brief"
+      assert_grep 'preserved work' "$dir/wt/uncommitted.txt" "$api/$mode changed uncommitted work"
+      [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$api/$mode delivered terminal input"
+      tmux -L "$label" has-session -t firstmate || fail "$api/$mode closed the active pane"
+      [ ! -e "$dir/activity/finished" ] || fail "$api/$mode fixture stopped waiting before refusal"
+      tmux -L "$label" kill-server
+    done
+  done
+  pass 'both relaunch interfaces preserve active builtin loops and unrelated-FD waits with unchanged interactive argv'
+}
+
 test_tmux_dead_accepts_its_nested_foreground_shell() {
-  local api dir id label pane nested capture out rc
+  local api dir id label pane nested capture out rc proven=0
   [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
   for api in spawn control; do
     id="rl-nested-$api"
@@ -2841,6 +2879,11 @@ test_tmux_dead_accepts_its_nested_foreground_shell() {
       [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
     done
     [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private tmux did not start a nested foreground shell'
+    if ! fm_test_terminal_read_available "$nested"; then
+      tmux -L "$label" kill-server
+      echo "skip - $api nested idle-shell proof unavailable on this kernel; manual confirmation required"
+      continue
+    fi
     printf '%s\n' "$pane" > "$dir/fake/pane-pid"
     printf '%s\n%s\n' "$pane" "$nested" > "$dir/fake/process-pids"
     rc=0
@@ -2850,9 +2893,12 @@ test_tmux_dead_accepts_its_nested_foreground_shell() {
       out=$(run_control "$dir" "$id" relaunch --note continue) || rc=$?
     fi
     expect_code 0 "$rc" "$api relaunch refused its nested foreground shell: $out"
+    proven=$((proven + 1))
     tmux -L "$label" kill-server
   done
-  pass 'both tmux relaunch interfaces accept the verified nested foreground task shell'
+  if [ "$proven" -eq 2 ]; then
+    pass 'both tmux relaunch interfaces accept the verified nested foreground task shell'
+  fi
 }
 
 test_tmux_missing_legacy_record_refuses_a_live_rooted_process() {
@@ -3629,6 +3675,7 @@ SH
   pass "scheduled continuation distinguishes missing CLI from inconclusive account before stopping"
 }
 
+test_tmux_dead_refuses_active_interactive_builtins
 test_scheduled_control_receipts
 test_scheduled_control_fences_the_expected_generation
 test_scheduled_control_rechecks_generation_after_lock_admission
