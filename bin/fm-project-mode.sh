@@ -112,30 +112,26 @@ case "${1:-}" in
   --forge) WANT_FORGE=1; shift ;;
 esac
 NAME=${1:?usage: fm-project-mode.sh [--raw|--branch-prefix|--forge] <project-name>}
-# The crew prefix is read only for a branch-prefix query, so a malformed
-# short-name declaration never disturbs a mode or forge query.
-DEFAULT_BRANCH=fm/
 if [ "$BRANCH_PREFIX_QUERY" -eq 1 ]; then
   # shellcheck source=bin/fm-crew-name-lib.sh
   . "$SCRIPT_DIR/fm-crew-name-lib.sh"
-  DEFAULT_BRANCH=$(fm_crew_default_branch_prefix "$CONFIG") || exit 1
 fi
 
 if [ ! -f "$REG" ]; then
   echo "warn: no registry at $REG; defaulting $NAME to no-mistakes off" >&2
   if [ "$BRANCH_PREFIX_QUERY" -eq 1 ]; then
-    echo "$DEFAULT_BRANCH"
+    fm_crew_default_branch_prefix "$CONFIG"
   elif [ "$WANT_FORGE" -eq 1 ]; then echo none; else echo "no-mistakes off"; fi
   exit 0
 fi
 
 # awk emits one "near <token>" line per keyed token whose key is a near miss of
-# `forge`, then "posture <mode> <yolo> <branch-prefix> <forge>" (branch-prefix is
-# the raw prefix, defaulting to the crew prefix; forge is `none` or the whole `forge=<value>`
-# token, so an empty value survives the split), or nothing if the project is
+# `forge`, then "posture <mode> <yolo> <forge> <branch-set> <branch-prefix>"
+# (branch-prefix is the raw prefix; forge is `none` or the whole `forge=<value>`
+# token, so an empty branch value survives the split), or nothing if the project is
 # absent. Every other token beside the mode is ignored, exactly as before either
 # annotation existed.
-parsed=$(awk -v n="$NAME" -v default_branch="$DEFAULT_BRANCH" '
+parsed=$(awk -v n="$NAME" '
   function dist(x, y,   i, j, lx, ly, d, c, v) {
     lx = length(x); ly = length(y);
     for (i=0; i<=lx; i++) d[i,0] = i;
@@ -159,7 +155,7 @@ parsed=$(awk -v n="$NAME" -v default_branch="$DEFAULT_BRANCH" '
     if (substr($0, 1, plen) != prefix) next
     after = substr($0, plen + 1);
     if (after != "" && substr(after, 1, 2) != " [" && substr(after, 1, 3) != " - ") next
-    mode="no-mistakes"; yolo="off"; branch=default_branch; forge="none";
+    mode="no-mistakes"; yolo="off"; branch=""; branch_set=0; forge="none";
     if (substr(after, 1, 2) == " [") {
       s="";
       nk = split(after, rest, " ");
@@ -173,7 +169,7 @@ parsed=$(awk -v n="$NAME" -v default_branch="$DEFAULT_BRANCH" '
       mode_set = 0
       for (j=1; j<=k; j++) {
         if (a[j]=="+yolo") { yolo="on"; continue }
-        if (a[j] ~ /^branch=/) { branch = substr(a[j], 8); continue }
+        if (a[j] ~ /^branch=/) { branch = substr(a[j], 8); branch_set=1; continue }
         if (a[j] ~ /^forge=/) { forge = a[j]; continue }
         if (a[j] ~ /^[^=]+=/) {
           key = substr(a[j], 1, index(a[j], "=") - 1);
@@ -187,14 +183,14 @@ parsed=$(awk -v n="$NAME" -v default_branch="$DEFAULT_BRANCH" '
     }
     # branch is printed LAST: an empty branch= override must survive as an
     # empty final field, which only holds when nothing follows it.
-    print "posture", mode, yolo, forge, branch; exit
+    print "posture", mode, yolo, forge, branch_set, branch; exit
   }
 ' "$REG")
 
 if [ -z "$parsed" ]; then
   echo "warn: project \"$NAME\" not in registry; defaulting to no-mistakes off" >&2
   if [ "$BRANCH_PREFIX_QUERY" -eq 1 ]; then
-    echo "$DEFAULT_BRANCH"
+    fm_crew_default_branch_prefix "$CONFIG"
   elif [ "$WANT_FORGE" -eq 1 ]; then echo none; else echo "no-mistakes off"; fi
   exit 0
 fi
@@ -208,19 +204,23 @@ while IFS=' ' read -r kind rest; do
 done <<EOF
 $parsed
 EOF
-while IFS=' ' read -r m y f b; do
-  mode=$m; yolo=$y; rest_forge=$f; branch=$b
+while IFS=' ' read -r m y f s b; do
+  mode=$m; yolo=$y; rest_forge=$f; branch_set=$s; branch=$b
 done <<EOF
 $posture
 EOF
 forge=${rest_forge:-none}
 case "$mode" in
   no-mistakes|direct-PR|local-only|no-mistakes-prod-only) ;;
-  *) echo "warn: unknown mode \"$mode\" for $NAME; defaulting to no-mistakes off" >&2; mode=no-mistakes; yolo=off; branch=$DEFAULT_BRANCH ;;
+  *) echo "warn: unknown mode \"$mode\" for $NAME; defaulting to no-mistakes off" >&2; mode=no-mistakes; yolo=off; branch_set=0 ;;
 esac
 case "$yolo" in on|off) ;; *) yolo=off ;; esac
 if [ "$BRANCH_PREFIX_QUERY" -eq 1 ]; then
-  echo "$branch"
+  if [ "$branch_set" -eq 1 ]; then
+    echo "$branch"
+  else
+    fm_crew_default_branch_prefix "$CONFIG"
+  fi
   exit 0
 fi
 

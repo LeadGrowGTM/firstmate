@@ -1638,7 +1638,7 @@ test_spawn_refreshes_legacy_worker_roles
 # presence-independent), defaults an unregistered/plain project to the legacy
 # "fm/" prefix, and resolves an empty override to "" for a bare <task-id> branch.
 test_project_mode_resolves_branch_prefix() {
-  local home out err
+  local home out err status project
   home="$TMP_ROOT/project-mode-branch/home"
   mkdir -p "$home/data"
   cat > "$home/data/projects.md" <<'EOF'
@@ -1684,6 +1684,26 @@ EOF
 
   out=$(FM_HOME="$TMP_ROOT/project-mode-branch/no-registry-home" "$PROJECT_MODE" --branch-prefix anyproj 2>/dev/null)
   [ "$out" = "fm/" ] || fail "an absent registry must default the branch prefix to fm/ (got '$out')"
+
+  mkdir -p "$home/config" "$TMP_ROOT/project-mode-branch/no-registry-home/config"
+  printf 'Nap\n' > "$home/config/mate-short-name"
+  printf 'Nap\n' > "$TMP_ROOT/project-mode-branch/no-registry-home/config/mate-short-name"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix overrideproj 2>&1)
+  [ "$out" = fix/ ] || fail "a registered override read the malformed home short form (got '$out')"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix reorderedproj 2>&1)
+  [ "$out" = contrib/ ] || fail "a reordered override read the malformed home short form (got '$out')"
+  out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix bareproj 2>&1)
+  [ -z "$out" ] || fail "an empty override read the malformed home short form (got '$out')"
+  for project in plainproj typomodeproj never-registered; do
+    out=$(FM_HOME="$home" "$PROJECT_MODE" --branch-prefix "$project" 2>&1)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$project accepted a malformed short form for its default branch"
+    assert_contains "$out" "mate-short-name holds 'Nap'" "$project did not validate its default branch"
+  done
+  out=$(FM_HOME="$TMP_ROOT/project-mode-branch/no-registry-home" "$PROJECT_MODE" --branch-prefix anyproj 2>&1)
+  status=$?
+  [ "$status" -ne 0 ] || fail "an absent registry accepted a malformed short form for its default branch"
+  assert_contains "$out" "mate-short-name holds 'Nap'" "an absent registry did not validate its default branch"
   pass "fm-project-mode: --branch-prefix resolves order-independently and defaults to the legacy fm/ prefix"
 }
 
