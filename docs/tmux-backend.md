@@ -50,7 +50,6 @@ tmux attach -t firstmate
 
 Each task window is named `fm-<id>`.
 The [crew names setting](configuration.md#crew-names-configmate-short-name) owns how Firstmate's status theme displays new windows.
-Under tmux's built-in or an operator's custom window-status format, a window shows its plain `fm-<id>` name.
 
 ```sh
 tmux list-windows -t <session-name>
