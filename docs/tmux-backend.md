@@ -76,20 +76,14 @@ Tmux backend calls refuse that home unless its private `fm-lab` socket is select
 
 A target-existence check proves only that the pane exists.
 The deeper tmux agent-liveness probe first verifies exact window membership, then reads process names to distinguish a running harness from a bare idle shell.
-It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, Rovo, and AGY process identities as `alive`, a foreground shell group with positive terminal-input wait proof as `dead`, a window absent from the addressed server as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
+It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, Rovo, and AGY process identities as `alive`, common shells as `dead`, a window absent from the addressed server as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
-`dead` authorizes endpoint adoption; `missing` requires the shared socket/process absence proof before preserved-copy recovery (see [agent lifecycle control](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone)).
+Only `dead` authorizes recovery directly; `missing` requires the [endpoint-absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone) because a false absence result could launch a duplicate agent.
 
 For positive attribution, the probe combines two independent name sources rather than making either one load-bearing.
 `#{pane_current_command}` and the pane tty foreground process group's kernel `comm` values expose different name fields, and which one retains executable identity is platform-dependent.
 The foreground probe also reads argv[0] so an exact harness install-path component can carry the verdict when the other fields expose a rewritten process name.
-Either source naming a verified harness is enough for `alive`, because a false `dead` is the one verdict that can start a duplicate agent on a live worktree.
-Shell names and interactive argv alone never establish idleness: an interactive shell can execute builtins without changing either.
-`bin/fm-agent-process.py` owns the Linux kernel terminal-input proof shared by liveness and rooted-process exclusions, including a nested foreground shell's waiting parent.
-Only a sleeping foreground shell with an explicit kernel tty-read wait qualifies; generic `do_select` and `wait_woken` waits also describe unrelated work and refuse.
-The cwd-only macOS inventory supplies no such shell exemption.
-When this proof is unavailable, relaunch, returned-copy reuse and claim retirement refuse with an unproven-agent reason; an idle shell pane needs manual confirmation before recovery.
-Missing-server recovery still uses socket identity and rooted-process absence, so it does not require a surviving shell to supply terminal-input proof.
+Either source naming a verified harness is enough for `alive`, because a false `dead` is the one verdict that can start a duplicate agent on a live worktree, while a readable foreground process group settles the negative verdicts.
 
 Scoping the second source to the foreground process group rather than to the pane's descendants is deliberate: a harness-named process left running in the background of an otherwise idle pane must not read as an agent.
 The same scoping covers multi-process launchers without a special case, so the Pi Launcher path is attributed through its `pi-signed` wrapper and `pi` engine even though its title is the exact foreground command `pi-launcher`.

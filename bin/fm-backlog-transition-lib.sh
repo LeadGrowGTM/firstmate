@@ -55,13 +55,6 @@
 # closes a row that reads as an open captain call. An answer that closes the row
 # first applies any supported retained artifact from the validated record, then
 # replay simply retires the record.
-# Unlanded claim retirement records `mode=requeue:<prior-state>:<row-sha256>`.
-# The snapshot is taken before mutation; only that exact preexisting Done row
-# may be reopened. A later Done answer wins. Reopen precedes the preserved-work
-# note, so our own partial body update cannot masquerade as a later answer.
-# Retirement publishes its marker only after archival and claim release. Its
-# close/retain modes are `retire-close`/`retire-retain`; all retirement modes
-# refuse replay beside the matching active meta, including a restored record.
 
 # Set by fm_backlog_transition_applies for a return-1 exemption.
 # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
@@ -632,10 +625,7 @@ fm_backlog_retain() {  # <data-dir> <id> [flag...]
       FM_BACKLOG_TRANSITION_ERROR="could not decode the task body of $id"
       return 1
     }
-    case "$deliverable" in
-      'Preserved unfinished work: '*) line=$deliverable ;;
-      *) line="Deliverable of the finished work: $deliverable" ;;
-    esac
+    line="Deliverable of the finished work: $deliverable"
     case $'\n'"$body"$'\n' in
       *$'\n'"$line"$'\n'*) ;;
       *)
@@ -896,24 +886,9 @@ fm_backlog_close_marker_path() {  # <state-dir> <id>
   printf '%s/%s.backlog-close\n' "$1" "$2"
 }
 
-fm_backlog_requeue_mode() {  # <data-dir> <id>
-  local row prior_state digest
-  row=$(fm_backlog_row_show "$1" "$2" --full) || {
-    FM_BACKLOG_TRANSITION_ERROR="cannot snapshot backlog row $2 before claim retirement"
-    return 1
-  }
-  prior_state=$(printf '%s\n' "$row" | sed -n 's/^  state: *//p')
-  case "$prior_state" in
-    queued|in_flight|done) ;;
-    *) FM_BACKLOG_TRANSITION_ERROR="invalid pre-retirement backlog state for $2"; return 1 ;;
-  esac
-  digest=$(printf '%s\n' "$row" | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)') || return 1
-  printf 'requeue:%s:%s\n' "$prior_state" "$digest"
-}
-
 fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <expected-id> <state-dir>
   local marker=$1 authorized_data data_resolved expected_id=$3 state=$4
-  local id='' data='' marker_spawn_gen='' cleanup_incomplete=0 mode=close line raw_bytes arg_value decoded_note
+  local id='' data='' marker_spawn_gen='' cleanup_incomplete=0 mode=close line raw_bytes arg_value
   local url_tail url_authority url_path url_host url_port host_rest host_label host_valid
   local percent_tail percent_valid
   local id_count=0 data_count=0 spawn_gen_count=0 cleanup_incomplete_count=0 mode_count=0
@@ -949,13 +924,7 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
     return 1
   fi
   case "$mode" in
-    close|retain|retire-close|retire-retain) ;;
-    requeue:*)
-      if ! [[ $mode =~ ^requeue:(queued|in_flight|done):[0-9a-f]{64}$ ]]; then
-        FM_BACKLOG_TRANSITION_ERROR="invalid requeue intent in pending-close record $marker"
-        return 1
-      fi
-      ;;
+    close|retain) ;;
     *)
       FM_BACKLOG_TRANSITION_ERROR="invalid transition mode in pending-close record $marker"
       return 1
@@ -1016,21 +985,7 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
     0) ;;
     2)
       case "${args[0]}" in
-        --note)
-          if [ "${args[1]}" = "local%20main" ]; then
-            true
-          elif { [ "$mode" = retain ] || [[ $mode == requeue:* ]]; } && [[ ${args[1]} == hex:* ]]; then
-            arg_value=${args[1]#hex:}
-            [ -n "$arg_value" ] && [ "${#arg_value}" -le 8192 ] \
-              && [ $(( ${#arg_value} % 2 )) -eq 0 ] \
-              && [[ $arg_value != *[!0-9a-f]* ]] \
-              && decoded_note=$(perl -e 'print pack("H*", $ARGV[0])' -- "$arg_value") \
-              && fm_backlog_control_bytes_valid 0 "$(fm_backlog_bytes_of_string "$decoded_note")" \
-              && [[ $decoded_note == "Preserved unfinished work: worktree "*"; branch "* ]]
-          else
-            false
-          fi
-          ;;
+        --note) [ "${args[1]}" = "local%20main" ] ;;
         --pr)
           arg_value=${args[1]}
           [ "${#arg_value}" -le 2048 ] \
@@ -1095,10 +1050,6 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
       ;;
     *) FM_BACKLOG_TRANSITION_ERROR="invalid pending-close arguments in $marker"; return 1 ;;
   esac
-  if [[ $mode == requeue:* ]] && { [ "${args[0]-}" != --note ] || [[ ${args[1]-} != hex:* ]]; }; then
-    FM_BACKLOG_TRANSITION_ERROR="requeue intent requires a preserved-work note in $marker"
-    return 1
-  fi
   FM_BACKLOG_CLOSE_VALIDATED_ID=$id
   FM_BACKLOG_CLOSE_VALIDATED_DATA=$data_resolved
   FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN=$marker_spawn_gen
@@ -1107,9 +1058,10 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
   FM_BACKLOG_CLOSE_VALIDATED_ARGS=("${args[@]+"${args[@]}"}")
 }
 
-# --retain records a captain-held transition; --mode preserves an exact validated
-# transition intent during replay. Remaining flags record the deliverable.
-fm_backlog_close_marker_stage() {  # <temporary-path> <id> <data-dir> <spawn-gen> <state-dir> <cleanup-incomplete: 0|1> [--retain | --mode <mode>] [flag...]
+# A leading `--retain` flag records the captain-held transition (`mode=retain`)
+# instead of a close; the remaining flags are the same completion links either
+# transition records.
+fm_backlog_close_marker_stage() {  # <temporary-path> <id> <data-dir> <spawn-gen> <state-dir> <cleanup-incomplete: 0|1> [--retain] [flag...]
   local tmp=$1 id=$2 data spawn_gen=$4 state=$5 cleanup_incomplete=$6 arg previous_arg=''
   local mode=close serialized_args=()
   data=$(fm_backlog_data_absolute "$3") || {
@@ -1129,16 +1081,10 @@ fm_backlog_close_marker_stage() {  # <temporary-path> <id> <data-dir> <spawn-gen
   if [ "${1:-}" = --retain ]; then
     mode=retain
     shift
-  elif [ "${1:-}" = --mode ]; then
-    mode=${2:-}
-    [ "$#" -ge 2 ] || return 1
-    shift 2
   fi
   for arg in "$@"; do
     if [ "$previous_arg" = --note ] && [ "$arg" = "local main" ]; then
       serialized_args+=("local%20main")
-    elif [ "$previous_arg" = --note ]; then
-      serialized_args+=("hex:$(perl -e 'print unpack("H*", $ARGV[0])' -- "$arg")")
     else
       serialized_args+=("$arg")
     fi
@@ -1211,18 +1157,10 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
   marker_spawn_gen=$FM_BACKLOG_CLOSE_VALIDATED_SPAWN_GEN
   cleanup_incomplete=$FM_BACKLOG_CLOSE_VALIDATED_CLEANUP_INCOMPLETE
   mode=$FM_BACKLOG_CLOSE_VALIDATED_MODE
-  [ "$mode" = close ] || mode_flags=(--mode "$mode")
+  [ "$mode" = close ] || mode_flags=(--retain)
   args=("${FM_BACKLOG_CLOSE_VALIDATED_ARGS[@]+"${FM_BACKLOG_CLOSE_VALIDATED_ARGS[@]}"}")
   if [ "${args[0]-}" = --note ]; then
-    if [ "${args[1]-}" = local%20main ]; then
-      args[1]="local main"
-    else
-      args[1]=$(perl -e 'print pack("H*", $ARGV[0])' -- "${args[1]#hex:}") || return 1
-    fi
-  fi
-  if [ "$mode" = retain ] && [[ ${args[1]-} == 'Preserved unfinished work: worktree '* ]]; then
-    FM_BACKLOG_TRANSITION_ERROR="cannot replay legacy retirement without its pre-retirement backlog state"
-    return 1
+    args[1]="local main"
   fi
   meta="$state/$id.meta"
   if [ -e "$meta" ] || [ -L "$meta" ]; then
@@ -1237,12 +1175,6 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
       FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
       return 0
     fi
-    case "$mode" in
-      requeue:*|retire-close|retire-retain)
-        FM_BACKLOG_TRANSITION_ERROR="active task record remains for claim retirement of $id; retry guarded retirement before replay"
-        return 1
-        ;;
-    esac
     fm_backlog_close_marker_mark_cleanup_incomplete "$state" "$marker" "$id" "$data" \
       "$marker_spawn_gen" "${mode_flags[@]+"${mode_flags[@]}"}" "${args[@]+"${args[@]}"}" \
       || return 1
@@ -1250,10 +1182,6 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
     fm_backlog_atomic_transition remove "$meta" "the interrupted task record" "$state" \
       || return 1
   fi
-  case "$mode" in
-    retire-close) mode=close ;;
-    retire-retain) mode=retain ;;
-  esac
   if fm_backlog_row_probe "$data" "$id"; then
     row_state=$FM_BACKLOG_ROW_STATE
     if [ "${row_state%% *}" != "done" ] && [ "$FM_BACKLOG_ROW_HOLD_KIND" = captain ]; then
@@ -1268,21 +1196,14 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
   fi
   case "$row_state" in
     done\ *)
-      if [[ $mode == requeue:* ]]; then
-        local current_mode
-        current_mode=$(fm_backlog_requeue_mode "$data" "$id") || return 1
-        if [ "$current_mode" != "$mode" ]; then
-          fm_backlog_close_marker_remove "$marker" "$state" || return 1
-          FM_BACKLOG_CLOSE_REPLAY_RESULT=answered
-          return 0
-        fi
-      elif [ "$mode" = retain ]; then
+      if [ "$mode" = retain ]; then
         # The captain's answer closed the row before this replay; the retained
         # transition owes it nothing more than retiring the record.
         fm_backlog_close_marker_remove "$marker" "$state" || return 1
         FM_BACKLOG_CLOSE_REPLAY_RESULT=answered
         return 0
-      elif fm_backlog_atomic_transition close '' "$marker" "$data" "$id" "$state" \
+      fi
+      if fm_backlog_atomic_transition close '' "$marker" "$data" "$id" "$state" \
           "${args[@]+"${args[@]}"}"; then
         if [ "$cleanup_incomplete" = 1 ]; then
           FM_BACKLOG_CLOSE_REPLAY_RESULT=closed_incomplete
@@ -1290,9 +1211,8 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
           FM_BACKLOG_CLOSE_REPLAY_RESULT=closed
         fi
         return 0
-      else
-        return 1
       fi
+      return 1
       ;;
     '')
       fm_backlog_close_marker_remove "$marker" "$state" || return 1
@@ -1300,12 +1220,6 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
       return 0
       ;;
   esac
-  if [[ $mode == requeue:* ]]; then
-    if [[ $mode == requeue:done:* && $row_state == done\ * ]]; then
-      fm_backlog_mutate "$data" reopen "$id" || return 1
-    fi
-    mode=retain
-  fi
   if fm_backlog_atomic_transition "$mode" '' "$marker" "$data" "$id" "$state" \
       "${args[@]+"${args[@]}"}"; then
     if [ "$mode" = retain ]; then

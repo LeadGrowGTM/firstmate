@@ -26,22 +26,6 @@
 # shellcheck source=bin/fm-wsl-interop-lib.sh
 . "$FM_BACKEND_LIB_DIR/fm-wsl-interop-lib.sh"
 
-# Bind lifecycle reads and writes to the task's durable server identity.
-# TMUX is tmux's native socket selector; clearing TMUX_PANE prevents a caller's
-# pane id on another server from becoming this task's launch container.
-# Legacy records retain the caller's selector and require process absence when
-# missing (fm_control_endpoint_absence_verdict owns that proof).
-fm_backend_tmux_bind_record() {  # <meta-file>
-  local meta=$1 socket
-  grep -q '^tmux_socket=' "$meta" || return 0
-  socket=$(fm_backend_meta_exact_value "$meta" tmux_socket) || return 1
-  case "$socket" in /*) ;; *) return 1 ;; esac
-  case "$socket" in *[$'\n\r\t']*) return 1 ;; esac
-  TMUX="$socket,0,0"
-  export TMUX
-  unset TMUX_PANE
-}
-
 # fm_backend_tmux_resolve_bare_selector: the live-window-listing fallback for a
 # selector that is neither an explicit target nor a task selector routed
 # through meta - an ad hoc window name with no recorded task. Mirrors the
@@ -355,7 +339,7 @@ fm_backend_tmux_current_command() {  # <target>
 # Scoping to the foreground process group rather than to the pane's descendants
 # is what keeps the probe honest in the other direction: a harness-named process
 # left running in the background of an otherwise idle pane is deliberately NOT
-# reported as a foreground agent. The probe also
+# reported, so a genuinely agent-free pane still classifies `dead`. It also
 # reports every member of a multi-process launcher (the Pi Launcher path runs a
 # `pi-signed` wrapper and a `pi` engine in one group), so no launcher needs its
 # own special case here.
@@ -434,11 +418,12 @@ fm_backend_tmux_foreground_argv0s() {  # <target>
 # The verdict combines two independent name sources rather than trusting either
 # alone. Either source naming a verified harness is enough for `alive`, because
 # a false `dead` is the one outcome that can launch a duplicate agent onto a
-# live worktree. A shell-only foreground group additionally needs positive
-# terminal-input wait evidence before it can authorize a negative verdict.
+# live worktree, while the foreground process group - when it is readable - is
+# authoritative for the negative verdicts, since it is the only source that can
+# distinguish a truly idle pane from a rewritten process title.
 fm_backend_tmux_agent_state() {  # <target>
   local target=$1 comm session window windows inventory_status
-  local foreground argv0s name pid fg_seen=0 fg_shell=0 fg_other=0 input_seen=0 input_proven=1
+  local foreground argv0s name pid fg_seen=0 fg_shell=0 fg_other=0
   case "$target" in
     *:*:*|'':*|*:'') printf 'unreadable'; return 0 ;;
     *:*) ;;
@@ -519,31 +504,24 @@ EOF
     return 0
   fi
 
-  # Shell names and interactive argv also describe busy builtin loops and
-  # reads on unrelated descriptors. Require positive kernel terminal-input
-  # evidence for every foreground member before calling a shell group dead.
+  # A readable foreground process group settles the negative verdicts: only a
+  # group that is nothing but shells is confidently agent-free.
   if [ "$fg_seen" -eq 1 ]; then
     if [ "$fg_other" -eq 0 ] && [ "$fg_shell" -eq 1 ]; then
-      while IFS= read -r pid; do
-        [ -n "$pid" ] || continue
-        input_seen=1
-        fm_agent_process_proof input "$pid" || input_proven=0
-      done <<EOF
-$(fm_backend_tmux_foreground_pids "$target")
-EOF
-      if [ "$input_seen" = 1 ] && [ "$input_proven" = 1 ]; then
-        printf 'dead'
-        return 0
-      fi
+      printf 'dead'
+    else
+      printf 'ambiguous'
     fi
-    printf 'ambiguous'
     return 0
   fi
 
   case "$comm" in
     '') printf 'unreadable'; return 0 ;;
   esac
-  printf 'ambiguous'
+  case "$(fm_agent_process_classify_name "$comm")" in
+    shell) printf 'dead' ;;
+    *) printf 'ambiguous' ;;
+  esac
 }
 
 # Backward-compatible three-state view for callers that only need a yes/no
