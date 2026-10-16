@@ -1619,6 +1619,8 @@ test_branch_actor_cannot_retire_secondmate() {
   [ -d "$subhome_abs" ] || fail "the refused retirement removed the secondmate home"
   grep -F -- '- domain ' "$home/data/secondmates.md" >/dev/null || fail "the refused retirement removed the registry route"
   [ ! -s "$log" ] || fail "the refused retirement acted on the secondmate endpoint: $(cat "$log")"
+  [ ! -e "$home/state/.secondmate-retiring-domain" ] \
+    || fail "the supervision branch wrote a retiring marker"
   pass "the supervision branch cannot retire a secondmate and leaves it fully intact"
 }
 
@@ -1694,6 +1696,8 @@ test_secondmate_teardown_sweeps_process_events_before_removal() {
   grep -Fx "$subhome_abs" "$sweep_log" >/dev/null || fail "normal secondmate teardown did not invoke the child home's sweep"
   [ ! -d "$subhome" ] || fail "normal secondmate teardown retained a successfully swept home"
   [ ! -e "$home/state/domain.meta" ] || fail "normal swept teardown retained parent evidence"
+  [ ! -e "$home/state/.secondmate-retiring-domain" ] \
+    || fail "normal swept teardown left the retiring marker"
   pass "normal secondmate teardown sweeps process events before removal"
 }
 
@@ -1725,6 +1729,8 @@ test_secondmate_teardown_refuses_process_events_without_sweep_script() {
   [ -e "$subhome/state/procevent/source.source" ] || fail "missing sweep capability refusal removed the registration"
   [ -e "$claim_root/source.claim" ] || fail "missing sweep capability refusal removed the claim"
   grep -F 'kill-window' "$log" >/dev/null && fail "missing sweep capability refusal killed a runtime endpoint"
+  [ -f "$home/state/.secondmate-retiring-domain" ] && [ ! -L "$home/state/.secondmate-retiring-domain" ] \
+    || fail "a refused retirement did not leave the retiring marker that stands liveness down"
   pass "secondmate teardown preserves state when process-event sweeping is unavailable"
 }
 
@@ -1762,6 +1768,8 @@ SH
   [ -e "$subhome/state/procevent/source.source" ] || fail "later refusal removed the process-event registration"
   [ -d "$subhome" ] || fail "later refusal removed the secondmate home"
   [ -e "$home/state/domain.meta" ] || fail "later refusal removed parent evidence"
+  [ -f "$home/state/.secondmate-retiring-domain" ] && [ ! -L "$home/state/.secondmate-retiring-domain" ] \
+    || fail "a later refusal dropped the retiring marker"
   pass "later teardown refusals preserve active process-event sources"
 }
 

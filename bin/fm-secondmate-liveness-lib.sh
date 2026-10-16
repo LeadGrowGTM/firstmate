@@ -44,9 +44,18 @@
 # Concurrency: fm_secondmate_liveness_lock serializes probe+kill+relaunch per
 # task across the bootstrap sweep and the watcher tick, so a concurrent
 # relaunch can never be observed mid-flight as a dead endpoint and killed.
-# bin/fm-control.sh relaunch and bin/fm-teardown.sh hold the same lock for
-# their whole operation, so no liveness episode auto-relaunches a mate either
-# of them is deliberately stopping.
+# bin/fm-control.sh relaunch and bin/fm-teardown.sh hold the same lock while
+# that process is still inside the operation, so no liveness episode
+# auto-relaunches a mate either of them is deliberately stopping.
+# A refused teardown exits and releases the lock.
+# state/.secondmate-retiring-<id> covers that gap: one line, started=<epoch>,
+# written when teardown takes the lock, left in place by a refused pass, and
+# removed only when retirement completes.
+# This probe treats any existing inode, including an unsafe one, as skipped
+# without a probe, kill, or relaunch.
+# A retry keeps an existing regular file.
+# A symlink or non-file refuses both the write and the clear and still stands
+# relaunch down.
 # The attempt ledger (.secondmate-relaunch-<id>, one line per attempt plus one
 # per outcome) is both the durable relaunch record and the input to the
 # watcher's relaunch bound; teardown removes it.
@@ -82,6 +91,56 @@ fm_secondmate_liveness_lock() {  # <id>
 fm_secondmate_liveness_unlock() {  # <id>
   fm_sm_live_require_locks || return 0
   fm_lock_release "$STATE/.secondmate-liveness-$1.lock" 2>/dev/null || true
+}
+
+# Durable stand-down for a retirement that has started. The liveness lock
+# dies with the teardown process, including a refused pass; this marker does
+# not. Any inode stands relaunch down. Only a regular file is rewritten or
+# removed, and a symlink is removed without following it.
+fm_secondmate_retirement_marker() {  # <id>
+  printf '%s\n' "$STATE/.secondmate-retiring-$1"
+}
+
+fm_secondmate_retirement_marked() {  # <id>
+  local path
+  path=$(fm_secondmate_retirement_marker "$1")
+  [ -e "$path" ] || [ -L "$path" ]
+}
+
+fm_secondmate_retirement_mark() {  # <id>
+  local id=$1 path tmp
+  path=$(fm_secondmate_retirement_marker "$id")
+  if [ -L "$path" ] || { [ -e "$path" ] && [ ! -f "$path" ]; }; then
+    echo "error: could not record that retirement has started for $id; nothing was changed" >&2
+    return 1
+  fi
+  if [ -f "$path" ]; then
+    return 0
+  fi
+  tmp=$(umask 077; mktemp "${path}.XXXXXX") || {
+    echo "error: could not record that retirement has started for $id; nothing was changed" >&2
+    return 1
+  }
+  if ! printf 'started=%s\n' "$(date +%s)" > "$tmp" || ! mv -f -- "$tmp" "$path"; then
+    rm -f -- "$tmp"
+    echo "error: could not record that retirement has started for $id; nothing was changed" >&2
+    return 1
+  fi
+}
+
+fm_secondmate_retirement_clear() {  # <id>
+  local id=$1 path
+  path=$(fm_secondmate_retirement_marker "$id")
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 0
+  fi
+  if [ -L "$path" ] || [ -f "$path" ]; then
+    rm -f -- "$path" && return 0
+    echo "error: could not clear the retiring marker for $id; liveness recovery stays stood down" >&2
+    return 1
+  fi
+  echo "error: could not clear the retiring marker for $id; liveness recovery stays stood down" >&2
+  return 1
 }
 
 fm_sm_live_first_line() {
@@ -136,6 +195,10 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   local meta=$1 id=$2 mode=$3
   FM_SM_LIVE_STATUS=skipped FM_SM_LIVE_STATE=unknown FM_SM_LIVE_KILL=0
   FM_SM_LIVE_CAUSE='' FM_SM_LIVE_WHERE='' FM_SM_LIVE_REASON='' FM_SM_LIVE_LINE=''
+  if fm_secondmate_retirement_marked "$id"; then
+    FM_SM_LIVE_REASON="retirement is in progress; endpoint left untouched"
+    return 0
+  fi
   local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || { FM_SM_LIVE_STATUS=silent; return 0; }

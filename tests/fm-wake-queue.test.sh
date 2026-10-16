@@ -3581,6 +3581,90 @@ SH
   pass "watch liveness: an unreachable remote secondmate is probed, preserved, and never failed over"
 }
 
+# prepare_refused_secondmate_retirement <name>
+# A real retirement whose process-event preflight passes and whose real sweep
+# then refuses, after the endpoint has already been killed. The liveness lock
+# is released with the teardown process. PREPARED_DIR is the watcher case.
+# Call this directly: fail() exits the whole test process, so a command
+# substitution would hide that exit.
+prepare_refused_secondmate_retirement() {
+  local name=$1 dir home err rc=0
+  dir=$(make_secondmate_liveness_case "$name")
+  home="$TMP_ROOT/$name-mate"
+  printf 'worktree=%s\nproject=%s\n' "$home" "$home" >> "$dir/state/sm1.meta"
+  printf '%s\n' "- sm1 - design domain (home: $home; scope: design domain; projects: alpha; added 2026-06-22)" \
+    > "$dir/data/secondmates.md"
+  mkdir -p "$home/state/procevent" "$home/bin"
+  printf 'adapter=lavish\n' > "$home/state/procevent/source.source"
+  cat > "$home/bin/fm-procevent.sh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+case "${1:-}" in
+  sweep-home)
+    if [ "${2:-}" = --preflight ]; then
+      exit 0
+    fi
+    exit 1
+    ;;
+  reconcile) exit 0 ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$home/bin/fm-procevent.sh"
+  cat > "$dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+printf 'fake treehouse refused: %s\n' "$*" >&2
+exit 1
+SH
+  chmod +x "$dir/fakebin/treehouse"
+  err="$dir/teardown.err"
+  if PATH="$dir/fakebin:$PATH" TMUX='' FM_HOME="$dir" FM_FAKE_TMUX_CURRENT_COMMAND=zsh \
+      FM_TMUX_CALL_LOG="$dir/tmux.log" \
+      "$ROOT/bin/fm-teardown.sh" sm1 >"$dir/teardown.out" 2>"$err"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  [ "$rc" -ne 0 ] || fail "retirement was expected to refuse the process-event sweep: $(cat "$dir/teardown.out" "$err")"
+  grep -F 'process-event cleanup is incomplete' "$err" >/dev/null \
+    || fail "retirement did not refuse on process-event cleanup: $(cat "$err")"
+  [ -d "$home" ] || fail "the refused retirement removed the secondmate home"
+  [ -f "$home/AGENTS.md" ] || fail "the refused retirement removed AGENTS.md"
+  [ -f "$dir/state/sm1.meta" ] || fail "the refused retirement removed the endpoint record"
+  [ ! -e "$dir/state/.secondmate-liveness-sm1.lock" ] && [ ! -L "$dir/state/.secondmate-liveness-sm1.lock" ] \
+    || fail "the refused retirement still holds the liveness lock, so a quiet tick would not prove the race"
+  grep -F 'kill-window' "$dir/tmux.log" >/dev/null \
+    || fail "the refused retirement did not kill the endpoint before refusing: $(cat "$dir/tmux.log" "$err")"
+  : > "$dir/tmux.log"
+  PREPARED_DIR=$dir
+}
+
+test_secondmate_liveness_tick_skips_relaunch_after_refused_retirement() {
+  local dir state home pid
+  prepare_refused_secondmate_retirement liveness-retire-refuse
+  dir=$PREPARED_DIR
+  state="$dir/state"
+  home="$TMP_ROOT/liveness-retire-refuse-mate"
+
+  run_liveness_leg "$dir" retire FM_FAKE_TMUX_CURRENT_COMMAND=zsh; pid=$LIVENESS_PID
+  sleep 4
+  is_live_non_zombie "$pid" \
+    || fail "liveness relaunched a secondmate whose retirement had already refused: $(cat "$dir/watch-retire.out" "$dir/watch-retire.err" "$dir/tmux.log")"
+  kill_liveness_leg "$pid"
+  [ -e "$state/.secondmate-liveness-tick" ] || fail "the liveness tick did not run"
+  [ ! -s "$dir/tmux.log" ] || fail "liveness touched the endpoint of a retiring secondmate: $(cat "$dir/tmux.log")"
+  grep -F 'secondmate sm1 liveness: retirement is in progress; endpoint left untouched' \
+    "$state/.watch-triage.log" >/dev/null \
+    || fail "the tick did not stand down for retirement: $(cat "$state/.watch-triage.log" 2>/dev/null)"
+  [ -f "$state/.secondmate-retiring-sm1" ] && [ ! -L "$state/.secondmate-retiring-sm1" ] \
+    || fail "retirement did not leave a regular retiring marker"
+  grep -Eq '^started=[0-9][0-9]*$' "$state/.secondmate-retiring-sm1" \
+    || fail "the retiring marker is not a started epoch: $(cat "$state/.secondmate-retiring-sm1")"
+  [ -f "$home/AGENTS.md" ] || fail "the tick disturbed the half-retired home"
+  [ ! -s "$state/.wake-queue" ] || fail "a retiring secondmate queued a wake: $(cat "$state/.wake-queue")"
+  pass "watch liveness: a refused retirement stands relaunch down after its lock is gone"
+}
+
 test_self_held_lock_reclaims_instead_of_deadlocking
 test_subshell_lock_ownership_without_bashpid
 test_bounded_lock_handoff_after_contention
@@ -3650,3 +3734,4 @@ test_secondmate_liveness_tick_error_keeps_scanning_and_wakes
 test_secondmate_liveness_tick_unqueued_outcome_is_an_error_not_a_wake
 test_secondmate_liveness_tick_skips_mate_whose_lock_is_held
 test_secondmate_liveness_tick_preserves_unreachable_remote
+test_secondmate_liveness_tick_skips_relaunch_after_refused_retirement

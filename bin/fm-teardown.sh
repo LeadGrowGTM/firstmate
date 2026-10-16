@@ -551,10 +551,25 @@ if [ ! -e "$META" ] && [ ! -L "$META" ] \
   && fm_backlog_record_parent_authorized "$META" "task record" "$STATE" \
   && ! grep -qE "^- $ID( |\$)" "$SECONDMATE_REG" 2>/dev/null \
   && "$SCRIPT_DIR/fm-procevent-remote-reply.sh" retired "$ID" >/dev/null 2>&1; then
+  if [ -e "$STATE/.secondmate-retiring-$ID" ] || [ -L "$STATE/.secondmate-retiring-$ID" ]; then
+    # shellcheck source=bin/fm-secondmate-liveness-lib.sh
+    . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
+    fm_secondmate_retirement_clear "$ID" || exit 1
+  fi
   echo "teardown $ID: already retired; this home holds no record of it and nothing was changed"
   exit 0
 fi
 fm_backlog_record_present "$META" "task record" "$STATE" || {
+  # Meta removal can land before the marker clear. A leftover marker with no
+  # route would stand a reused id down forever.
+  if { [ -e "$STATE/.secondmate-retiring-$ID" ] || [ -L "$STATE/.secondmate-retiring-$ID" ]; } \
+    && ! grep -qE "^- $ID( |\$)" "$SECONDMATE_REG" 2>/dev/null; then
+    if ! declare -F fm_secondmate_retirement_clear >/dev/null 2>&1; then
+      # shellcheck source=bin/fm-secondmate-liveness-lib.sh
+      . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
+    fi
+    fm_secondmate_retirement_clear "$ID" || exit 1
+  fi
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
 }
@@ -603,15 +618,21 @@ fi
 # is read under the metadata lock (role partition: bin/fm-lease-lib.sh).
 [ "$TEARDOWN_META_KIND" != secondmate ] || fm_lease_forbid_branch "secondmate retirement (fm-teardown)"
 # A secondmate's endpoint-liveness episodes (bin/fm-secondmate-liveness-lib.sh)
-# serialize on this lock; retirement holds it to the end so no probe or relaunch
-# can act on the route mid-teardown, and its relaunch ledger and park marker are
-# removed with the route instead of surviving for a reused id.
+# serialize on this lock while this process holds it. The retiring marker
+# written here is what still stands relaunch down after a refused pass exits
+# and releases the lock. The relaunch ledger and park marker are removed with
+# the route instead of surviving for a reused id.
 if [ "$TEARDOWN_META_KIND" = secondmate ]; then
+  if ! declare -F fm_secondmate_retirement_mark >/dev/null 2>&1; then
+    # shellcheck source=bin/fm-secondmate-liveness-lib.sh
+    . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
+  fi
   fm_lock_try_acquire "$STATE/.secondmate-liveness-$ID.lock" || {
     echo "error: a secondmate liveness check is in progress for $ID; nothing was changed - retry teardown" >&2
     exit 1
   }
   SM_LIVENESS_LOCK="$STATE/.secondmate-liveness-$ID.lock"
+  fm_secondmate_retirement_mark "$ID" || exit 1
 fi
 TEARDOWN_CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
 TEARDOWN_META_SPAWN_GEN=
@@ -1152,6 +1173,7 @@ remote_secondmate_teardown() {
   rm -f -- "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
     "$(fm_wake_signal_seen_path "$STATE" "$STATE/$ID.turn-ended")" \
     "$STATE/.secondmate-relaunch-$ID" "$STATE/.secondmate-relaunch-bound-$ID"
+  fm_secondmate_retirement_clear "$ID" || return 1
   printf 'teardown %s complete (remote %s:%s)\n' "$ID" "$remote_host" "$remote_home"
   return 0
 }
@@ -4128,6 +4150,9 @@ else
     echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
+fi
+if [ "$KIND" = secondmate ]; then
+  fm_secondmate_retirement_clear "$ID" || exit 1
 fi
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
