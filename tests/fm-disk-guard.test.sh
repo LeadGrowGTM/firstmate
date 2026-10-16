@@ -184,6 +184,20 @@ assert_present "$home/state/disk-guard.pause" "the projected rise pauses spawns"
 
 reset_guard
 printf 'keep\n' > "$home/state/pause-target"
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+assert_equals 1 "$(wake_count)" "the regular pressure flag wakes once"
+rm -f "$home/state/disk-guard.pause"
+ln -s pause-target "$home/state/disk-guard.pause"
+out=$(run_guard)
+assert_contains "$out" "action=pause-symlink" "a replacement symlink is recognized"
+assert_equals 2 "$(wake_count)" "a replacement symlink wakes despite unchanged pressure"
+assert_contains "$(cat "$home/state/.wake-queue")" "disk-guard pause-symlink reasons=ram" "the replacement wake names the symlink"
+run_guard >/dev/null
+assert_equals 2 "$(wake_count)" "an unchanged symlink pause does not wake again"
+
+reset_guard
+printf 'keep\n' > "$home/state/pause-target"
 ln -s pause-target "$home/state/disk-guard.pause"
 set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)

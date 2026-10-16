@@ -384,7 +384,7 @@ deletion_root_allowed() {
     case "$path" in
       "$home"|"$home"/*)
         case "$path" in
-          "$home/.tmp"|"$home/.tmp"/*|"$home/tmp"|"$home/tmp"/*|"$home/state/logs"|"$home/state/logs"/*) return 0 ;;
+          "$home/.tmp"|"$home/.tmp"/*|"$home/tmp"|"$home/tmp"/*|"$home/state/logs"|"$home/state/logs"/*) ;;
           *) return 1 ;;
         esac
         ;;
@@ -435,7 +435,7 @@ resolve_real_dir() {
     die "$kind root must be a real directory: $path"
   fi
   phys=$(physical_dir "$path") || die "$kind root must be a real directory: $path"
-  if path_forbidden "$phys" || root_contains_home "$phys"; then
+  if path_forbidden "$phys" || ! deletion_root_allowed "$phys"; then
     die "$kind root is protected: $phys"
   fi
   RESOLVED_DIR=$phys
@@ -1089,9 +1089,11 @@ root_owns_file() {
     if [ -n "$root" ] && [ "$i" -ne "$owner" ]; then
       case "$file" in
         "$root"/*)
-          if [ "${DEL_DAYS[$i]}" -gt "${DEL_DAYS[$owner]}" ] ||
-            { [ "${DEL_DAYS[$i]}" -eq "${DEL_DAYS[$owner]}" ] && [ "$i" -lt "$owner" ]; }; then
-            return 1
+          if [ "${DEL_KIND[$i]}" != log ] || log_name_ok "${file##*/}"; then
+            if [ "${DEL_DAYS[$i]}" -gt "${DEL_DAYS[$owner]}" ] ||
+              { [ "${DEL_DAYS[$i]}" -eq "${DEL_DAYS[$owner]}" ] && [ "$i" -lt "$owner" ]; }; then
+              return 1
+            fi
           fi
           ;;
       esac

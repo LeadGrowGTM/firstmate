@@ -447,6 +447,40 @@ rc=0
 run clean --config "$tiercfg" --live >/dev/null 2>"$TMP_ROOT/ancestor.err" || rc=$?
 assert_equals 1 "$rc" "a cache-tool root containing a home was accepted"
 
+mkdir -p "$home/config/archive"
+printf 'private\n' > "$home/config/archive/old.jsonl"
+fm_touch_epoch $((now - 3 * 86400)) "$home/config/archive/old.jsonl"
+cat > "$tiercfg" <<EOF
+home $home_phys
+claude-sessions $home_phys/config/archive 1
+EOF
+rc=0
+run clean --config "$tiercfg" --live >/dev/null 2>"$TMP_ROOT/protected-root.err" || rc=$?
+assert_equals 1 "$rc" "a Claude root inside home config was accepted"
+assert_present "$home/config/archive/old.jsonl" "a refused Claude root kept config data"
+cat > "$tiercfg" <<EOF
+home $home_phys
+cache-tool npm $home_phys/config/archive
+EOF
+rc=0
+run clean --config "$tiercfg" --live >/dev/null 2>"$TMP_ROOT/protected-root.err" || rc=$?
+assert_equals 1 "$rc" "a cache-tool root inside home config was accepted"
+
+nested_home="$home/.tmp/nested-home"
+mkdir -p "$nested_home/config/archive"
+printf 'private\n' > "$nested_home/config/archive/old.txt"
+fm_touch_epoch $((now - 3 * 86400)) "$nested_home/config/archive/old.txt"
+cat > "$tiercfg" <<EOF
+home $home_phys
+home $nested_home
+tmp $nested_home/config/archive 1
+EOF
+rc=0
+run clean --config "$tiercfg" --live >/dev/null 2>"$TMP_ROOT/protected-root.err" || rc=$?
+assert_equals 1 "$rc" "an outer home's tmp allowance exposed a nested home's config"
+assert_present "$nested_home/config/archive/old.txt" "a nested home's config stayed intact"
+rm -rf -- "$nested_home"
+
 nested_root="$home/.tmp/nested-cache"
 mkdir -p "$nested_root"
 nested_file="$nested_root/retained.txt"
@@ -466,6 +500,28 @@ out=$(run clean --config "$tiercfg")
 assert_equals 1 "$(printf '%s\n' "$out" | grep -F "path=$nested_file" | grep -c 'would-free')" "overlapping roots counted a file twice"
 out=$(run clean --config "$tiercfg" --live)
 assert_absent "$nested_file" "live cleanup removed a file past the longer retention"
+
+log_root="$home/.tmp/logs"
+mkdir -p "$log_root"
+nonlog_file="$log_root/stale.txt"
+log_file="$log_root/stale.log"
+printf 'old\n' > "$nonlog_file"
+printf 'old\n' > "$log_file"
+fm_touch_epoch $((now - 10 * 86400)) "$nonlog_file" "$log_file"
+cat > "$tiercfg" <<EOF
+home $home_phys
+tmp $home_phys/.tmp 7
+log $log_root 30
+EOF
+out=$(run clean --config "$tiercfg")
+assert_contains "$out" "$(printf 'would-free\treason=aged-file\tcategory=tmp\tbytes=4\tage-days=10\tpath=%s' "$nonlog_file")" "the wider tmp root owns a non-log file"
+assert_not_contains "$out" "path=$log_file" "the longer log retention kept a 10-day log"
+out=$(run clean --config "$tiercfg" --live)
+assert_absent "$nonlog_file" "live cleanup removed the non-log file through tmp"
+assert_present "$log_file" "live cleanup kept the 10-day log"
+fm_touch_epoch $((now - 40 * 86400)) "$log_file"
+out=$(run clean --config "$tiercfg")
+assert_equals 1 "$(printf '%s\n' "$out" | grep -F "path=$log_file" | grep -c 'would-free')" "overlapping roots counted a log twice"
 
 for suffix in result adapter handled; do
   printf 'old\n' > "$home/state/procevent-inbox/noowner-evt.1.$suffix"

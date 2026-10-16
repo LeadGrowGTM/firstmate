@@ -2248,7 +2248,7 @@ The script header owns the floors, the lead window, the projection, the log line
 The defaults are 8 GiB of available RAM, 100 GiB free on `C:`, 70 percent of the Linux filesystem, and a 30 minute lead.
 Optional `config/disk-guard` in the root Firstmate home replaces any of those and names the virtual-disk file.
 The guard writes `state/disk-guard.pause` in that root home when a floor is already crossed or the lead window says it will be.
-[`bin/fm-spawn.sh`](../bin/fm-spawn.sh) refuses a fresh ship or scout while that regular file exists: it launches nothing, creates no record, leaves the backlog item queued, and exits 75.
+[`bin/fm-spawn.sh`](../bin/fm-spawn.sh) refuses a fresh ship or scout while a regular pause file or symlink exists at that path: it launches nothing, creates no record, leaves the backlog item queued, and exits 75 until the flag is repaired or removed.
 A relaunch and a secondmate are not deferred.
 The guard removes the flag when the sample is healthy, and it does not follow a symlink there.
 The sample that first writes the flag runs [`bin/fm-data-manage.sh`](../bin/fm-data-manage.sh) `clean` once when the root home's `config/data-management` is regular, adding `--live` only when the authorization marker is regular too.

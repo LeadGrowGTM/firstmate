@@ -367,11 +367,11 @@ announce() {
   fi
   case "$kind" in
     pause)
-      if [ -f "$mark" ] && [ "$(cat "$mark" 2>/dev/null || true)" = "$REASONS" ]; then
+      if [ -f "$mark" ] && [ "$(cat "$mark" 2>/dev/null || true)" = "$payload" ]; then
         return 0
       fi
       fm_wake_append check disk-guard "$payload" || return 1
-      printf '%s\n' "$REASONS" > "$mark"
+      printf '%s\n' "$payload" > "$mark"
       ;;
     clear)
       fm_wake_append check disk-guard "$payload" || return 1
