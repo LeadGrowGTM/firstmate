@@ -3603,7 +3603,8 @@ test_answer_before_cleanup_replay_preserves_the_retained_report() {
   home=$(make_home answer-before-cleanup-replay)
   id=sample-answer-before-cleanup-replay
   wt="$home/projects/$id"
-  mkdir -p "$home/data/$id" "$wt" "$home/projects/sample"
+  mkdir -p "$home/data/$id"
+  fm_git_worktree "$home/projects/sample" "$wt" "task-$id"
   tasks_in "$home" add "$id" "Investigate answer before cleanup replay" --kind scout \
     --repo sample --start >/dev/null || fail "could not create the answer-before-replay fixture"
   fm_write_meta "$home/state/$id.meta" \
@@ -3630,7 +3631,7 @@ SH
   set -e
   [ "$rc" -ne 0 ] || fail "cleanup succeeded despite the failed worktree return"
   assert_present "$home/state/$id.backlog-close" \
-    "the interrupted cleanup lost its retained-artifact record"
+    "the interrupted cleanup lost its retained-artifact record: $(cat "$home/teardown.err")"
 
   printf 'Proceed with the reported result.\n' > "$home/answer.txt"
   run_captain "$home" answer "$id" --decision-file "$home/answer.txt" >/dev/null \
@@ -3714,7 +3715,8 @@ test_unusable_pending_close_record_names_its_reason() {
   id=sample-unusable-pending-close
   wt="$home/projects/$id"
   marker="$home/state/$id.backlog-close"
-  mkdir -p "$home/data/$id" "$wt" "$home/projects/sample" "$home/elsewhere"
+  mkdir -p "$home/data/$id" "$home/elsewhere"
+  fm_git_worktree "$home/projects/sample" "$wt" "task-$id"
   tasks_in "$home" add "$id" "Investigate the unusable pending close" --kind scout \
     --repo sample --start >/dev/null || fail "could not create the unusable pending-close fixture"
   fm_write_meta "$home/state/$id.meta" \
@@ -3765,7 +3767,8 @@ test_relocated_report_does_not_wedge_an_answer_before_replay() {
   mv "$home/data" "$data"
   id=sample-relocated-answer-before-replay
   wt="$home/projects/$id"
-  mkdir -p "$home/data" "$data/$id" "$wt" "$home/projects/sample"
+  mkdir -p "$home/data" "$data/$id"
+  fm_git_worktree "$home/projects/sample" "$wt" "task-$id"
   cat > "$home/data/backlog.md" <<'EOF'
 ## In flight
 
@@ -4538,7 +4541,8 @@ SH
     fail "the local merge did not reach the post-validation synchronization point"
   fi
   set +e
-  PATH="$local_home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$local_home" \
+  PATH="$local_home/fakebin:$PATH" FM_TEST_REAL_GIT="$real_git" \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$local_home" \
     FM_STATE_OVERRIDE="$local_home/state" FM_DATA_OVERRIDE="$local_home/data" \
     FM_CONFIG_OVERRIDE="$local_home/config" "$TEARDOWN" "$local_id" --force \
     > "$local_home/race-local-teardown.out" 2> "$local_home/race-local-teardown.err"
@@ -4555,7 +4559,7 @@ SH
     || fail "forced cleanup retired the task between local validation and merge"
   assert_grep "another lifecycle action is already running for task $local_id" \
     "$local_home/race-local-teardown.err" \
-    "local cleanup was not refused by the merge's task control lock"
+    "local cleanup was not refused by the merge's task control lock: $(cat "$local_home/race-local-teardown.err")"
   [ "$local_merge_rc" -eq 0 ] || fail "the serialized local merge failed after cleanup was refused"
   [ "$after" != "$before" ] || fail "the serialized local merge did not fast-forward main"
   assert_present "$local_home/state/$local_id.meta" \
