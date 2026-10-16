@@ -105,7 +105,6 @@ REASONS=
 SAMPLE_BLOCKED=0
 
 take_lock() {
-  local old=
   LOCK_DIR="$STATE/disk-guard.lock"
   exec {LOCK_FD}<"$STATE" || die "could not open lock directory $STATE"
   if ! flock -n "$LOCK_FD"; then
@@ -117,14 +116,6 @@ take_lock() {
     die "lock path is a symlink: $LOCK_DIR"
   fi
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    if [ -f "$LOCK_DIR/pid" ] && [ ! -L "$LOCK_DIR/pid" ]; then
-      old=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
-    fi
-    if is_uint_token "${old:-}" && kill -0 "$old" 2>/dev/null; then
-      printf 'fm-disk-guard: another run holds %s\n' "$LOCK_DIR" >&2
-      LOCK_DIR=
-      exit 0
-    fi
     rm -rf -- "$LOCK_DIR"
     mkdir "$LOCK_DIR" 2>/dev/null || die "could not take lock $LOCK_DIR"
   fi
@@ -475,7 +466,12 @@ sample_once() {
         action="pause-symlink"
         announce pause "disk-guard pause-symlink reasons=none" || die "could not record the pressure wake"
         ;;
-      *) action=none ;;
+      *)
+        action=none
+        if [ -f "$STATE/disk-guard.announced" ] && [ ! -L "$STATE/disk-guard.announced" ]; then
+          rm -f -- "$STATE/disk-guard.announced"
+        fi
+        ;;
     esac
   fi
   line=$(printf '%s ram_avail_kib=%s swap_free_kib=%s linux_used_pct=%s linux_size_kib=%s linux_used_kib=%s linux_avail_kib=%s c_free_kib=%s vhdx_bytes=%s pressure=%s reasons=%s action=%s' \

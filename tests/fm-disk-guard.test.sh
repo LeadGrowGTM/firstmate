@@ -99,14 +99,17 @@ assert_equals 1 "$rc" "an oversized floor did not fail"
 assert_absent "$home/state/disk-guard.pause" "an oversized floor did not pause spawns"
 rm -f "$home/config/disk-guard"
 
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
 mkdir "$home/state/disk-guard.lock"
 printf '%s\n' "$$" > "$home/state/disk-guard.lock/pid"
-rc=0
-run_guard >/dev/null 2>"$TMP_ROOT/lock.err" || rc=$?
-assert_equals 0 "$rc" "a live lock did not exit quietly"
-assert_contains "$(cat "$TMP_ROOT/lock.err")" "another run holds" "the quiet exit names the lock"
-assert_absent "$home/state/disk-guard.log" "a live lock did not sample"
-rm -rf "$home/state/disk-guard.lock"
+out=$(run_guard)
+assert_contains "$out" "pressure=no" "a reused PID did not block a sample"
+assert_absent "$home/state/disk-guard.lock" "the recovered lock was released"
+mkdir "$home/state/disk-guard.lock"
+out=$(run_guard)
+assert_contains "$out" "pressure=no" "a missing PID did not block a sample"
+assert_absent "$home/state/disk-guard.lock" "the incomplete lock was released"
+reset_guard
 
 real_mkdir=$(command -v mkdir)
 cat > "$stubbin/mkdir" <<EOF
@@ -162,6 +165,19 @@ assert_equals 2 "$(wake_count)" "clearing the pause wakes once"
 assert_contains "$(cat "$home/state/.wake-queue")" "disk-guard clear" "the wake says the pause cleared"
 
 reset_guard
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+rm -f "$home/state/disk-guard.pause"
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+out=$(run_guard)
+assert_contains "$out" "action=none" "a healthy sample sees the removed pause"
+assert_absent "$home/state/disk-guard.announced" "the removed pause clears announcement state"
+assert_equals 1 "$(wake_count)" "removing the pause adds no wake"
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+assert_equals 2 "$(wake_count)" "pressure after a removed pause wakes again"
+
+reset_guard
 write_previous 600 20000000 200000000 30
 set_collector_values 9000000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
@@ -211,6 +227,20 @@ out=$(run_guard)
 assert_contains "$out" "action=pause-symlink" "a healthy sample does not remove a symlink flag"
 assert_contains "$(cat "$home/state/pause-target")" "keep" "a healthy sample leaves the symlink target"
 assert_equals 2 "$(wake_count)" "a healthy sample with a symlink alerts the supervisor"
+rm -f "$home/state/disk-guard.pause"
+
+reset_guard
+ln -s pause-target "$home/state/disk-guard.pause"
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+rm -f "$home/state/disk-guard.pause"
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+assert_absent "$home/state/disk-guard.announced" "removing a symlink clears announcement state"
+ln -s pause-target "$home/state/disk-guard.pause"
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+assert_equals 2 "$(wake_count)" "a new symlink pause wakes after repair"
 rm -f "$home/state/disk-guard.pause"
 
 : > "$home/state/disk-guard.log"

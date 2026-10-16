@@ -260,20 +260,12 @@ require_abs_path() {
 }
 
 take_lock() {
-  local pid_file old parent=${CONFIG%/*}
+  local pid_file parent=${CONFIG%/*}
   [ -n "$parent" ] || parent=/
   exec {LOCK_FD}<"$parent" || die "could not open lock directory $parent"
   flock -n "$LOCK_FD" || die "another data-manage run holds ${CONFIG}.lock"
   LOCK_DIR="${CONFIG}.lock"
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    old=
-    [ -f "$LOCK_DIR/pid" ] && old=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
-    case "$old" in
-      ''|*[!0-9]*) die "another data-manage run holds $LOCK_DIR" ;;
-    esac
-    if kill -0 "$old" 2>/dev/null; then
-      die "another data-manage run holds $LOCK_DIR (pid $old)"
-    fi
     rm -rf -- "$LOCK_DIR"
     mkdir "$LOCK_DIR" 2>/dev/null || die "could not take lock $LOCK_DIR"
   fi

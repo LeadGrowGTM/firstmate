@@ -568,6 +568,15 @@ rm -f "$stubbin/lsof"
 cat > "$tiercfg" <<EOF
 home $home_phys
 EOF
+mkdir "$tiercfg.lock"
+printf '%s\n' "$$" > "$tiercfg.lock/pid"
+out=$(run measure --config "$tiercfg")
+assert_contains "$out" $'measure\tphase=before' "a reused PID did not block stale lock recovery"
+assert_absent "$tiercfg.lock" "the recovered lock was released"
+mkdir "$tiercfg.lock"
+out=$(run measure --config "$tiercfg")
+assert_contains "$out" $'measure\tphase=before' "a missing PID did not block stale lock recovery"
+assert_absent "$tiercfg.lock" "the incomplete lock was released"
 real_mkdir=$(command -v mkdir)
 cat > "$stubbin/mkdir" <<EOF
 #!/bin/sh
