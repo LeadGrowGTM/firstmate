@@ -1301,7 +1301,9 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
       ;;
   esac
   if [[ $mode == requeue:* ]]; then
-    fm_backlog_mutate "$data" reopen "$id" || return 1
+    if [[ $mode == requeue:done:* && $row_state == done\ * ]]; then
+      fm_backlog_mutate "$data" reopen "$id" || return 1
+    fi
     mode=retain
   fi
   if fm_backlog_atomic_transition "$mode" '' "$marker" "$data" "$id" "$state" \
