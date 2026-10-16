@@ -1,0 +1,22 @@
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/origin.git
+ * [new branch]      main -> main
+A new version of treehouse is available: v2.1.1 → v3.1.4
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Leased worktree at ~/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/pool/.treehouse/probe-bfd2b7/1/probe. Run 'treehouse return ~/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/pool/.treehouse/probe-bfd2b7/1/probe' to release it.
+managed_slot=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/pool/.treehouse/probe-bfd2b7/1/probe
+## HEAD (no branch)
+A new version of treehouse is available: v2.1.1 → v3.1.4
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+=== DRY RUN ===
+clean	would-delegate	reason=landed-clean	tool=fm-treehouse-guard.sh	project=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/home/projects/probe	bytes=16384	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/pool/.treehouse/probe-bfd2b7/1/probe
+summary	mode=dry-run	would-free-bytes=0	freed-bytes=0	delegate-upper-bound-bytes=16384	kept-worktrees=1	candidate-worktrees=1
+preview_slot=present
+=== LIVE PRUNE ===
+clean	would-delegate	reason=landed-clean	tool=fm-treehouse-guard.sh	project=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/home/projects/probe	bytes=16384	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/pool/.treehouse/probe-bfd2b7/1/probe
+clean	delegate-ran	status=0	project=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-prune.MIu6dt/home/projects/probe
+summary	mode=live	would-free-bytes=0	freed-bytes=0	delegate-upper-bound-bytes=16384	kept-worktrees=1	candidate-worktrees=1
+post_prune_slot=absent

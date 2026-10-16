@@ -1,0 +1,23 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-spawn-lab.QFpNxp
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-spawn-lab.QFpNxp/probe-origin.git
+ * [new branch]      main -> main
+=== PRIMARY PANE ===
+
+
+
+
+
+
+                                                            ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix typecheck errors"
+────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M518FMAXGX4TA4HMC8BRBY9G  ◆ Sonnet 5.5
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+=== SPAWN WHILE PAUSED ===
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-spawn-lab.QFpNxp
+deferred: this machine is pausing new local spawns (/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-spawn-lab.QFpNxp/state/disk-guard.pause); task pause-probe was not launched and its backlog item stays queued - dispatch it again once that flag is removed
+spawn_exit=75
+  title: Pause probe
+  state: queued
+record=absent worktrees=1

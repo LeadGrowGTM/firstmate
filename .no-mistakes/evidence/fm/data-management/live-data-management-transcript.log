@@ -1,0 +1,37 @@
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/origin.git
+ * [new branch]      main -> main
+Preparing worktree (new branch 'dirty')
+Preparing worktree (new branch 'unlanded')
+=== MEASURE ===
+measure	phase=before
+measure	df	mount=/	size-kib=1055762868	used-kib=314307192	avail-kib=687752204	capacity=32%
+measure	path	category=home	bytes=372736	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/home
+measure	path	category=data	bytes=8192	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/home/data
+=== DRY RUN ===
+clean	keep	reason=primary-checkout	category=worktree	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/home/projects/example
+clean	keep	reason=uncommitted-changes	category=worktree	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/pool/dirty
+clean	keep	reason=commits-not-on-remote	category=worktree	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/pool/unlanded
+clean	would-free	reason=aged-file	category=tmp	bytes=21	age-days=3	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/home/.tmp/old.txt
+summary	mode=dry-run	would-free-bytes=21	freed-bytes=0	delegate-upper-bound-bytes=0	kept-worktrees=3	candidate-worktrees=0
+dry_run_old_file=present
+=== UNAUTHORIZED LIVE REQUEST ===
+clean	skip	reason=first-live-not-authorized
+summary	mode=dry-run	would-free-bytes=21	freed-bytes=0	delegate-upper-bound-bytes=0	kept-worktrees=3	candidate-worktrees=0
+unauthorized_old_file=present
+=== AUTHORIZED LIVE CLEANUP ===
+measure	phase=before
+clean	keep	reason=primary-checkout	category=worktree	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/home/projects/example
+clean	keep	reason=uncommitted-changes	category=worktree	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/pool/dirty
+clean	keep	reason=commits-not-on-remote	category=worktree	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/pool/unlanded
+clean	freed	reason=aged-file	category=tmp	bytes=21	age-days=3	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-live.HO5dVB/home/.tmp/old.txt
+measure	phase=after
+summary	mode=live	would-free-bytes=21	freed-bytes=21	delegate-upper-bound-bytes=0	kept-worktrees=3	candidate-worktrees=0
+post_live=old_removed fresh_present dotenv_present data_present dirty_worktree_present unlanded_worktree_present
+=== PRESSURE SAMPLE ===
+1792124855 ram_avail_kib=27576320 swap_free_kib=16752008 linux_used_pct=32 linux_size_kib=1055762868 linux_used_kib=314313152 linux_avail_kib=687746244 c_free_kib=138228444 vhdx_bytes=absent pressure=yes reasons=ram action=paused
+1792124855	1	check	disk-guard	disk-guard pause reasons=ram
+pause_file=present
+=== HEALTHY SAMPLE ===
+1792124855 ram_avail_kib=27586776 swap_free_kib=16752008 linux_used_pct=32 linux_size_kib=1055762868 linux_used_kib=314313188 linux_avail_kib=687746208 c_free_kib=138228444 vhdx_bytes=absent pressure=no reasons=none action=cleared
+1792124855	2	check	disk-guard	disk-guard clear
+pause_file=absent

@@ -1,0 +1,8 @@
+=== AUTHORIZED CLEANUP WITH PROTECTED NAMES ===
+clean	freed	reason=aged-file	category=tmp	bytes=11	age-days=3	path=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-protected.Fs3M3T/home/.tmp/old.txt
+summary	mode=live	would-free-bytes=11	freed-bytes=11	delegate-upper-bound-bytes=0	kept-worktrees=0	candidate-worktrees=0
+protected=dotenv oauth-token certificate edge-history data-record all-present
+=== ATTEMPT TO CONFIGURE DATA AS CLEANUP ROOT ===
+fm-data-manage: deletion root is protected or outside the allowed home directories: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M518FMAXGX4TA4HMC8BRBY9G/.fm-protected.Fs3M3T/home/data
+bad_root_exit=1
+data_record_after_refusal=present
