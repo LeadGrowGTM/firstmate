@@ -485,7 +485,7 @@ A resume moves the sandbox to a new machine, so its SSH host key changes every t
 Before every connection, [`bin/fm-on.sh`](../bin/fm-on.sh) asks Boat whether the sandbox behind a Boat alias is running and dials only the address and host key Boat confirms at that moment.
 Direct SSH to the alias runs the same check through its guarded SSH config block, which stores no address.
 A stopped sandbox is never dialled: its alias has no stored address, a connection attempt parks it, and the call reads like any other [unavailable transport](#ssh-exit-255-and-unavailable-homes): the remote home is unknown, and nothing is replaced locally.
-The same holds for a sandbox still restoring its disk, and for one whose host key from Boat differs from the pin at an unchanged address.
+A sandbox still restoring its disk, one whose host key from Boat differs from the pin, or one whose Boat API cannot be read is also refused without connecting.
 A sandbox that is running at a new address needs an explicit alias refresh before the connection.
 If the `boat-eng` alias block is missing, `fm-on.sh` recreates it only when Boat confirms the configured box is running and restored.
 That check never resumes a sandbox.
@@ -510,8 +510,8 @@ That relaunch is a new Remote Control session, so the [entry the app listed befo
 ### The restore window
 
 For a short time after a resume, Boat restores the home directory lazily.
-Until Boat reports the restore finished, a file read on the sandbox can block with no timeout.
-A remote call made inside that window hangs instead of failing, and the stalled remote process cannot be ended until its read completes; `bin/fm-on.sh` refuses a Boat alias until Boat reports the restore finished.
+Until Boat reports the restore finished, a file read on the sandbox can block with no timeout, and the stalled process cannot be ended until its read completes.
+`bin/fm-on.sh` refuses a Boat alias until Boat reports the restore finished.
 The window is normally a few seconds, and it has lasted several minutes when Boat's snapshot store returned errors.
 
 Both halves of the recipe wait it out:
