@@ -225,7 +225,7 @@ spawn_branch() {
 # explicit prefix is forwarded verbatim; an explicit empty prefix is refused
 # before any owner call.
 check_branch_prefix_forwarding() {
-  local dir out rc variant brief_branch
+  local dir out rc variant brief_branch invalid index=0
   for variant in absent null explicit; do
     dir=$(make_case "prefix-$variant")
     mkdir -p "$dir/home/config"
@@ -251,12 +251,17 @@ check_branch_prefix_forwarding() {
         assert_no_grep '--branch-prefix' "$dir/home/calls" "$variant prefix forwarded a prefix instead of the home default" ;;
     esac
   done
-  dir=$(make_case prefix-empty)
-  jq '.branch_prefix=""' "$dir/plan.json" > "$dir/other.json" && mv "$dir/other.json" "$dir/plan.json"
-  out=$(run_case "$dir"); rc=$?
-  expect_code 1 "$rc" 'explicit empty prefix'
-  assert_equals 0 "$(count_calls "$dir")" 'explicit empty prefix reached the spawn'
-  pass 'branch_prefix: absent, null and explicit spawn the prepared brief branch; empty is refused'
+  for invalid in '""' '"bad prefix"' false true 0 '[]' '{}'; do
+    index=$((index + 1))
+    dir=$(make_case "prefix-invalid-$index")
+    jq --argjson value "$invalid" '.branch_prefix=$value' "$dir/plan.json" > "$dir/other.json" && mv "$dir/other.json" "$dir/plan.json"
+    out=$(run_case "$dir"); rc=$?
+    expect_code 1 "$rc" "invalid branch_prefix $invalid"
+    assert_contains "$out" 'invalid explicit fallback authorization' "invalid branch_prefix $invalid passed plan validation"
+    assert_equals 0 "$(count_calls "$dir")" "invalid branch_prefix $invalid reached the spawn"
+    [ ! -e "$dir/home/state/scheduled-worker/occ/journal.json" ] || fail "invalid branch_prefix $invalid created a journal"
+  done
+  pass 'branch_prefix: absent, null and explicit spawn the prepared brief branch; invalid values are refused'
 }
 
 check_authorization_and_selection

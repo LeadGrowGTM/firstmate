@@ -70,7 +70,7 @@ jq -e '
   (.backend | IN("tmux","herdr","zellij","orca","cmux")) and
   (.mode | IN("no-mistakes","direct-PR","local-only")) and (.yolo | IN("on","off")) and
   (.reasoning_class | token) and
-  (.branch_prefix // "fm/" | token) and (.base_branch // "main" | token) and
+  (.branch_prefix == null or (.branch_prefix | token)) and (.base_branch // "main" | token) and
   (.profiles | type == "array" and length > 0 and length <= 32) and
   (.reasoning_class as $class | all(.profiles[];
     (keys == ["effort","harness","model","reasoning_class"]) and
