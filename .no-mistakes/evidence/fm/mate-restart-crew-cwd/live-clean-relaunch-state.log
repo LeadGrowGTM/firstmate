@@ -1,0 +1,19 @@
+Mate pane: omp /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-omphome
+Crew pane: bash /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-omphome/projects/crewcopy
+Recorded mate harness: omp
+Recorded crew task: crew2
+Mate terminal tail:
+   couldn't be reached.
+ - Worker's local copy: the routine refresh skipped it.
+   /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.
+   fm-test-omphome/projects/crewcopy isn't its own repository, so updating it
+   would have touched the test home itself.
+
+ I've marked the notification as handled. The main firstmate still hasn't
+ routed any requests, I made no external changes, and I'm staying idle.
+
+
+❯
+ 󰵗 · 󰪣 Opus 5.5 ·  …SVWEK/.fm-test-omphome ·  detached ·  5.8%/1M 󰁨 · 󰙺 0.33
+
+

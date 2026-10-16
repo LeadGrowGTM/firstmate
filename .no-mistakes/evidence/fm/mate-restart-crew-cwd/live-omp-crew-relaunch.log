@@ -1,0 +1,3 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-lab
+error: exit-delivered ompmate interrupt=delivered verified=agent-alive cancel=unconfirmed exit-command=delivered agent-state=alive exit=unconfirmed; the agent did not stop within 15s
+error: relaunch of ompmate failed while stopping the old agent, which is still running; its original instructions were restored

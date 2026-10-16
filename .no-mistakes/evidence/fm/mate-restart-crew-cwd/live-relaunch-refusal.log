@@ -1,0 +1,6 @@
+Command: fm-control.sh testmate relaunch
+Exit status: 1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-lab
+error: task testmate's dead endpoint is not safe to relaunch; cannot prove the old agent gone: live processes still have cwd in the recorded worktree (pids 56561)
+Mate record unchanged: yes
+Surviving mate-owned process pid=56561 cwd=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-smhome/projects/crewcopy

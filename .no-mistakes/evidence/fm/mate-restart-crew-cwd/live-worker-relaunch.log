@@ -1,0 +1,5 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-lab
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-lab
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+warning: secondmate ompmate sync skipped before launch: primary default-branch commit cannot be resolved
+relaunched ompmate harness=omp from=omp model=default effort=default backend=tmux endpoint=primary:fm-ompmate worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-omphome

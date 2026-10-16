@@ -1,0 +1,5 @@
+Live recorded crew pane, no other process: clear	
+Detached process with recorded FM_TASK_ID=crew1, pid=34491 cwd=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-smhome: clear	
+Unmarked mate process in crew copy, pid=34722 cwd=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-smhome/projects/crewcopy: unproven	live processes still have cwd in the recorded worktree (pids 34722)
+Unmarked mate process in home, pid=34972 cwd=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52YGY9CF7P7GPYRCKTSVWEK/.fm-test-smhome: unproven	live processes still have cwd in the recorded worktree (pids 34972)
+After mate processes exit, live crew remains: clear	
