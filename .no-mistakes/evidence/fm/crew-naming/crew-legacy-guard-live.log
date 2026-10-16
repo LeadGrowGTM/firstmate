@@ -1,0 +1,10 @@
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.0puen3/origin.git
+ * [new branch]      main -> main
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.0puen3/home
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.0puen3/home/data/legacy-job/launch-brief.md records no ship branch; defaulting to legacy branch fm/legacy-job
+notice: legacy-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+notice: legacy-job ships branch=fm/legacy-job while project registers the ship-branch prefix 'nap/crew/' (branch nap/crew/legacy-job) - the task's branch and PR will read as firstmate-authored; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned legacy-job harness=codex kind=ship mode=local-only yolo=off window=primary:fm-legacy-job worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.0puen3/pool/.treehouse/project-3cad0c/1/project
+scheduled-worker: worker-published occurrence=legacy-job task=legacy-job receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.0puen3/home/state/scheduled-worker/legacy-job/outcome.1.json
+LEGACY_RECORDED: window=primary:fm-legacy-job crew_label=nap-crew-legacy-job branch=fm/legacy-job 
+CONFLICT_STATUS=1 CONFLICT_OUTPUT=error: prepared ship brief records conflicting branches: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.0puen3/home/data/bad-job/brief.md

@@ -1,0 +1,64 @@
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.7GKSPm/home
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.7GKSPm/origin.git
+ * [new branch]      main -> main
+PRIMARY_WINDOW: node
+scaffolded: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.7GKSPm/home/data/live-job/brief.md (ship, mode=local-only; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.7GKSPm/home
+notice: live-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: could not resolve origin's current default branch for pooled worktree '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.7GKSPm/pool/.treehouse/project-181848/1/project'; refusing to launch from a potentially stale base
+/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/origin.git
+ * [new branch]      main -> main
+PRIMARY_WINDOW: node
+scaffolded: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/data/live-job/brief.md (ship, mode=local-only; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home
+notice: live-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned live-job harness=codex kind=ship mode=local-only yolo=off window=primary:fm-live-job worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/pool/.treehouse/project-b6e81d/1/project
+RECORDED_TASK:
+window=primary:fm-live-job
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/pool/.treehouse/project-b6e81d/1/project
+crew_label=nap-crew-live-job
+branch=nap/crew/live-job
+LIVE_WINDOWS:
+primary:node|label=|id=@0
+primary:fm-live-job|label=nap-crew-live-job|id=@1
+RENDERED_STATUS:  : 
+ADDRESS_CHECK:
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bash '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9
+/bin/fm-treehouse-pool-check.sh' '/home/mitch/.no-mistakes/worktrees/5782b7185c5
+e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home' '/home/mitch/.no-mistakes/w
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/post-checkout': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/pre-push': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/sendemail-validate': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/post-commit': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/pre-auto-gc': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/post-merge': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/post-applypatch': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/post-rewrite': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/pre-commit': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/prepare-commit-msg': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/applypatch-msg': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/commit-msg': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/pre-merge-commit': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/pre-applypatch': Permission denied
+rm: cannot remove '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.XOV3TD/home/state/live-job.git-hooks/pre-rebase': Permission denied

@@ -1,0 +1,28 @@
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.1DHqwH/origin.git
+ * [new branch]      main -> main
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.1DHqwH/home
+notice: live-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned live-job harness=omp kind=ship mode=local-only yolo=off window=primary:fm-live-job worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.1DHqwH/pool/.treehouse/project-5d4efd/1/project
+RECORDED_BRANCH=nap/crew/live-job
+ACTUAL_BRANCH_AFTER_WAIT=nap/crew/live-job
+WORKER_PANE:
+│ crew-live.1DHqwH/pool/.treehouse/project-5d4efd/1/project                    │
+│ ## HEAD (no branch)                                                          │
+│ ⟨Wall: 0.10s | Timeout: 300s⟩                                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+ This is an isolated pool case, so I should create a separate branch for it.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ $ git checkout -b nap/crew/live-job -- && git status --short --branch && git │
+│ log --oneline -1 && ls                                                       │
+│ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/. │
+│ crew-live.1DHqwH/home/state/live-job.inbox/ 2>&1                             │
+├─── Output ───────────────────────────────────────────────────────────────────┤
+│ Switched to a new branch 'nap/crew/live-job'                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+  󱊷 Creating task branch
+
+❯
+ ⠹ 7s · 󰪣 Opus 5.5 ·  project/project ·  detached ·  4.7%/1M 󰁨 · 󰙺 0.62

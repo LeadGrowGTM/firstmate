@@ -1,0 +1,28 @@
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.wmIw07/origin.git
+ * [new branch]      main -> main
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.wmIw07/home
+notice: live-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned live-job harness=codex kind=ship mode=local-only yolo=off window=primary:fm-live-job worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.wmIw07/pool/.treehouse/project-d046ff/1/project
+RECORDED_BRANCH=nap/crew/live-job
+ACTUAL_BRANCH_AFTER_WAIT=<detached>
+WORKER_PANE:
+  crew-live.wmIw07/pool/.treehouse/project-d046ff/1/project
+
+  Note: You’re in a subdirectory of a Git project. Trusting will apply to the
+  repository root:
+  /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.
+  crew-live.wmIw07/project
+
+  Trust this folder? Codex can read, edit, and run files here, subject to your
+  permission settings. Folder settings can run code automatically, even
+  without a model request. Continue only if you trust these files. Your trust
+  decision will be saved.
+
+› 1. Trust and continue
+  2. Quit
+
+  enter continue · esc quit
+
+
+
+

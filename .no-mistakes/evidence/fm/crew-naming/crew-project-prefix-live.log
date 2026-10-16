@@ -1,0 +1,4 @@
+REGISTERED_OVERRIDE_WITH_BAD_HOME_SHORT: fix/
+HOME_CREW_DEFAULT: nap/crew/
+MALFORMED_HOME_FALLBACK: warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-prefix.CxAyJ1/config/mate-short-name holds 'Nap'; a short form is 1-16 lowercase letters, digits and inner dashes; using the default fm- names
+fm/

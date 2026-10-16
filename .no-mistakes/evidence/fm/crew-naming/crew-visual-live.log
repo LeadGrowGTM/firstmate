@@ -1,0 +1,7 @@
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.qNXXed/origin.git
+ * [new branch]      main -> main
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.qNXXed/home
+notice: live-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned live-job harness=codex kind=ship mode=local-only yolo=off window=primary:fm-live-job worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.qNXXed/pool/.treehouse/project-eecc43/1/project
+THEME_STATUS:  1:nap-crew-live-job 
+ATTACHED_STATUS_EXCERPT: '[primary]  0:node   1:nap-crew-live-job \x1b(B                                                                                \x1b(B[primary]  0:node   1:nap-crew-live-job \x1b(B                                                                   crew: loading\x1b(Bu ?|live-job\x1b(B | ? ? | project/1──────────────────────────────────────────────────────────────────────────────────────────\x1b(B'

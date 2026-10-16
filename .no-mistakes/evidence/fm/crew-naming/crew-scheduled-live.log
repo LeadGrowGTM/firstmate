@@ -1,0 +1,29 @@
+To /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.hw6Ni4/origin.git
+ * [new branch]      main -> main
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.hw6Ni4/home
+notice: live-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned live-job harness=codex kind=ship mode=local-only yolo=off window=primary:fm-live-job worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.hw6Ni4/pool/.treehouse/project-76c0e0/1/project
+live-job: window=primary:fm-live-job crew_label=nap-crew-live-job branch=nap/crew/live-job 
+window=fm-live-job label=nap-crew-live-job
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.hw6Ni4/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+notice: scheduled-job ships mode=local-only while the standing posture for project is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+notice: scheduled-job ships branch=nap/crew/scheduled-job while project registers the ship-branch prefix 'leg/crew/' (branch leg/crew/scheduled-job) - the task's branch and PR will read as firstmate-authored; proceed only on a current explicit captain instruction or an intake judgment you can state
+spawned scheduled-job harness=codex kind=ship mode=local-only yolo=off window=primary:fm-scheduled-job worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.hw6Ni4/pool/.treehouse/project-76c0e0/2/project
+scheduled-worker: worker-published occurrence=scheduled-occ task=scheduled-job receipt=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M533N8H253965QMSHY1CPTB9/.crew-live.hw6Ni4/home/state/scheduled-worker/scheduled-occ/outcome.1.json
+scheduled-job: window=primary:fm-scheduled-job crew_label=leg-crew-scheduled-job branch=nap/crew/scheduled-job 
+window=fm-scheduled-job label=leg-crew-scheduled-job
+AFTER_CONFIG_CHANGE: live-job: window=primary:fm-live-job crew_label=nap-crew-live-job branch=nap/crew/live-job 
+window=fm-live-job label=nap-crew-live-job
+THEME_STATUS:  1:nap-crew-live-job 
+WINDOW_INVENTORY:
+node|
+fm-live-job|nap-crew-live-job
+fm-scheduled-job|leg-crew-scheduled-job
+ATTACHED_STATUS_EXCERPT: 'not captured'
