@@ -105,7 +105,7 @@ Tmux and Herdr support preserved-copy reclaim through the same relaunch command.
 Allocation checks idle recorded custody before Treehouse acquisition and checks the returned copy again before Firstmate's base refresh or worker launch.
 Relaunch checks recorded custody under the project allocation lock before replacing the agent.
 
-Two endpoint verdicts are agent-free, and both license a relaunch:
+Two endpoint verdicts can license a relaunch after the recorded worktree's process check also clears:
 
 - `dead` - the endpoint exists and confidently holds no agent. It is **adopted**, so the task keeps its exact recorded address.
 - gone, **proven** - there is no endpoint and therefore no agent, and it cannot be adopted, so the launch owner **creates one fresh endpoint in the recorded worktree** and the republished record rebinds the task to it.
@@ -115,7 +115,7 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
 
 - **Herdr can prove it.** Every read goes through the adapter's `--session <session>` CLI, so the recheck starts and reads the session the *record* names, through that session's own socket.
   It starts that server (only the server: no workspace and no tab are created) and **re-reads the recorded pane**.
-  `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; only a second `missing` proves the pane itself did not survive ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
+  `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; a second `missing` proves the pane itself did not survive, but reclaim still requires a readable process inventory showing no live process rooted in the recorded worktree ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
   That server start is a real side effect, and the parenthetical above does not cover it: when the recorded session's server no longer exists at all, the probe stands a fresh empty one up in order to ask, and nothing afterwards uses it.
   So in that state `exit` - which otherwise reads as a read-only inspection - leaves an idle herdr server behind.
 - **tmux proves server death.** A tmux task records `tmux_socket=`, the socket path its server reported at spawn.
@@ -165,6 +165,7 @@ A record for a proven-stopped worker can be retired through the records-only `--
 The original metadata is archived with the task material; the worktree and remaining task artifacts, including hooks and the steering inbox, stay in place.
 Another holder's slot marker remains untouched.
 Retirement refuses a surviving process under the copy or recorded task temp root, an attributable active validation run, and a same-id marker whose home cannot be proved to match.
+Unfinished work remains in its copy and branch; when the backlog row can be updated, retirement requeues it with a preserved-work note while preserving a later Done answer.
 `bin/fm-teardown.sh`'s header and help own the command, proof requirements, locking, and incompatible options.
 This retirement closes the task's reservation; ordinary teardown continues to enforce landed-work checks whenever it owns and returns the copy.
 
