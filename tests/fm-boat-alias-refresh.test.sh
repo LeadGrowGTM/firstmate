@@ -23,6 +23,14 @@
 #   7. --remove deletes only that alias's block and known-hosts file, without
 #      calling Boat.
 #   8. FM_BOAT_BIN selects the CLI, and --help prints the usage.
+#   9. A refresh of a stopped sandbox parks its existing alias with no address
+#      and no pin.
+#  10. --verify leaves a non-Boat alias alone, prints Boat's confirmed address
+#      and pin, refreshes a moved or parked alias first, and refuses a stopped,
+#      unrestored, or re-keyed sandbox and a block with no sandbox id.
+#  11. The real fm-on.sh dials a Boat alias only at the address and key Boat
+#      just confirmed, refreshes a moved alias before dialling, and treats a
+#      stopped or re-keyed sandbox as unavailable without connecting.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -479,6 +487,237 @@ test_cli_override_and_help() {
   pass "T8 FM_BOAT_BIN selects the CLI; --help prints the usage"
 }
 
+assert_parked() {  # <alias> <label>; the block holds no address and no pin
+  assert_equals "$1" "$(effective "$1" hostname)" "$2: a parked alias must resolve to no address"
+  assert_absent "$SSH/known_hosts_$(printf '%s' "$1" | tr - _)" "$2: a parked alias must keep no pin"
+  assert_no_grep 203.0.113.7 "$SSH/config" "$2: the old address must be gone from the config"
+}
+
+# --- T9: a refresh of a stopped sandbox parks its existing alias ---------------
+test_refresh_parks_a_stopped_alias() {
+  new_case park
+  printf 'Host existing\n  HostName existing.invalid\n' > "$SSH/config"
+  set_info running 203.0.113.7:19034 null true
+  set_hostkey host1
+  refresh "$ID" boat-pilot
+  expect_code 0 "$CODE" "writing the alias must succeed"$'\n'"$ERR"
+  rm -f "$BOAT/calls"
+
+  set_info stopped null null true
+  refresh "$ID" boat-pilot
+  expect_code 1 "$CODE" "a stopped sandbox must be refused"$'\n'"$OUT"
+  assert_contains "$ERR" "is not running (state=stopped)" "the stopped state must be named"
+  assert_parked boat-pilot "a refresh of a stopped sandbox"
+  assert_equals existing.invalid "$(effective existing hostname)" "the operator's alias must survive parking"
+  assert_equals "--no-update info $ID --json" "$(cat "$BOAT/calls")" "a stopped sandbox must not be asked for its host key"
+
+  set_info running 198.51.100.9:19043 null true
+  set_hostkey host2
+  refresh "$ID" boat-pilot
+  expect_code 0 "$CODE" "a refresh after the next resume must succeed"$'\n'"$ERR"
+  assert_contains "$OUT" "endpoint: none -> 198.51.100.9:19043" "a parked alias has no previous endpoint"
+  assert_alias boat-pilot 198.51.100.9 19043 "$FP2" "a refresh of a parked alias"
+  pass "T9 a refresh of a stopped sandbox parks its alias with no address or pin"
+}
+
+# --- T10: --verify confirms the alias against Boat before every connection -----
+verify() {  # [NAME=value...] <alias>
+  refresh "$@"
+}
+
+test_verify() {
+  local listing pins
+  new_case verify
+  set_info running 203.0.113.7:19034 null true
+  set_hostkey host1
+
+  verify --verify boat-pilot
+  expect_code 3 "$CODE" "an alias with no Boat block is not a Boat alias"$'\n'"$ERR"
+  assert_equals 0 "$(boat_calls)" "a non-Boat alias must not reach Boat"
+  printf 'Host boat-pilot\n  HostName 192.0.2.50\n' > "$SSH/config"
+  verify --verify boat-pilot
+  expect_code 3 "$CODE" "an operator's own alias is not a Boat alias"$'\n'"$ERR"
+  assert_equals 0 "$(boat_calls)" "an operator's own alias must not reach Boat"
+  rm -f "$SSH/config"
+
+  refresh "$ID" boat-pilot
+  expect_code 0 "$CODE" "writing the alias must succeed"$'\n'"$ERR"
+  rm -f "$BOAT/calls"
+  verify --verify boat-pilot
+  expect_code 0 "$CODE" "a running sandbox at its pinned address must verify"$'\n'"$ERR"
+  pins="HostName=203.0.113.7
+Port=19034
+HostKeyAlias=boat-pilot
+UserKnownHostsFile=$SSH/known_hosts_boat_pilot
+GlobalKnownHostsFile=/dev/null
+StrictHostKeyChecking=yes
+UpdateHostKeys=no"
+  assert_equals "$pins" "$OUT" "the verified address and pin must be printed as ssh options"
+  assert_equals "--no-update info $ID --json
+--no-update exec $ID --json -- cat /etc/ssh/ssh_host_ed25519_key.pub" "$(cat "$BOAT/calls")" \
+    "verifying must use only the two read-only Boat calls"
+
+  # Same endpoint, different host key: refused, nothing rewritten.
+  set_hostkey host2
+  cp "$SSH/config" "$CASE/config.before"
+  cp "$SSH/known_hosts_boat_pilot" "$CASE/known.before"
+  verify --verify boat-pilot
+  expect_code 1 "$CODE" "a host key mismatch must be refused"$'\n'"$OUT"
+  assert_contains "$ERR" "does not match the key pinned" "the mismatch must be named"
+  assert_equals "" "$OUT" "a refusal must print no ssh options"
+  cmp -s "$SSH/config" "$CASE/config.before" || fail "a host key mismatch rewrote the config"
+  cmp -s "$SSH/known_hosts_boat_pilot" "$CASE/known.before" || fail "a host key mismatch replaced the pin"
+
+  # A moved endpoint is refreshed from Boat before the options are printed.
+  set_info running 198.51.100.9:19043 null true
+  verify --verify boat-pilot
+  expect_code 0 "$CODE" "a moved sandbox must be refreshed and verified"$'\n'"$ERR"
+  assert_contains "$OUT" "HostName=198.51.100.9" "the new host must be printed"
+  assert_contains "$OUT" "Port=19043" "the new port must be printed"
+  assert_contains "$ERR" "endpoint 203.0.113.7:19034 -> 198.51.100.9:19043" "the refresh must be reported"
+  assert_alias boat-pilot 198.51.100.9 19043 "$FP2" "a verify after a move"
+
+  # An unfinished restore is refused after the refresh.
+  set_info running 198.51.100.9:19043 null false
+  verify --verify boat-pilot
+  expect_code 1 "$CODE" "an unfinished restore must be refused"$'\n'"$OUT"
+  assert_contains "$ERR" "has not finished restoring" "the unfinished restore must be named"
+
+  # A stopped sandbox parks the alias with only one Boat call.
+  set_info stopped null null true
+  rm -f "$BOAT/calls"
+  verify --verify boat-pilot
+  expect_code 1 "$CODE" "a stopped sandbox must be refused"$'\n'"$OUT"
+  assert_contains "$ERR" "is not running (state=stopped)" "the stopped state must be named"
+  assert_equals "--no-update info $ID --json" "$(cat "$BOAT/calls")" "a stopped sandbox must not be asked for its host key"
+  assert_parked boat-pilot "a verify of a stopped sandbox"
+  listing=$(ssh_listing)
+  verify --verify boat-pilot
+  expect_code 1 "$CODE" "a parked alias of a stopped sandbox must stay refused"$'\n'"$OUT"
+  assert_equals "$listing" "$(ssh_listing)" "a second stopped verify must change nothing"
+
+  # A parked alias whose sandbox is running again is refreshed from Boat.
+  set_info running 192.0.2.44:19050 null true
+  set_hostkey host1
+  verify --verify boat-pilot
+  expect_code 0 "$CODE" "a parked alias of a running sandbox must be refreshed"$'\n'"$ERR"
+  assert_contains "$OUT" "HostName=192.0.2.44" "the refreshed host must be printed"
+  assert_alias boat-pilot 192.0.2.44 19050 "$FP1" "a verify of a parked alias"
+
+  # A failed Boat read is refused unchanged.
+  cp "$SSH/config" "$CASE/config.before"
+  : > "$BOAT/info.fail"
+  verify --verify boat-pilot
+  expect_code 1 "$CODE" "a failed Boat read must be refused"$'\n'"$OUT"
+  cmp -s "$SSH/config" "$CASE/config.before" || fail "a failed Boat read rewrote the config"
+  rm -f "$BOAT/info.fail"
+
+  # A block from before the sandbox id line cannot be checked and is refused.
+  new_case verify-legacy
+  cat > "$SSH/config" <<'EOF'
+# >>> boat-alias boat-pilot >>>
+Host boat-pilot
+  HostName 203.0.113.7
+  Port 19034
+# <<< boat-alias boat-pilot <<<
+EOF
+  verify --verify boat-pilot
+  expect_code 1 "$CODE" "a block with no sandbox id must be refused"$'\n'"$OUT"
+  assert_contains "$ERR" "names no sandbox" "the missing sandbox id must be named"
+  assert_equals 0 "$(boat_calls)" "a block with no sandbox id must not reach Boat"
+
+  verify --verify
+  expect_code 2 "$CODE" "--verify without an alias is invalid use"
+  verify --verify 'boat pilot'
+  expect_code 2 "$CODE" "--verify with an unsafe alias is invalid use"
+  pass "T10 --verify confirms a Boat alias against Boat and refuses a stopped, unrestored, or re-keyed sandbox"
+}
+
+# --- T11: fm-on.sh never dials a Boat alias Boat has not just confirmed --------
+# The real fm-on.sh runs against a registry route whose host is the Boat alias,
+# with the fake Boat CLI and a fake ssh that records each attempt and the
+# address the config held at that moment.
+test_fm_on_dials_only_confirmed_boat_addresses() {
+  local fmhome ssh_log
+  new_case fm-on
+  fmhome="$CASE/fm-home"
+  ssh_log="$CASE/ssh.log"
+  mkdir -p "$fmhome/data"
+  printf -- '- boat-eng - Boat overflow (host: boat-pilot; root: /home/user/firstmate; home: /home/user/fm-boat-eng; scope: overflow; projects: firstmate; added 2026-10-16)\n' \
+    > "$fmhome/data/secondmates.md"
+  cat > "$CASE/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+host=$(awk '$1 == "HostName" { h = $2 } END { print h }' "$HOME/.ssh/config" 2>/dev/null)
+printf 'config=%s argv=%s\n' "${host:-none}" "$*" >> "$FAKE_SSH_LOG"
+printf 'connected\n'
+SH
+  chmod +x "$CASE/fake-ssh"
+  fm_on() {
+    OUT=$(env -u FM_BOAT_BIN HOME="$CASE/home" PATH="$FAKEBIN:$PATH" FAKE_BOAT_DIR="$BOAT" FAKE_BOAT_ID="$ID" \
+      FM_HOME="$fmhome" FM_SSH_BIN="$CASE/fake-ssh" FAKE_SSH_LOG="$ssh_log" \
+      bash "$ROOT/bin/fm-on.sh" boat-eng fm-crew-state.sh 2>"$CASE/stderr")
+    CODE=$?
+    ERR=$(cat "$CASE/stderr")
+  }
+  ssh_calls() {
+    if [ -f "$ssh_log" ]; then wc -l < "$ssh_log" | tr -d ' '; else echo 0; fi
+  }
+
+  set_info running 203.0.113.7:19034 null true
+  set_hostkey host1
+  refresh "$ID" boat-pilot
+  expect_code 0 "$CODE" "writing the alias must succeed"$'\n'"$ERR"
+
+  # A running sandbox at the pinned address is dialled with Boat's pins.
+  fm_on
+  expect_code 0 "$CODE" "a confirmed sandbox must be reached"$'\n'"$ERR"
+  assert_equals connected "$OUT" "the remote command must run"
+  assert_equals 1 "$(ssh_calls)" "one connection must be made"
+  assert_contains "$(tail -n 1 "$ssh_log")" "-o HostName=203.0.113.7 -o Port=19034 -o HostKeyAlias=boat-pilot" \
+    "the connection must pin Boat's address"
+  assert_contains "$(tail -n 1 "$ssh_log")" "-o StrictHostKeyChecking=yes" "the connection must never accept a new key"
+
+  # A moved endpoint is refreshed from Boat before the connection.
+  set_info running 198.51.100.9:19043 null true
+  set_hostkey host2
+  fm_on
+  expect_code 0 "$CODE" "a moved sandbox must be refreshed and reached"$'\n'"$ERR"
+  assert_equals 2 "$(ssh_calls)" "one more connection must be made"
+  assert_contains "$(tail -n 1 "$ssh_log")" "config=198.51.100.9 " "the alias must be refreshed before the connection"
+  assert_contains "$(tail -n 1 "$ssh_log")" "-o HostName=198.51.100.9 -o Port=19043" "the connection must use the new address"
+  assert_alias boat-pilot 198.51.100.9 19043 "$FP2" "fm-on after a move"
+
+  # A host key Boat reports that differs from the pin is refused unconnected.
+  set_hostkey host1
+  fm_on
+  expect_code 255 "$CODE" "a host key mismatch must read as unavailable transport"$'\n'"$OUT"
+  assert_contains "$ERR" "does not match the key pinned" "the mismatch must be named"
+  assert_contains "$ERR" "not connecting" "fm-on must say it did not connect"
+  assert_equals 2 "$(ssh_calls)" "a host key mismatch must not connect"
+
+  # A stopped sandbox is offline: no connection, no resume, alias parked.
+  set_info stopped null null true
+  rm -f "$BOAT/calls"
+  fm_on
+  expect_code 255 "$CODE" "a stopped sandbox must read as unavailable transport"$'\n'"$OUT"
+  assert_contains "$ERR" "is not running (state=stopped)" "the stopped state must be named"
+  assert_equals 2 "$(ssh_calls)" "a stopped sandbox must not be dialled"
+  assert_equals "--no-update info $ID --json" "$(cat "$BOAT/calls")" "a stopped sandbox must get one read and no resume"
+  assert_parked boat-pilot "fm-on for a stopped sandbox"
+  fm_on
+  expect_code 255 "$CODE" "a parked alias must stay offline"$'\n'"$OUT"
+  assert_equals 2 "$(ssh_calls)" "a parked alias must not be dialled"
+
+  # A route whose host is not a Boat alias never reaches Boat.
+  rm -f "$SSH/config" "$BOAT/calls"
+  fm_on
+  expect_code 0 "$CODE" "a non-Boat route must connect as before"$'\n'"$ERR"
+  assert_equals 3 "$(ssh_calls)" "a non-Boat route must connect once"
+  assert_not_contains "$(tail -n 1 "$ssh_log")" "HostName=" "a non-Boat route must get no Boat pins"
+  assert_equals 0 "$(boat_calls)" "a non-Boat route must not reach Boat"
+  pass "T11 fm-on.sh dials a Boat alias only at the address and key Boat just confirmed"
+}
+
 test_first_run_writes_pinned_alias
 test_resume_replaces_only_the_alias
 test_ip_fallback
@@ -487,5 +726,8 @@ test_unsafe_config_is_refused
 test_restore_wait
 test_remove
 test_cli_override_and_help
+test_refresh_parks_a_stopped_alias
+test_verify
+test_fm_on_dials_only_confirmed_boat_addresses
 
 echo "# all fm-boat-alias-refresh tests passed"

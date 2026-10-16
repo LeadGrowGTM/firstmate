@@ -120,6 +120,8 @@ SH
 cat > "$BIN/fm-boat-alias-refresh.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
+# A post-stop check parks the alias; the real helper refuses a stopped box.
+[ "$*" != '--verify boat-prove' ] || exit 1
 [ "$*" = "$(cat "$FIXTURES/box-id") boat-prove" ] || exit 97
 [ ! -e "$FIXTURES/rotate-on-alias" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
 [ ! -e "$FIXTURES/alias.fail" ]
@@ -690,6 +692,7 @@ test_teardown_stop() {
   expect_code 0 "$CODE" "last task teardown: $OUT"
   assert_grep 'teardown task-one' "$FIXTURES/calls" 'ordinary remote teardown was not called'
   assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'last task did not stop approved box'
+  assert_equals 'alias --verify boat-prove' "$(tail -n 1 "$FIXTURES/calls")" 'the stop did not park the alias'
   assert_absent "$LOCAL_HOME/state/.boat-environment" 'stopped box retained environment receipt'
   assert_absent "$REMOTE_HOME/state/task-one.meta" 'last task record remained'
   new_case another-task-remains

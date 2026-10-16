@@ -32,7 +32,8 @@
 # Requests never carry Git identity or credentials. The worker derives its
 # identity from the GitHub connection injected on the box by fm-code.
 # Dispatch returns success only after the remote worker confirms fresh status.
-# FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh.
+# FM_BOAT_BIN selects the CLI (boat); fm-boat-alias-refresh.sh owns SSH refresh,
+# and a stop made here parks the boat-prove alias at once through its --verify.
 # On transport failure, remote completion is unknown: reconcile the SAME task
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
 # A definite spawn refusal stops a box this send resumed only after the
@@ -100,6 +101,8 @@ stop_current_instance() {
   current=$(boat_instance) && [ "$current" = "$instance" ] && receipt_matches "$current" || return 1
   fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null || return 1
   rm -f -- "$ENV_RECEIPT"
+  # Park the alias now; fm-on.sh's own check would otherwise do it at the next call.
+  FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" --verify boat-prove >/dev/null 2>&1 || true
 }
 REG="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
 if [ "$PREPARE" -eq 0 ]; then
