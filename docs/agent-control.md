@@ -114,7 +114,7 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
 
 - **Herdr can prove it.** Every read goes through the adapter's `--session <session>` CLI, so the recheck starts and reads the session the *record* names, through that session's own socket.
   It starts that server (only the server: no workspace and no tab are created) and **re-reads the recorded pane**.
-  `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; a second `missing` proves the pane itself did not survive, but reclaim still requires a readable process inventory showing no live process rooted in the recorded worktree ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
+  `dead` means the pane survived the restart and is adopted after all, with no second tab; `alive` means the agent came back and refuses; a second `missing` proves the pane itself did not survive, but reclaim still requires the shared process check below ([`docs/herdr-backend.md`](herdr-backend.md) "Restart and liveness behavior").
   That server start is a real side effect, and the parenthetical above does not cover it: when the recorded session's server no longer exists at all, the probe stands a fresh empty one up in order to ask, and nothing afterwards uses it.
   So in that state `exit` - which otherwise reads as a read-only inspection - leaves an idle herdr server behind.
 - **tmux proves server death.** A tmux task records `tmux_socket=`, the socket path its server reported at spawn.
@@ -124,11 +124,14 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
   The proof also checks every live tmux server process owned by the user: each must match the `#{pid}` of an answering socket, including the recorded socket and all candidate-directory sockets.
   A live server with an unlinked socket, a server that is too old, or a server process that cannot be reconciled with the socket reads refuses recovery.
   When no socket answers, any tmux process still visible also blocks recovery.
-  The same-user process inventory must also prove no process has its cwd in the recorded worktree or a subdirectory; an unreadable possible worker or process inventory refuses.
-  Linux reads kernel cwd links, and macOS reads a bounded cwd-only `lsof` inventory.
   A renamed session or moved window on a live server is never proof of server death.
   The re-created window opens in the recovering process's tmux container session, and the republished record carries the new window and its socket.
   Until that record is published the new window is the relaunch's own, so a refused attempt closes it rather than leaving it to collide with a retry.
+
+The shared same-user process check also guards `dead` endpoints: a live process with cwd in the recorded worktree or a subdirectory blocks relaunch unless it is positively attributed to a second mate's own recorded ship or scout.
+A descendant of a live recorded crew pane is attributed to that crew; on Linux, a process whose `FM_TASK_ID` matches that mate home's recorded ship or scout task id is attributed too.
+A process belonging to the mate's own pane, an unattributed process, or an unattributed unreadable possible worker still blocks; an unreadable process inventory refuses.
+Linux reads kernel cwd links, and macOS reads a bounded cwd-only `lsof` inventory.
 
 Every transient or self-contradicting read stays `unreadable` or `ambiguous` and still refuses, so a momentary backend failure can never be mistaken for absence.
 
