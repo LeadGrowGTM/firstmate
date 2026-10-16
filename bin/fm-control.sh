@@ -1192,7 +1192,7 @@ record_note() {
 }
 
 do_relaunch() {
-  local exit_result state note_line
+  local exit_result state note_line dead_process_verdict elapsed=0
   local -a spawn_args
 
   require_state_verified_backend relaunch
@@ -1276,6 +1276,24 @@ do_relaunch() {
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
+
+  # The pane can become a bare shell before the exiting agent's remaining
+  # process leaves the worktree. Wait for that process to finish, but keep the
+  # spawn owner's independent absence check as the launch boundary.
+  if [ "$exit_result" = stopped ] && { [ "$BACKEND" = tmux ] || [ "$BACKEND" = herdr ]; }; then
+    while :; do
+      dead_process_verdict=$(fm_control_dead_endpoint_process_verdict "$BACKEND" "$T" "$META")
+      [ "${dead_process_verdict%%$'\t'*}" != clear ] || break
+      case "${dead_process_verdict#*$'\t'}" in
+        'live processes still have cwd in the recorded worktree'*) ;;
+        *) die "task $ID's dead endpoint is not safe to relaunch: ${dead_process_verdict#*$'\t'}" ;;
+      esac
+      awk -v e="$elapsed" -v t="$EXIT_WAIT" 'BEGIN{exit !(e < t)}' \
+        || die "task $ID's dead endpoint is not safe to relaunch after ${EXIT_WAIT}s: ${dead_process_verdict#*$'\t'}"
+      sleep "$POLL"
+      elapsed=$(awk -v e="$elapsed" -v p="$POLL" 'BEGIN{printf "%.3f", e + p}')
+    done
+  fi
 
   # The launch owner (fm-spawn --relaunch) clears the previous incarnation's
   # per-task harness wiring before arming the new one, so nothing to do here.

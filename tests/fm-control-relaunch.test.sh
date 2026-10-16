@@ -205,6 +205,7 @@ SH
   cat > "$fb/sleep" <<'SH'
 #!/usr/bin/env bash
 [ -z "${FM_FAKE_LOCK_WAITING:-}" ] || : > "$FM_FAKE_LOCK_WAITING"
+[ -z "${FM_TEST_REAL_SLEEP:-}" ] || exec /bin/sleep "$1"
 exit 0
 SH
   chmod +x "$fb/sleep"
@@ -292,7 +293,7 @@ run_control() {  # <case-dir> <args...>
     TMUX_TMPDIR="$dir/tmux-root" \
     HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
     FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
-    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT="${FM_TEST_CONTROL_EXIT_WAIT:-0.05}" FM_CONTROL_LAUNCH_WAIT=0.05 \
     FM_REAL_GIT="${FM_REAL_GIT:-}" FM_FAKE_GIT_FAILURE="${FM_FAKE_GIT_FAILURE:-}" \
     FM_REAL_MV="${FM_REAL_MV:-}" FM_FAKE_COMPLETE_JOURNAL_MV_FAIL="${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" \
     FM_FAKE_META_PUBLISH_MV_FAIL="${FM_FAKE_META_PUBLISH_MV_FAIL:-}" \
@@ -1328,6 +1329,48 @@ test_secondmate_relaunch_picks_up_the_configured_harness_pin() {
     || fail "the mate's configured effort should be selected on relaunch"
   assert_not_contains "$out" "not a verified harness" "claude is a verified harness"
   pass "fm-control relaunch: a secondmate re-resolves its durable opus low override"
+}
+
+test_secondmate_relaunch_waits_for_exiting_home_process() {
+  local dir home hook out rc=0
+  dir=$(new_case exiting-home sm-exit)
+  home="$dir/home"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin"
+  printf 'sm-exit\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo 'window=fmses:fm-sm-exit'
+    echo 'endpoint_task_id=sm-exit'
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo 'harness=claude'
+    echo 'kind=secondmate'
+    echo 'mode=secondmate'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+    echo "home=$dir/smhome"
+    echo 'backend=tmux'
+  } > "$home/state/sm-exit.meta"
+  printf 'fm-sm-exit\n' > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  hook="$dir/fakebin/on-agent-exit"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'cd %q || exit 1\n' "$dir/smhome"
+    printf '/bin/sleep 2 >/dev/null 2>&1 &\n'
+    printf 'printf "%%s\\n" "$!" > %q\n' "$dir/fake/process-pids"
+  } > "$hook"
+  chmod +x "$hook"
+  out=$(FM_TEST_CONTROL_EXIT_WAIT=3 FM_TEST_REAL_SLEEP=1 FM_FAKE_ON_AGENT_EXIT="$hook" \
+    run_control "$dir" sm-exit relaunch) || rc=$?
+  expect_code 0 "$rc" "a bare-shell secondmate should restart after its exiting process clears: $out"
+  assert_contains "$out" 'relaunched sm-exit' 'the replacement was not reported'
+  pass 'a secondmate restarts after a briefly rooted exit process clears'
 }
 
 # The watcher's secondmate auto-relaunch and a control-plane relaunch must not
@@ -3758,6 +3801,7 @@ test_prior_harness_turnend_registry_entry_is_cleared
 test_wiring_removal_failure_refuses_before_replacement_arm
 test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
+test_secondmate_relaunch_waits_for_exiting_home_process
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop

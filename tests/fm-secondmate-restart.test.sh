@@ -72,6 +72,7 @@ case "${1:-}" in
       printf '%s\n' "$payload" >> "$D/literal"
       case "$payload" in
         /exit|/quit)
+          [ ! -f "$D/exit-warning" ] || cat "$D/exit-warning" >&2
           if [ -e "$D/remote-relaunch-start" ] && [ ! -e "$D/remote-relaunch-end" ]; then
             : > "$D/local-relaunch-during-remote"
           fi
@@ -659,12 +660,15 @@ test_post_stop_failure_is_reported_unreached() {
   add_local_mate "$dir" sm1
   arm_answer "$dir" sm1
   printf 'zsh' > "$dir/fake/becomes"
+  printf 'WARNING: watcher still down\n' > "$dir/fake/exit-warning"
 
   out=$(run_restart "$dir" sm1); rc=$?
 
   expect_code 3 "$rc" "a post-stop relaunch failure must remain accounted for"$'\n'"$out"
   assert_contains "$out" "unreached: sm1:" "a stopped mate must be reported as unreached"
   assert_contains "$out" "restart outcome is unknown" "the report must not attribute the failed lifecycle operation"
+  assert_not_contains "$out" 'the restart outcome is unknown: WARNING' \
+    'a watcher warning hid the underlying relaunch refusal'
   assert_not_contains "$out" "nudged: sm1" "a durable enqueue must not masquerade as a running mate's nudge"
   assert_contains "$out" "summary: 0 of 1 restarted, 0 nudged, 1 unreached" \
     "the summary must not claim that a stopped mate remains on older instructions with a message"
