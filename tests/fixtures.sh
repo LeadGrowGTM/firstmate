@@ -287,9 +287,9 @@ fm_test_spawn_brief() {
 $intent
 
 ## Firstmate spec
-Goal: Observe the requested spawn or refusal through the public command.
-Off-limits: Changes outside the disposable test case; do not operate any real worker endpoint or shared pool.
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract only with this fixture's private project and state.
+Goal: Exercise the spawn behavior under test.
+Off-limits: Changes outside the disposable test case.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract.
 EOF
 }
 
@@ -332,7 +332,7 @@ fm_test_run_spawn() {
   mkdir -p "$spawn_home"
   FM_ROOT_OVERRIDE='' FM_HOME="$home" HOME="$spawn_home" \
     CLAUDE_CONFIG_DIR="${FM_TEST_CLAUDE_CONFIG_DIR:-}" \
-    FM_STATE_OVERRIDE="${FM_TEST_STATE_OVERRIDE:-$home/state}" FM_DATA_OVERRIDE="$home/data" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$pane" TMUX="${TMUX:-fake,1,0}" \
     PATH="$fakebin:$PATH" \

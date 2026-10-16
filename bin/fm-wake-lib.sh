@@ -1478,7 +1478,7 @@ fm_firstmate_root_home() {
 # with no tasks. Requires bin/fm-secondmate-registry-lib.sh to be sourced first.
 # shellcheck disable=SC2034 # FM_LOCAL_FIRSTMATE_ERROR is read by callers.
 fm_local_firstmate_state_dirs() {  # <first-state>
-  local first=$1 root home reg registry line child known existing i=0
+  local first=$1 root home reg line child known existing i=0
   local -a homes
   FM_LOCAL_FIRSTMATE_STATES=("$first")
   FM_LOCAL_FIRSTMATE_ERROR=
@@ -1498,19 +1498,9 @@ fm_local_firstmate_state_dirs() {  # <first-state>
     done
     [ "$known" = 1 ] || FM_LOCAL_FIRSTMATE_STATES+=("$home/state")
     reg="$home/data/secondmates.md"
-    if [ -e "$home/data" ] || [ -L "$home/data" ]; then
-      [ -d "$home/data" ] && [ -r "$home/data" ] && [ -x "$home/data" ] || {
-        FM_LOCAL_FIRSTMATE_ERROR="local Firstmate registry parent is inaccessible at $home/data"
-        return 1
-      }
-    fi
     [ ! -e "$reg" ] && [ ! -L "$reg" ] && continue
     [ -f "$reg" ] && [ ! -L "$reg" ] || {
       FM_LOCAL_FIRSTMATE_ERROR="local Firstmate registry is unsafe at $reg"
-      return 1
-    }
-    registry=$(cat "$reg" 2>/dev/null) || {
-      FM_LOCAL_FIRSTMATE_ERROR="local Firstmate registry is unreadable at $reg"
       return 1
     }
     while IFS= read -r line || [ -n "$line" ]; do
@@ -1533,7 +1523,7 @@ fm_local_firstmate_state_dirs() {  # <first-state>
           [ "$known" = 1 ] || homes+=("$child")
           ;;
       esac
-    done <<< "$registry"
+    done < "$reg"
   done
 }
 
@@ -1702,8 +1692,6 @@ PY
       return 1
     fi
   done
-  # shellcheck disable=SC2034 # Output for the allocation custody preflight.
-  FM_TREEHOUSE_POOL_RESOLVED=$pool
 }
 
 # Treehouse keys its default pool by directory name plus origin, so two homes
@@ -1785,7 +1773,7 @@ fm_treehouse_slot_owner_marker() {  # <worktree>
   printf '%s/.fm-slot-owner\n' "$(dirname "$slot")"
 }
 
-# Claim a pool slot for a task when no other holder has a readable claim.
+# Claim a pool slot for a task, replacing whatever the previous holder left.
 # The rename is atomic, so a reader either sees the old claim or the new one.
 fm_treehouse_slot_owner_claim() {  # <worktree> <task-id> <home>
   local worktree=$1 id=$2 home=$3 marker tmp
@@ -1797,8 +1785,6 @@ fm_treehouse_slot_owner_claim() {  # <worktree> <task-id> <home>
      && { [ ! -f "$marker" ] || [ -L "$marker" ]; }; then
     return 1
   fi
-  fm_treehouse_slot_owner_state "$worktree" "$id" "$home"
-  case "$FM_TREEHOUSE_SLOT_OWNER" in absent|mine) ;; *) return 1 ;; esac
   tmp="$marker.tmp.${BASHPID:-$$}"
   rm -f "$tmp" || return 1
   {
@@ -1812,14 +1798,13 @@ fm_treehouse_slot_owner_claim() {  # <worktree> <task-id> <home>
 # Sets FM_TREEHOUSE_SLOT_OWNER to one of:
 #   mine   - the claim names this task
 #   other  - the claim names a different task, so the slot was reassigned
-#   disputed - the task id matches but the recorded home identity does not
 #   absent - no claim: the slot was taken before claims existed, or returned since
 #   unsafe - a claim file exists but cannot be read as a claim
 # FM_TREEHOUSE_SLOT_OWNER_ID and FM_TREEHOUSE_SLOT_OWNER_HOME carry the recorded
-# claimant as evidence. A matching id belongs to this home only when both
-# paths resolve to the same directory, including symlink aliases.
-fm_treehouse_slot_owner_state() {  # <worktree> <task-id> <home>
-  local worktree=$1 id=$2 home=$3 marker line owner_id='' owner_home='' task_count=0 home_count=0
+# claimant as evidence. The home is reported, never matched: a home that moved
+# must not turn a task's own slot into a refusal.
+fm_treehouse_slot_owner_state() {  # <worktree> <task-id>
+  local worktree=$1 id=$2 marker line owner_id='' owner_home=''
   FM_TREEHOUSE_SLOT_OWNER=unsafe
   FM_TREEHOUSE_SLOT_OWNER_ID=
   FM_TREEHOUSE_SLOT_OWNER_HOME=
@@ -1831,203 +1816,31 @@ fm_treehouse_slot_owner_state() {  # <worktree> <task-id> <home>
   [ -f "$marker" ] && [ ! -L "$marker" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      task=*) owner_id=${line#task=}; task_count=$((task_count + 1)) ;;
-      home=*) owner_home=${line#home=}; home_count=$((home_count + 1)) ;;
+      task=*) owner_id=${line#task=} ;;
+      home=*) owner_home=${line#home=} ;;
     esac
   done < "$marker" || return 0
-  [ -n "$owner_id" ] && [ "$task_count" = 1 ] && [ "$home_count" -le 1 ] || return 0
-  case "$owner_id" in *[!A-Za-z0-9._-]*) return 0 ;; esac
+  [ -n "$owner_id" ] || return 0
   # shellcheck disable=SC2034 # Output globals, read by the sourcing caller.
   FM_TREEHOUSE_SLOT_OWNER_ID=$owner_id
   # shellcheck disable=SC2034 # Output globals, read by the sourcing caller.
   FM_TREEHOUSE_SLOT_OWNER_HOME=$owner_home
-  if [ "$owner_id" != "$id" ]; then
-    FM_TREEHOUSE_SLOT_OWNER=other
-  elif [ -n "$owner_home" ] && [ -n "$home" ] && [ -d "$owner_home" ] && [ -d "$home" ] \
-    && [ "$owner_home" -ef "$home" ]; then
+  if [ "$owner_id" = "$id" ]; then
     FM_TREEHOUSE_SLOT_OWNER=mine
   else
-    FM_TREEHOUSE_SLOT_OWNER=disputed
+    FM_TREEHOUSE_SLOT_OWNER=other
   fi
 }
 
 # Drop a task's own claim once its slot is back in the pool. Never removes
 # another task's claim, so a misdirected release cannot strip the evidence that
 # protects the slot's real owner.
-fm_treehouse_slot_owner_release() {  # <worktree> <task-id> <home>
-  local worktree=$1 id=$2 home=$3 marker
-  fm_treehouse_slot_owner_state "$worktree" "$id" "$home"
+fm_treehouse_slot_owner_release() {  # <worktree> <task-id>
+  local worktree=$1 id=$2 marker
+  fm_treehouse_slot_owner_state "$worktree" "$id"
   [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ] || return 0
   marker=$(fm_treehouse_slot_owner_marker "$worktree") || return 0
   rm -f "$marker" 2>/dev/null || true
-}
-
-# One custody screen for allocation and relaunch, under the project's shared
-# allocation/return lock. Every durable record is a reservation until teardown
-# retires it, regardless of the endpoint's current liveness. Never replace a
-# conflicting claim or refresh a copy while another record still names it.
-fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
-  local state=$1 own_meta=$2 worktree=$3 id=$4 slot other field path state_dir
-  slot=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
-  if ! declare -F fm_backend_meta_exact_value >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-backend.sh
-    . "$FM_WAKE_LIB_DIR/fm-backend.sh"
-  fi
-  if ! declare -F secondmate_registry_parse_line >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-secondmate-registry-lib.sh
-    . "$FM_WAKE_LIB_DIR/fm-secondmate-registry-lib.sh"
-  fi
-  fm_local_firstmate_state_dirs "$state" || {
-    printf 'REFUSED: worktree custody cannot be established: %s\n' "$FM_LOCAL_FIRSTMATE_ERROR" >&2
-    return 1
-  }
-  for state_dir in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
-    [ -d "$state_dir" ] && [ -r "$state_dir" ] && [ -x "$state_dir" ] || {
-      printf 'REFUSED: worktree custody state directory is unreadable: %s\n' "$state_dir" >&2
-      return 1
-    }
-    for other in "$state_dir"/*.meta; do
-      [ -e "$other" ] || [ -L "$other" ] || continue
-      [ -f "$other" ] && [ ! -L "$other" ] && [ -r "$other" ] || {
-        printf 'REFUSED: worktree custody record is unsafe: %s\n' "$other" >&2
-        return 1
-      }
-      [ "${other##*/}" = "${own_meta##*/}" ] && [ "$other" -ef "$own_meta" ] && continue
-      for field in worktree home; do
-        grep -q "^$field=" "$other" || continue
-        path=$(fm_backend_meta_exact_value "$other" "$field") || {
-          printf 'REFUSED: worktree custody record has ambiguous %s: %s\n' "$field" "$other" >&2
-          return 1
-        }
-        [ ! -d "$path" ] || path=$(CDPATH='' cd -- "$path" && pwd -P) || return 1
-        [ "$path" = "$slot" ] || continue
-        printf 'REFUSED: worktree custody conflict for task %s: %s is still named by task %s (%s); retire its stale claim with guarded teardown before allocating or relaunching this copy.\n' \
-          "$id" "$slot" "${other##*/}" "$other" >&2
-        return 1
-      done
-    done
-  done
-}
-
-# Stop before Treehouse can reset an idle copy whose durable reservation still
-# exists. Busy copies remain unavailable to Treehouse's process lease; the
-# selected copy is screened again by fm_worktree_custody_check before refresh.
-# An unreadable candidate inventory refuses rather than guessing the pool safe.
-fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [records]
-  local home=$1 project=$2 user=$3 pool='' state_dir meta field path processes inventory line marker slot candidate
-  # Before the pane enters Treehouse, scan this clone's existing pooled copies.
-  # Inside the pane (or a durable lease), also validate the actual provider root.
-  if [ "${4:-}" != records ]; then
-    fm_treehouse_pool_check "$home" "$project" "$user" || return 1
-    pool=$FM_TREEHOUSE_POOL_RESOLVED
-  fi
-  if ! declare -F fm_backend_meta_exact_value >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-backend.sh
-    . "$FM_WAKE_LIB_DIR/fm-backend.sh"
-  fi
-  if ! declare -F secondmate_registry_parse_line >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-secondmate-registry-lib.sh
-    . "$FM_WAKE_LIB_DIR/fm-secondmate-registry-lib.sh"
-  fi
-  if ! declare -F fm_agent_worktree_processes >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-agent-process-lib.sh
-    . "$FM_WAKE_LIB_DIR/fm-agent-process-lib.sh"
-  fi
-  fm_local_firstmate_state_dirs "${FM_STATE_OVERRIDE:-$home/state}" || {
-    printf 'REFUSED: pool custody cannot be established: %s\n' "$FM_LOCAL_FIRSTMATE_ERROR" >&2
-    return 1
-  }
-  for state_dir in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
-    [ -d "$state_dir" ] && [ -r "$state_dir" ] && [ -x "$state_dir" ] || {
-      printf 'REFUSED: pool custody state directory is unreadable: %s\n' "$state_dir" >&2
-      return 1
-    }
-    for meta in "$state_dir"/*.meta; do
-      [ -e "$meta" ] || [ -L "$meta" ] || continue
-      [ -f "$meta" ] && [ ! -L "$meta" ] && [ -r "$meta" ] || {
-        printf 'REFUSED: pool custody record is unsafe: %s\n' "$meta" >&2
-        return 1
-      }
-      for field in worktree home; do
-        grep -q "^$field=" "$meta" || continue
-        path=$(fm_backend_meta_exact_value "$meta" "$field") || {
-          printf 'REFUSED: pool custody record has ambiguous %s: %s\n' "$field" "$meta" >&2
-          return 1
-        }
-        [ -d "$path" ] || continue
-        path=$(CDPATH='' cd -- "$path" && pwd -P) || return 1
-        if [ -n "$pool" ]; then
-          _fm_treehouse_path_inside "$path" "$pool" || continue
-        else
-          fm_treehouse_pool_slot "$project" "$path" || continue
-        fi
-        processes=$(fm_agent_worktree_processes "$path") || {
-          printf 'REFUSED: cannot prove the recorded pool copy %s unavailable to allocation\n' "$path" >&2
-          return 1
-        }
-        [ -z "$processes" ] || continue
-        printf 'REFUSED: idle pool copy %s is still reserved by %s; relaunch that task or use guarded --retire-claim teardown before allocation.\n' "$path" "$meta" >&2
-        return 1
-      done
-    done
-  done
-  if [ -n "$pool" ]; then
-    for marker in "$pool"/*/.fm-slot-owner; do
-      [ -e "$marker" ] || [ -L "$marker" ] || continue
-      [ -f "$marker" ] && [ ! -L "$marker" ] || {
-        printf 'REFUSED: pool copy has unreadable custody: %s\n' "$marker" >&2
-        return 1
-      }
-      slot=${marker%/.fm-slot-owner}
-      path=
-      for candidate in "$slot"/*; do
-        [ -d "$candidate" ] && [ ! -L "$candidate" ] || continue
-        path=$candidate
-        break
-      done
-      [ -n "$path" ] || {
-        printf 'REFUSED: pool slot %s has a claim but no readable copy\n' "$slot" >&2
-        return 1
-      }
-      fm_treehouse_slot_owner_state "$path" '' ''
-      [ "$FM_TREEHOUSE_SLOT_OWNER" = other ] || {
-        printf 'REFUSED: pool slot %s has unreadable custody\n' "$slot" >&2
-        return 1
-      }
-      processes=$(fm_agent_worktree_processes "$slot") || {
-        printf 'REFUSED: pool slot %s has a retained claim and unproven process state\n' "$slot" >&2
-        return 1
-      }
-      [ -n "$processes" ] && continue
-      printf 'REFUSED: idle pool slot %s still carries a slot claim; reconcile it before allocation\n' "$slot" >&2
-      return 1
-    done
-    return 0
-  fi
-  # A surviving slot marker is a reservation even when its task record is no
-  # longer reachable. Screen these before the provider can reset the copy.
-  inventory=$(git -C "$project" worktree list --porcelain) || return 1
-  while IFS= read -r line; do
-    case "$line" in worktree\ *) path=${line#worktree } ;; *) continue ;; esac
-    [ -d "$path" ] || continue
-    fm_treehouse_pool_slot "$project" "$path" || continue
-    fm_treehouse_slot_owner_state "$path" '' ''
-    [ "$FM_TREEHOUSE_SLOT_OWNER" != absent ] || continue
-    [ "$FM_TREEHOUSE_SLOT_OWNER" != unsafe ] || {
-      printf 'REFUSED: pool copy %s has unreadable custody; no allocation was attempted\n' "$path" >&2
-      return 1
-    }
-    processes=$(fm_agent_worktree_processes "$path") || {
-      printf 'REFUSED: pool copy %s has a retained slot claim and unproven process state\n' "$path" >&2
-      return 1
-    }
-    [ -z "$processes" ] || continue
-    printf 'REFUSED: idle pool copy %s still carries task %s\047s slot claim; reconcile it before allocation\n' \
-      "$path" "$FM_TREEHOUSE_SLOT_OWNER_ID" >&2
-    return 1
-  done <<EOF
-$inventory
-EOF
 }
 
 fm_failure_episode_reset() {

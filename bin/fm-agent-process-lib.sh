@@ -23,7 +23,7 @@ unset _FM_AGENT_PROCESS_LIB_DIR
 
 # fm_agent_process_classify_name: the single owner of the process-name
 # vocabulary shared by every liveness signal - `agent` for a verified harness,
-# `shell` for a shell name (activity requires separate proof), `other` for anything else.
+# `shell` for an idle login/interactive shell, `other` for anything else.
 # Keeping one classifier means independent name sources (a kernel process
 # name, an argv[0], a rendered pane title) can never drift into disagreeing
 # about what a given name means.
@@ -113,67 +113,4 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
   else
     printf 'other'
   fi
-}
-
-# Recovery proof, independent of harness names: EVERY same-user process rooted
-# in the recorded copy is a possible surviving worker. No signals are sent.
-# Print matching pids; a failed inventory or an unreadable live cwd refuses.
-# Linux uses kernel cwd links, including descendants in subdirectories. macOS
-# uses the bounded cwd-only lsof inventory, never a recursive file-tree walk.
-fm_agent_worktree_processes() {  # <worktree> [<pane-shell-pid>] [allow-missing] -> pids (empty means none)
-  local worktree=$1 excluded_pid=${2:-} allow_missing=${3:-} out pid path line parent leaf
-  if [ -d "$worktree" ]; then
-    worktree=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
-  else
-    [ "$allow_missing" = allow-missing ] || return 1
-    [ ! -e "$worktree" ] && [ ! -L "$worktree" ] || return 1
-    parent=${worktree%/*}
-    leaf=${worktree##*/}
-    [ -n "$parent" ] && [ -n "$leaf" ] && [ "$leaf" != . ] && [ "$leaf" != .. ] || return 1
-    parent=$(CDPATH='' cd -- "$parent" && pwd -P) || return 1
-    worktree="$parent/$leaf"
-  fi
-  case "$excluded_pid" in ''|*[!0-9]*) excluded_pid= ;; esac
-  case "$(uname -s)" in
-    Linux)
-      fm_agent_process_proof rooted "$worktree" "$excluded_pid"
-      ;;
-    Darwin)
-      out=$(lsof -a -u "$(id -u)" -d cwd -Fpn 2>&1) || return 1
-      [ -n "$out" ] || return 1
-      pid=
-      while IFS= read -r line; do
-        case "$line" in
-          p*) pid=${line#p}; case "$pid" in ''|*[!0-9]*) return 1 ;; esac ;;
-          fcwd) [ -n "$pid" ] || return 1 ;;
-          n*)
-            [ -n "$pid" ] || return 1
-            path=${line#n}
-            case "$path" in
-              "$worktree"|"$worktree"/*)
-                # cwd-only lsof has no terminal-input wait proof. Every
-                # rooted process remains a possible surviving worker.
-                printf '%s\n' "$pid"
-                ;;
-              *' (deleted)')
-                path=${path% (deleted)}
-                case "$path" in "$worktree"|"$worktree"/*) printf '%s\n' "$pid" ;; esac
-                ;;
-            esac
-            ;;
-          '') ;;
-          *) return 1 ;;
-        esac
-      done <<EOF
-$out
-EOF
-      ;;
-    *) return 1 ;;
-  esac
-}
-
-# One kernel-evidence owner for rooted-process exceptions and tmux liveness.
-# Names and interactive argv alone never establish that a shell is idle.
-fm_agent_process_proof() {
-  python3 "${BASH_SOURCE[0]%/*}/fm-agent-process.py" "$@"
 }

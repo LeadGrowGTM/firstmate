@@ -68,21 +68,6 @@ pin_markdown_backend() {  # <addressing-root>
   printf '%s\n' 'backend = "markdown"' > "$1/.tasks.toml"
 }
 
-# The recovery proof inventories processes through ps. These fixtures own no
-# worker processes; keep their inventory private rather than inspecting host
-# services whose cwd may be unreadable under the developer's /proc policy.
-make_private_process_inventory() {  # <fakebin>
-  cat > "$1/ps" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ] && [ "$#" -eq 4 ]; then
-  printf '%s\n' "$PPID"
-else
-  exec /bin/ps "$@"
-fi
-SH
-  chmod +x "$1/ps"
-}
-
 # A home with a real backlog, a real project clone with an origin, a pooled
 # worktree, and stubs for every tool the spawn path shells out to.
 make_home() {  # <name> [task-id...]
@@ -91,7 +76,6 @@ make_home() {  # <name> [task-id...]
   case_dir="$TMP_ROOT/$name"
   home="$case_dir/home"
   fakebin=$(fm_fakebin "$case_dir")
-  make_private_process_inventory "$fakebin"
   mkdir -p "$home/state" "$home/config" "$home/data" "$home/projects"
   touch "$home/state/.last-watcher-beat"
   printf '%s\n' claude > "$home/config/crew-harness"
@@ -115,9 +99,6 @@ Exercise backlog dispatch for $id.
 
 ## Firstmate spec
 Verify the atomic backlog transition.
-Goal: Verify the paired record and backlog state for $id.
-Off-limits: Files outside this private test fixture.
-Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Exercise the public lifecycle commands and inspect their durable records.
 
 # Definition of done
 Delivery contract: mode=no-mistakes
@@ -472,17 +453,6 @@ SH
   chmod +x "$case_dir/fakebin/tasks-axi"
 }
 
-break_launch_staging() {  # <case-dir>
-  cat > "$1/fakebin/mv" <<'SH'
-#!/usr/bin/env bash
-for arg in "$@"; do
-  case "$arg" in */launch.s*.sh) exit 1 ;; esac
-done
-exec /bin/mv "$@"
-SH
-  chmod +x "$1/fakebin/mv"
-}
-
 break_launch_delivery() {  # <case-dir>
   local case_dir=$1
   cat > "$case_dir/fakebin/tmux" <<'SH'
@@ -530,7 +500,7 @@ SH
 
 interrupt_kimi_readiness() {  # <case-dir>
   local case_dir=$1 home
-  home="$case_dir/user-home"
+  home=$(home_of "$case_dir")
   mkdir -p "$home/.kimi-code"
   printf '# test config\n' > "$home/.kimi-code/config.toml"
   fm_fake_exit0 "$case_dir/fakebin" kimi
@@ -1370,7 +1340,7 @@ test_dispatch_refuses_to_commit_without_a_published_record() {
   pass "dispatch cannot commit without a verified task-record publication"
 }
 
-test_dispatch_retains_the_record_when_launch_precedes_commit_failure() {
+test_dispatch_leaves_no_record_when_the_transition_fails() {
   local case_dir id out rc=0
   id=atomic-dispatch-b4
   case_dir=$(make_home dispatch-transition-fails "$id")
@@ -1381,14 +1351,13 @@ test_dispatch_retains_the_record_when_launch_precedes_commit_failure() {
   [ "$rc" -ne 0 ] || fail "spawn reported success though the backlog transition failed"
   assert_contains "$out" "could not be moved to In flight" \
     "spawn failed without explaining the backlog transition failure"
-  assert_present "$(home_of "$case_dir")/state/$id.meta" \
-    "a failed backlog transition removed a potentially active worker's record"
-  assert_present "$(home_of "$case_dir")/state/$id.busy-state" \
-    "a failed backlog transition removed a potentially active worker's busy generation"
-  assert_contains "$out" 'worker may be active' 'commit failure did not explain custody preservation'
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "a failed backlog transition left an orphaned record behind"
+  assert_absent "$(home_of "$case_dir")/state/$id.busy-state" \
+    "a failed backlog transition left the task's armed busy generation behind"
   [ "$(row_state "$case_dir" "$id")" = queued ] \
     || fail "a failed dispatch left the backlog item in $(row_state "$case_dir" "$id")"
-  pass "a failed postlaunch backlog transition retains the worker's observable records"
+  pass "a failed backlog transition fails the dispatch loudly and leaves no record"
 }
 
 test_boat_postlaunch_endpoint_reserves_capacity() {
@@ -1412,7 +1381,7 @@ SH
   break_verb "$case_dir" start
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
   [ "$rc" -ne 0 ] || fail "Boat spawn reported success after backlog failure"
-  assert_present "$home/state/$id.meta" "postlaunch failure removed the Boat worker's record"
+  assert_absent "$home/state/$id.meta" "ordinary failed-dispatch rollback changed"
   fm_write_meta "$home/state/worker-two.meta" 'kind=ship'
   fm_write_meta "$home/state/worker-three.meta" 'kind=scout'
   printf 'fm-%s\nfm-worker-two\nfm-worker-three\n' "$id" > "$case_dir/windows"
@@ -1424,7 +1393,7 @@ SH
 JSON
   ) || rc=$?
   expect_code 75 "$rc" "orphaned Boat endpoint must occupy its worker slot: $out"
-  pass "Boat capacity refuses a fourth worker after a postlaunch backlog failure"
+  pass "Boat live endpoint inventory refuses a fourth worker after metadata rollback"
 }
 
 test_boat_intake_owns_the_provisioned_backlog() {
@@ -1435,7 +1404,6 @@ test_boat_intake_owns_the_provisioned_backlog() {
     home="$case_dir/home"
     proj="$home/projects/firstmate"
     fakebin=$(fm_fakebin "$case_dir")
-    make_private_process_inventory "$fakebin"
     mkdir -p "$home/"{bin,data,state,config,projects} "$case_dir/user-home"
     printf 'Fixture home.\n' > "$home/AGENTS.md"
     printf 'boat-eng\n' > "$home/.fm-secondmate-home"
@@ -1511,12 +1479,12 @@ test_dispatch_reports_an_incomplete_record_rollback() {
   case_dir=$(make_home dispatch-remove-failure "$id")
   add_item "$case_dir" "$id"
   meta="$(home_of "$case_dir")/state/$id.meta"
-  break_launch_staging "$case_dir"
+  break_verb "$case_dir" start
   break_meta_removal "$case_dir" "$meta"
 
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
   [ "$rc" -ne 0 ] || fail "spawn reported success though transition and rollback failed"
-  assert_contains "$out" "did not remove both task and busy records" \
+  assert_contains "$out" "failed-dispatch cleanup is incomplete" \
     "spawn did not report that its provisional record remained"
   assert_present "$meta" "failed record removal was reported as successful"
   assert_absent "$(home_of "$case_dir")/state/$id.busy-state" \
@@ -1531,7 +1499,7 @@ test_dispatch_reports_an_incomplete_busy_rollback() {
   id=atomic-dispatch-busy-remove-failure-b5
   case_dir=$(make_home dispatch-busy-remove-failure "$id")
   add_item "$case_dir" "$id"
-  break_launch_staging "$case_dir"
+  break_verb "$case_dir" start
   break_busy_removal "$case_dir" "$id"
 
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
@@ -1672,10 +1640,8 @@ test_dispatch_interruption_during_kimi_readiness_fails_before_commit() {
     run_spawn "$case_dir" "$id" "$case_dir/project" --harness kimi \
       --mode no-mistakes --yolo off) || rc=$?
   [ "$rc" -ne 0 ] || fail "Kimi readiness interruption was reported as success"
-  assert_present "$case_dir/kimi-interrupted" \
-    "Kimi readiness fixture never reached its interruption: $out"
-  assert_present "$home/state/$id.meta" \
-    "Kimi readiness interruption removed a potentially active worker's record: $out"
+  assert_absent "$home/state/$id.meta" \
+    "Kimi readiness interruption retained an unconfirmed task record"
   [ "$(row_state "$case_dir" "$id")" = queued ] \
     || fail "Kimi readiness interruption committed unconfirmed work In flight: $out"
   pass "Kimi readiness interruptions fail before backlog commit"
@@ -1693,8 +1659,8 @@ test_dispatch_does_not_resurrect_a_row_closed_after_preflight() {
   assert_contains "$out" "state done" "spawn did not report the row's ineligible state"
   [ "$(row_state "$case_dir" "$id")" = "done" ] \
     || fail "spawn resurrected a row closed after preflight"
-  assert_present "$(home_of "$case_dir")/state/$id.meta" \
-    "spawn removed a potentially active worker's record after its row was closed"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "spawn retained a record after its row was closed"
   pass "dispatch does not resurrect a row closed after preflight"
 }
 
@@ -1709,8 +1675,8 @@ test_dispatch_fails_when_its_row_vanishes_after_preflight() {
   [ "$rc" -ne 0 ] || fail "spawn succeeded after its backlog row vanished"
   assert_contains "$out" "vanished before dispatch commit" \
     "spawn did not report that its backlog row vanished"
-  assert_present "$(home_of "$case_dir")/state/$id.meta" \
-    "spawn removed a potentially active worker's record after its backlog row vanished"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "spawn retained a record after its backlog row vanished"
   [ -z "$(row_state "$case_dir" "$id")" ] || fail "spawn recreated a removed backlog row"
   pass "dispatch fails when its backlog row vanishes after preflight"
 }
@@ -2249,115 +2215,6 @@ test_recovery_backfills_a_recorded_link_on_an_already_done_item() {
     "recovery discarded the recorded link because the item was already Done"
   assert_absent "$marker" "recovery retained an applied completion-link marker"
   pass "recovery backfills recorded links onto already Done items"
-}
-
-test_recovery_requeues_done_unlanded_retirement() {
-  local case_dir id marker note_hex out digest
-  id=atomic-retire-done-requeue
-  case_dir=$(make_home retire-done-requeue)
-  add_item "$case_dir" "$id"
-  start_item "$case_dir" "$id"
-  tasks-axi 'done' "$id" --file "$(backlog_of "$case_dir")" >/dev/null
-  write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-requeue'
-  mkdir -p "$(home_of "$case_dir")/data/$id"
-  mv "$(home_of "$case_dir")/state/$id.meta" "$(home_of "$case_dir")/data/$id/retired-worktree-claim.fixture.meta"
-  marker="$(home_of "$case_dir")/state/$id.backlog-close"
-  note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
-    "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
-  digest=$(tasks-axi show "$id" --full --file "$(backlog_of "$case_dir")" \
-    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')
-  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-requeue\nmode=requeue:done:%s\narg=--note\narg=hex:%s\n' \
-    "$id" "$(home_of "$case_dir")/data" "$digest" "$note_hex" > "$marker"
-
-  out=$(run_bootstrap "$case_dir") || fail "interrupted retirement did not replay: $out"
-  [ "$(row_state "$case_dir" "$id")" = queued ] \
-    || fail "interrupted retirement left unfinished work Done: $out"
-  assert_grep "Preserved unfinished work: worktree $case_dir/wt; branch fm/$id" \
-    "$(backlog_of "$case_dir")" 'retirement replay lost the preserved work location'
-  assert_absent "$marker" 'retirement replay left its pending marker'
-  assert_absent "$(home_of "$case_dir")/state/$id.meta" 'retirement replay left its active record'
-  pass 'session start requeues an interrupted unlanded claim even from Done'
-}
-
-test_retirement_replay_preserves_a_later_captain_answer() {
-  local case_dir home id marker note_hex digest out
-  id=atomic-retire-later-answer
-  case_dir=$(make_home retire-later-answer)
-  home=$(home_of "$case_dir")
-  add_item "$case_dir" "$id"
-  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" \
-    "$ROOT/bin/fm-captain-hold.sh" hold "$id" --category security --reason 'Choose the preserved work outcome.' >/dev/null \
-    || fail 'could not create the later-answer hold'
-  digest=$(tasks-axi show "$id" --full --file "$(backlog_of "$case_dir")" \
-    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')
-  note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
-    "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
-  marker="$home/state/$id.backlog-close"
-  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-answer\nmode=requeue:queued:%s\narg=--note\narg=hex:%s\n' \
-    "$id" "$home/data" "$digest" "$note_hex" > "$marker"
-  printf 'Keep the recorded resolution closed.\n' > "$case_dir/decision.txt"
-  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" \
-    "$ROOT/bin/fm-captain-hold.sh" answer "$id" --decision-file "$case_dir/decision.txt" >/dev/null \
-    || fail 'could not answer after recording the retirement intent'
-  out=$(run_bootstrap "$case_dir")
-  [ "$(row_state "$case_dir" "$id")" = 'done' ] || fail "retirement reopened a later answer: $out"
-  assert_grep 'Keep the recorded resolution closed.' "$(backlog_of "$case_dir")" 'replay lost the answer'
-  assert_absent "$marker" 'answered retirement intent was not retired'
-  pass 'retirement replay leaves a later captain answer Done'
-}
-
-test_legacy_retirement_replay_refuses_without_prior_state() {
-  local case_dir home id marker note_hex out
-  id=atomic-retire-legacy-answer
-  case_dir=$(make_home retire-legacy-answer)
-  home=$(home_of "$case_dir")
-  add_item "$case_dir" "$id"
-  tasks-axi 'done' "$id" --file "$(backlog_of "$case_dir")" >/dev/null
-  write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-legacy'
-  cp "$home/state/$id.meta" "$case_dir/before.meta"
-  note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
-    "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
-  marker="$home/state/$id.backlog-close"
-  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-legacy\nmode=retain\narg=--note\narg=hex:%s\n' \
-    "$id" "$home/data" "$note_hex" > "$marker"
-  out=$(run_bootstrap "$case_dir")
-  [ "$(row_state "$case_dir" "$id")" = 'done' ] || fail "legacy intent reopened Done without prior state: $out"
-  cmp -s "$case_dir/before.meta" "$home/state/$id.meta" || fail 'legacy replay removed the active record'
-  assert_present "$marker" 'unproven legacy retirement intent was discarded'
-  assert_contains "$out" 'without its pre-retirement backlog state' 'legacy refusal was not explained'
-  pass 'legacy retirement replay refuses without pre-retirement state'
-}
-
-test_retirement_replay_preserves_active_claim_records() {
-  local case_dir home id mode intent marker note_hex digest out
-  for mode in requeue retire-close retire-retain; do
-    id="atomic-retire-active-$mode"
-    case_dir=$(make_home "retire-active-$mode")
-    home=$(home_of "$case_dir")
-    add_item "$case_dir" "$id"
-    start_item "$case_dir" "$id"
-    write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-active'
-    cp "$home/state/$id.meta" "$case_dir/before.meta"
-    marker="$home/state/$id.backlog-close"
-    intent=$mode
-    note_hex=local%20main
-    if [ "$mode" = requeue ]; then
-      digest=$(tasks-axi show "$id" --full --file "$(backlog_of "$case_dir")" \
-        | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')
-      intent="requeue:in_flight:$digest"
-      note_hex="hex:$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
-        "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')"
-    fi
-    printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-active\nmode=%s\narg=--note\narg=%s\n' \
-      "$id" "$home/data" "$intent" "$note_hex" > "$marker"
-    cp "$marker" "$case_dir/before.marker"
-    out=$(run_bootstrap "$case_dir")
-    cmp -s "$case_dir/before.meta" "$home/state/$id.meta" || fail "$mode replay removed a restored active record: $out"
-    cmp -s "$case_dir/before.marker" "$marker" || fail "$mode replay changed its uncommitted retirement intent"
-    [ "$(row_state "$case_dir" "$id")" = in_flight ] || fail "$mode replay changed an active claim's row"
-    assert_contains "$out" 'active task record remains for claim retirement' "$mode replay did not explain its refusal"
-  done
-  pass 'retirement replay preserves active records until retirement is committed'
 }
 
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read() {
@@ -3306,13 +3163,8 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
   pass "dispatching a persistent secondmate needs no backlog item"
 }
 
-test_dispatch_interruption_during_kimi_readiness_fails_before_commit
-test_retirement_replay_preserves_active_claim_records
 test_boat_postlaunch_endpoint_reserves_capacity
 test_boat_intake_owns_the_provisioned_backlog
-test_legacy_retirement_replay_refuses_without_prior_state
-test_retirement_replay_preserves_a_later_captain_answer
-test_recovery_requeues_done_unlanded_retirement
 test_backend_resolution_preserves_config_errors
 test_backend_resolution_preserves_precedence_and_defaults
 test_backlog_callers_refuse_unreadable_backend_config
@@ -3338,7 +3190,7 @@ test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
 test_dispatch_refuses_to_commit_without_a_published_record
-test_dispatch_retains_the_record_when_launch_precedes_commit_failure
+test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback
 test_dispatch_reports_an_incomplete_busy_rollback
 test_dispatch_rolls_back_before_a_failed_launch_delivery
@@ -3350,6 +3202,7 @@ test_fm_tasks_axi_fallback_bounds_the_call_without_a_timeout_binary
 test_fm_tasks_axi_fallback_passes_the_child_status_and_output_through
 test_fm_tasks_axi_fails_closed_when_nothing_can_bound_the_call
 test_fm_tasks_axi_gnu_timeout_forces_termination_of_a_sigterm_ignoring_child
+test_dispatch_interruption_during_kimi_readiness_fails_before_commit
 test_dispatch_does_not_resurrect_a_row_closed_after_preflight
 test_dispatch_fails_when_its_row_vanishes_after_preflight
 test_completion_closes_a_local_only_ship_before_reporting_success
