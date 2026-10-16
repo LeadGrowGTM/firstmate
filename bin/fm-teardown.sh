@@ -3968,6 +3968,13 @@ teardown_legacy_stamp_rollback() {
   fi
   BACKLOG_CLOSED=1
   META_SPAWN_GEN=$TEARDOWN_META_SPAWN_GEN
+  if [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+    retirement_mode=$(fm_backlog_requeue_mode "$DATA" "$ID") || {
+      echo "REFUSED: cannot record the pre-retirement backlog state for $ID" >&2
+      exit 1
+    }
+    BACKLOG_TRANSITION_FLAGS=(--mode "$retirement_mode")
+  fi
   if ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
       "${BACKLOG_TRANSITION_FLAGS[@]+"${BACKLOG_TRANSITION_FLAGS[@]}"}" \
       "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
@@ -4384,8 +4391,16 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
   }
 fi
 if [ "$BACKLOG_CLOSED" = 1 ]; then
-  if ! fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
-      "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
+  retirement_transition() {
+    if [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+      fm_backlog_atomic_transition remove "$META" "task record" "$STATE" \
+        && fm_backlog_close_marker_replay "$STATE" "$BACKLOG_CLOSE_MARKER" "$DATA"
+    else
+      fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$META" "$BACKLOG_CLOSE_MARKER" \
+        "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"
+    fi
+  }
+  if ! retirement_transition; then
     [ "$RETIRE_CLAIM" != 1 ] || retirement_rollback || true
     fm_lock_release "$META_LOCK"
     META_LOCK_HELD=0

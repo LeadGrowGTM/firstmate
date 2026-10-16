@@ -2218,7 +2218,7 @@ test_recovery_backfills_a_recorded_link_on_an_already_done_item() {
 }
 
 test_recovery_requeues_done_unlanded_retirement() {
-  local case_dir id marker note_hex out
+  local case_dir id marker note_hex out digest
   id=atomic-retire-done-requeue
   case_dir=$(make_home retire-done-requeue)
   add_item "$case_dir" "$id"
@@ -2228,8 +2228,10 @@ test_recovery_requeues_done_unlanded_retirement() {
   marker="$(home_of "$case_dir")/state/$id.backlog-close"
   note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
     "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
-  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-requeue\nmode=retain\narg=--note\narg=hex:%s\n' \
-    "$id" "$(home_of "$case_dir")/data" "$note_hex" > "$marker"
+  digest=$(tasks-axi show "$id" --full --file "$(backlog_of "$case_dir")" \
+    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')
+  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-requeue\nmode=requeue:done:%s\narg=--note\narg=hex:%s\n' \
+    "$id" "$(home_of "$case_dir")/data" "$digest" "$note_hex" > "$marker"
 
   out=$(run_bootstrap "$case_dir") || fail "interrupted retirement did not replay: $out"
   [ "$(row_state "$case_dir" "$id")" = queued ] \
@@ -2239,6 +2241,55 @@ test_recovery_requeues_done_unlanded_retirement() {
   assert_absent "$marker" 'retirement replay left its pending marker'
   assert_absent "$(home_of "$case_dir")/state/$id.meta" 'retirement replay left its active record'
   pass 'session start requeues an interrupted unlanded claim even from Done'
+}
+
+test_retirement_replay_preserves_a_later_captain_answer() {
+  local case_dir home id marker note_hex digest out
+  id=atomic-retire-later-answer
+  case_dir=$(make_home retire-later-answer)
+  home=$(home_of "$case_dir")
+  add_item "$case_dir" "$id"
+  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-captain-hold.sh" hold "$id" --category scope --reason 'Choose the preserved work outcome.' >/dev/null \
+    || fail 'could not create the later-answer hold'
+  digest=$(tasks-axi show "$id" --full --file "$(backlog_of "$case_dir")" \
+    | perl -MDigest::SHA=sha256_hex -0777 -ne 'print sha256_hex($_)')
+  note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
+    "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
+  marker="$home/state/$id.backlog-close"
+  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-answer\nmode=requeue:queued:%s\narg=--note\narg=hex:%s\n' \
+    "$id" "$home/data" "$digest" "$note_hex" > "$marker"
+  printf 'Keep the recorded resolution closed.\n' > "$case_dir/decision.txt"
+  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-captain-hold.sh" answer "$id" --decision-file "$case_dir/decision.txt" >/dev/null \
+    || fail 'could not answer after recording the retirement intent'
+  out=$(run_bootstrap "$case_dir")
+  [ "$(row_state "$case_dir" "$id")" = done ] || fail "retirement reopened a later answer: $out"
+  assert_grep 'Keep the recorded resolution closed.' "$(backlog_of "$case_dir")" 'replay lost the answer'
+  assert_absent "$marker" 'answered retirement intent was not retired'
+  pass 'retirement replay leaves a later captain answer Done'
+}
+
+test_legacy_retirement_replay_refuses_without_prior_state() {
+  local case_dir home id marker note_hex out
+  id=atomic-retire-legacy-answer
+  case_dir=$(make_home retire-legacy-answer)
+  home=$(home_of "$case_dir")
+  add_item "$case_dir" "$id"
+  tasks-axi done "$id" --file "$(backlog_of "$case_dir")" >/dev/null
+  write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-legacy'
+  cp "$home/state/$id.meta" "$case_dir/before.meta"
+  note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
+    "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
+  marker="$home/state/$id.backlog-close"
+  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-legacy\nmode=retain\narg=--note\narg=hex:%s\n' \
+    "$id" "$home/data" "$note_hex" > "$marker"
+  out=$(run_bootstrap "$case_dir")
+  [ "$(row_state "$case_dir" "$id")" = done ] || fail "legacy intent reopened Done without prior state: $out"
+  cmp -s "$case_dir/before.meta" "$home/state/$id.meta" || fail 'legacy replay removed the active record'
+  assert_present "$marker" 'unproven legacy retirement intent was discarded'
+  assert_contains "$out" 'without its pre-retirement backlog state' 'legacy refusal was not explained'
+  pass 'legacy retirement replay refuses without pre-retirement state'
 }
 
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read() {
@@ -3189,6 +3240,9 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
 
 test_boat_postlaunch_endpoint_reserves_capacity
 test_boat_intake_owns_the_provisioned_backlog
+test_legacy_retirement_replay_refuses_without_prior_state
+test_retirement_replay_preserves_a_later_captain_answer
+test_recovery_requeues_done_unlanded_retirement
 test_backend_resolution_preserves_config_errors
 test_backend_resolution_preserves_precedence_and_defaults
 test_backlog_callers_refuse_unreadable_backend_config
@@ -3251,7 +3305,6 @@ test_recovery_ignores_a_symlinked_worker_record
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open
 test_recovery_replays_a_gerrit_close_with_its_change_url_as_a_note
 test_recovery_backfills_a_recorded_link_on_an_already_done_item
-test_recovery_requeues_done_unlanded_retirement
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read
 test_recovery_retry_preserves_incomplete_cleanup_warning
 test_recovery_finishes_a_close_for_the_same_meta_incarnation
