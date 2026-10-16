@@ -34,6 +34,7 @@ set -u
 CONTROL="$ROOT/bin/fm-control.sh"
 SPAWN="$ROOT/bin/fm-spawn.sh"
 PROMOTE="$ROOT/bin/fm-promote.sh"
+PROMOTION_SCOPE=(--goal 'Ship the change.' --off-limits 'Unrelated files.' --contracts 'none')
 BRIEF="$ROOT/bin/fm-brief.sh"
 X_LINK="$ROOT/bin/fm-x-link.sh"
 # fm_test_tmproot's own cleanup trap fires when its command substitution exits,
@@ -807,6 +808,255 @@ test_same_harness_relaunch_keeps_the_profile_axes() {
   pass "fm-control relaunch: a same-harness relaunch keeps the profile axes it was running with"
 }
 
+test_direct_spawn_relaunch_keeps_the_profile_axes() {
+  local dir out rc
+  dir=$(new_case directprofile rl-direct-profile)
+  add_ship_task "$dir" rl-direct-profile claude
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=high/' \
+    "$dir/home/state/rl-direct-profile.meta" > "$dir/home/state/rl-direct-profile.meta.tmp"
+  mv "$dir/home/state/rl-direct-profile.meta.tmp" "$dir/home/state/rl-direct-profile.meta"
+  printf zsh > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl-direct-profile --relaunch); rc=$?
+  expect_code 0 "$rc" "direct relaunch should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-direct-profile model)" = opus ] || fail "direct relaunch lost recorded model"
+  [ "$(meta_field "$dir" rl-direct-profile effort)" = high ] || fail "direct relaunch lost recorded effort"
+  assert_contains "$(cat "$dir/fake/literal")" "--model 'opus'" "direct relaunch lost model flag"
+  assert_contains "$(cat "$dir/fake/literal")" "--effort 'high'" "direct relaunch lost effort flag"
+  pass "direct spawn relaunch preserves recorded model and effort"
+}
+
+test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop() {
+  local dir out rc variant
+  for variant in unlisted weaker; do
+    dir=$(new_case "fallback-$variant" "rl-$variant")
+    add_ship_task "$dir" "rl-$variant" codex
+    printf codex > "$dir/fake/command"
+    fm_fake_exit0 "$dir/fakebin" codex
+    mkdir -p "$dir/home/config"
+    printf '%s\n' '{"rules":[{"when":"hard tasks","use":[{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong"}]}],"default":{"harness":"codex","model":"gpt-6-sol","effort":"high","reasoning_class":"workhorse"}}' > "$dir/home/config/crew-dispatch.json"
+    if [ "$variant" = weaker ]; then
+      jq '.rules[0].use += [.default]' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp"
+      mv "$dir/config.tmp" "$dir/home/config/crew-dispatch.json"
+    fi
+    sed 's/^model=default$/model=gpt-6.1-sol/; s/^effort=default$/effort=xhigh/' \
+      "$dir/home/state/rl-$variant.meta" > "$dir/meta.tmp"
+    mv "$dir/meta.tmp" "$dir/home/state/rl-$variant.meta"
+    cp "$dir/home/state/rl-$variant.meta" "$dir/meta.before"
+    cp "$dir/home/data/rl-$variant/brief.md" "$dir/brief.before"
+    out=$(run_control "$dir" "rl-$variant" relaunch --model gpt-6-sol --effort high --note "quota exhausted"); rc=$?
+    expect_code 1 "$rc" "unauthorized fallback should refuse"$'\n'"$out"
+    if [ "$variant" = unlisted ]; then
+      assert_contains "$out" "not listed for the recorded dispatch rule" "missing same-rule refusal"
+    else
+      assert_contains "$out" "lower or change the recorded reasoning class" "missing class refusal"
+    fi
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-$variant.meta" || fail "fallback refusal changed metadata"
+    cmp -s "$dir/brief.before" "$dir/home/data/rl-$variant/brief.md" || fail "fallback refusal changed brief"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "fallback refusal stopped the worker"
+    # The spawn interface cannot bypass the same guard once an agent is gone.
+    printf zsh > "$dir/fake/command"
+    out=$(run_spawn "$dir" "rl-$variant" --relaunch --model gpt-6-sol --effort high --fallback-reason "quota exhausted"); rc=$?
+    expect_code 1 "$rc" "direct spawn should enforce the fallback policy"$'\n'"$out"
+    cmp -s "$dir/meta.before" "$dir/home/state/rl-$variant.meta" || fail "direct fallback refusal changed metadata"
+  done
+  pass "control and direct spawn refuse unlisted or weaker configured fallbacks before mutation"
+}
+
+test_fallback_policy_changes() {
+  local dir out rc variant id
+  for variant in rule-removed config-removed reclassified lower-effort ambiguous-legacy; do
+    id="rl-policy-$variant"
+    dir=$(new_case "$variant" "$id")
+    add_ship_task "$dir" "$id" codex
+    printf codex > "$dir/fake/command"
+    fm_fake_exit0 "$dir/fakebin" codex
+    mkdir -p "$dir/home/config"
+    printf '%s\n' '{"rules":[{"when":"hard tasks","use":[{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong"}]}]}' > "$dir/home/config/crew-dispatch.json"
+    sed 's/^model=default$/model=gpt-6.1-sol/; s/^effort=default$/effort=xhigh/' "$dir/home/state/$id.meta" > "$dir/meta.tmp"
+    mv "$dir/meta.tmp" "$dir/home/state/$id.meta"
+    if [ "$variant" != ambiguous-legacy ]; then
+      printf '%s\n' 'dispatch_rule={"rule":"rule_1"}' >> "$dir/home/state/$id.meta"
+    fi
+    [ "$variant" != reclassified ] || printf '%s\n' reasoning_class=strong >> "$dir/home/state/$id.meta"
+    case "$variant" in
+      rule-removed) jq '{default:.rules[0].use}' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+      config-removed) rm "$dir/home/config/crew-dispatch.json" ;;
+      reclassified) jq '.rules[0].use |= map(.reasoning_class="workhorse")' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+      lower-effort) jq '.rules[0].use |= map(del(.reasoning_class))' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+      ambiguous-legacy) jq '.default=.rules[0].use' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp" ;;
+    esac
+    [ ! -f "$dir/config.tmp" ] || mv "$dir/config.tmp" "$dir/home/config/crew-dispatch.json"
+    cp "$dir/home/state/$id.meta" "$dir/meta.before"
+    out=$(run_control "$dir" "$id" relaunch --effort high --note "quota fallback"); rc=$?
+    expect_code 1 "$rc" "$variant must refuse fallback"$'\n'"$out"
+    cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "$variant changed metadata"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "$variant stopped the worker"
+    pass "$variant refuses before stopping or changing metadata"
+  done
+}
+
+test_configured_fallback_refuses_an_omitted_effort_before_stop() {
+  local dir out rc
+  dir=$(new_case omitted-effort rl-omitted-effort)
+  add_ship_task "$dir" rl-omitted-effort grok
+  printf grok > "$dir/fake/command"
+  fm_fake_exit0 "$dir/fakebin" grok
+  mkdir -p "$dir/home/config"
+  printf '%s\n' '{"default":[{"harness":"grok","model":"grok-4.7","effort":"high"},{"harness":"grok","model":"grok-4.7","effort":"xhigh"}]}' > "$dir/home/config/crew-dispatch.json"
+  sed 's/^model=default$/model=grok-4.7/; s/^effort=default$/effort=high/' \
+    "$dir/home/state/rl-omitted-effort.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/rl-omitted-effort.meta"
+  cp "$dir/home/state/rl-omitted-effort.meta" "$dir/meta.before"
+  out=$(run_control "$dir" rl-omitted-effort relaunch --effort xhigh --note "quota fallback"); rc=$?
+  expect_code 1 "$rc" "a higher token that realizes default must refuse"$'\n'"$out"
+  assert_contains "$out" "cannot realize effort 'xhigh'" "missing omitted-effort refusal"
+  cmp -s "$dir/meta.before" "$dir/home/state/rl-omitted-effort.meta" || fail "omitted-effort refusal changed metadata"
+  [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "omitted-effort refusal stopped the worker"
+  pass "configured fallback refuses an effort the adapter would omit before stopping"
+}
+
+test_configured_equivalent_fallback_records_realized_profile_and_reason() {
+  local dir out rc fingerprint reason=$'provider quota exhausted\nuse declared equivalent'
+  dir=$(new_case equivalent rl-equivalent)
+  add_ship_task "$dir" rl-equivalent claude
+  mkdir -p "$dir/home/config"
+  printf '%s\n' '{"rules":[{"when":"hard tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong","provider":"codex"}]}]}' > "$dir/home/config/crew-dispatch.json"
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=xhigh/' \
+    "$dir/home/state/rl-equivalent.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/rl-equivalent.meta"
+  fm_fake_exit0 "$dir/fakebin" codex
+  printf codex > "$dir/fake/becomes"
+  out=$(run_control "$dir" rl-equivalent relaunch --harness codex --model gpt-6.1-sol --effort high --note "$reason"); rc=$?
+  expect_code 0 "$rc" "declared equivalent fallback should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-equivalent dispatch_rule)" = '{"rule":"rule_1"}' ] || fail "fallback lost its rule"
+  fingerprint=$(meta_field "$dir" rl-equivalent dispatch_rule_fingerprint)
+  [[ $fingerprint =~ ^[0-9a-f]{64}$ ]] || fail "fallback lost its rule fingerprint"
+  [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "fallback lost its chosen class"
+  [ "$(meta_field "$dir" rl-equivalent dispatch_provider)" = codex ] || fail "fallback lost provider"
+  [ "$(meta_field "$dir" rl-equivalent harness)" = codex ] || fail "fallback lost realized harness"
+  [ -z "$(meta_field "$dir" rl-equivalent realized_harness)" ] || fail "fallback wrote a duplicate harness field"
+  [ "$(meta_field "$dir" rl-equivalent realized_model)" = gpt-6.1-sol ] || fail "fallback lost realized model"
+  [ "$(meta_field "$dir" rl-equivalent realized_effort)" = high ] || fail "fallback lost realized effort"
+  [ "$(meta_field "$dir" rl-equivalent fallback_reason | jq -r .)" = "$reason" ] || fail "fallback lost multiline reason"
+  assert_contains "$(cat "$dir/fake/literal")" "--model 'gpt-6.1-sol'" "fallback did not realize the model"
+  assert_contains "$(cat "$dir/fake/literal")" 'model_reasoning_effort="high"' "fallback did not realize the effort"
+  out=$(run_control "$dir" rl-equivalent relaunch --note "resume the same profile"); rc=$?
+  expect_code 0 "$rc" "unchanged fallback profile should relaunch"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-equivalent dispatch_rule_fingerprint)" = "$fingerprint" ] || fail "unchanged relaunch changed the rule fingerprint"
+  [ "$(meta_field "$dir" rl-equivalent reasoning_class)" = strong ] || fail "unchanged relaunch lost its class"
+  [ "$(meta_field "$dir" rl-equivalent fallback_reason | jq -r .)" = "$reason" ] || fail "unchanged relaunch replaced the fallback reason with its progress note"
+  pass "declared equivalent fallback records the rule, class, realized profile, provider and reason"
+}
+
+test_reordered_rule_refuses_before_stop() {
+  local dir id out rc fingerprint
+  id=rl-rule-reordered
+  dir=$(new_case rule-reordered "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/home/config"
+  printf '%s\n' '{"rules":[{"when":"first tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"codex","model":"gpt-6.1-sol","effort":"high","reasoning_class":"strong"}]},{"when":"second tasks","use":[{"harness":"claude","model":"opus","effort":"xhigh","reasoning_class":"strong"},{"harness":"grok","model":"grok-4.7","effort":"high","reasoning_class":"strong"}]}]}' > "$dir/home/config/crew-dispatch.json"
+  unlink "$dir/home/state/$id.meta"
+  : > "$dir/fake/windows"
+  printf zsh > "$dir/fake/command"
+  fm_fake_exit0 "$dir/fakebin" treehouse
+  out=$(run_spawn "$dir" "$id" "$dir/proj" --harness claude --model opus --effort xhigh \
+    --mode no-mistakes --yolo off --dispatch-rule '{"rule":"rule_1"}'); rc=$?
+  expect_code 0 "$rc" "configured spawn should publish the selected rule"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" dispatch_rule)" = '{"rule":"rule_1"}' ] || fail "spawn did not record the selected rule"
+  fingerprint=$(meta_field "$dir" "$id" dispatch_rule_fingerprint)
+  [[ $fingerprint =~ ^[0-9a-f]{64}$ ]] || fail "spawn did not record the rule fingerprint"
+  printf '%s' "$(meta_field "$dir" "$id" worktree)" > "$dir/fake/cwd"
+  printf '%s' "$(meta_field "$dir" "$id" window | cut -d: -f1)" > "$dir/fake/session-name"
+  : > "$dir/fake/literal"
+  : > "$dir/fake/keys"
+  jq '.rules |= reverse' "$dir/home/config/crew-dispatch.json" > "$dir/config.tmp"
+  mv "$dir/config.tmp" "$dir/home/config/crew-dispatch.json"
+  cp "$dir/home/state/$id.meta" "$dir/meta.before"
+  fm_fake_exit0 "$dir/fakebin" grok
+  out=$(run_control "$dir" "$id" relaunch --harness grok --model grok-4.7 --effort high --note "quota fallback"); rc=$?
+  expect_code 1 "$rc" "reordered rule should refuse before stopping the worker"$'\n'"$out"
+  assert_contains "$out" "dispatch rule changed since launch for task $id" "reordered rule refusal did not name the task"
+  cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "reordered rule refusal changed task metadata"
+  [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "reordered rule refusal stopped the worker"
+  printf zsh > "$dir/fake/command"
+  out=$(run_spawn "$dir" "$id" --relaunch --harness grok --model grok-4.7 --effort high --fallback-reason="quota fallback"); rc=$?
+  expect_code 1 "$rc" "direct relaunch should refuse the reordered rule"$'\n'"$out"
+  assert_contains "$out" "dispatch rule changed since launch for task $id" "direct refusal did not name the task"
+  cmp -s "$dir/meta.before" "$dir/home/state/$id.meta" || fail "direct refusal changed task metadata"
+  pass "control and direct relaunch refuse a reordered rule"
+}
+
+test_scheduled_plan_continuation_ignores_unrelated_crew_dispatch() {
+  local dir id out rc
+  id=rl-scheduled-plan
+  dir=$(new_case scheduled-plan "$id")
+  add_ship_task "$dir" "$id" claude
+  mkdir -p "$dir/home/config" "$dir/home/state/scheduled-worker/occ"
+  printf '%s\n' '{"rules":[{"when":"unrelated","use":{"harness":"grok","model":"grok-4.7","effort":"high"}}]}' > "$dir/home/config/crew-dispatch.json"
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=xhigh/' "$dir/home/state/$id.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/$id.meta"
+  printf '%s\n' 'spawn_gen=gen-1' >> "$dir/home/state/$id.meta"
+  jq -n --arg project "$dir/proj" '{version:1,authorized:true,occurrence:"occ",task:"rl-scheduled-plan",project:$project,backend:"tmux",mode:"no-mistakes",yolo:"off",reasoning_class:"strong/approved",profiles:[{harness:"claude",model:"opus",effort:"xhigh",reasoning_class:"strong/approved"},{harness:"codex",model:"gpt-6.1-sol",effort:"high",reasoning_class:"strong/approved"}]}' > "$dir/plan.json"
+  jq -S . "$dir/plan.json" > "$dir/home/state/scheduled-worker/occ/plan.json"
+  jq -n --slurpfile plan "$dir/plan.json" '{version:1,phase:"live-worker",attempt:1,tried:[$plan[0].profiles[0]],observed_at:0,action:"spawn",profile:$plan[0].profiles[0],spawn_gen:"gen-1"}' > "$dir/home/state/scheduled-worker/occ/journal.json"
+  jq -n --slurpfile plan "$dir/plan.json" --argjson now "$(date +%s)" '{profile:$plan[0].profiles[1],observed_at:$now,evidence:"both listed profiles checked"}' > "$dir/selection.json"
+  printf '%s\n' '{"kind":"usage-exhausted","spawn_gen":"gen-1","evidence":"current generation exhausted"}' > "$dir/proof.json"
+  printf '%s\n' 'Continue after exhaustion.' > "$dir/note.txt"
+  fm_fake_exit0 "$dir/fakebin" codex
+  printf codex > "$dir/fake/becomes"
+  mkdir -p "$dir/user-home"
+  out=$(env -u TMUX -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION -u HERDR_SOCKET_PATH \
+    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_STATE_OVERRIDE="$dir/home/state" \
+    FM_DATA_OVERRIDE="$dir/home/data" FM_CONFIG_OVERRIDE="$dir/home/config" \
+    FM_FAKE_DIR="$dir/fake" TMUX_TMPDIR="$dir/tmux-root" HOME="$dir/user-home" \
+    CLAUDE_CONFIG_DIR='' FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
+    "$ROOT/bin/fm-scheduled-worker.sh" "$dir/plan.json" "$dir/selection.json" \
+    --exhaustion "$dir/proof.json" --note-file "$dir/note.txt" 2>&1); rc=$?
+  expect_code 0 "$rc" "scheduled continuation should use its authorized plan"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" harness)" = codex ] || fail "scheduled continuation did not launch the selected harness"
+  [ "$(meta_field "$dir" "$id" reasoning_class)" = strong/approved ] || fail "scheduled continuation lost its authorized class"
+  [ "$(jq -r .phase "$dir/home/state/scheduled-worker/occ/journal.json")" = live-worker ] || fail "scheduled continuation was not published"
+  assert_grep '/exit' "$dir/fake/literal" "scheduled continuation did not stop the prior worker"
+  pass "scheduled plan authorizes continuation beside unrelated crew dispatch"
+}
+
+test_leading_option_relaunch_notes_reach_replacement() {
+  local dir id out rc note variant
+  for variant in option markdown; do
+    id="rl-leading-note-$variant"
+    dir=$(new_case "$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    if [ "$variant" = option ]; then
+      note='--quota exhausted'
+      out=$(run_control "$dir" "$id" relaunch "--note=$note"); rc=$?
+    else
+      note=$'---\nContinue from the checkpoint.'
+      printf '%s\n' "$note" > "$dir/note.md"
+      out=$(run_control "$dir" "$id" relaunch --note-file "$dir/note.md"); rc=$?
+    fi
+    expect_code 0 "$rc" "$variant note should reach the replacement"$'\n'"$out"
+    [ "$(meta_field "$dir" "$id" fallback_reason | jq -r .)" = "$note" ] || fail "$variant note changed in the replacement receipt"
+    assert_grep '/exit' "$dir/fake/literal" "$variant note did not stop the prior worker"
+    assert_grep 'Firstmate operational input waiting: read' "$dir/fake/literal" "$variant note did not launch the replacement"
+  done
+  pass "leading-option and Markdown relaunch notes reach the replacement"
+}
+
+test_explicit_default_clears_same_harness_profile() {
+  local dir out rc
+  dir=$(new_case clearprofile rl-clear-profile)
+  add_ship_task "$dir" rl-clear-profile claude
+  sed 's/^model=default$/model=opus/; s/^effort=default$/effort=high/' \
+    "$dir/home/state/rl-clear-profile.meta" > "$dir/meta.tmp"
+  mv "$dir/meta.tmp" "$dir/home/state/rl-clear-profile.meta"
+  out=$(run_control "$dir" rl-clear-profile relaunch --model default --effort default --note "clear profile"); rc=$?
+  expect_code 0 "$rc" "explicit default should clear both axes"$'\n'"$out"
+  [ "$(meta_field "$dir" rl-clear-profile model)" = default ] || fail "explicit default restored the old model"
+  [ "$(meta_field "$dir" rl-clear-profile effort)" = default ] || fail "explicit default restored the old effort"
+  pass "explicit default still clears a same-harness model and effort"
+}
+
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop() {
   local dir out rc id=rl-ultra
   dir=$(new_case native-ultra "$id")
@@ -1064,7 +1314,9 @@ test_secondmate_relaunch_holds_off_the_watcher_auto_relaunch() {
   local dir home out rc hook
   dir=$(new_case watcher-race sm9)
   home="$dir/home"
-  mkdir -p "$home/data/sm9"
+  mkdir -p "$home/data/sm9" "$home/config"
+  # This race tests a Claude relaunch, independently of the host's harness.
+  printf 'claude\n' > "$home/config/secondmate-harness"
   printf '# secondmate brief\n' > "$home/data/sm9/brief.md"
   fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
   mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" \
@@ -1465,7 +1717,7 @@ test_promoted_scout_relaunch_receives_the_current_delivery_contract() {
     FM_HOME="$home" "$BRIEF" "$id" firstmate --scout >/dev/null \
       || fail "$mode: could not scaffold the scout brief"
     brief="$home/data/$id/brief.md"
-    sed 's/{TASK}/Fix the promotion relaunch contract./; s/{FIRSTMATE_SPEC}/Preserve the current delivery mode./' \
+    sed 's/{TASK}/Fix the promotion relaunch contract./; s/{FIRSTMATE_SPEC}/Preserve the current delivery mode./; s/{GOAL}/Fix relaunch./; s/{OFF_LIMITS}/Other scripts./; s/{CONTRACTS}/none/' \
       "$brief" > "$brief.filled"
     mv "$brief.filled" "$brief"
     {
@@ -1483,7 +1735,7 @@ test_promoted_scout_relaunch_receives_the_current_delivery_contract() {
     printf '%s' "$dir/wt" > "$dir/fake/cwd"
 
     out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
-      "$PROMOTE" "$id" --mode "$mode" --yolo off 2>&1) \
+      "$PROMOTE" "$id" --mode "$mode" --yolo off "${PROMOTION_SCOPE[@]}" 2>&1) \
       || fail "$mode: scout promotion should succeed: $out"
     assert_grep 'This is a SCOUT task' "$brief" \
       "$mode: the reproduction fixture lost the original scout delivery text"
@@ -1675,14 +1927,14 @@ test_prepublication_failure_keeps_concurrent_durable_metadata() {
     run_control "$dir" rl30 relaunch --harness codex --note "preserve concurrent metadata" \
       > "$dir/control.out" &
   control_pid=$!
-  while [ ! -e "$dir/cwd-race-ready" ] && [ "$i" -lt 200 ]; do
+  while [ ! -e "$dir/cwd-race-ready" ] && [ "$i" -lt 500 ]; do
     /bin/sleep 0.01
     i=$((i + 1))
   done
   [ -e "$dir/cwd-race-ready" ] || {
     kill "$control_pid" 2>/dev/null || true
     wait "$control_pid" 2>/dev/null || true
-    fail "relaunch did not reach its pre-publication endpoint check"
+    fail "relaunch did not reach its pre-publication endpoint check: $(cat "$dir/control.out")"
   }
   link_out=$(env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
     "$X_LINK" rl30 request-30 --carry-count 2 --carry-ts 1700000000 \
@@ -2042,7 +2294,7 @@ test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution() {
     i=$((i + 1))
   done
   [ -e "$lock" ] || fail "could not stage the promotion lifecycle lock"
-  out=$(FM_HOME="$dir/home" "$PROMOTE" rl29 --mode direct-PR --yolo on 2>&1); rc=$?
+  out=$(FM_HOME="$dir/home" "$PROMOTE" rl29 --mode direct-PR --yolo on "${PROMOTION_SCOPE[@]}" 2>&1); rc=$?
   kill "$holder" 2>/dev/null || true
   wait "$holder" 2>/dev/null || true
   expect_code 1 "$rc" "promotion should refuse a concurrent lifecycle action"
@@ -3132,6 +3384,15 @@ test_harness_switch_does_not_carry_the_old_profile_axes
 test_harness_switch_resolves_a_prefixed_recorded_harness
 test_prefixed_recorded_harness_requires_explicit_replacement
 test_same_harness_relaunch_keeps_the_profile_axes
+test_direct_spawn_relaunch_keeps_the_profile_axes
+test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop
+test_fallback_policy_changes
+test_configured_fallback_refuses_an_omitted_effort_before_stop
+test_configured_equivalent_fallback_records_realized_profile_and_reason
+test_reordered_rule_refuses_before_stop
+test_scheduled_plan_continuation_ignores_unrelated_crew_dispatch
+test_leading_option_relaunch_notes_reach_replacement
+test_explicit_default_clears_same_harness_profile
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop
 test_signed_out_worker_account_pin_refuses_before_stop
 test_worker_account_pin_follows_the_relaunch

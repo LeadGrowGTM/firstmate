@@ -561,12 +561,15 @@ The check reads Boat and reports; it never stops a sandbox.
 
 An explicitly Boat-selected ship or scout can use [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) through a purpose-built `boat-eng` remote route.
 Firstmate still labels and selects work at intake; the sender does not evaluate routing policy or choose a model profile.
-The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, refusal behavior, and transport recovery commands in their headers and `--help`.
+The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, and refusal behavior in their headers and `--help`; an unconfirmed-start refusal prints the same-task recovery commands.
 
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
-The approved box and SSH alias are pinned by the sender; `--prepare --code-only` takes a valid task envelope on stdin and performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
-Use the sender for each overflow resume: an independent `boat resume` does not establish the current instance's `--no-env` receipt, so later dispatch is refused.
+Record the approved box id in the controller home's `config/boat-box-id`; the sender's header owns its validation and the fixed `boat-prove` SSH alias.
+`--prepare --code-only` takes a valid task envelope on stdin and performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
+Use the sender for each overflow resume so it establishes the current instance's `fm-code` environment receipt; an independent resume does not authorize later dispatch.
+A box once resumed with `--no-env` can never receive named-environment injection and needs a replacement environment-enabled box.
+Changing the configured id requires approval of that replacement; the sender never creates or replaces boxes.
 
 Send one JSON task envelope whose `intent` and `spec` contain only code-only task prose, with the concrete `harness`, `model`, and `effort` already resolved under the ordinary dispatch and quota rules:
 
@@ -578,6 +581,21 @@ The box generates its own normal worker brief and operational paths, allocates i
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
+Provision the dedicated `fm-code` Boat environment with GitHub access enabled and secrets, Boat credentials, and agent credentials disabled.
+The box acts as the captain's GitHub account through Boat's own GitHub connection; no PC credential or Infisical token is transferred.
+Set the remote `boat-eng` home's local `config/boat-github-account.json` to the expected public GitHub account, for example `{"id":194535094,"login":"MitchellkellerLG"}`; use the captain's current account ID and login for the home being provisioned.
+The worker compares the injected account by numeric ID, uses the login as a readable label, and refuses ships and scouts before backlog intake when the setting is absent, invalid, or mismatched.
+Install `gh-axi` on the box and ensure its worker harnesses have working logins; this environment does not inject agent logins.
+Before backlog intake, every ship and scout resolves the injected GitHub account on the box and derives its public noreply committer name and email.
+The worker applies that identity only to its isolated worktree, including reused slots; no identity is read from the controller's Git configuration or accepted in task JSON.
+Boat worktree pools live only on the box, and PC pools never host Boat workers.
+Do not send a token in task JSON: the current remote job transport stages stdin on disk.
+The separate live delivery check must prove GitHub authentication, repository access, and PR delivery on the approved environment-enabled box before reporting this setup as working.
+
+Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.
+The worker does not auto-answer Codex directory-trust text because a rendered transcript cannot prove an active modal.
+Without a fresh worker status declaration, dispatch refuses success and leaves the task intact for same-task reconciliation.
+Running boxes reserve only their existing timer's remaining duration against the unchanged spend caps; dispatch never extends the timer.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
 
@@ -595,6 +613,15 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown <task-id>
 ```
 
 The command uses ordinary remote teardown and its landed-work checks.
+For scouts, first review the report's unresolved calls and record the completion inventory from the controller with the origin task id:
+
+```sh
+FM_HOME=<controller-home> bin/fm-on.sh boat-eng fm-captain-hold.sh complete <task-id> --none
+```
+
+Use `--none` only after confirming there are no unresolved calls; otherwise pass the durable held task ids as defined by `fm-captain-hold.sh --help`.
+Teardown requires a completed `fm-captain-hold.sh` inventory for the origin task id under the same trust model as local scouts; it does not verify who recorded the inventory.
+When the inventory is incomplete, teardown refuses and prints the controller command, preserving both the scout and the box.
 It stops the approved box when both Boat task records and worker endpoints are gone.
 There is no twenty-minute idle monitor: if teardown does not complete, the box runs until its auto-stop timer expires.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.

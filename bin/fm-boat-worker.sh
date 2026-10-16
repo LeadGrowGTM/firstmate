@@ -12,7 +12,8 @@
 #   harness: claude|codex|grok; model: concrete nonempty model; effort:
 #   low|medium|high|xhigh|max|ultra. These are the profile selected by firstmate
 #   under its ordinary dispatch/quota rules, never an alternate quota budget.
-# No other keys (including env, secrets, home, origin, yolo, flags) are accepted.
+# No other keys (including git_name, git_email, env, secrets, home, origin,
+# yolo, flags) are accepted. Git identity never comes from the controller.
 #
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project
@@ -37,11 +38,25 @@
 #
 # Inspect/steer/report through fm-on.sh boat-eng with existing fm-crew-state.sh,
 # fm-peek.sh, fm-send.sh, and fm-remote-file.sh; task teardown uses fm-teardown.sh.
+# Dispatch success requires a fresh worker status declaration within 120 polls
+# (one second apart; FM_BOAT_START_POLLS and FM_BOAT_START_INTERVAL override).
+# Codex directory-trust text is not auto-answered; missing start proof leaves
+# the task intact for same-id reconciliation, never retry.
+# Scout teardown requires a completed captain-hold inventory; refusal
+# prints the exact controller command rather than manufacturing --none consent.
+# Every worker, including scouts, requires gh-axi and a valid injected on-box
+# GitHub account matching config/boat-github-account.json by numeric id before
+# backlog intake. gh-axi api /user supplies only login/id;
+# its --jq scalar is read from its exact untruncated api_response envelope.
+# The account login and <numeric-id>+<login>@users.noreply.github.com become
+# --git-name/--git-email; fm-spawn.sh applies them only to the isolated worktree.
 # No merges, home transfer, secret injection, or new supervision loop is added.
 set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$SCRIPT_DIR/fm-timeout-lib.sh"
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 boat_runtime() {
   [ -z "${TMUX:-}" ] || die 'Boat worker commands must run outside tmux through the remote transport'
@@ -99,6 +114,9 @@ if [ "$1" = teardown ] || [ "$1" = idle ]; then
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
     case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
     [ "$(fm_backend_of_meta "$FM_HOME/state/$ID.meta")" = tmux ] || die 'Boat teardown requires a tmux worker'
+    if [ "$kind" = scout ] && ! "$SCRIPT_DIR/fm-captain-hold.sh" verify "$ID" >&2; then
+      die "scout completion inventory required; after reviewing unresolved calls, run from the controller: fm-on.sh boat-eng fm-captain-hold.sh complete $ID --none (or list the held task ids instead of --none)"
+    fi
     "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
   fi
   COUNT=$(boat_worker_count) || exit 1
@@ -167,6 +185,38 @@ case "$origin" in
 esac
 [ -z "$(git -C "$REPO" ls-files -- 'clients' '.env' '**/.env')" ] || die 'project tracks client or secret files'
 [ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
+command -v gh-axi >/dev/null || die 'every worker requires gh-axi installed on the Boat box'
+# Ask the injected connection for public identity only, never inspect or stage
+# its credentials. A marker/base64 scalar avoids parsing arbitrary TOON fields.
+GH_OUTPUT=$(fm_run_timed 30 gh-axi api /user --jq '"fm_boat_identity=" + ({login,id} | tojson | @base64)' --full 2>/dev/null) || die 'on-box GitHub account is unavailable'
+GH_ENCODED=$(printf '%s\n' "$GH_OUTPUT" | sed -n 's/^  body: fm_boat_identity=\([A-Za-z0-9+/=]*\)$/\1/p')
+[ -n "$GH_ENCODED" ] &&
+  [ "$GH_OUTPUT" = "$(printf 'api_response:\n  body: fm_boat_identity=%s\n  truncated: false' "$GH_ENCODED")" ] || die 'on-box GitHub identity response is invalid or truncated'
+GH_ACCOUNT=$(jq -cen --arg encoded "$GH_ENCODED" '
+  $encoded | @base64d | fromjson | select(type == "object") |
+  select((.login | type == "string" and length <= 39 and
+    test("\\A[A-Za-z0-9]+(-[A-Za-z0-9]+)*\\z")) and
+    (.id | type == "number" and . > 0 and . <= 9007199254740991 and floor == .))
+' 2>/dev/null) || die 'on-box GitHub account login or numeric id is invalid'
+GIT_NAME=$(printf '%s' "$GH_ACCOUNT" | jq -r .login)
+GH_ID=$(printf '%s' "$GH_ACCOUNT" | jq -r .id)
+ACCOUNT_CONFIG="$FM_HOME/config/boat-github-account.json"
+if [ ! -f "$ACCOUNT_CONFIG" ] || [ -L "$ACCOUNT_CONFIG" ]; then
+  die "expected Boat GitHub account is missing (config/boat-github-account.json); actual $GIT_NAME ($GH_ID)"
+fi
+[ "$(wc -c < "$ACCOUNT_CONFIG")" -le 256 ] || die 'invalid config/boat-github-account.json'
+EXPECTED_ACCOUNT=$(jq -cen --slurpfile account "$ACCOUNT_CONFIG" '
+  $account | select(length == 1) | .[0] |
+  select(type == "object" and (keys == ["id","login"]) and
+    (.login | type == "string" and length <= 39 and
+      test("\\A[A-Za-z0-9]+(-[A-Za-z0-9]+)*\\z")) and
+    (.id | type == "number" and . > 0 and . <= 9007199254740991 and floor == .))
+' 2>/dev/null) || die 'invalid config/boat-github-account.json'
+EXPECTED_ID=$(printf '%s' "$EXPECTED_ACCOUNT" | jq -r .id)
+EXPECTED_NAME=$(printf '%s' "$EXPECTED_ACCOUNT" | jq -r .login)
+[ "$GH_ID" = "$EXPECTED_ID" ] ||
+  die "Boat GitHub account mismatch: expected $EXPECTED_NAME ($EXPECTED_ID); actual $GIT_NAME ($GH_ID)"
+GIT_EMAIL=$(printf '%s' "$GH_ACCOUNT" | jq -r '"\(.id)+\(.login)@users.noreply.github.com"')
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
@@ -203,6 +253,50 @@ awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
 ' "$BRIEF" > "$TMP/brief"
 cat "$TMP/brief" > "$BRIEF"
 if [ "$MODE" != scout ]; then ARGS+=(--yolo off); fi
+ARGS+=(--git-name "$GIT_NAME" --git-email "$GIT_EMAIL")
 ARGS+=(--backend tmux --harness "$(jq -r .harness "$TMP/request")" --model "$(jq -r .model "$TMP/request")" --effort "$(jq -r .effort "$TMP/request")")
-"$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}"
+STATUS="$FM_HOME/state/$ID.status"
+STATUS_LINES=0
+if [ -L "$STATUS" ] || { [ -e "$STATUS" ] && [ ! -f "$STATUS" ]; }; then
+  die 'unsafe worker status path'
+fi
+if [ -f "$STATUS" ]; then STATUS_LINES=$(wc -l < "$STATUS"); fi
+"$SCRIPT_DIR/fm-spawn.sh" "$ID" "$REPO" "${ARGS[@]}" >&2
+# A spawned pane is not proof that the brief was consumed. Only a new worker
+# declaration counts.
+# shellcheck source=bin/fm-classify-lib.sh
+. "$SCRIPT_DIR/fm-classify-lib.sh"
+polls=${FM_BOAT_START_POLLS:-120}
+interval=${FM_BOAT_START_INTERVAL:-1}
+case "$polls" in ''|*[!0-9]*|0) die 'invalid Boat start poll limit' ;; esac
+for ((poll=0; poll<polls; poll++)); do
+  started=0
+  refused=0
+  if [ -f "$STATUS" ]; then
+    fresh=$(tail -n "+$((STATUS_LINES + 1))" "$STATUS")
+    while IFS= read -r line; do
+      case "$line" in *': '*) ;; *) continue ;; esac
+      status_line_at_epoch "$line" >/dev/null || continue
+      status_verb=''
+      status_line_verb "$line" status_verb
+      case "$status_verb" in
+        failed|blocked|needs-decision) refused=1 ;;
+        working|paused|done) started=1 ;;
+      esac
+    done <<< "$fresh"
+  fi
+  [ "$refused" -eq 0 ] || die "worker $ID declared a failure or decision before start confirmation; reconcile its status"
+  if [ "$started" -eq 1 ]; then
+    printf 'boat-started: %s (fresh worker status)\n' "$ID"
+    break
+  fi
+  if [ "$poll" -lt "$((polls - 1))" ]; then sleep "$interval"; fi
+done
+if [ "$poll" -eq "$polls" ]; then
+  printf 'error: worker %s did not prove start with a fresh status; a Codex folder-trust prompt is a known cause. Reconcile the same task before retry.\n' "$ID" >&2
+  printf 'Inspect: fm-on.sh boat-eng fm-peek.sh %s\n' "$ID" >&2
+  printf 'If the live pane shows that prompt, answer: fm-on.sh boat-eng fm-send.sh %s --key Enter\n' "$ID" >&2
+  printf 'Then inspect: fm-on.sh boat-eng fm-peek.sh %s\n' "$ID" >&2
+  exit 1
+fi
 printf 'boat-task: %s project=%s mode=%s route=boat-eng\n' "$ID" "$PROJECT" "$MODE"

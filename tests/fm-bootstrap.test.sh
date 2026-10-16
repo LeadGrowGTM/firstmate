@@ -1133,6 +1133,10 @@ test_crew_dispatch_validation() {
     esac
   done <<'ROWS'
 malformed dispatch config is flagged^{"rules":[^exact^CREW_DISPATCH: invalid config/crew-dispatch.json - malformed JSON
+declared equivalent class is accepted^{"default":{"harness":"codex","model":"gpt-6.1-sol","effort":"xhigh","reasoning_class":"strong"}}^empty^
+empty reasoning class is flagged^{"default":{"harness":"codex","reasoning_class":""}}^exact^CREW_DISPATCH: invalid config/crew-dispatch.json - reasoning_class must be a non-empty label
+numeric reasoning class is flagged^{"rules":[{"when":"hard tasks","use":{"harness":"codex","reasoning_class":3}}]}^exact^CREW_DISPATCH: invalid config/crew-dispatch.json - reasoning_class must be a non-empty label
+newline reasoning class is flagged^{"default":{"harness":"codex","reasoning_class":"strong\n"}}^exact^CREW_DISPATCH: invalid config/crew-dispatch.json - reasoning_class must be a non-empty label
 unverified dispatch harness is flagged^{"rules":[{"when":"anything","use":{"harness":"spaceship"}}],"default":{"harness":"codex"}}^exact^CREW_DISPATCH: invalid config/crew-dispatch.json - unverified harness: spaceship
 codex Luna max effort is accepted^{"rules":[{"when":"big feature","use":{"harness":"codex","model":"gpt-5.6-luna","effort":"max"}}]}^empty^
 codex unsupported model max effort is flagged^{"rules":[{"when":"big feature","use":{"harness":"codex","model":"gpt-5","effort":"max"}}]}^exact^CREW_DISPATCH: invalid config/crew-dispatch.json - invalid effort: codex:max

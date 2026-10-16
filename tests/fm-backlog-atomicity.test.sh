@@ -1411,6 +1411,7 @@ test_boat_intake_owns_the_provisioned_backlog() {
     mkdir -p "$home/"{bin,data,state,config,projects} "$case_dir/user-home"
     printf 'Fixture home.\n' > "$home/AGENTS.md"
     printf 'boat-eng\n' > "$home/.fm-secondmate-home"
+    printf '%s\n' '{"id":12345,"login":"fixture-boat"}' > "$home/config/boat-github-account.json"
     printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$home/.tasks.toml"
     printf 'tmux\n' > "$home/config/backend"
     touch "$home/state/.last-watcher-beat"
@@ -1432,12 +1433,30 @@ SH
     cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 case "\$*" in *'#{pane_current_path}'*) printf '%s\n' '$case_dir/wt'; exit 0 ;; esac
+case "\${1:-}" in
+  send-keys)
+    case " \$* " in
+      *' -l '*) : > '$case_dir/launch-pending' ;;
+      *' Enter '*)
+        if [ -e '$case_dir/launch-pending' ]; then
+          printf 'working [at=1791892800]: brief consumed\n' >> '$home/state/task-one.status'
+          rm '$case_dir/launch-pending'
+        fi
+        ;;
+    esac
+    ;;
+esac
 case "\${1:-}" in display-message) printf 'firstmate\n' ;; esac
 exit 0
 SH
     chmod +x "$fakebin/git" "$fakebin/tmux"
     boat_fixture_cat "$fakebin"
-    fm_fake_exit0 "$fakebin" treehouse gh gh-axi no-mistakes codex
+    fm_fake_exit0 "$fakebin" treehouse gh no-mistakes codex
+    cat > "$fakebin/gh-axi" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' 'api_response:' '  body: fm_boat_identity=eyJpZCI6MTIzNDUsImxvZ2luIjoiZml4dHVyZS1ib2F0In0=' '  truncated: false'
+SH
+    chmod +x "$fakebin/gh-axi"
     if [ "$name" = existing ]; then
       FM_HOME="$home" "$ROOT/bin/fm-tasks-axi.sh" add task-one 'Already queued' --kind ship --repo firstmate >/dev/null \
         || fail 'could not seed an existing queued item'
@@ -1446,7 +1465,7 @@ SH
     out=$(env -u TMUX -u TMUX_PANE FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" HOME="$case_dir/user-home" \
       FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
       FM_CONFIG_OVERRIDE="$home/config" FM_PROJECTS_OVERRIDE="$home/projects" FM_BACKEND=tmux \
-      FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" \
+      FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$case_dir/wt" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 \
       PATH="$fakebin:$PATH" "$ROOT/bin/fm-boat-worker.sh" spawn "$BOAT_FIXTURE_INSTANCE" <<'JSON'
 {"id":"task-one","project":"firstmate","kind":"ship","mode":"direct-PR","intent":"Exercise intake","spec":"Code only","harness":"codex","model":"gpt-6-luna","effort":"low"}
 JSON

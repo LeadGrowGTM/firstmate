@@ -1367,6 +1367,16 @@ Firstmate reads but never edits the override file; existing Claude launch wiring
 The file is per home because each second mate can use different settings, and it is not inherited from the primary home.
 [`fm-spawn.sh`](../bin/fm-spawn.sh) owns the delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
 
+## Claude plugin directories (config/claude-plugin-dirs.json)
+
+The optional local, gitignored `config/claude-plugin-dirs.json` contains a nonempty JSON array of absolute plugin directory paths, such as `["/home/user/fm-home/data/plugins/example"]`.
+For each Claude ship, scout, or relaunch, Firstmate reads the spawning home's file and adds one session-only `--plugin-dir` flag per directory.
+For a Claude second-mate launch or relaunch, Firstmate reads the second mate's own home instead.
+The directories must exist at launch time; an unreadable or invalid file, a missing directory, or a path containing control characters skips the entire file with one note on stderr.
+An absent file and every non-Claude launch remain unchanged.
+This setting does not install plugins into either Claude account and does not change `config/skill-overrides.json` or user-level skill availability.
+[`fm-spawn.sh`](../bin/fm-spawn.sh) owns delivery, with regression coverage in [`tests/fm-spawn-dispatch-profile.test.sh`](../tests/fm-spawn-dispatch-profile.test.sh).
+
 ## Project capacity (config/project-capacity)
 
 The optional local, gitignored `config/project-capacity` tells Firstmate how many workers a project can run at once on this machine, for a project whose machine-local resource - a heavy test suite, a local editor stack, a device - only serves a few workers at a time.
@@ -1517,7 +1527,7 @@ Choose a cap that covers the workers running at once plus the finished work stil
 
 `config/crew-dispatch.json` is an optional local, gitignored file containing natural-language rules that firstmate reads before dispatching a crewmate or scout.
 Firstmate chooses the best matching rule with judgment; shell scripts do not match the natural-language rules.
-Firstmate resolves the rule's profile object or array under `AGENTS.md` section 4 and `quota-array-dispatch`, then passes only concrete `--harness`, `--model`, and `--effort` flags to `fm-spawn.sh`.
+Firstmate resolves the rule's profile object or array under `AGENTS.md` section 4 and `quota-array-dispatch`, then passes concrete `--harness`, `--model`, and `--effort` flags to `fm-spawn.sh`; its help owns the optional rule selector and fallback-reason flags.
 
 **Spawn requirements**
 
@@ -1559,6 +1569,7 @@ This section is the single owner of the canonical schema and its per-field seman
 | `use` and optional top-level `default` | Accept one profile object or a non-empty array of profile objects; the single-object form remains fully backward-compatible. |
 | Profile `harness` | Required in every profile. |
 | Profile `model` and `effort`; rule `why` | Optional. |
+| Profile `reasoning_class` | Optional non-empty label containing letters, digits, dots, underscores, or plain dashes, beginning with a letter or digit; matching labels declare equivalent reasoning classes across profiles. |
 
 **Fields applied only by typed resolution**
 
@@ -1607,6 +1618,24 @@ This single-provider table is separate from the frozen legacy mapping used by `f
 - If no dispatch rule fits, firstmate resolves `default` through the same object-or-array path before falling back to `config/crew-harness`.
 - Except for `ultra`, which refuses unsupported profiles under the native-effort contract above, an effort value the chosen harness does not accept is recorded as `effort=` in task meta for traceability but omitted from the launch flags.
 - Bootstrap reports unsupported harness/model/effort combinations as a `CREW_DISPATCH` diagnostic when they are visible in the file.
+
+Spawn records the uniquely selected profile set as JSON-encoded `dispatch_rule` (`{"rule":"rule_1"}` for the first rule or `{"default":true}`), a SHA-256 `dispatch_rule_fingerprint` of its condition and use list (or the default use list), its optional `reasoning_class` and `dispatch_provider`, and the JSON-encoded `fallback_reason` in task metadata.
+An ambiguous set requires an explicit selector at intake; scripts never choose among natural-language rules.
+An explicit profile outside the configuration remains an intake override, with no recorded rule authorizing subsequent fallback.
+Ship and scout relaunches preserve the recorded model and effort when omitted, including direct spawn relaunches, and preserve the chosen class and fallback rationale on an unchanged profile.
+A crew-dispatch replacement must be listed in that same rule in the current configuration; removing the rule or its configuration cannot authorize a replacement.
+For records with a rule fingerprint, changing or reordering that rule refuses relaunch before stopping the worker, even when the replacement remains listed at the saved position.
+Different models or adapters require matching declared `reasoning_class` labels, rather than treating equal effort tokens as evidence of equal model capability.
+Without declared labels, the same adapter and model may retain or increase its explicit effort, but may not lower it or replace it with an unknown default.
+Legacy task records recover a rule only when their recorded profile identifies exactly one current set; ambiguous or unlisted records refuse fallback.
+Control checks the same guard before stopping an agent and uses its progress note as the fallback reason; direct spawn replacements require an explicit reason.
+This guard does not select a fallback or change quota/account policy.
+Unconfigured manual replacements and configured secondmate pins retain their existing control contracts.
+
+`harness` records the realized harness; `realized_model` records a model supplied to the canonical launch and is absent when the harness chooses its default; `realized_effort` records the applied effort or `default`, while raw-command model and effort record `unknown`.
+These fields describe the launch request, not unobservable model substitutions inside a vendor service.
+A declared reasoning class or configured fallback refuses an effort the adapter would omit, and a raw command cannot claim a configured profile.
+Public-interface regression coverage lives in `tests/fm-spawn-dispatch-profile.test.sh` and `tests/fm-control-relaunch.test.sh`.
 
 See [`docs/examples/crew-dispatch.json`](examples/crew-dispatch.json) for a starting point to copy into local `config/crew-dispatch.json`; its Pi default declares the `claude` provider required for typed resolution of that Anthropic model.
 
@@ -1713,6 +1742,7 @@ The scaffold never picks a different type.
       "use": "<one line>",
       "skills": ["<skill name or repo-relative path>"],
       "agents": ["<agent name or repo-relative path>"],
+      "tools": ["<tool or CLI name>"],
       "check": "<command>",
       "hand_back": "<one line>",
       "model": "<optional model token>",
@@ -1729,6 +1759,7 @@ The scaffold never picks a different type.
 | `name` | Required lowercase slug (`^[a-z0-9]+(-[a-z0-9]+)*$`). |
 | `use` | Required one line saying when to pick this type. |
 | `skills`, `agents` | Optional arrays of names or repo-relative paths the worker resolves in the project, never absolute paths and never copied text. |
+| `tools` | Optional array of the named tools or CLIs the worker uses for this type, in the same form; the brief tells the worker to name any substitute when it hands back. |
 | `check` | Optional one-line command, omitted when the type has no check. |
 | `hand_back` | Required one line describing what the worker hands back. |
 | `touch` | Required one-line boundary, recorded in the brief and not enforced. |
@@ -1904,6 +1935,7 @@ No qualifying option, or two equally probable qualifying options, produces `ambi
 | `error` | API, network, malformed response metadata, rendering, or quota-axi failure. |
 
 Every result above exits 0.
+For a `clear` result, the `profile:` line also identifies the selected rule and carries a rationale with the resolver note, provider, and `spendPriority` for the spawn receipt.
 
 - Response probabilities must contain exactly every offered choice, use numeric values from 0 through 1, and sum to approximately 1 within 0.01.
 - Only a usage or configuration error exits 2: an unreadable brief, an existing but unreadable or malformed canonical rules file, or missing `jq`, each reported and never selected around.

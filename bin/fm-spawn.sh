@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
-#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--git-name <name> --git-email <email>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--git-name <name> --git-email <email>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
@@ -19,8 +19,8 @@
 #   yolo is inactive (bin/fm-project-mode.sh's header carries that decision). A
 #   registry entry the parser refuses stops the spawn rather than launching on a
 #   guessed posture. A
-#   ship or scout spawn also refuses leftover `{TASK}` / `{FIRSTMATE_SPEC}`
-#   placeholders, an empty Task, an incomplete pair of Task subsections, or a
+#   ship or scout spawn also refuses unfilled Captain intent and required labeled
+#   spec fields, an empty Task, an incomplete pair of Task subsections, or a
 #   `## Captain's intent` line opening with a Captain label or address.
 #   Every ship or scout spawn renders `launch-brief.md`; for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
@@ -48,11 +48,21 @@
 #   base_branch= in state/<id>.meta, which a relaunch reuses and later review and
 #   cleanup read; it is refused on secondmates and relaunches, and without it
 #   nothing changes.
+#   --git-name and --git-email must be supplied together on a fresh ship or
+#   scout launch. They set the committer identity only in its verified linked
+#   task worktree via Git worktree config, before the harness starts. Enabling
+#   extensions.worktreeConfig changes common config, so an existing core.bare=true
+#   or core.worktree refuses the launch before that change. No flags leave Git
+#   config untouched; secondmates and relaunches cannot set this identity.
 #   Ship/scout launches always put fm-dod-lib.sh's current worker role scope
 #   first in the private launch-brief overlay, including the exact task-owned
 #   steering inbox. This never rewrites a project's instruction files or a
 #   secondmate's charter.
 #        fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>]
+#   --dispatch-rule <JSON-key> disambiguates a fresh launch's configured
+#   profile set; --fallback-reason <text> records the provider/quota rationale.
+#   Configured replacements must belong to the recorded rule and preserve the
+#   reasoning class (bin/fm-dispatch-profile-lib.sh), including direct relaunch.
 #   --relaunch launches a replacement agent for an EXISTING task into that
 #   task's own recorded worktree, reusing its recorded endpoint when that
 #   endpoint still exists, instead of creating either from scratch. It is
@@ -87,7 +97,7 @@
 #   only a shell that will not go refuses.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
-#   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
+#   --model <name> and --effort <default|low|medium|high|xhigh|max|ultra> are concrete profile
 #   axes chosen by firstmate at intake. They are only threaded into harnesses whose
 #   installed CLIs were verified to support that axis; unsupported axes are omitted
 #   from that harness's launch rather than guessed. Ultra is the explicit
@@ -814,11 +824,15 @@ KIND_SET=0
 HARNESS_ARG=
 MODEL=
 EFFORT=
+DISPATCH_RULE=
+FALLBACK_REASON=
 BACKEND_ARG=
 MODE=
 YOLO=
 BRANCH_PREFIX=fm/
 TRACEPARENT_ARG=
+GIT_NAME=
+GIT_EMAIL=
 HARNESS_SET=0
 MODEL_SET=0
 EFFORT_SET=0
@@ -831,6 +845,8 @@ BASE_BRANCH_SET=0
 UPSTREAM_CONSENT=
 UPSTREAM_CONSENT_SET=0
 TRACEPARENT_SET=0
+GIT_NAME_SET=0
+GIT_EMAIL_SET=0
 RELAUNCH=0
 # Opt-in only: exact-resume presentation-order lock waits instead of refusing.
 # Absent/unset keeps upstream refuse-on-contention. See header.
@@ -858,6 +874,8 @@ for a in "$@"; do
       EFFORT=$a
       EFFORT_SET=1
       ;;
+    dispatch-rule) DISPATCH_RULE=$a ;;
+    fallback-reason) FALLBACK_REASON=$a ;;
     backend)
       BACKEND_ARG=$a
       BACKEND_SET=1
@@ -886,6 +904,14 @@ for a in "$@"; do
       TRACEPARENT_ARG=$a
       TRACEPARENT_SET=1
       ;;
+    git-name)
+      GIT_NAME=$a
+      GIT_NAME_SET=1
+      ;;
+    git-email)
+      GIT_EMAIL=$a
+      GIT_EMAIL_SET=1
+      ;;
     *)
       echo "error: internal parser state for --$want_value" >&2
       exit 1
@@ -904,6 +930,10 @@ for a in "$@"; do
     KIND_SET=1
     ;;
   --relaunch) RELAUNCH=1 ;;
+  --dispatch-rule) want_value='dispatch-rule' ;;
+  --dispatch-rule=*) DISPATCH_RULE=${a#--dispatch-rule=} ;;
+  --fallback-reason) want_value='fallback-reason' ;;
+  --fallback-reason=*) FALLBACK_REASON=${a#--fallback-reason=} ;;
   --herdr-resume-lock-wait) HERDR_RESUME_LOCK_WAIT=1 ;;
   --harness) want_value=harness ;;
   --harness=*)
@@ -955,6 +985,16 @@ for a in "$@"; do
     TRACEPARENT_ARG=${a#--traceparent=}
     TRACEPARENT_SET=1
     ;;
+  --git-name) want_value='git-name' ;;
+  --git-name=*)
+    GIT_NAME=${a#--git-name=}
+    GIT_NAME_SET=1
+    ;;
+  --git-email) want_value='git-email' ;;
+  --git-email=*)
+    GIT_EMAIL=${a#--git-email=}
+    GIT_EMAIL_SET=1
+    ;;
   *) POS+=("$a") ;;
   esac
 done
@@ -994,6 +1034,34 @@ done
   echo "error: --traceparent requires a non-empty value" >&2
   exit 1
 }
+if [ "$GIT_NAME_SET" -ne "$GIT_EMAIL_SET" ]; then
+  echo "error: --git-name and --git-email must be supplied together" >&2
+  exit 1
+fi
+if [ "$GIT_NAME_SET" -eq 1 ]; then
+  case "$GIT_NAME" in
+  ''|*[[:cntrl:]]*|*'<'*|*'>'*) echo "error: --git-name must be non-empty and contain no control or Git ident delimiter characters" >&2; exit 1 ;;
+  esac
+  case "$GIT_EMAIL" in
+  ''|*[[:cntrl:][:space:]]*|*'<'*|*'>'*|@*|*@|*@*@*) echo "error: --git-email must be a non-empty Git email address without whitespace, control, or ident delimiter characters" >&2; exit 1 ;;
+  esac
+  case "$GIT_EMAIL" in
+  *@*) ;;
+  *) echo "error: --git-email must contain an address with a local and domain part" >&2; exit 1 ;;
+  esac
+  git_ident=$(GIT_COMMITTER_NAME="$GIT_NAME" GIT_COMMITTER_EMAIL="$GIT_EMAIL" git var GIT_COMMITTER_IDENT 2>/dev/null) || {
+    echo "error: --git-name and --git-email do not form a valid Git committer ident" >&2
+    exit 1
+  }
+  case "$git_ident" in
+  "$GIT_NAME <$GIT_EMAIL> "*) ;;
+  *) echo "error: --git-name and --git-email do not round-trip as a Git committer ident" >&2; exit 1 ;;
+  esac
+  [ "$KIND" != secondmate ] && [ "$RELAUNCH" -eq 0 ] || {
+    echo "error: --git-name and --git-email apply only to fresh ship and scout launches" >&2
+    exit 1
+  }
+fi
 # A parent-delivered carrier replaces this home's own resolution, so it is
 # refused unless it is a secondmate spawn carrying a strictly valid W3C value.
 # Nothing else may reach the pane's TRACEPARENT export.
@@ -1008,9 +1076,9 @@ if [ "$TRACEPARENT_SET" -eq 1 ]; then
   }
 fi
 case "$EFFORT" in
-'' | low | medium | high | xhigh | max | ultra) ;;
+'' | default | low | medium | high | xhigh | max | ultra) ;;
 *)
-  echo "error: --effort must be one of low, medium, high, xhigh, max, ultra" >&2
+  echo "error: --effort must be one of default, low, medium, high, xhigh, max, ultra" >&2
   exit 1
   ;;
 esac
@@ -1800,6 +1868,8 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ -z "$HARNESS_ARG" ] || shared_args+=(--harness "$HARNESS_ARG")
   [ -z "$MODEL" ] || shared_args+=(--model "$MODEL")
   [ -z "$EFFORT" ] || shared_args+=(--effort "$EFFORT")
+  [ -z "$DISPATCH_RULE" ] || shared_args+=(--dispatch-rule "$DISPATCH_RULE")
+  [ -z "$FALLBACK_REASON" ] || shared_args+=("--fallback-reason=$FALLBACK_REASON")
   [ -z "$BACKEND_ARG" ] || shared_args+=(--backend "$BACKEND_ARG")
   # One delivery contract applies to every pair in a batch, exactly like the shared
   # harness. Each pair still re-validates it against its own brief, so a batch
@@ -1808,6 +1878,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ "$YOLO_SET" -eq 0 ] || shared_args+=(--yolo "$YOLO")
   [ "$BRANCH_PREFIX_SET" -eq 0 ] || shared_args+=(--branch-prefix "$BRANCH_PREFIX")
   [ "$BASE_BRANCH_SET" -eq 0 ] || shared_args+=(--base-branch "$BASE_BRANCH")
+  [ "$GIT_NAME_SET" -eq 0 ] || shared_args+=(--git-name "$GIT_NAME" --git-email "$GIT_EMAIL")
   [ "$HERDR_RESUME_LOCK_WAIT" -eq 0 ] || shared_args+=(--herdr-resume-lock-wait)
   for pair in "${POS[@]}"; do
     case "$pair" in
@@ -2215,6 +2286,12 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: task $ID has no recorded harness; pass --harness to relaunch it" >&2
     exit 1
   }
+  # Direct callers get the same profile preservation as the control plane.
+  # A deliberate harness change still requires axes native to the new adapter.
+  if [ "$ARG3" = "$RELAUNCH_PRIOR_HARNESS" ]; then
+    [ "$MODEL_SET" -eq 1 ] || MODEL=$(fm_meta_get "$RELAUNCH_META" model)
+    [ "$EFFORT_SET" -eq 1 ] || EFFORT=$(fm_meta_get "$RELAUNCH_META" effort)
+  fi
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
   '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin | commandcode)
@@ -2905,6 +2982,22 @@ if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
     fi
   fi
 fi
+# Check configured profile changes before provisioning or retiring any wiring.
+# shellcheck source=bin/fm-dispatch-profile-lib.sh
+. "$SCRIPT_DIR/fm-dispatch-profile-lib.sh"
+FM_DISPATCH_PROFILE_RECEIPT='{}'
+if [ "$KIND" != secondmate ]; then
+  [ "$RELAUNCH" -eq 0 ] || [ -z "$DISPATCH_RULE" ] || {
+    echo "error: --relaunch reuses the recorded dispatch rule; --dispatch-rule cannot override it" >&2
+    exit 1
+  }
+  fm_dispatch_profile_check "$CONFIG/crew-dispatch.json" "${RELAUNCH_META:-}" \
+    "$HARNESS" "$MODEL" "$EFFORT" "$DISPATCH_RULE" "$FALLBACK_REASON" "${FM_SCHEDULED_WORKER_PLAN:-}" || exit 1
+  if [ "$RAW_LAUNCH" = 1 ] && jq -e '.source != null' <<< "$FM_DISPATCH_PROFILE_RECEIPT" >/dev/null; then
+    echo "error: a raw command cannot prove the configured dispatch profile; use the canonical --harness launch" >&2
+    exit 1
+  fi
+fi
 # Ultra is an explicit native capability, never a Pi thinking-level alias.
 # Validate the fully resolved profile before worktree or endpoint provisioning.
 if [ "$EFFORT" = ultra ]; then
@@ -3138,40 +3231,29 @@ model_flag_for_harness() {
 
 effort_flag_for_harness() {
   local harness=$1 effort=$2 model=${3:-}
-  [ -n "$effort" ] && [ "$effort" != default ] || return 0
+  effort=$(fm_dispatch_realized_effort "$harness" "$model" "$effort")
+  [ "$effort" != default ] || return 0
   case "$harness" in
   claude)
-    case "$effort" in
-    low | medium | high | xhigh | max) printf -- '--effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--effort %s ' "$(shell_quote "$effort")"
     ;;
   codex)
     # The installed codex config schema uses model_reasoning_effort. The
     # installed model catalog supports max for gpt-5.6-luna; keep that level
     # scoped to the model whose catalog entry advertises it.
-    case "$effort" in
-    low | medium | high | xhigh) printf -- '-c %s ' "$(shell_quote "model_reasoning_effort=\"$effort\"")" ;;
-    max)
-      [ "$model" = gpt-5.6-luna ] || return 0
-      printf -- '-c %s ' "$(shell_quote 'model_reasoning_effort="max"')"
-      ;;
-    esac
+    printf -- '-c %s ' "$(shell_quote "model_reasoning_effort=\"$effort\"")"
     ;;
   grok)
     # grok exposes both --effort and --reasoning-effort; firstmate's profile
     # axis is the reasoning knob. As of grok 0.2.99, --reasoning-effort accepts
     # only low|medium|high and rejects both xhigh and max, so omit those rather
     # than passing a known-bad value.
-    case "$effort" in
-    low | medium | high) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")"
     ;;
   agy)
     # agy 1.2.0 --effort accepts exactly low|medium|high, so xhigh and max are
     # omitted rather than passed as known-bad values (record-and-omit).
-    case "$effort" in
-    low | medium | high) printf -- '--effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--effort %s ' "$(shell_quote "$effort")"
     ;;
   commandcode)
     # Command Code's --effort set is model-scoped and an unknown value exits
@@ -3192,15 +3274,13 @@ effort_flag_for_harness() {
       "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$harness" "$model" "$effort" || return 1
       printf -- '--codex-effort %s ' "$(shell_quote ultra)"
       ;;
-    low | medium | high | xhigh | max) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
+    *) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
     esac
     ;;
   omp)
     # omp 18.1.11 --thinking accepts off|minimal|low|medium|high|xhigh|max|auto,
     # a superset of the shared vocabulary, so every level maps straight across.
-    case "$effort" in
-    low | medium | high | xhigh | max) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--thinking %s ' "$(shell_quote "$effort")"
     ;;
   opencode)
     # opencode's interactive `opencode --prompt` launch has no effort flag
@@ -3220,12 +3300,6 @@ effort_flag_for_harness() {
     # and is likewise omitted. The fragment lands inside the launch's
     # single-quoted assignment, so a literal quote in the model id must close and
     # reopen that quoting.
-    [ -n "$model" ] && [ "$model" != default ] || return 0
-    case "${model%%/*}:$effort" in
-    anthropic:high | anthropic:max) ;;
-    openai:low | openai:medium | openai:high | openai:xhigh) ;;
-    *) return 0 ;;
-    esac
     local model_json
     model_json=$(json_escape "$model")
     model_json=${model_json//\'/\'\\\'\'}
@@ -3242,9 +3316,7 @@ effort_flag_for_harness() {
     # here leaves muse on its own high default. muse's extra none/minimal
     # levels sit below firstmate's shared vocabulary and are deliberately
     # unreachable rather than remapped onto low.
-    case "$effort" in
-    low | medium | high | xhigh | max) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
-    esac
+    printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")"
     ;;
     # rovo has no --effort flag on `run`; its effort mapping rides
     # --config-override, but that flag is single-value (see
@@ -3340,8 +3412,9 @@ rovo_config_override_flag() {
   data_real=$(cd "$data_dir" && pwd -P) || return 1
   state_real=$(cd "$state_dir" && pwd -P) || return 1
   agent_json=
-  case "$effort" in
-  low | medium | high | max) agent_json="\"agent\":{\"efficiencyLevel\":\"$(json_escape "$effort")\"}," ;;
+  case "$(fm_dispatch_realized_effort rovo default "$effort")" in
+  default) ;;
+  *) agent_json="\"agent\":{\"efficiencyLevel\":\"$(json_escape "$effort")\"}," ;;
   esac
   paths_json=$(printf '"%s","%s","%s"' \
     "$(json_escape "$data_real/$id")" \
@@ -3658,7 +3731,7 @@ fi
 }
 if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   if fm_brief_task_placeholders_present "$BRIEF"; then
-    echo "error: $BRIEF still contains {TASK} or {FIRSTMATE_SPEC}; fill ## Captain's intent and ## Firstmate spec before spawn" >&2
+    echo "error: $BRIEF still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}; fill ## Captain's intent and ## Firstmate spec before spawn" >&2
     exit 1
   fi
   if ! fm_brief_task_content_valid "$BRIEF"; then
@@ -3952,6 +4025,36 @@ validate_spawn_worktree() { # <source> <inspect-target>
     echo "error: $source did not yield an isolated worktree (resolved '$WT'; worktree root '${SPAWN_WT_TOP:-none}'; spawning project '$PROJ_ABS'); refusing to launch to avoid tangling the primary checkout. Inspect target $inspect_target" >&2
     exit 1
   fi
+}
+
+set_spawn_git_identity() { # <verified linked worktree>
+  local worktree=$1 common bare ident rc
+  common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir) || return 1
+  bare=$(git config --file "$common/config" --includes --get --bool core.bare 2>/dev/null) || {
+    rc=$?
+    [ "$rc" -eq 1 ] || { echo "error: common Git core.bare is invalid; refusing worktree config" >&2; return 1; }
+    bare=
+  }
+  if git config --file "$common/config" --includes --get core.worktree >/dev/null 2>&1; then
+    echo "error: common Git core.worktree is set; refusing worktree config" >&2
+    return 1
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] || { echo "error: common Git core.worktree could not be read; refusing worktree config" >&2; return 1; }
+  fi
+  if [ "$bare" = true ]; then
+    echo "error: common Git core.bare=true or core.worktree makes extensions.worktreeConfig unsafe; refusing worker identity" >&2
+    return 1
+  fi
+  git -C "$worktree" config --local extensions.worktreeConfig true || return 1
+  # Boat-only pools pass this pair on every launch, overwriting a reused slot before use.
+  git -C "$worktree" config --worktree user.name "$GIT_NAME" || return 1
+  git -C "$worktree" config --worktree user.email "$GIT_EMAIL" || return 1
+  ident=$(env -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL git -C "$worktree" var GIT_COMMITTER_IDENT) || return 1
+  case "$ident" in
+  "$GIT_NAME <$GIT_EMAIL> "*) ;;
+  *) echo "error: task worktree Git committer ident did not match requested identity" >&2; return 1 ;;
+  esac
 }
 
 # A pooled slot whose only deviation is a submodule gitlink is stale, not dirty:
@@ -5145,6 +5248,7 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
   freshen_spawn_worktree_base "$WT" "$BASE_BRANCH" || exit 1
+  [ "$GIT_NAME_SET" -eq 0 ] || set_spawn_git_identity "$WT" || exit 1
 fi
 
 # Re-assert the durable task copy after either treehouse acquisition or endpoint
@@ -5850,7 +5954,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch upstream_consent model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -5871,6 +5975,19 @@ preserve_relaunch_meta() {
   [ -z "$UPSTREAM_CONSENT" ] || echo "upstream_consent=$UPSTREAM_CONSENT"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    echo "realized_model=unknown"
+    echo "realized_effort=unknown"
+  else
+    [ -z "$MODEL" ] || [ "$MODEL" = default ] || echo "realized_model=$MODEL"
+    echo "realized_effort=$(fm_dispatch_realized_effort "$HARNESS" "$MODEL" "$EFFORT")"
+  fi
+  printf '%s\n' "$FM_DISPATCH_PROFILE_RECEIPT" | jq -r '
+    (if .source != null then "dispatch_rule=" + (.source | tojson) else empty end),
+    (if .rule_fingerprint != null then "dispatch_rule_fingerprint=" + .rule_fingerprint else empty end),
+    (if (.class // "") != "" then "reasoning_class=" + .class else empty end),
+    (if (.provider // "") != "" then "dispatch_provider=" + .provider else empty end),
+    (if .reason != null then "fallback_reason=" + (.reason | tojson) else empty end)'
   # The worker account pin, only when this home declares one, so an unpinned
   # task record stays byte-identical.
   [ -z "$WORKER_ACCOUNT" ] || echo "account=$WORKER_ACCOUNT_DECLARED"
@@ -6099,6 +6216,31 @@ if [ "$HARNESS" = claude ]; then
     LAUNCH=${LAUNCH/__CLAUDESETTINGS__/"$(shell_quote "$STATE_REAL/$ID.claude-settings.json")"}
   else
     LAUNCH=${LAUNCH/__CLAUDESETTINGS__/"$(shell_quote "$CLAUDE_SETTINGS")"}
+  fi
+  # A second mate reads its own home; ships and scouts read the spawning home.
+  claude_plugin_file=$CONFIG/claude-plugin-dirs.json
+  [ "$KIND" != secondmate ] || claude_plugin_file=$WT/config/claude-plugin-dirs.json
+  if [ -f "$claude_plugin_file" ]; then
+    claude_plugin_flags=
+    if claude_plugin_json=$(jq -ces '
+      if length != 1 or (.[0] | type) != "array" or (.[0] | length) == 0
+      then error("expected one nonempty array") else .[0] end
+      | if all(.[]; type == "string" and startswith("/") and (explode | all(.[]; . >= 32 and . != 127)))
+        then . else error("expected absolute paths without control characters") end' "$claude_plugin_file" 2>/dev/null); then
+      mapfile -t claude_plugin_paths < <(printf '%s\n' "$claude_plugin_json" | jq -r '.[]')
+      for claude_plugin_path in "${claude_plugin_paths[@]}"; do
+        if [ ! -d "$claude_plugin_path" ]; then
+          claude_plugin_flags=
+          break
+        fi
+        claude_plugin_flags="$claude_plugin_flags--plugin-dir $(shell_quote "$claude_plugin_path") "
+      done
+    fi
+    if [ -n "$claude_plugin_flags" ]; then
+      LAUNCH="${LAUNCH%%--disallowedTools *}${claude_plugin_flags}--disallowedTools ${LAUNCH#*--disallowedTools }"
+    else
+      echo "note: skipped $claude_plugin_file: expected a nonempty JSON array of existing absolute plugin directories" >&2
+    fi
   fi
 fi
 if [ "$HARNESS" = rovo ]; then

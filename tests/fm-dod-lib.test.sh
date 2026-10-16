@@ -10,6 +10,7 @@ set -u
 . "$ROOT/bin/fm-dod-lib.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-dod-lib)
+PROMOTION_SCOPE=(--goal 'Ship the change.' --off-limits 'Unrelated files.' --contracts 'none')
 fm_git_identity fmtest fmtest@example.invalid
 
 accept_done() {  # <kind> <mode> <worktree> <project> <line> [<state> <id> <meta>]
@@ -356,7 +357,7 @@ Captain: This fenced example must not become intent.
 # Setup
 This is a SCOUT task: the deliverable is a written report, not a PR.
 EOF
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode direct-PR --yolo off 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion whose only Captain lines are fenced or indented examples should fail"
   assert_contains "$out" "has no provenance-marked Captain's intent" \
@@ -399,12 +400,15 @@ Fix the hub bug.
 
 ## Firstmate spec
 Reproduce it first.
+Goal: Fix the hub bug.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 
 # Setup
 You are in a disposable git worktree of proj, at a detached HEAD on a clean copy of its base branch.
 Base branch: feature/hub
 EOF
-    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode "$mode" --yolo off 2>&1)
+    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" "$id" --mode "$mode" --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
     status=$?
     if [ "$mode" = direct-PR ]; then
       expect_code 0 "$status" "promoting a scout with a recorded base should succeed"$'\n'"$out"
@@ -415,6 +419,10 @@ EOF
       assert_grep 'against the base branch `feature/hub`' "$home/data/$id/ship-instructions.md" \
         "promotion did not target the PR at the recorded base"
       assert_grep 'base_branch=feature/hub' "$meta" "promotion dropped the recorded base"
+      assert_grep "write proof to \`$home/data/$id/proof.md\`" "$home/data/$id/ship-instructions.md" \
+        "promotion did not name the durable proof destination"
+      assert_grep "and their output in \`$home/data/$id/proof.md\`." "$home/data/$id/ship-instructions.md" \
+        "promotion Definition of done named a different proof destination"
     else
       [ "$status" -ne 0 ] || fail "promoting a based scout to local-only should be refused"
       assert_contains "$out" "mode=local-only" "the local-only promotion refusal did not explain itself"
@@ -466,5 +474,34 @@ test_worker_role_names_skill_and_fallback_file() {
 }
 
 test_worker_role_names_skill_and_fallback_file
+
+# Required labeled fields must have filled values.
+test_unfilled_bounded_lines_are_detected() {
+  local f="$TMP_ROOT/bounded-brief.md"
+  write() { printf '# Task\n## Captain'"'"'s intent\nDo it.\n\n## Firstmate spec\n%s\n\n# Rules\n' "$1" > "$f"; }
+  write 'Build it.'
+  fm_brief_task_placeholders_present "$f" || fail "missing labeled fields were not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" && fail "a filled bounded spec was reported unfilled"
+  write "$(printf 'Goal: G.\n{FIRSTMATE_SPEC}\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "an unfilled firstmate spec was not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.')"
+  fm_brief_task_placeholders_present "$f" || fail "missing contracts were not detected"
+  write "$(printf 'Goal: {GOAL}\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "an unfilled goal was not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: {OFF_LIMITS}\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "unfilled off-limits were not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}')"
+  fm_brief_task_placeholders_present "$f" || fail "unfilled contracts were not detected"
+  write "$(printf 'Goal: \nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "an empty goal was not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: \nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none')"
+  fm_brief_task_placeholders_present "$f" || fail "empty off-limits were not detected"
+  write "$(printf 'Goal: G.\nBuild it.\nOff-limits: O.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): ')"
+  fm_brief_task_placeholders_present "$f" || fail "empty contracts were not detected"
+  pass "missing, empty, and unfilled required labeled fields are detected"
+}
+
+test_unfilled_bounded_lines_are_detected
 
 echo "all fm-dod-lib tests passed"

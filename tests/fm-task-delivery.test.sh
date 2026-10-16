@@ -20,6 +20,7 @@ set -u
 SPAWN="$ROOT/bin/fm-spawn.sh"
 BRIEF="$ROOT/bin/fm-brief.sh"
 PROMOTE="$ROOT/bin/fm-promote.sh"
+PROMOTION_SCOPE=(--goal "Ship the scoped change." --off-limits "Unrelated files." --contracts "none")
 PROJECT_MODE="$ROOT/bin/fm-project-mode.sh"
 MERGE_LOCAL="$ROOT/bin/fm-merge-local.sh"
 TMP_ROOT=$(fm_test_tmproot fm-task-delivery)
@@ -47,7 +48,7 @@ write_brief() {  # <home> <id> [<recorded-mode>]
   local home=$1 id=$2 mode=${3:-}
   mkdir -p "$home/data/$id"
   {
-    printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nExercise the delivery contract.\n\n## Firstmate spec\nVerify the selected delivery behavior.\n\n# Definition of done\n'
+    printf 'You are a crewmate.\n\n# Task\n## Captain'\''s intent\nExercise the delivery contract.\n\n## Firstmate spec\nGoal: Verify the delivery contract.\nVerify the selected delivery behavior.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n\n# Definition of done\n'
     [ -z "$mode" ] || printf 'Delivery contract: mode=%s\n' "$mode"
   } > "$home/data/$id/brief.md"
 }
@@ -57,6 +58,9 @@ fill_brief_subsections() {  # <file> <intent> <spec>
   content=$(cat "$file")
   content=${content//'{TASK}'/$intent}
   content=${content//'{FIRSTMATE_SPEC}'/$spec}
+  content=${content//'{GOAL}'/Ship the change.}
+  content=${content//'{OFF_LIMITS}'/Unrelated scripts.}
+  content=${content//'{CONTRACTS}'/none}
   printf '%s\n' "$content" > "$file"
 }
 
@@ -234,7 +238,7 @@ test_promote_requires_and_records_the_delivery_contract() {
   [ "$status" -ne 0 ] || fail "promotion without --yolo should exit non-zero"
   assert_contains "$out" "promotion requires --yolo" "promote refusal did not name the missing merge posture"
 
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-d1 --mode no-mistakes-prod-only --yolo off 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-d1 --mode no-mistakes-prod-only --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion on a conditional policy should exit non-zero"
   assert_contains "$out" "classify this task's surface" "promote did not refuse the conditional policy as a task mode"
@@ -242,7 +246,7 @@ test_promote_requires_and_records_the_delivery_contract() {
   blocked_data="$home/data-blocked"
   printf 'not a directory\n' > "$blocked_data"
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$blocked_data" \
-    "$PROMOTE" promote-d1 --mode direct-PR --yolo on 2>&1)
+    "$PROMOTE" promote-d1 --mode direct-PR --yolo on "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion without writable instruction storage should exit non-zero"
   assert_grep 'kind=scout' "$meta" "failed instruction publication still promoted the task"
@@ -252,7 +256,7 @@ test_promote_requires_and_records_the_delivery_contract() {
   instructions_path="$home/data/promote-d1/ship-instructions.md"
   mkdir -p "$instructions_path"
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
-    "$PROMOTE" promote-d1 --mode direct-PR --yolo on 2>&1)
+    "$PROMOTE" promote-d1 --mode direct-PR --yolo on "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion over an instruction directory should exit non-zero"
   assert_contains "$out" "ship instructions path is a directory" \
@@ -262,7 +266,7 @@ test_promote_requires_and_records_the_delivery_contract() {
   assert_no_grep '^yolo=' "$meta" "invalid instruction destination recorded a merge posture"
   rmdir "$instructions_path"
 
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-d1 --mode direct-PR --yolo on 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" promote-d1 --mode direct-PR --yolo on "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   expect_code 0 "$status" "a promotion carrying both flags should succeed"
   assert_grep 'kind=ship' "$meta" "promotion did not restore ship teardown protection"
@@ -271,6 +275,53 @@ test_promote_requires_and_records_the_delivery_contract() {
   assert_contains "$out" "ship instructions for mode=direct-PR" "promotion hint did not carry the decided mode"
   [ "$(grep -c '^mode=' "$meta")" = 1 ] || fail "promotion left more than one mode= line in the task record"
   pass "fm-promote: promotion requires the delivery contract and records it exactly once"
+}
+
+test_promotion_requires_a_bounded_ship_spec() {
+  local home id meta brief instructions out status omitted original
+  local -a scope
+  home="$TMP_ROOT/promote-bounded/home"
+  id=promote-bounded
+  mkdir -p "$home/state"
+  meta="$home/state/$id.meta"
+  printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$meta"
+  write_brief "$home" "$id"
+  brief="$home/data/$id/brief.md"
+  instructions="$home/data/$id/ship-instructions.md"
+  original=$(cat "$brief")
+
+  for omitted in goal off-limits contracts; do
+    case "$omitted" in
+      goal) scope=(--off-limits 'Unrelated files.' --contracts 'none') ;;
+      off-limits) scope=(--goal 'Ship the scoped change.' --contracts 'none') ;;
+      contracts) scope=(--goal 'Ship the scoped change.' --off-limits 'Unrelated files.') ;;
+    esac
+    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
+      --mode direct-PR --yolo off "${scope[@]}" 2>&1)
+    status=$?
+    [ "$status" -ne 0 ] || fail "promotion accepted a ship spec without $omitted"
+    assert_contains "$out" "error: $instructions still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}; fill ## Captain's intent and ## Firstmate spec before spawn" \
+      "$omitted: promotion did not use the spawn placeholder refusal"
+    assert_absent "$instructions" "$omitted: promotion published incomplete ship instructions"
+    assert_grep 'kind=scout' "$meta" "$omitted: promotion changed the task kind"
+    assert_equals "$original" "$(cat "$brief")" "$omitted: promotion rewrote the scout brief"
+  done
+
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
+    --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
+  status=$?
+  expect_code 0 "$status" "promotion with a complete ship spec should succeed"
+  assert_grep 'Goal: Ship the scoped change.' "$instructions" "ship instructions lost the goal"
+  assert_grep 'Off-limits: Unrelated files.' "$instructions" "ship instructions lost off-limits"
+  assert_grep 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none' "$instructions" \
+    "ship instructions lost contracts and gates"
+  assert_grep 'kind=ship' "$meta" "complete ship spec did not promote the task"
+  assert_grep '# Current ship Firstmate spec' "$brief" "relaunch brief lost the current ship spec"
+  assert_grep 'Goal: Ship the scoped change.' "$brief" "relaunch brief lost the ship goal"
+  assert_grep 'Off-limits: Unrelated files.' "$brief" "relaunch brief lost ship off-limits"
+  assert_grep 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none' "$brief" \
+    "relaunch brief lost ship contracts and gates"
+  pass "fm-promote: a bounded ship spec is required and persists after promotion"
 }
 
 # A symlink at state/<id>.meta is the containment hazard the shared publisher
@@ -287,7 +338,7 @@ test_promote_refuses_a_symlinked_task_record() {
   ln -s "$target" "$meta"
 
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
-    "$PROMOTE" promote-sym --mode direct-PR --yolo on 2>&1)
+    "$PROMOTE" promote-sym --mode direct-PR --yolo on "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion through a symlink record should refuse"
   assert_contains "$out" "task record" "promotion did not identify the unpublished task record"
@@ -327,7 +378,7 @@ STUB
       || fail "$mode: scout brief generation should succeed"
     fill_brief_subsections "$home/data/$id/brief.md" \
       "Ship the delivery-contract change." "Preserve the selected delivery mode."
-    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode "$mode" --yolo off 2>&1) \
+    out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode "$mode" --yolo off "${PROMOTION_SCOPE[@]}" 2>&1) \
       || fail "$mode: promotion should succeed"
 
     payload="$TMP_ROOT/promote-dod/payload-$id"
@@ -360,7 +411,7 @@ STUB
     for contract in "$payload" "$home/data/$id/brief.md"; do
       assert_grep "This replaces the scout rule limiting outside-worktree writes to the report and status file." "$contract" \
         "$mode: $contract retained the scout-only write restriction"
-      assert_grep "Keep project edits inside this worktree; keep proof and scratch output outside it, under \`$home/data/$id/\` or a temporary directory." "$contract" \
+      assert_grep "Keep project edits inside this worktree; write proof to \`$home/data/$id/proof.md\` and keep scratch output outside it, under \`$home/data/$id/\` or a temporary directory." "$contract" \
         "$mode: $contract omitted the ship scratch-location rule"
       assert_grep "Outside the worktree, write only that task material and the status and steering-inbox records authorized below." "$contract" \
         "$mode: $contract omitted the ship outside-worktree write boundary"
@@ -423,7 +474,7 @@ test_promotion_persists_the_selected_ship_branch() {
   fill_brief_subsections "$home/data/$id/brief.md" \
     "Promote the branch-prefix fixture." "Use the configured branch exactly."
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
-    --mode local-only --yolo off --branch-prefix fix/) \
+    --mode local-only --yolo off "${PROMOTION_SCOPE[@]}" --branch-prefix fix/) \
     || fail "branch-prefix promotion should succeed"
   instructions="$home/data/$id/ship-instructions.md"
   assert_grep "branch=fix/$id" "$meta" \
@@ -453,7 +504,7 @@ test_promotion_branch_command_is_shell_safe() {
   fill_brief_subsections "$home/data/$id/brief.md" \
     "Promote the shell-safe fixture." "Use the configured branch exactly."
   FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
-    --mode local-only --yolo off --branch-prefix "$prefix" >/dev/null 2>&1 \
+    --mode local-only --yolo off "${PROMOTION_SCOPE[@]}" --branch-prefix "$prefix" >/dev/null 2>&1 \
     || fail "a ref-format-valid metacharacter prefix should promote safely"
   instructions="$home/data/$id/ship-instructions.md"
   # shellcheck disable=SC2016  # Single quotes are required: the sed expression holds literal backticks.
@@ -583,7 +634,7 @@ EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn of an unfilled ship brief should exit non-zero"
-  assert_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "unfilled ship spawn did not name the leftover placeholders"
   assert_contains "$out" "## Captain's intent" \
     "unfilled ship spawn did not name the intent subsection to fill"
@@ -596,7 +647,7 @@ EOF
     "Fix replacement of \`{TASK}\` in Herdr briefs." \
     "Keep literal \`{FIRSTMATE_SPEC}\` examples intact."
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
-  assert_not_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_not_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "a filled ship brief mentioning placeholder tokens was refused as unfilled"
   assert_not_contains "$out" "must contain nonempty" \
     "a filled ship brief mentioning placeholder tokens failed content validation"
@@ -622,7 +673,7 @@ EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
   assert_not_contains "$out" "must contain nonempty" \
     "fenced example headings made a filled legacy Task fail validation"
-  assert_not_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_not_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "fenced example headings made a filled legacy Task look unfilled"
 
   id=delivery-legacy-no-mistakes
@@ -662,6 +713,9 @@ Fix the migrated dispatch boundary.
 
 ## Firstmate spec
 Preserve the existing compatibility path.
+Goal: Preserve the dispatch boundary.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 
 # Definition of done
 Delivery contract: mode=no-mistakes
@@ -700,6 +754,9 @@ Delivery contract: mode=no-mistakes
 Unrelated notes must not become task intent.
 ## Firstmate spec
 Unrelated notes must not satisfy task validation.
+Goal: Keep the unrelated note separate.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
   status=$?
@@ -717,7 +774,7 @@ EOF
   out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --scout)
   status=$?
   [ "$status" -ne 0 ] || fail "spawn of an unfilled scout brief should exit non-zero"
-  assert_contains "$out" "still contains {TASK} or {FIRSTMATE_SPEC}" \
+  assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
     "unfilled scout spawn did not name the leftover placeholders"
   assert_absent "$home/state/$id.meta" "unfilled scout spawn wrote task metadata"
 
@@ -738,7 +795,7 @@ EOF
   printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$meta"
   FM_HOME="$home" "$BRIEF" "$id" proj --scout >/dev/null 2>&1 \
     || fail "unfilled promote scout brief should scaffold"
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo on 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo on "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion of an unfilled scout brief should exit non-zero"
   assert_contains "$out" "preserve the original ask in ## Captain's intent" \
@@ -750,7 +807,7 @@ EOF
   id=promote-missing-brief
   meta="$home/state/$id.meta"
   printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$meta"
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo off 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion without a scout brief should exit non-zero"
   assert_contains "$out" "must contain nonempty" \
@@ -773,8 +830,11 @@ Keep this Firstmate constraint out of captain intent.
 Unrelated notes are not the original ask.
 ## Firstmate spec
 Unrelated notes are not the task specification.
+Goal: Keep the unrelated note separate.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo off 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion without provenance-marked captain intent should fail"
   assert_contains "$out" "has no provenance-marked Captain's intent" \
@@ -791,7 +851,7 @@ EOF
   fill_brief_subsections "$home/data/$id/brief.md" \
     "Investigate why the identity check is failing." \
     "Ship the identity-check fix without adding a classifier."
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode no-mistakes --yolo off 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode no-mistakes --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   expect_code 0 "$status" "promotion of a filled scout brief should succeed"
   assert_grep 'kind=ship' "$meta" "filled promotion did not restore ship teardown protection"
@@ -819,6 +879,9 @@ Ship the parser without losing detailed requirements.
 
 ## Firstmate spec
 Keep this opening requirement.
+Goal: Preserve the parser requirements.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 
 ### Acceptance criteria
 Keep this nested requirement too.
@@ -832,7 +895,7 @@ Keep this closing requirement.
 # Setup
 This scout-only setup must not become the spec.
 EOF
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo off 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   expect_code 0 "$status" "promotion with nested and fenced spec content should succeed"
   brief="$home/data/$id/ship-instructions.md"
@@ -864,7 +927,7 @@ Ship the narrow session-floor fix with a regression test.
 # Setup
 This is a SCOUT task: the deliverable is a written report, not a PR.
 EOF
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo on 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode direct-PR --yolo on "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   expect_code 0 "$status" "promotion of a pre-subsection scout brief should succeed"
   brief="$home/data/$id/ship-instructions.md"
@@ -912,7 +975,7 @@ EOF
   words=$(printf '%s\n' "Keep the literal example \`Captain, hello\` in the documentation." \
     "Stop composing Captain:, Captain's words:, Captain's ask:, and Captain's intent: into PR bodies.")
   write_brief "$home" intent-literal no-mistakes
-  printf '# Task\n## Captain'"'"'s intent\n%s\n\n## Firstmate spec\nDo not paraphrase.\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' "$words" > "$home/data/intent-literal/brief.md"
+  printf '# Task\n## Captain'"'"'s intent\n%s\n\n## Firstmate spec\nGoal: Preserve the request.\nDo not paraphrase.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' "$words" > "$home/data/intent-literal/brief.md"
   out=$(run_spawn "$home" "$fakebin" intent-literal "$proj" claude --mode no-mistakes --yolo off)
   assert_not_contains "$out" "operator-address line" "labels mentioned mid-line were refused as address"
   authorized=$(awk '$0 == "## Captain intent authorized for --intent" { emit=1; next } emit { print }' "$home/data/intent-literal/launch-brief.md")
@@ -923,7 +986,7 @@ EOF
     n=$((n + 1))
     id="intent-addressed-$n"
     write_brief "$home" "$id" no-mistakes
-    printf '# Task\n## Captain'"'"'s intent\nKeep the original request intact.\n  %s preserve its provenance.\n\n## Firstmate spec\nDo not paraphrase.\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' \
+    printf '# Task\n## Captain'"'"'s intent\nKeep the original request intact.\n  %s preserve its provenance.\n\n## Firstmate spec\nGoal: Preserve the request.\nDo not paraphrase.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n\n# Definition of done\nDelivery contract: mode=no-mistakes\n' \
       "$marker" > "$home/data/$id/brief.md"
     out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
     status=$?
@@ -940,8 +1003,8 @@ EOF
   id='intent-addressed-promote'
   printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$home/state/$id.meta"
   write_brief "$home" "$id"
-  printf '# Task\n## Captain'"'"'s intent\nCaptain: investigate the refusal.\n\n## Firstmate spec\nReproduce it first.\n' > "$home/data/$id/brief.md"
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode no-mistakes --yolo off 2>&1)
+  printf '# Task\n## Captain'"'"'s intent\nCaptain: investigate the refusal.\n\n## Firstmate spec\nGoal: Reproduce the refusal.\nReproduce it first.\nOff-limits: Unrelated files.\nContracts and gates (follow them; spawned inside a pipeline, move only through its states): none\n' > "$home/data/$id/brief.md"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode no-mistakes --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "promotion of addressed intent should be refused"
   assert_contains "$out" "operator-address line: Captain: investigate the refusal." \
@@ -1183,7 +1246,7 @@ EOF
 
   meta="$home/state/forge-yolo-p1.meta"
   printf 'window=fm-forge-yolo-p1\nkind=scout\nworktree=/tmp/wt\nproject=%s\n' "$proj" > "$meta"
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" forge-yolo-p1 --mode no-mistakes --yolo on 2>&1)
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" forge-yolo-p1 --mode no-mistakes --yolo on "${PROMOTION_SCOPE[@]}" 2>&1)
   status=$?
   [ "$status" -ne 0 ] || fail "a promotion with --yolo on was accepted for the gerrit-forge project"
   assert_contains "$out" "--yolo on is refused" "the promotion refusal did not name the refused flag"
@@ -1490,7 +1553,7 @@ STUB
   fill_brief_subsections "$home/data/$id/brief.md" \
     "Fix what the investigation found on the Gerrit project." "Carry over only the fix."
 
-  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode no-mistakes --yolo off 2>&1) \
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" --mode no-mistakes --yolo off "${PROMOTION_SCOPE[@]}" 2>&1) \
     || fail "promotion should take the registered forge with no flag to remember"
   payload="$TMP_ROOT/forge-promote/payload"
   ( cd "$sendroot" \
@@ -1677,12 +1740,82 @@ EOF
   pass "fm-project-mode: --branch-prefix resolves order-independently and defaults to the legacy fm/ prefix"
 }
 
+test_required_labeled_fields_gate_delivery() {
+  local rec home proj fakebin id out meta content field filled unfilled variant
+  rec=$(make_home placeholder-examples)
+  IFS='|' read -r home proj fakebin <<EOF
+$rec
+EOF
+  for id in example-ship example-scout; do
+    mkdir -p "$home/data/$id"
+    cat > "$home/data/$id/brief.md" <<'EOF'
+# Task
+## Captain's intent
+Ship the example-safe change.
+
+## Firstmate spec
+Goal: Ship the example-safe change.
+Implement the requested behavior.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+EOF
+  done
+  printf '# Definition of done\nDelivery contract: mode=direct-PR\n' >> "$home/data/example-ship/brief.md"
+  out=$(run_spawn "$home" "$fakebin" example-ship "$proj" claude --mode direct-PR --yolo off)
+  assert_not_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
+    "spawn rejected examples in a filled ship spec"
+  assert_present "$home/data/example-ship/launch-brief.md" "spawn did not render the example-safe ship brief"
+
+  for field in goal off-limits contracts; do
+    for variant in placeholder empty missing; do
+      id="unfilled-$field-$variant"
+      mkdir -p "$home/data/$id"
+      content=$(cat "$home/data/example-ship/brief.md")
+      case "$field:$variant" in
+        goal:placeholder) filled='Goal: Ship the example-safe change.'; unfilled='Goal: {GOAL}' ;;
+        goal:empty) filled='Goal: Ship the example-safe change.'; unfilled='Goal: ' ;;
+        goal:missing) filled='Goal: Ship the example-safe change.'; unfilled='' ;;
+        off-limits:placeholder) filled='Off-limits: Unrelated files.'; unfilled='Off-limits: {OFF_LIMITS}' ;;
+        off-limits:empty) filled='Off-limits: Unrelated files.'; unfilled='Off-limits: ' ;;
+        off-limits:missing) filled='Off-limits: Unrelated files.'; unfilled='' ;;
+        contracts:placeholder) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none'; unfilled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}' ;;
+        contracts:empty) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none'; unfilled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): ' ;;
+        contracts:missing) filled='Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none'; unfilled='' ;;
+      esac
+      content=${content/"$filled"/"$unfilled"}
+      [ "$variant" != placeholder ] || content=${content/"## Firstmate spec"/"## Firstmate spec"$'\n'"$filled"}
+      printf '%s\n' "$content" > "$home/data/$id/brief.md"
+      out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode direct-PR --yolo off)
+      assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
+        "spawn accepted $variant $field after filled-looking examples"
+    done
+  done
+
+  id='unfilled-promotion'
+  mkdir -p "$home/data/$id"
+  cp "$home/data/unfilled-goal-placeholder/brief.md" "$home/data/$id/brief.md"
+  printf 'window=fm-%s\nkind=scout\nworktree=/tmp/wt\n' "$id" > "$home/state/$id.meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" "$id" \
+    --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
+  assert_contains "$out" "still contains {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, or {CONTRACTS}" \
+    "promotion accepted an unfilled goal after filled-looking examples"
+
+  meta="$home/state/example-scout.meta"
+  printf 'window=fm-example-scout\nkind=scout\nworktree=/tmp/wt\n' > "$meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$PROMOTE" example-scout \
+    --mode direct-PR --yolo off "${PROMOTION_SCOPE[@]}" 2>&1)
+  assert_contains "$out" 'promoted example-scout to ship' "promotion rejected examples in a filled scout spec"
+  assert_grep 'kind=ship' "$meta" "example-safe scout did not promote"
+  pass "fm-spawn/fm-promote: required labeled fields gate delivery"
+}
+
 test_ship_spawn_requires_a_valid_delivery_contract
 test_scout_and_secondmate_refuse_delivery_flags
 test_spawn_refuses_a_brief_mode_mismatch
 test_spawn_notices_a_rigor_downgrade_against_the_registry
 test_scout_records_no_delivery_posture
 test_promote_requires_and_records_the_delivery_contract
+test_promotion_requires_a_bounded_ship_spec
 test_promote_refuses_a_symlinked_task_record
 test_promotion_delivers_the_real_definition_of_done
 test_promotion_persists_the_selected_ship_branch
@@ -1702,5 +1835,6 @@ test_spawn_refuses_a_registry_forge_it_cannot_read
 test_promotion_carries_the_forge_binding
 test_forge_forgejo_rides_the_same_binding
 test_spawn_and_promote_require_filled_task_subsections
+test_required_labeled_fields_gate_delivery
 test_project_mode_resolves_branch_prefix
 echo "# all fm-task-delivery tests passed"
