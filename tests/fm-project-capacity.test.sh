@@ -567,6 +567,19 @@ test_disk_guard_pause_defers_a_fresh_spawn() {
   pass "a disk-guard pause defers a fresh spawn until the flag is removed"
 }
 
+test_disk_guard_symlink_defers_a_fresh_spawn() {
+  local case_dir home out rc=0 before worktrees
+  case_dir=$(make_case disk-guard-symlink task-c)
+  home="$case_dir/home"
+  ln -s missing-target "$home/state/disk-guard.pause"
+  before=$(call_count "$case_dir")
+  worktrees=$(worktree_list "$case_dir")
+  out=$(spawn_ship "$case_dir" task-c "$case_dir/unused") || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "a spawn ignored a symlink pause flag: $out"
+  assert_nothing_created "$case_dir" "$home" task-c "$before" "$worktrees"
+  pass "a symlink pause flag defers a fresh spawn"
+}
+
 test_batch_reports_a_deferred_pair() {
   local case_dir home out rc=0
   case_dir=$(make_case batch task-c)
@@ -664,5 +677,6 @@ test_concurrent_spawns_cannot_both_take_the_last_place
 test_failed_spawn_after_admission_holds_no_place
 test_unreadable_declaration_refuses_every_spawn
 test_disk_guard_pause_defers_a_fresh_spawn
+test_disk_guard_symlink_defers_a_fresh_spawn
 test_batch_reports_a_deferred_pair
 test_orca_spawn_is_admitted_under_the_shared_project_lock

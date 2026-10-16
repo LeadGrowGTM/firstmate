@@ -92,6 +92,13 @@ assert_equals 1 "$rc" "a bad floor did not fail"
 assert_absent "$home/state/disk-guard.pause" "a bad config did not pause spawns"
 rm -f "$home/config/disk-guard"
 
+printf 'ram-floor-kib 9223372036854775808\n' > "$home/config/disk-guard"
+rc=0
+run_guard >/dev/null 2>"$TMP_ROOT/oversized.err" || rc=$?
+assert_equals 1 "$rc" "an oversized floor did not fail"
+assert_absent "$home/state/disk-guard.pause" "an oversized floor did not pause spawns"
+rm -f "$home/config/disk-guard"
+
 mkdir "$home/state/disk-guard.lock"
 printf '%s\n' "$$" > "$home/state/disk-guard.lock/pid"
 rc=0
@@ -100,6 +107,33 @@ assert_equals 0 "$rc" "a live lock did not exit quietly"
 assert_contains "$(cat "$TMP_ROOT/lock.err")" "another run holds" "the quiet exit names the lock"
 assert_absent "$home/state/disk-guard.log" "a live lock did not sample"
 rm -rf "$home/state/disk-guard.lock"
+
+real_mkdir=$(command -v mkdir)
+cat > "$stubbin/mkdir" <<EOF
+#!/bin/sh
+"$real_mkdir" "\$@" || exit \$?
+if [ "\${TEST_DELAY_LOCK:-}" = 1 ] && [ "\$1" = "$home/state/disk-guard.lock" ]; then
+  : > "$TMP_ROOT/lock-created"
+  sleep 1
+fi
+EOF
+chmod +x "$stubbin/mkdir"
+export TEST_DELAY_LOCK=1
+run_guard > "$TMP_ROOT/first-sample.out" &
+first_sampler=$!
+i=0
+while [ ! -f "$TMP_ROOT/lock-created" ]; do
+  i=$((i + 1))
+  [ "$i" -lt 100 ] || fail "the first sampler did not create its lock"
+  sleep 0.01
+done
+out=$(run_guard 2>&1)
+wait "$first_sampler"
+assert_contains "$out" "another run holds" "a second sampler did not wait for the owner"
+assert_equals 1 "$(wc -l < "$home/state/disk-guard.log" | tr -d '[:space:]')" "two samplers recorded a sample"
+unset TEST_DELAY_LOCK
+rm -f "$stubbin/mkdir" "$TMP_ROOT/lock-created"
+reset_guard
 
 out=$(run_guard)
 assert_contains "$out" "pressure=no" "a healthy sample is not pressure"
@@ -155,12 +189,14 @@ set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "action=pause-symlink" "a symlink pause flag is not replaced"
 assert_contains "$(cat "$home/state/pause-target")" "keep" "the symlink target stays"
+assert_equals 1 "$(wake_count)" "a symlink pause wakes the supervisor"
 rm -f "$home/state/disk-guard.pause"
 set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
 ln -s pause-target "$home/state/disk-guard.pause"
 out=$(run_guard)
 assert_contains "$out" "action=pause-symlink" "a healthy sample does not remove a symlink flag"
 assert_contains "$(cat "$home/state/pause-target")" "keep" "a healthy sample leaves the symlink target"
+assert_equals 2 "$(wake_count)" "a healthy sample with a symlink alerts the supervisor"
 rm -f "$home/state/disk-guard.pause"
 
 : > "$home/state/disk-guard.log"

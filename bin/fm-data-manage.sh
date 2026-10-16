@@ -136,6 +136,7 @@ SEEN_MOUNT_FILE=
 LIVE_PATHS=
 OPEN_INODES=
 LOCK_DIR=
+LOCK_FD=
 WOULD_FREE=0
 FREED=0
 DELEGATE_BYTES=0
@@ -259,7 +260,10 @@ require_abs_path() {
 }
 
 take_lock() {
-  local pid_file old
+  local pid_file old parent=${CONFIG%/*}
+  [ -n "$parent" ] || parent=/
+  exec {LOCK_FD}<"$parent" || die "could not open lock directory $parent"
+  flock -n "$LOCK_FD" || die "another data-manage run holds ${CONFIG}.lock"
   LOCK_DIR="${CONFIG}.lock"
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     old=
@@ -374,6 +378,7 @@ parse_config() {
 deletion_root_allowed() {
   local path=$1 home
   local i=0
+  root_contains_home "$path" && return 1
   while [ "$i" -lt "${#HOMES[@]}" ]; do
     home=${HOMES[$i]}
     case "$path" in
@@ -387,6 +392,14 @@ deletion_root_allowed() {
     i=$((i + 1))
   done
   return 0
+}
+
+root_contains_home() {
+  local root=$1 home
+  for home in "${HOMES[@]}"; do
+    case "$home" in "$root"|"$root"/*) return 0 ;; esac
+  done
+  return 1
 }
 
 resolve_deletion_roots() {
@@ -404,7 +417,7 @@ resolve_deletion_roots() {
     fi
     phys=$(physical_dir "$path") || die "deletion root must be a real directory: $path"
     if path_forbidden "$phys" || ! deletion_root_allowed "$phys"; then
-      die "deletion root inside a home must be under .tmp, tmp, or state/logs: $phys"
+      die "deletion root is protected or outside the allowed home directories: $phys"
     fi
     DEL_PATH[i]=$phys
     i=$((i + 1))
@@ -422,7 +435,9 @@ resolve_real_dir() {
     die "$kind root must be a real directory: $path"
   fi
   phys=$(physical_dir "$path") || die "$kind root must be a real directory: $path"
-  path_forbidden "$phys" && die "$kind root is protected: $phys"
+  if path_forbidden "$phys" || root_contains_home "$phys"; then
+    die "$kind root is protected: $phys"
+  fi
   RESOLVED_DIR=$phys
 }
 
@@ -666,6 +681,23 @@ file_in_use() {
     return 0
   fi
   return 0
+}
+
+file_in_use_now() {
+  local output status
+  file_in_use "$1" && return 0
+  [ -d /proc ] || return 1
+  if command -v lsof >/dev/null 2>&1; then
+    if output=$(lsof -- "$1" 2>&1); then
+      return 0
+    else
+      status=$?
+    fi
+    [ "$status" -eq 1 ] && [ -z "$output" ] && return 1
+    return 0
+  fi
+  collect_live_paths
+  file_in_use "$1"
 }
 
 already_have_wt() {
@@ -1050,8 +1082,27 @@ note_category() {
   CAT_BYTES+=(0)
 }
 
+root_owns_file() {
+  local file=$1 owner=$2 i=0 root
+  while [ "$i" -lt "${#DEL_PATH[@]}" ]; do
+    root=${DEL_PATH[$i]}
+    if [ -n "$root" ] && [ "$i" -ne "$owner" ]; then
+      case "$file" in
+        "$root"/*)
+          if [ "${DEL_DAYS[$i]}" -gt "${DEL_DAYS[$owner]}" ] ||
+            { [ "${DEL_DAYS[$i]}" -eq "${DEL_DAYS[$owner]}" ] && [ "$i" -lt "$owner" ]; }; then
+            return 1
+          fi
+          ;;
+      esac
+    fi
+    i=$((i + 1))
+  done
+  return 0
+}
+
 scan_root() {
-  local kind=$1 name=$2 root=$3 days=$4
+  local kind=$1 name=$2 root=$3 days=$4 owner=$5
   local now file base age mtime bytes listed=0 walked=0 rc
   now=$(date +%s)
   note_category "$name"
@@ -1068,6 +1119,7 @@ scan_root() {
     [ -f "$file" ] && [ ! -L "$file" ] || continue
     base=${file##*/}
     cleanup_file_safe "$file" "$root" || continue
+    root_owns_file "$file" "$owner" || continue
     if [ "$kind" = log ] && ! log_name_ok "$base"; then
       continue
     fi
@@ -1087,6 +1139,7 @@ scan_root() {
     # Re-check immediately before any unlink so a swapped symlink is not removed as a file.
     cleanup_file_safe "$file" "$root" || continue
     if [ "$LIVE" -eq 1 ]; then
+      file_in_use_now "$file" && continue
       rc=0
       rm -f -- "$file" || rc=$?
       if [ "$rc" -ne 0 ] || [ -e "$file" ]; then
@@ -1200,9 +1253,20 @@ session_names_worktree() {
 
 procevent_group_old() {
   local inbox=$1 stem=$2 days=$3 now=$4 suffix f mtime age
-  for suffix in result adapter owner-task handled; do
+  PROC_GROUP_FILES=()
+  for suffix in result adapter handled; do
     f="$inbox/$stem.$suffix"
     [ -f "$f" ] && [ ! -L "$f" ] || return 1
+    PROC_GROUP_FILES+=("$f")
+  done
+  for suffix in owner-task extension; do
+    f="$inbox/$stem.$suffix"
+    if [ -e "$f" ] || [ -L "$f" ]; then
+      [ -f "$f" ] && [ ! -L "$f" ] || return 1
+      PROC_GROUP_FILES+=("$f")
+    fi
+  done
+  for f in "${PROC_GROUP_FILES[@]}"; do
     mtime=$(file_mtime "$f" 2>/dev/null || true)
     case "$mtime" in
       ''|*[!0-9]*) return 1 ;;
@@ -1230,6 +1294,7 @@ emit_or_free_file() {
   esac
   cleanup_file_safe "$file" "$root" || return 0
   if [ "$LIVE" -eq 1 ]; then
+    file_in_use_now "$file" && return 0
     rc=0
     rm -f -- "$file" || rc=$?
     if [ "$rc" -ne 0 ] || [ -e "$file" ]; then
@@ -1259,7 +1324,7 @@ emit_or_free_file() {
 }
 
 clean_procevent() {
-  local home i inbox handled base stem id now suffix f busy phys
+  local home i inbox handled base stem id now f busy phys
   [ -n "$PROC_DAYS" ] || return 0
   now=$(date +%s)
   i=0
@@ -1288,9 +1353,8 @@ clean_procevent() {
         fi
         procevent_group_old "$inbox" "$stem" "$PROC_DAYS" "$now" || continue
         busy=0
-        for suffix in result adapter owner-task handled; do
-          f="$inbox/$stem.$suffix"
-          if file_in_use "$f"; then
+        for f in "${PROC_GROUP_FILES[@]}"; do
+          if file_in_use_now "$f"; then
             busy=1
           fi
         done
@@ -1298,8 +1362,8 @@ clean_procevent() {
           emit "$(printf 'clean\tskip\treason=in-use\tcategory=procevent-result\tpath=%s' "$handled")"
           continue
         fi
-        for suffix in result adapter owner-task handled; do
-          emit_or_free_file procevent-result "$inbox/$stem.$suffix" "$now" proc "$inbox"
+        for f in "${PROC_GROUP_FILES[@]}"; do
+          emit_or_free_file procevent-result "$f" "$now" proc "$inbox"
         done
       done
     fi
@@ -1432,6 +1496,12 @@ clean_cache_tools() {
     if [ "$LIVE" -eq 0 ]; then
       emit "$(printf 'clean\twould-run\ttool=%s\tpath=%s\tcommand=%s' "$name" "$path" "$shown")"
     else
+      collect_live_paths
+      if path_has_live_child "$path"; then
+        emit "$(printf 'clean\tskip\treason=in-use\tcategory=%s\tpath=%s' "$name" "$path")"
+        i=$((i + 1))
+        continue
+      fi
       rc=0
       case "$name" in
         npm) fm_run_timed 180 npm cache clean --force --cache "$path" >/dev/null 2>&1 || rc=$? ;;
@@ -1449,7 +1519,7 @@ run_clean_actions() {
   local i=0
   while [ "$i" -lt "${#DEL_PATH[@]}" ]; do
     [ -n "${DEL_PATH[$i]}" ] || { i=$((i + 1)); continue; }
-    scan_root "${DEL_KIND[$i]}" "${DEL_NAME[$i]}" "${DEL_PATH[$i]}" "${DEL_DAYS[$i]}"
+    scan_root "${DEL_KIND[$i]}" "${DEL_NAME[$i]}" "${DEL_PATH[$i]}" "${DEL_DAYS[$i]}" "$i"
     i=$((i + 1))
   done
   clean_procevent
@@ -1500,7 +1570,8 @@ main() {
   parse_config
   if [ "$LIVE" -eq 1 ]; then
     marker=${HOMES[0]}/config/data-management.live-authorized
-    if [ ! -f "$marker" ] || [ -L "$marker" ] || [ -L "${HOMES[0]}/config" ]; then
+    if [ -e "${HOMES[0]}/.fm-secondmate-parent" ] || [ -L "${HOMES[0]}/.fm-secondmate-parent" ] ||
+      [ ! -f "$marker" ] || [ -L "$marker" ] || [ -L "${HOMES[0]}/config" ]; then
       LIVE=0
       emit "$(printf 'clean\tskip\treason=first-live-not-authorized')"
     fi

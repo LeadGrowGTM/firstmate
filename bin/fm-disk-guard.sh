@@ -72,11 +72,17 @@ is_uint_token() {
 }
 
 norm_uint() {
-  is_uint_token "$1" || return 1
-  printf '%s\n' "$((10#$1))"
+  local n=$1
+  is_uint_token "$n" || return 1
+  while [ "${#n}" -gt 1 ] && [ "${n#0}" != "$n" ]; do
+    n=${n#0}
+  done
+  [ "${#n}" -lt 15 ] || { [ "${#n}" -eq 15 ] && [[ "$n" < 106751991167301 ]]; } || return 1
+  printf '%s\n' "$n"
 }
 
 LOCK_DIR=
+LOCK_FD=
 ROOT=
 RAM_FLOOR=8388608
 C_FLOOR=104857600
@@ -101,6 +107,12 @@ SAMPLE_BLOCKED=0
 take_lock() {
   local old=
   LOCK_DIR="$STATE/disk-guard.lock"
+  exec {LOCK_FD}<"$STATE" || die "could not open lock directory $STATE"
+  if ! flock -n "$LOCK_FD"; then
+    printf 'fm-disk-guard: another run holds %s\n' "$LOCK_DIR" >&2
+    LOCK_DIR=
+    exit 0
+  fi
   if [ -L "$LOCK_DIR" ]; then
     die "lock path is a symlink: $LOCK_DIR"
   fi
@@ -129,6 +141,7 @@ release_lock() {
     rm -rf -- "$LOCK_DIR"
   fi
   LOCK_DIR=
+  [ -z "$LOCK_FD" ] || exec {LOCK_FD}<&-
 }
 
 load_guard_config() {
@@ -445,7 +458,10 @@ sample_once() {
         action="already-paused"
         announce pause "disk-guard pause reasons=$REASONS" || die "could not record the pressure wake"
         ;;
-      symlink) action="pause-symlink" ;;
+      symlink)
+        action="pause-symlink"
+        announce pause "disk-guard pause-symlink reasons=$REASONS" || die "could not record the pressure wake"
+        ;;
       *) die "could not write the pause flag" ;;
     esac
   else
@@ -455,7 +471,10 @@ sample_once() {
         action=cleared
         announce clear "disk-guard clear" || die "could not record the clear wake"
         ;;
-      symlink) action="pause-symlink" ;;
+      symlink)
+        action="pause-symlink"
+        announce pause "disk-guard pause-symlink reasons=none" || die "could not record the pressure wake"
+        ;;
       *) action=none ;;
     esac
   fi

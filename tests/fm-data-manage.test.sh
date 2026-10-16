@@ -424,4 +424,136 @@ out=$(PATH="$stubbin:$PATH" run clean --config "$tiercfg" --live)
 assert_contains "$out" "reason=in-use	category=npm	path=$unsafe_cache" "a cache with a nested checkout is not purged"
 assert_equals "$npm_before" "$(wc -l < "$TMP_ROOT/npm.log")" "the cache tool was not called on a nested checkout"
 
+cat > "$tiercfg" <<EOF
+home $home_phys
+tmp $TMP_ROOT 1
+EOF
+rc=0
+run clean --config "$tiercfg" --live >/dev/null 2>"$TMP_ROOT/ancestor.err" || rc=$?
+assert_equals 1 "$rc" "a cleanup root containing a home was accepted"
+assert_present "$home/config/data-management.live-authorized" "a refused ancestor root left home config intact"
+cat > "$tiercfg" <<EOF
+home $home_phys
+claude-sessions $TMP_ROOT 1
+EOF
+rc=0
+run clean --config "$tiercfg" --live >/dev/null 2>"$TMP_ROOT/ancestor.err" || rc=$?
+assert_equals 1 "$rc" "a Claude root containing a home was accepted"
+cat > "$tiercfg" <<EOF
+home $home_phys
+cache-tool npm $TMP_ROOT
+EOF
+rc=0
+run clean --config "$tiercfg" --live >/dev/null 2>"$TMP_ROOT/ancestor.err" || rc=$?
+assert_equals 1 "$rc" "a cache-tool root containing a home was accepted"
+
+nested_root="$home/.tmp/nested-cache"
+mkdir -p "$nested_root"
+nested_file="$nested_root/retained.txt"
+printf 'retained\n' > "$nested_file"
+fm_touch_epoch $((now - 10 * 86400)) "$nested_file"
+cat > "$tiercfg" <<EOF
+home $home_phys
+tmp $home_phys/.tmp 7
+cache nested $nested_root 30
+EOF
+out=$(run clean --config "$tiercfg")
+assert_not_contains "$out" "path=$nested_file" "the longer nested retention kept a 10-day file"
+out=$(run clean --config "$tiercfg" --live)
+assert_present "$nested_file" "live cleanup kept the 10-day nested file"
+fm_touch_epoch $((now - 40 * 86400)) "$nested_file"
+out=$(run clean --config "$tiercfg")
+assert_equals 1 "$(printf '%s\n' "$out" | grep -F "path=$nested_file" | grep -c 'would-free')" "overlapping roots counted a file twice"
+out=$(run clean --config "$tiercfg" --live)
+assert_absent "$nested_file" "live cleanup removed a file past the longer retention"
+
+for suffix in result adapter handled; do
+  printf 'old\n' > "$home/state/procevent-inbox/noowner-evt.1.$suffix"
+  printf 'old\n' > "$home/state/procevent-inbox/extension-evt.1.$suffix"
+  fm_touch_epoch $((now - 3 * 86400)) "$home/state/procevent-inbox/noowner-evt.1.$suffix" "$home/state/procevent-inbox/extension-evt.1.$suffix"
+done
+printf 'old\n' > "$home/state/procevent-inbox/extension-evt.1.extension"
+fm_touch_epoch $((now - 3 * 86400)) "$home/state/procevent-inbox/extension-evt.1.extension"
+printf 'old\n' > "$home/state/procevent-inbox/incomplete-evt.1.result"
+printf 'old\n' > "$home/state/procevent-inbox/incomplete-evt.1.handled"
+fm_touch_epoch $((now - 3 * 86400)) "$home/state/procevent-inbox/incomplete-evt.1.result" "$home/state/procevent-inbox/incomplete-evt.1.handled"
+cat > "$tiercfg" <<EOF
+home $home_phys
+procevent-result 1
+EOF
+out=$(run clean --config "$tiercfg" --live)
+assert_absent "$home/state/procevent-inbox/noowner-evt.1.result" "a handled group without owner-task was removed"
+assert_absent "$home/state/procevent-inbox/noowner-evt.1.handled" "the no-owner group was removed whole"
+assert_absent "$home/state/procevent-inbox/extension-evt.1.extension" "a handled extension sidecar was removed"
+assert_absent "$home/state/procevent-inbox/extension-evt.1.handled" "the extension group was removed whole"
+assert_present "$home/state/procevent-inbox/incomplete-evt.1.result" "an incomplete group kept its result"
+assert_present "$home/state/procevent-inbox/incomplete-evt.1.handled" "an incomplete group kept its marker"
+
+late="$home/.tmp/late-open.log"
+printf 'late\n' > "$late"
+fm_touch_epoch $((now - 3 * 86400)) "$late"
+cat > "$stubbin/lsof" <<EOF
+#!/bin/sh
+if [ "\$2" = "$late" ]; then
+  printf 'opened after survey\n'
+  exit 0
+fi
+exit 1
+EOF
+chmod +x "$stubbin/lsof"
+cat > "$tiercfg" <<EOF
+home $home_phys
+tmp $home_phys/.tmp 1
+EOF
+out=$(run clean --config "$tiercfg" --live)
+assert_present "$late" "a file opened after the process survey was retained"
+rm -f "$stubbin/lsof"
+
+cat > "$tiercfg" <<EOF
+home $home_phys
+EOF
+real_mkdir=$(command -v mkdir)
+cat > "$stubbin/mkdir" <<EOF
+#!/bin/sh
+"$real_mkdir" "\$@" || exit \$?
+if [ "\${TEST_DELAY_LOCK:-}" = 1 ] && [ "\$1" = "$tiercfg.lock" ]; then
+  : > "$TMP_ROOT/data-lock-created"
+  sleep 1
+fi
+EOF
+chmod +x "$stubbin/mkdir"
+export TEST_DELAY_LOCK=1
+run measure --config "$tiercfg" > "$TMP_ROOT/first-measure.out" &
+first_manager=$!
+i=0
+while [ ! -f "$TMP_ROOT/data-lock-created" ]; do
+  i=$((i + 1))
+  [ "$i" -lt 100 ] || fail "the first data manager did not create its lock"
+  sleep 0.01
+done
+rc=0
+run measure --config "$tiercfg" >/dev/null 2>"$TMP_ROOT/second-measure.err" || rc=$?
+assert_equals 1 "$rc" "two data managers entered the lock together"
+assert_contains "$(cat "$TMP_ROOT/second-measure.err")" "another data-manage run holds" "the second manager named the held lock"
+wait "$first_manager"
+unset TEST_DELAY_LOCK
+rm -f "$stubbin/mkdir" "$TMP_ROOT/data-lock-created"
+
+secondmate="$TMP_ROOT/secondmate"
+mkdir -p "$secondmate/config" "$secondmate/state" "$secondmate/.tmp"
+printf 'parent\n' > "$secondmate/.fm-secondmate-parent"
+: > "$secondmate/config/data-management.live-authorized"
+secondmate_file="$secondmate/.tmp/old.txt"
+printf 'keep\n' > "$secondmate_file"
+fm_touch_epoch $((now - 3 * 86400)) "$secondmate_file"
+rm -f "$home/config/data-management.live-authorized"
+cat > "$tiercfg" <<EOF
+home $secondmate
+home $home_phys
+tmp $secondmate/.tmp 1
+EOF
+out=$(run clean --config "$tiercfg" --live)
+assert_contains "$out" "mode=dry-run" "a secondmate marker did not authorize live cleanup"
+assert_present "$secondmate_file" "a secondmate marker left its aged file intact"
+
 pass "fm-data-manage keeps unlanded work and treats dry-run as read-only"

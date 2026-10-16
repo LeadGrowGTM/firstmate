@@ -3153,6 +3153,16 @@ case "$LAUNCH" in
   ;;
 esac
 
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
+  DISK_GUARD_ROOT=$(fm_firstmate_root_home "$FM_HOME" 2>/dev/null) || DISK_GUARD_ROOT=
+  if [ -n "$DISK_GUARD_ROOT" ] && { [ -f "$DISK_GUARD_ROOT/state/disk-guard.pause" ] || [ -L "$DISK_GUARD_ROOT/state/disk-guard.pause" ]; }; then
+    echo "deferred: this machine is pausing new local spawns ($DISK_GUARD_ROOT/state/disk-guard.pause); task $ID was not launched and its backlog item stays queued - dispatch it again once that flag is removed" >&2
+    FM_LAUNCH_OUTCOME=capacity
+    FM_LAUNCH_OUTCOME_REASON="disk-guard"
+    exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
+  fi
+fi
+
 case "$LAUNCH" in
 *__KIMIBIN__*)
   KIMI_BIN=$(resolve_kimi_binary) || {
@@ -3475,18 +3485,6 @@ if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" != secondmate ]; then
       fi
       ;;
   esac
-fi
-# Machine pressure (bin/fm-disk-guard.sh owns the flag). A fresh worker is
-# deferred while the root home's state/disk-guard.pause exists, before any
-# brief, endpoint, worktree, record, or backlog move, so the item stays queued.
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
-  DISK_GUARD_ROOT=$(fm_firstmate_root_home "$FM_HOME" 2>/dev/null) || DISK_GUARD_ROOT=
-  if [ -n "$DISK_GUARD_ROOT" ] && [ -f "$DISK_GUARD_ROOT/state/disk-guard.pause" ] && [ ! -L "$DISK_GUARD_ROOT/state/disk-guard.pause" ]; then
-    echo "deferred: this machine is pausing new local spawns ($DISK_GUARD_ROOT/state/disk-guard.pause); task $ID was not launched and its backlog item stays queued - dispatch it again once that flag is removed" >&2
-    FM_LAUNCH_OUTCOME=capacity
-    FM_LAUNCH_OUTCOME_REASON="disk-guard"
-    exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
-  fi
 fi
 # Project capacity admission (bin/fm-project-capacity-lib.sh owns the
 # declaration, what holds a place, and why this is race-safe). A fresh worker
