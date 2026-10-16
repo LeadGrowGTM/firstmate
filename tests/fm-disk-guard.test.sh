@@ -9,24 +9,43 @@ trap fm_test_cleanup EXIT
 
 home="$TMP_ROOT/home"
 mkdir -p "$home/state" "$home/config" "$home/.tmp"
-metrics="$TMP_ROOT/metrics"
-
-write_metrics() {
-  cat > "$metrics" <<EOF
-ram_avail_kib=$1
-swap_free_kib=$2
-linux_used_pct=$3
-linux_size_kib=$4
-linux_used_kib=$5
-linux_avail_kib=$6
-c_free_kib=$7
-vhdx_bytes=$8
+stubbin="$TMP_ROOT/bin"
+mkdir -p "$stubbin"
+real_awk=$(command -v awk)
+real_df=$(command -v df)
+cat > "$stubbin/awk" <<EOF
+#!/bin/sh
+if [ "\$#" -eq 2 ] && [ "\$2" = /proc/meminfo ]; then
+  case "\$1" in
+    *MemAvailable:*) printf '%s\n' "\$TEST_RAM_AVAIL" ;;
+    *SwapFree:*) printf '%s\n' "\$TEST_SWAP_FREE" ;;
+    *) exit 1 ;;
+  esac
+else
+  exec "$real_awk" "\$@"
+fi
 EOF
+cat > "$stubbin/df" <<EOF
+#!/bin/sh
+if [ "\$1" = -kP ] && [ "\$2" = "\$FM_HOME" ]; then
+  printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+  printf 'fixture %s %s %s %s%% %s\n' "\$TEST_LINUX_SIZE" "\$TEST_LINUX_USED" "\$TEST_LINUX_AVAIL" "\$TEST_LINUX_PCT" "\$2"
+elif [ "\$1" = -kP ] && [ "\$2" = /mnt/c ]; then
+  printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+  printf 'fixture 400000000 200000000 %s 50%% /mnt/c\n' "\$TEST_C_FREE"
+else
+  exec "$real_df" "\$@"
+fi
+EOF
+chmod +x "$stubbin/awk" "$stubbin/df"
+
+set_collector_values() {
+  export TEST_RAM_AVAIL=$1 TEST_SWAP_FREE=$2 TEST_LINUX_PCT=$3
+  export TEST_LINUX_SIZE=$4 TEST_LINUX_USED=$5 TEST_LINUX_AVAIL=$6 TEST_C_FREE=$7
 }
 
 run_guard() {
-  FM_HOME="$home" FM_DISK_GUARD_METRICS=1 FM_DISK_GUARD_METRICS_FILE="$metrics" \
-    bash "$TOOL" sample
+  FM_HOME="$home" PATH="$stubbin:$PATH" bash "$TOOL" sample
 }
 
 reset_guard() {
@@ -65,7 +84,7 @@ env -u FM_HOME bash "$TOOL" sample >/dev/null 2>"$TMP_ROOT/nohome.err" || rc=$?
 assert_equals 1 "$rc" "a sample without FM_HOME did not fail"
 assert_contains "$(cat "$TMP_ROOT/nohome.err")" "FM_HOME is required" "the refusal names FM_HOME"
 
-write_metrics 30000000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
 printf 'ram-floor-kib nope\n' > "$home/config/disk-guard"
 rc=0
 run_guard >/dev/null 2>"$TMP_ROOT/bad.err" || rc=$?
@@ -88,7 +107,7 @@ assert_contains "$out" "action=none" "a healthy sample takes no action"
 assert_absent "$home/state/disk-guard.pause" "a healthy sample does not pause spawns"
 assert_equals 0 "$(wake_count)" "a healthy sample does not wake"
 
-write_metrics 1000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "pressure=yes" "RAM below the floor is pressure"
 assert_contains "$out" "reasons=ram" "the reason is the RAM floor"
@@ -101,7 +120,7 @@ out=$(run_guard)
 assert_contains "$out" "action=already-paused" "pressure that continues does not pause again"
 assert_equals 1 "$(wake_count)" "a continued pause does not wake again"
 
-write_metrics 30000000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "action=cleared" "a healthy sample clears the pause"
 assert_absent "$home/state/disk-guard.pause" "the pause flag is gone"
@@ -110,21 +129,21 @@ assert_contains "$(cat "$home/state/.wake-queue")" "disk-guard clear" "the wake 
 
 reset_guard
 write_previous 600 20000000 200000000 30
-write_metrics 9000000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 9000000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "reasons=ram-soon" "a RAM fall inside the lead window is pressure"
 assert_present "$home/state/disk-guard.pause" "the projected fall pauses spawns"
 
 reset_guard
 write_previous 600 9000000 200000000 30
-write_metrics 8900000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 8900000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "pressure=no" "a slow RAM fall outside the lead window is not pressure"
 assert_absent "$home/state/disk-guard.pause" "a slow fall does not pause spawns"
 
 reset_guard
 write_previous 600 30000000 200000000 50
-write_metrics 30000000 8000000 68 1000000 680000 320000 200000000 absent
+set_collector_values 30000000 8000000 68 1000000 680000 320000 200000000
 out=$(run_guard)
 assert_contains "$out" "reasons=linux-soon" "a Linux rise inside the lead window is pressure"
 assert_present "$home/state/disk-guard.pause" "the projected rise pauses spawns"
@@ -132,12 +151,12 @@ assert_present "$home/state/disk-guard.pause" "the projected rise pauses spawns"
 reset_guard
 printf 'keep\n' > "$home/state/pause-target"
 ln -s pause-target "$home/state/disk-guard.pause"
-write_metrics 1000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "action=pause-symlink" "a symlink pause flag is not replaced"
 assert_contains "$(cat "$home/state/pause-target")" "keep" "the symlink target stays"
 rm -f "$home/state/disk-guard.pause"
-write_metrics 30000000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
 ln -s pause-target "$home/state/disk-guard.pause"
 out=$(run_guard)
 assert_contains "$out" "action=pause-symlink" "a healthy sample does not remove a symlink flag"
@@ -150,7 +169,7 @@ while [ "$i" -lt 2000 ]; do
   printf 'seed\n' >> "$home/state/disk-guard.log"
   i=$((i + 1))
 done
-write_metrics 30000000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
 run_guard >/dev/null
 assert_equals 2000 "$(wc -l < "$home/state/disk-guard.log" | tr -d '[:space:]')" "the log keeps the last 2000 lines"
 assert_contains "$(tail -n 1 "$home/state/disk-guard.log")" "pressure=no" "the newest sample is the line that remains"
@@ -168,7 +187,7 @@ cat > "$home/config/data-management" <<EOF
 home $home_phys
 tmp $home_phys/.tmp 1
 EOF
-write_metrics 1000 8000000 30 1000000 300000 700000 200000000 absent
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "action=paused-cleanup-0" "pressure runs the configured cleanup once"
 assert_contains "$(cat "$home/state/disk-guard.cleanup")" "mode=dry-run" "pressure without authorization plans cleanup"

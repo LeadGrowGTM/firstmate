@@ -43,12 +43,6 @@
 # cache. It may stat the configured virtual-disk file and read free space on
 # `/mnt/c`. It does not walk `/mnt`.
 #
-# `FM_DISK_GUARD_METRICS=1` reads `FM_DISK_GUARD_METRICS_FILE` instead of this
-# machine. That file is one `key=value` line each: `ram_avail_kib`,
-# `swap_free_kib`, `linux_used_pct`, `linux_size_kib`, `linux_used_kib`,
-# `linux_avail_kib`, `c_free_kib`, and `vhdx_bytes`. A value is an integer or
-# `absent`. `vhdx_bytes` may also be `error`.
-#
 # Exit 0 means a sample was recorded, or another live run holds the lock.
 # Exit 1 means the home, config, or sample could not be trusted. Exit 2
 # means the command line was wrong.
@@ -187,26 +181,6 @@ load_guard_config() {
   done < "$file"
 }
 
-set_metric() {
-  local key=$1 val=$2 norm
-  case "$val" in
-    absent) norm=absent ;;
-    error) [ "$key" = vhdx_bytes ] || die "only vhdx_bytes may be error"; norm=error ;;
-    *) norm=$(norm_uint "$val") || die "metric $key is not an integer or absent: $val" ;;
-  esac
-  case "$key" in
-    ram_avail_kib) RAM_AVAIL=$norm ;;
-    swap_free_kib) SWAP_FREE=$norm ;;
-    linux_used_pct) LINUX_PCT_NOW=$norm ;;
-    linux_size_kib) LINUX_SIZE=$norm ;;
-    linux_used_kib) LINUX_USED=$norm ;;
-    linux_avail_kib) LINUX_AVAIL=$norm ;;
-    c_free_kib) C_FREE=$norm ;;
-    vhdx_bytes) VHDX_BYTES=$norm ;;
-    *) die "unknown metric $key" ;;
-  esac
-}
-
 read_df_fields() {
   local target=$1 kind=$2 line cap used avail size
   line=$(df -kP "$target" 2>/dev/null | awk 'NR==2 { print }') || true
@@ -247,27 +221,6 @@ load_live_metrics() {
       VHDX_BYTES=absent
     fi
   fi
-}
-
-load_metrics() {
-  local file line key val
-  if [ "${FM_DISK_GUARD_METRICS:-}" = 1 ]; then
-    file=${FM_DISK_GUARD_METRICS_FILE:-}
-    [ -n "$file" ] && [ -f "$file" ] && [ ! -L "$file" ] || die "FM_DISK_GUARD_METRICS=1 needs a regular metrics file"
-    while IFS= read -r line || [ -n "$line" ]; do
-      case "$line" in
-        ''|\#*) continue ;;
-        *=*)
-          key=${line%%=*}
-          val=${line#*=}
-          set_metric "$key" "$val"
-          ;;
-        *) die "bad metrics line: $line" ;;
-      esac
-    done < "$file"
-    return 0
-  fi
-  load_live_metrics
 }
 
 load_previous() {
@@ -472,7 +425,7 @@ sample_once() {
   local now flag_state action cleanup_state pressure=no line
   now=$(date +%s)
   load_guard_config
-  load_metrics
+  load_live_metrics
   load_previous
   decide "$now"
   if [ -n "$REASONS" ]; then
