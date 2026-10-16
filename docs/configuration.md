@@ -502,7 +502,7 @@ New work that home starts then reads as that mate's crew:
 
 The file holds one short form of 1-16 lowercase letters, digits, and inner dashes, on one line with an optional final newline.
 A missing or empty file keeps today's names exactly.
-Any other content stops new spawns and ship briefs in that home with an error naming the file, rather than guessing a name.
+Any other content stops new spawns and ship briefs that use the default branch prefix with an error naming the file, rather than guessing a name.
 [`bin/fm-crew-name-lib.sh`](../bin/fm-crew-name-lib.sh) owns the format and the names it produces.
 
 The branch is only a default: a project's registered `branch=<prefix>` and an explicit `--branch-prefix` still win, and `bin/fm-project-mode.sh --branch-prefix <project>` reports the resolved prefix.
@@ -1058,7 +1058,7 @@ A ship or scout task worker never carries it, so tasks do not add entries to the
 
 ### Secondmates
 
-Every Claude secondmate launch and relaunch carries `--remote-control 'fm-<id>'`, so the session is listed as `fm-<id>`, the same stable label Firstmate uses for that secondmate on every backend.
+Every Claude secondmate launch and relaunch carries `--remote-control 'fm-<id>'`, so the session is listed as `fm-<id>`, matching Firstmate's stable task address for that secondmate.
 The optional local, gitignored `config/claude-remote-control` is the switch.
 
 | Token | Claude secondmate launch |
