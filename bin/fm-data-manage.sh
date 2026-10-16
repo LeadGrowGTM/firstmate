@@ -123,6 +123,7 @@ CLAUDE_PATH=()
 CLAUDE_DAYS=()
 CACHE_NAME=()
 CACHE_PATH=()
+RESOLVED_DIR=
 PROC_DAYS=
 CODEX_DAYS=
 NAMED=()
@@ -233,9 +234,10 @@ path_forbidden() {
     part=${p%%/*}
     part=${part,,}
     case "$part" in
-      data|.ssh|.aws|.azure|.kube|.gnupg|.docker|.mozilla|google-chrome|chromium|brave-browser|bravesoftware|gcloud|gh|1password|firefox|chrome|brave|edge|..|.) return 0 ;;
+      data|.ssh|.aws|.azure|.kube|.gnupg|.docker|gcloud|gh|1password|..|.) return 0 ;;
+      *chrome*|*chromium*|*edge*|*msedge*|*firefox*|*mozilla*|*brave*|*opera*|*vivaldi*|*safari*|*profile*|*cookies*|*history*|*login*data*|*local*state*|*keyring*|*keychain*) return 0 ;;
+      .env*|*.env|*.env.*|*dotenv*|*cert*|*crt*|*pem*|*key*|*p12*|*pfx*|*jks*|*keystore*|*.cer|*.der|*.p8|*.p7b|*.p7c|*.pub|*token*|*oauth*|*credential*|*secret*|*auth*|*cookie*|*password*|*passwd*|.netrc|.npmrc|id_rsa|id_ed25519|id_ecdsa) return 0 ;;
     esac
-    file_name_protected "$part" && return 0
     case "$p" in
       */*) p=${p#*/} ;;
       *) p= ;;
@@ -244,18 +246,14 @@ path_forbidden() {
   return 1
 }
 
-file_name_protected() {
-  local base=${1,,}
-  case "$base" in
-    .env*|*.env|*.env.*|*dotenv*|*token*|*oauth*|*credential*|*secret*|*cookie*|*auth*|*key*|*password*|.netrc|.npmrc|id_rsa|id_ed25519|id_ecdsa|*.pem|*.p12|*.pfx|*.crt|*.cer|*.der|*.p8|*.p7b|*.p7c|*.jks|*.pub) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 require_abs_path() {
   local p=$1 label=$2
-  path_forbidden "$p" && die "$label path is not an allowed absolute path: $p"
   case "$p" in
+    /*) ;;
+    *) die "$label path is not an allowed absolute path: $p" ;;
+  esac
+  case "$p" in
+    /|/mnt|/mnt/*|*[![:print:]]*|*[[:space:]]*) die "$label path is not an allowed absolute path: $p" ;;
     */) die "$label path must not end with a slash: $p" ;;
   esac
 }
@@ -280,7 +278,7 @@ take_lock() {
 }
 
 parse_config() {
-  local line kind a b c nwords
+  local line kind a b c nwords phys
   [ -f "$CONFIG" ] && [ ! -L "$CONFIG" ] || die "config must be a regular file: $CONFIG"
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%$'\r'}
@@ -301,14 +299,16 @@ parse_config() {
       home)
         [ "$nwords" -eq 2 ] || die "home takes one path: $line"
         require_abs_path "$a" home
-        physical_dir "$a" >/dev/null || die "home is missing or is a symlink: $a"
-        HOMES+=("$(physical_dir "$a")")
+        phys=$(physical_dir "$a") || die "home is missing or is a symlink: $a"
+        path_forbidden "$phys" && die "home is protected: $phys"
+        HOMES+=("$phys")
         ;;
       pool-root)
         [ "$nwords" -eq 2 ] || die "pool-root takes one path: $line"
         require_abs_path "$a" pool-root
-        physical_dir "$a" >/dev/null || die "pool-root is missing or is a symlink: $a"
-        POOLS+=("$(physical_dir "$a")")
+        phys=$(physical_dir "$a") || die "pool-root is missing or is a symlink: $a"
+        path_forbidden "$phys" && die "pool-root is protected: $phys"
+        POOLS+=("$phys")
         ;;
       tmp|log)
         [ "$nwords" -eq 3 ] || die "$kind takes a path and a day count: $line"
@@ -413,6 +413,7 @@ resolve_deletion_roots() {
 
 resolve_real_dir() {
   local kind=$1 path=$2 phys
+  RESOLVED_DIR=
   if [ ! -e "$path" ] && [ ! -L "$path" ]; then
     emit "$(printf 'measure\tpath\tcategory=%s\tbytes=absent\tpath=%s' "$kind" "$path")"
     return 1
@@ -422,15 +423,15 @@ resolve_real_dir() {
   fi
   phys=$(physical_dir "$path") || die "$kind root must be a real directory: $path"
   path_forbidden "$phys" && die "$kind root is protected: $phys"
-  printf '%s\n' "$phys"
+  RESOLVED_DIR=$phys
 }
 
 resolve_tool_roots() {
-  local i=0 path phys
+  local i=0 path
   while [ "$i" -lt "${#CLAUDE_PATH[@]}" ]; do
     path=${CLAUDE_PATH[$i]}
-    if phys=$(resolve_real_dir claude-sessions "$path"); then
-      CLAUDE_PATH[i]=$phys
+    if resolve_real_dir claude-sessions "$path"; then
+      CLAUDE_PATH[i]=$RESOLVED_DIR
     else
       CLAUDE_PATH[i]=
     fi
@@ -439,8 +440,8 @@ resolve_tool_roots() {
   i=0
   while [ "$i" -lt "${#CACHE_PATH[@]}" ]; do
     path=${CACHE_PATH[$i]}
-    if phys=$(resolve_real_dir "${CACHE_NAME[$i]}" "$path"); then
-      CACHE_PATH[i]=$phys
+    if resolve_real_dir "${CACHE_NAME[$i]}" "$path"; then
+      CACHE_PATH[i]=$RESOLVED_DIR
     else
       CACHE_PATH[i]=
     fi
@@ -997,17 +998,21 @@ cleanup_file_safe() {
 }
 
 cache_store_safe() {
-  local root=$1 path walked=0 list=$WORK/cache-paths
+  local root=$1 path phys walked=0 list=$WORK/cache-paths
   root_inside_worktree "$root" && return 1
   find -P "$root" -xdev -print0 > "$list" 2>/dev/null || return 1
   while IFS= read -r -d '' path; do
     walked=$((walked + 1))
     [ "$walked" -le "$WALK_CAP" ] || return 1
     [ ! -L "$path" ] || return 1
-    path_forbidden "$path" && return 1
     if [ -f "$path" ]; then
       cleanup_file_safe "$path" "$root" || return 1
-    elif [ -e "$path/.git" ] || [ -L "$path/.git" ]; then
+    elif [ -d "$path" ]; then
+      phys=$(physical_dir "$path") || return 1
+      case "$phys" in "$root"|"$root"/*) ;; *) return 1 ;; esac
+      path_forbidden "$phys" && return 1
+      [ ! -e "$path/.git" ] && [ ! -L "$path/.git" ] || return 1
+    else
       return 1
     fi
   done < "$list"

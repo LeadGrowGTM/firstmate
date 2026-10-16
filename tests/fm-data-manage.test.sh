@@ -75,18 +75,24 @@ fresh="$home/.tmp/fresh.txt"
 envf="$home/.tmp/.env"
 envrc="$home/.tmp/.envrc"
 oauthf="$home/.tmp/oauth-token.json"
+certf="$home/.tmp/client.cert"
+edge_root="$home/.tmp/microsoft-edge/Default"
+edge_file="$edge_root/History"
 openf="$home/.tmp/open.txt"
 outside="$TMP_ROOT/outside.txt"
+mkdir -p "$edge_root"
 printf 'old\n' > "$old"
 printf 'fresh\n' > "$fresh"
 printf 'secret\n' > "$envf"
 printf 'secret\n' > "$envrc"
 printf 'oauth\n' > "$oauthf"
+printf 'certificate\n' > "$certf"
+printf 'browser history\n' > "$edge_file"
 printf 'open\n' > "$openf"
 printf 'outside\n' > "$outside"
 ln -s "$outside" "$home/.tmp/link"
 now=$(date +%s)
-fm_touch_epoch $((now - 3 * 86400)) "$old" "$envf" "$envrc" "$oauthf" "$openf"
+fm_touch_epoch $((now - 3 * 86400)) "$old" "$envf" "$envrc" "$oauthf" "$certf" "$edge_file" "$openf"
 unknown_checkout="$home/.tmp/nested-checkout"
 git init "$unknown_checkout" >/dev/null
 unknown_file="$unknown_checkout/dirty-old.txt"
@@ -123,6 +129,8 @@ assert_contains "$out" "path=$old" "dry-run names the aged temp file"
 assert_not_contains "$out" "path=$envf" "dry-run does not select a dotenv file"
 assert_not_contains "$out" "path=$envrc" "dry-run does not select an envrc file"
 assert_not_contains "$out" "path=$oauthf" "dry-run does not select an OAuth token"
+assert_not_contains "$out" "path=$certf" "dry-run does not select a certificate"
+assert_not_contains "$out" "path=$edge_file" "dry-run does not select Edge history"
 assert_not_contains "$out" "path=$unknown_file" "dry-run does not select an undiscovered checkout file"
 assert_not_contains "$out" "path=$fresh" "dry-run does not select a fresh temp file"
 assert_not_contains "$out" "path=$openf" "dry-run does not select an open temp file"
@@ -157,6 +165,8 @@ assert_present "$fresh" "a fresh temp file stays"
 assert_present "$envf" "a dotenv file stays"
 assert_present "$envrc" "an envrc file stays"
 assert_present "$oauthf" "an OAuth token stays"
+assert_present "$certf" "a certificate stays"
+assert_present "$edge_file" "Edge history stays"
 assert_present "$unknown_file" "an undiscovered dirty checkout stays"
 assert_present "$openf" "an open temp file stays"
 assert_present "$outside" "a symlink target stays"
@@ -241,7 +251,18 @@ EOF
 rc=0
 run clean --config "$bad" --live >/dev/null 2>"$TMP_ROOT/bad.err" || rc=$?
 assert_equals 1 "$rc" "a CLI credential store refuses the run"
+assert_contains "$(cat "$TMP_ROOT/bad.err")" "root is protected" "the credential-store refusal names the boundary"
 assert_present "$gh_store/hosts.yml" "the CLI credential remains"
+
+cat > "$bad" <<EOF
+home $home_phys
+claude-sessions $edge_root 1
+EOF
+rc=0
+run clean --config "$bad" --live >/dev/null 2>"$TMP_ROOT/bad.err" || rc=$?
+assert_equals 1 "$rc" "a browser profile refuses the session root"
+assert_contains "$(cat "$TMP_ROOT/bad.err")" "root is protected" "the session refusal names the boundary"
+assert_present "$edge_file" "the refused profile remains"
 
 wtcfg="$TMP_ROOT/wt.conf"
 scratch="$landed/scratch-old.txt"
