@@ -1378,6 +1378,72 @@ test_recycled_slot_of_another_clone_is_already_gone() {
   pass "fm-teardown: a pool slot now owned by another clone is already gone"
 }
 
+test_absent_recorded_slot_still_holds_project_lock() {
+  local mode dir parent subhome project worktree meta teardown_id lock_home lock holder waited rc id=stale-child
+  for mode in ordinary descendant; do
+    dir=$(make_case "absent-slot-$mode")
+    parent="$dir/home"
+    subhome="$dir/subhome"
+    worktree="$dir/pool/1/project"
+    teardown_id=$id
+    lock_home=$parent
+    project="$parent/projects/legion"
+    meta="$parent/state/$id.meta"
+    if [ "$mode" = descendant ]; then
+      project="$subhome/projects/legion"
+      meta="$subhome/state/$id.meta"
+      teardown_id=website-genie
+      lock_home=$subhome
+      mkdir -p "$subhome/state" "$parent/data"
+      printf 'website-genie\n' > "$subhome/.fm-secondmate-home"
+      write_local_parent_record "$subhome" "$parent"
+      fm_write_secondmate_meta "$parent/state/website-genie.meta" "$subhome" "" legion
+      printf '%s\n' "- website-genie - fixture (home: $subhome; scope: fixture; projects: legion; added 2026-10-15)" \
+        > "$parent/data/secondmates.md"
+    fi
+    mkdir -p "$(dirname "$project")"
+    git init -q "$project"
+    fm_write_meta "$meta" \
+      "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+      "worktree=$worktree" "project=$project" "kind=ship" "mode=no-mistakes"
+    lock=$(resolve_project_lock "$lock_home" "$project") \
+      || fail "$mode teardown could not resolve the recorded project's slot lock"
+    (
+      . "$ROOT/bin/fm-wake-lib.sh"
+      fm_lock_try_acquire "$lock" || exit 1
+      : > "$dir/lock-held"
+      exec sleep 30
+    ) &
+    holder=$!
+    waited=0
+    while [ ! -e "$dir/lock-held" ] && [ "$waited" -lt 100 ]; do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    [ -e "$dir/lock-held" ] || fail "$mode slot lock holder did not start"
+    set +e
+    FM_HOME="$parent" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+      "$TEARDOWN" "$teardown_id" --force > "$dir/stdout" 2> "$dir/stderr"
+    rc=$?
+    set -e
+    kill "$holder" 2>/dev/null || true
+    wait "$holder" 2>/dev/null || true
+    [ "$rc" -ne 0 ] || fail "$mode teardown crossed the project lock for an absent slot"
+    assert_contains "$(cat "$dir/stderr")" "another Treehouse slot allocation or return is in progress" \
+      "$mode teardown did not refuse at the recorded project's slot lock"
+    assert_present "$meta" "$mode lock refusal removed the child record"
+    [ ! -e "$worktree" ] || fail "$mode lock refusal created the recorded worktree"
+    [ ! -s "$dir/runtime.log" ] || fail "$mode lock refusal reached the runtime"
+    FM_HOME="$parent" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+      "$TEARDOWN" "$teardown_id" --force > "$dir/stdout" 2> "$dir/stderr" \
+      || fail "$mode teardown of an absent slot failed after the lock was released: $(cat "$dir/stderr")"
+    assert_absent "$meta" "$mode teardown left the child record after lock release"
+  done
+  pass "fm-teardown: absent recorded slots hold the project lock through ordinary and descendant cleanup"
+}
+
 # The tmux shim used by the endpoint-close tests below: every subcommand
 # reaches the real isolated server, so presence is always read from real tmux.
 # When FM_TEST_BLOCK_KILL is set, `kill-window` alone fails without forwarding,
@@ -1768,6 +1834,7 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
 test_stale_record_on_claimed_slot_retires_then_claimant_tears_down
 test_own_and_absent_slot_claims_still_tear_down
 test_recycled_slot_of_another_clone_is_already_gone
+test_absent_recorded_slot_still_holds_project_lock
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot
