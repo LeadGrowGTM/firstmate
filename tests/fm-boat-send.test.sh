@@ -294,7 +294,7 @@ test_validation() {
     '.home = "/home/user/other"' '.origin = "https://example.invalid/repo"' '.yolo = "on"' \
     '.flags = ["--unsafe"]' '.secrets = {}' '.mode = "local-only"' '.kind = "secondmate"' \
     '.harness = "echo"' '.effort = "unknown"' '.model = ""' '.intent = ""' \
-    '.spec = ""' '.git_name = ""' '.git_email = "invalid"' '.git_name = "Fixture"' '.git_name = "Fixture" | .git_email = "fixture@example.invalid"' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
+    '.spec = ""' '.goal = "still {GOAL}"' '.off_limits = "no pushes"' '.contracts = "none"' '.git_name = ""' '.git_email = "invalid"' '.git_name = "Fixture"' '.git_name = "Fixture" | .git_email = "fixture@example.invalid"' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
     '.intent = "hidden\u0000text"' '.kind = "scout"'; do
     n=$((n + 1))
     new_case "invalid-$n"
@@ -843,6 +843,42 @@ test_existing_backlog_row() {
   pass 'existing backlog rows must be dispatchable and match task kind and project'
 }
 
+placeholders_present() {
+  (
+    # shellcheck source=bin/fm-dod-lib.sh
+    . "$ROOT/bin/fm-dod-lib.sh" || exit 2
+    fm_brief_task_placeholders_present "$1"
+  )
+}
+
+test_brief_placeholder_fill() {
+  local brief
+  new_case brief-tokens-fallback
+  seed_project firstmate
+  : > "$FIXTURES/use-real-brief"
+  spawn_task
+  expect_code 0 "$CODE" "fallback brief reaches spawn: $OUT"
+  brief="$REMOTE_HOME/data/task-one/brief.md"
+  [ -f "$brief" ] || fail 'fallback brief was not written'
+  placeholders_present "$brief" && fail 'fallback brief still has unfilled task placeholders'
+  [ "$?" -eq 1 ] || fail 'fallback brief placeholder check did not run'
+  assert_grep 'Goal: Complete the one code-only task in the spec.' "$brief" 'fallback goal'
+  assert_grep 'Off-limits: Secrets, client data, pushes, merges, deploys, and captain contact.' "$brief" 'fallback off-limits'
+  assert_grep 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none' "$brief" 'fallback contracts'
+  assert_grep 'Implement the requested fix' "$brief" 'fallback kept intent'
+  new_case brief-tokens-scout
+  seed_project firstmate
+  : > "$FIXTURES/use-real-brief"
+  set_json request '.kind = "scout" | .mode = "scout"'
+  spawn_task
+  expect_code 0 "$CODE" "scout fallback brief reaches spawn: $OUT"
+  brief="$REMOTE_HOME/data/task-one/brief.md"
+  placeholders_present "$brief" && fail 'scout brief still has unfilled task placeholders'
+  [ "$?" -eq 1 ] || fail 'scout brief placeholder check did not run'
+  assert_grep '--scout' "$FIXTURES/spawn.argv" 'scout brief was not spawned as a scout'
+  pass 'Boat brief rewrite fills every scaffold placeholder before spawn'
+}
+
 seed_project() {
   fm_git_init_commit "$REMOTE_HOME/projects/$1"
   git -C "$REMOTE_HOME/projects/$1" config user.name Fixture
@@ -1102,6 +1138,7 @@ test_box_config_and_environment() {
 }
 
 test_box_config_and_environment
+test_brief_placeholder_fill
 test_independent_resume_before_refusal
 test_instance_changes_at_action_boundary
 test_same_id_orphan_retry
