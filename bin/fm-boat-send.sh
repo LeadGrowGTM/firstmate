@@ -102,7 +102,7 @@ stop_current_instance() {
   fm_run_timed 30 "$BOAT_BIN" --no-update stop "$BOX" --json >/dev/null || return 1
   rm -f -- "$ENV_RECEIPT"
   # Park the alias now; fm-on.sh's own check would otherwise do it at the next call.
-  FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" --verify boat-prove >/dev/null 2>&1 || true
+  FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" --park "$BOX" boat-prove >/dev/null || return 1
 }
 REG="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
 if [ "$PREPARE" -eq 0 ]; then

@@ -4,7 +4,9 @@
 #
 # Usage:
 #   fm-boat-alias-refresh.sh <sandbox-id> <alias>   write or refresh the alias
-#   fm-boat-alias-refresh.sh --verify <alias>       check the alias before a connection
+#   fm-boat-alias-refresh.sh --verify <alias> [id]  check the alias before a connection
+#   fm-boat-alias-refresh.sh --proxy <alias>        guard a direct SSH connection
+#   fm-boat-alias-refresh.sh --park <id> <alias>    park after a confirmed stop
 #   fm-boat-alias-refresh.sh --remove <alias>       remove the alias and its pin
 #   fm-boat-alias-refresh.sh --help
 #
@@ -27,7 +29,7 @@
 # It rewrites exactly two things under ~/.ssh and prints what changed:
 #   - one block in ~/.ssh/config, between the lines
 #     "# >>> boat-alias <alias> >>>" and "# <<< boat-alias <alias> <<<": the
-#     previous block is dropped and the new one appended at the end;
+#     previous block is dropped and the new one placed first;
 #   - one dedicated known-hosts file, ~/.ssh/known_hosts_<alias>, with every
 #     "-" in the alias written as "_".
 # The block records its sandbox id on a "# boat-sandbox <id>" line, names the
@@ -38,8 +40,8 @@
 #
 # The block holds an address only while Boat reports the sandbox running. When
 # a refresh or a --verify finds the sandbox in any other state, an existing
-# block is parked: it keeps only the sandbox id line, so the alias resolves to
-# no address, and the known-hosts file is deleted. The refresh then refuses.
+# block is parked: it retains a guarded Host entry with no address, and the
+# known-hosts file is deleted. The refresh then refuses.
 #
 # --verify is the pre-connect check fm-on.sh runs for every route. It exits 3,
 # changing nothing and calling no Boat command, when ~/.ssh/config holds no
@@ -47,16 +49,18 @@
 # connects nothing itself:
 #   - a sandbox that is not running parks the block and is refused (offline);
 #   - a running sandbox whose endpoint differs from the block, or whose block
-#     is parked, is refreshed from Boat first, without waiting for the restore;
+#     is parked, is refused until an explicit refresh;
 #   - a running sandbox at the block's endpoint whose host key from Boat
 #     differs from the pinned key is refused unchanged; an explicit refresh is
 #     the deliberate way to accept it;
 #   - a block with no sandbox id line, written before that line existed, is
 #     refused until an explicit refresh rewrites it;
 #   - a sandbox whose disk restore has not finished is refused.
-# On success it prints the verified OpenSSH options, one Name=value per line,
+# An optional sandbox id requires the alias to name the selected box. On
+# success it prints the verified OpenSSH options, one Name=value per line,
 # for the caller to pass with -o, so the connection uses the address and pin
-# Boat just confirmed even when an earlier block in ~/.ssh/config would win.
+# Boat just confirmed. The block's ProxyCommand repeats --verify for direct
+# SSH and opens transport only after the check passes.
 # --remove deletes the block and the known-hosts file, and deletes
 # ~/.ssh/config itself when the block was its whole content.
 #
@@ -64,11 +68,9 @@
 # rewrite would replace the link with a file) or holds a start line for this
 # alias with no end line (the rest of the file would be read as the block).
 #
-# OpenSSH keeps the first value it reads for each option, and the block is
-# last in the file. An earlier block that also matches the alias, such as
-# "Host *", therefore wins for any option it sets, except the ones --verify
-# prints for fm-on.sh to pass on the command line; `ssh -G <alias>` prints the
-# values in force.
+# OpenSSH keeps the first value it reads for each option, so the managed block
+# is first to keep an operator's broader Host pattern from replacing its guard.
+# `ssh -G <alias>` prints the values in force.
 #
 # After a resume the sandbox's home directory is restored lazily, and until
 # Boat reports hydrated=true a file open there can block with no timeout, which
@@ -104,15 +106,17 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,${/^#/!q;p;}' "$0" | sed 's/^# \{0,1\}//'; }
 bad_use() {
   printf 'error: %s\n' "$1" >&2
-  printf 'usage: %s <sandbox-id> <alias> | --verify <alias> | --remove <alias> | --help\n' "${0##*/}" >&2
+  printf 'usage: %s <sandbox-id> <alias> | --verify <alias> [id] | --proxy <alias> | --park <id> <alias> | --remove <alias> | --help\n' "${0##*/}" >&2
   exit 2
 }
 
 tmp=
 known_tmp=
+block_tmp=
 cleanup() {
   [ -z "$tmp" ] || rm -f -- "$tmp"
   [ -z "$known_tmp" ] || rm -f -- "$known_tmp"
+  [ -z "$block_tmp" ] || rm -f -- "$block_tmp"
 }
 trap cleanup EXIT
 
@@ -176,6 +180,14 @@ publish_config() {
   tmp=
 }
 
+prepend_block() {
+  block_tmp=$(mktemp "$SSH_DIR/.config.tmp.XXXXXX")
+  cat > "$block_tmp"
+  cat "$tmp" >> "$block_tmp"
+  mv -f -- "$block_tmp" "$tmp"
+  block_tmp=
+}
+
 # Sets INFO, STATE, HOST, PORT, and HYDRATED from one `boat info` read. HOST and
 # PORT are set only for a running sandbox.
 read_sandbox() { # <sandbox-id>
@@ -198,7 +210,7 @@ read_sandbox() { # <sandbox-id>
   fi
   [ -n "$HOST" ] || die "boat info returned no SSH endpoint or ip for $1"
   case "$PORT" in ''|*[!0-9]*) die "unexpected SSH port: $PORT" ;; esac
-  case "$HOST" in *[!A-Za-z0-9.:-]*) die "unexpected SSH host: $HOST" ;; esac
+  case "$HOST" in -*|*[!A-Za-z0-9.:-]*) die "unexpected SSH host: $HOST" ;; esac
 }
 
 running() {
@@ -225,7 +237,8 @@ write_alias() { # <sandbox-id> <alias>
   OLD_TARGET=${OLD_TARGET:-none}
   umask 077
   strip_config "$2"
-  cat >> "$tmp" <<EOF
+  printf -v proxy_path '%q' "$SCRIPT_DIR/fm-boat-alias-refresh.sh"
+  prepend_block <<EOF
 # >>> boat-alias $2 >>>
 # boat-sandbox $1
 Host $2
@@ -241,6 +254,7 @@ Host $2
   UpdateHostKeys no
   ForwardAgent no
   ConnectTimeout 15
+  ProxyCommand $proxy_path --proxy $2
 # <<< boat-alias $2 <<<
 EOF
   known_tmp="$KNOWN.tmp.$$"
@@ -258,8 +272,14 @@ park_alias() { # <sandbox-id> <alias>
   [ -n "$(block_fields "$2")" ] || return 0
   umask 077
   strip_config "$2"
-  printf '# >>> boat-alias %s >>>\n# boat-sandbox %s\n# parked: the sandbox is not running, so this alias has no address\n# <<< boat-alias %s <<<\n' \
-    "$2" "$1" "$2" >> "$tmp"
+  printf -v proxy_path '%q' "$SCRIPT_DIR/fm-boat-alias-refresh.sh"
+  prepend_block <<EOF
+# >>> boat-alias $2 >>>
+# boat-sandbox $1
+Host $2
+  ProxyCommand $proxy_path --proxy $2
+# <<< boat-alias $2 <<<
+EOF
   publish_config
   rm -f -- "$KNOWN"
 }
@@ -282,10 +302,38 @@ if [ "${1:-}" = --remove ]; then
   exit 0
 fi
 
+if [ "${1:-}" = --park ]; then
+  [ "$#" -eq 3 ] || bad_use "--park takes a sandbox id and alias"
+  ID=$2
+  ALIAS=$3
+  check_id "$ID"
+  check_alias "$ALIAS"
+  KNOWN="$SSH_DIR/known_hosts_${ALIAS//-/_}"
+  fields=$(block_fields "$ALIAS")
+  [ -z "$fields" ] || [ "${fields%% *}" = "$ID" ] || die "Boat alias $ALIAS does not name $ID"
+  check_tools
+  read_sandbox "$ID"
+  running && die "Boat sandbox $ID is still running; refusing to park $ALIAS"
+  park_alias "$ID" "$ALIAS"
+  exit 0
+fi
+
+if [ "${1:-}" = --proxy ]; then
+  [ "$#" -eq 2 ] || bad_use "--proxy takes exactly one alias"
+  check_alias "$2"
+  pins=$("$0" --verify "$2") || die "Boat did not verify $2; refusing proxy connection"
+  host=$(printf '%s\n' "$pins" | sed -n 's/^HostName=//p')
+  port=$(printf '%s\n' "$pins" | sed -n 's/^Port=//p')
+  [ -n "$host" ] && [ -n "$port" ] || die "Boat verification returned no endpoint for $2"
+  command -v nc >/dev/null 2>&1 || die "nc is required for Boat SSH proxy"
+  exec nc "$host" "$port"
+fi
+
 if [ "${1:-}" = --verify ]; then
-  [ "$#" -eq 2 ] || bad_use "--verify takes exactly one alias"
+  [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || bad_use "--verify takes an alias and optional sandbox id"
   ALIAS=$2
   check_alias "$ALIAS"
+  [ "$#" -eq 2 ] || check_id "$3"
   KNOWN="$SSH_DIR/known_hosts_${ALIAS//-/_}"
   fields=$(block_fields "$ALIAS")
   [ -n "$fields" ] || exit 3
@@ -293,6 +341,7 @@ if [ "${1:-}" = --verify ]; then
   target=${fields#* }
   [ "$ID" != none ] ||
     die "Boat alias $ALIAS names no sandbox, so it cannot be checked; run fm-boat-alias-refresh.sh <sandbox-id> $ALIAS"
+  [ "$#" -eq 2 ] || [ "$ID" = "$3" ] || die "Boat alias $ALIAS names $ID rather than configured box $3"
   check_id "$ID"
   check_tools
   read_sandbox "$ID"
@@ -301,17 +350,13 @@ if [ "${1:-}" = --verify ]; then
     die "Boat sandbox $ID behind $ALIAS is not running (state=${STATE:-unknown}); treating it as offline without connecting"
   fi
   read_hostkey "$ID"
-  if [ "$target" != "$HOST:$PORT" ]; then
-    [ -f "$KEY" ] || die "no Boat CLI key at $KEY; run 'boat ssh $ID true' once"
-    write_alias "$ID" "$ALIAS"
-    printf 'refreshed Boat alias %s from Boat: endpoint %s -> %s:%s, hostkey %s -> %s\n' \
-      "$ALIAS" "$OLD_TARGET" "$HOST" "$PORT" "${OLD_FP:-none}" "$NEW_FP" >&2
-  else
-    pinned=
-    [ ! -f "$KNOWN" ] || pinned=$(awk -v alias="$ALIAS" '$1 == alias { print $2, $3; exit }' "$KNOWN")
-    [ "$pinned" = "$HOSTKEY" ] ||
-      die "the host key Boat reports for $ID does not match the key pinned for $ALIAS at $HOST:$PORT; refusing to connect (run fm-boat-alias-refresh.sh $ID $ALIAS to accept Boat's key deliberately)"
-  fi
+  [ "$target" != none ] || die "Boat alias $ALIAS is parked; run fm-boat-alias-refresh.sh $ID $ALIAS after resume"
+  [ "$target" = "$HOST:$PORT" ] ||
+    die "Boat sandbox $ID moved from $target to $HOST:$PORT; refusing to connect (run fm-boat-alias-refresh.sh $ID $ALIAS to accept Boat's endpoint deliberately)"
+  pinned=
+  [ ! -f "$KNOWN" ] || pinned=$(awk -v alias="$ALIAS" '$1 == alias { print $2, $3; exit }' "$KNOWN")
+  [ "$pinned" = "$HOSTKEY" ] ||
+    die "the host key Boat reports for $ID does not match the key pinned for $ALIAS at $HOST:$PORT; refusing to connect (run fm-boat-alias-refresh.sh $ID $ALIAS to accept Boat's key deliberately)"
   [ "$HYDRATED" = true ] ||
     die "Boat sandbox $ID behind $ALIAS has not finished restoring its disk; treating it as offline without connecting"
   printf '%s\n' "HostName=$HOST" "Port=$PORT" "HostKeyAlias=$ALIAS" "UserKnownHostsFile=$KNOWN" \

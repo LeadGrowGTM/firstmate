@@ -483,9 +483,11 @@ Prefer that over registering the sandbox as a saved SSH host in a desktop app, b
 
 A resume moves the sandbox to a new machine, so its SSH host key changes every time, and its endpoint address and port can change with it.
 Before every connection, [`bin/fm-on.sh`](../bin/fm-on.sh) asks Boat whether the sandbox behind a Boat alias is running and dials only the address and host key Boat confirms at that moment.
+Direct SSH to the alias runs the same check through its guarded SSH config block.
 A stopped sandbox is never dialled: its alias is parked with no address, and the call reads like any other [unavailable transport](#ssh-exit-255-and-unavailable-homes): the remote home is unknown, and nothing is replaced locally.
 The same holds for a sandbox still restoring its disk, and for one whose host key from Boat differs from the pin at an unchanged address.
-A sandbox that is running at a new address is refreshed from Boat before the connection.
+A sandbox that is running at a new address needs an explicit alias refresh before the connection.
+If the `boat-eng` alias block is missing, `fm-on.sh` recreates it only when Boat confirms the configured box is running and restored.
 That check never resumes a sandbox.
 
 For an ordinary remote second mate, run the helper on the primary after every `boat resume` and before any other Firstmate call to that host:
@@ -496,7 +498,7 @@ bin/fm-boat-alias-refresh.sh <sandbox-id> <ssh-alias>
 ```
 
 It reads the new endpoint and host key through the authenticated Boat CLI rather than accepting a key on first sight over the network, and rewrites only that alias's block in `~/.ssh/config` and its dedicated known-hosts file.
-Its header owns what it reads, writes, and refuses, its environment knobs, and how an earlier matching `Host` block in `~/.ssh/config` can override the alias.
+Its header owns what it reads, writes, and refuses, its environment knobs, and how the guarded block takes priority over broader `Host` patterns in `~/.ssh/config`.
 
 On the sandbox, a resume keeps the home directory, `/etc`, and `/usr/local/bin`, so the clone, the installed tools, the `PATH` block, and the units all survive.
 Every process, `/tmp`, `~/.cache`, and every Unix socket are gone.
