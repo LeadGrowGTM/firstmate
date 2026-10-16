@@ -1664,7 +1664,7 @@ test_retire_claim_archives_without_spawn_generation() {
 
 test_retire_claim_restores_partial_backlog_transitions() {
   local dir id mode rc before archive backup
-  for mode in prepare done reopen remove rollback; do
+  for mode in prepare backup done reopen remove rollback; do
     id="retire-partial-$mode"
     dir=$(make_retire_claim_case "retire-partial-$mode" "$id")
     printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
@@ -1718,7 +1718,21 @@ if [ "$mode" = prepare ]; then
 fi
 exec /usr/bin/mktemp "$@"
 SH
-    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mv" "$dir/fakebin/mktemp"
+    cat > "$dir/fakebin/cp" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "$mode" = backup ]; then
+  for arg in "$@"; do
+    case "$arg" in */.retired-worktree-record.*)
+      printf 'partial backup\n' > "$arg"
+      exit 1
+      ;;
+    esac
+  done
+fi
+exec /bin/cp "$@"
+SH
+    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mv" "$dir/fakebin/mktemp" "$dir/fakebin/cp"
     rc=0
     run_retire_claim "$dir" "$id" > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
     [ "$rc" -ne 0 ] || fail "$mode: injected retirement failure was accepted"
@@ -1826,6 +1840,51 @@ test_retire_claim_accepts_its_nested_foreground_shell() {
   tmux -L "$label" kill-server
   rm -f "$socket"
   pass 'retirement accepts its verified nested foreground shell without closing the pane'
+}
+
+test_retire_claim_refuses_active_nested_shell_script() {
+  local dir id=retire-nested-script label socket pane active capture
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  dir=$(make_retire_claim_case retire-nested-script "$id")
+  label="retire-script-$RANDOM"
+  tmux -L "$label" new-session -d -s firstmate -n "fm-$id" -c "$dir/worktree" 'bash --noprofile --norc -i'
+  socket=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{socket_path}')
+  pane=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{pane_pid}')
+  printf 'tmux_socket=%s\n' "$socket" >> "$dir/home/state/$id.meta"
+  tmux -L "$label" send-keys -t "firstmate:fm-$id" \
+    'bash -c '\''printf "ACTIVE=%s\n" "$$"; while :; do :; done'\''' Enter
+  active=
+  for _ in $(seq 1 30); do
+    sleep 0.05
+    capture=$(tmux -L "$label" capture-pane -p -t "firstmate:fm-$id")
+    active=$(printf '%s\n' "$capture" | sed -n 's/^ACTIVE=\([0-9][0-9]*\).*$/\1/p' | tail -1)
+    [ -z "$active" ] || break
+  done
+  [ -n "$active" ] && [ "$active" != "$pane" ] || fail 'private pane did not start the active nested script'
+  printf '%s\n%s\n' "$pane" "$active" > "$dir/process-pids"
+  mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
+  ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
+  assert_retire_refused_unchanged "$dir" "$id" 'active nested shell script'
+  assert_grep 'live processes still have cwd' "$dir/retire.err" 'active shell was treated as idle'
+  kill -0 "$active" 2>/dev/null || fail 'retirement killed the active shell script'
+  tmux -L "$label" kill-server
+  rm -f "$socket"
+  pass 'retirement refuses an active foreground shell script'
+}
+
+test_retire_claim_refuses_deleted_suffix_process_path() {
+  local dir id=retire-deleted-suffix worker
+  dir=$(make_retire_claim_case retire-deleted-suffix "$id")
+  mkdir -p "$dir/tasktmp (deleted)"
+  printf 'tasktmp=%s\n' "$dir/tasktmp (deleted)" >> "$dir/home/state/$id.meta"
+  ( cd "$dir/tasktmp (deleted)" && exec sleep 60 ) &
+  worker=$!
+  printf '%s\n' "$worker" > "$dir/process-pids"
+  assert_retire_refused_unchanged "$dir" "$id" 'literal deleted-suffix task root'
+  assert_grep 'live processes still have cwd' "$dir/retire.err" 'literal deleted-suffix path was lost'
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+  pass 'retirement sees a rooted process in a literal deleted-suffix directory'
 }
 
 test_retire_claim_refuses_unsafe_identity_and_options() {
@@ -2389,6 +2448,8 @@ test_retire_claim_restores_partial_backlog_transitions
 test_retire_claim_requeues_unlanded_work
 test_retire_claim_accepts_cleared_task_temp_with_process_proof
 test_retire_claim_accepts_its_nested_foreground_shell
+test_retire_claim_refuses_active_nested_shell_script
+test_retire_claim_refuses_deleted_suffix_process_path
 test_retire_claim_refuses_live_agent
 test_retire_claim_refuses_unsafe_identity_and_options
 test_retire_claim_preserves_tasktmp_and_retries_after_refusals

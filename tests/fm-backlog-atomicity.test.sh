@@ -2217,6 +2217,30 @@ test_recovery_backfills_a_recorded_link_on_an_already_done_item() {
   pass "recovery backfills recorded links onto already Done items"
 }
 
+test_recovery_requeues_done_unlanded_retirement() {
+  local case_dir id marker note_hex out
+  id=atomic-retire-done-requeue
+  case_dir=$(make_home retire-done-requeue)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  tasks-axi done "$id" --file "$(backlog_of "$case_dir")" >/dev/null
+  write_task_meta "$case_dir" "$id" ship no-mistakes 'spawn_gen=spawn-retire-requeue'
+  marker="$(home_of "$case_dir")/state/$id.backlog-close"
+  note_hex=$(printf 'Preserved unfinished work: worktree %s; branch fm/%s' \
+    "$case_dir/wt" "$id" | od -An -tx1 | tr -d ' \n')
+  printf 'id=%s\ndata=%s\nspawn_gen=spawn-retire-requeue\nmode=retain\narg=--note\narg=hex:%s\n' \
+    "$id" "$(home_of "$case_dir")/data" "$note_hex" > "$marker"
+
+  out=$(run_bootstrap "$case_dir") || fail "interrupted retirement did not replay: $out"
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "interrupted retirement left unfinished work Done: $out"
+  assert_grep "Preserved unfinished work: worktree $case_dir/wt; branch fm/$id" \
+    "$(backlog_of "$case_dir")" 'retirement replay lost the preserved work location'
+  assert_absent "$marker" 'retirement replay left its pending marker'
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" 'retirement replay left its active record'
+  pass 'session start requeues an interrupted unlanded claim even from Done'
+}
+
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read() {
   local case_dir id out
   id=atomic-heal-read-error-b10
@@ -3227,6 +3251,7 @@ test_recovery_ignores_a_symlinked_worker_record
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open
 test_recovery_replays_a_gerrit_close_with_its_change_url_as_a_note
 test_recovery_backfills_a_recorded_link_on_an_already_done_item
+test_recovery_requeues_done_unlanded_retirement
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read
 test_recovery_retry_preserves_incomplete_cleanup_warning
 test_recovery_finishes_a_close_for_the_same_meta_incarnation

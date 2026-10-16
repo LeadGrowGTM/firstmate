@@ -2815,8 +2815,9 @@ test_tmux_dead_checks_background_descendants() {
   printf '%s\n' "$shell_pid" > "$dir/fake/process-pids"
   rc=0
   out=$(run_spawn "$dir" "$id" --relaunch --harness claude) || rc=$?
-  expect_code 0 "$rc" "a lone idle pane shell should permit relaunch: $out"
-  pass 'tmux: dead panes reject background descendants and permit an idle shell'
+  expect_code 1 "$rc" "an active pane shell script was accepted: $out"
+  assert_contains "$out" 'live processes still have cwd' 'the active shell script was treated as idle'
+  pass 'tmux: dead panes reject background descendants and an active shell script'
 }
 
 test_tmux_dead_accepts_its_nested_foreground_shell() {

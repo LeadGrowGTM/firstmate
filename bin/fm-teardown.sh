@@ -4297,7 +4297,8 @@ retirement_prepare() {
   retirement_tmp=$(mktemp "$DATA/$ID/.retired-worktree-claim.XXXXXX") || return 1
   retirement_backup=$(mktemp "$DATA/$ID/.retired-worktree-record.XXXXXX") || { rm -f "$retirement_tmp"; return 1; }
   if ! cp "$META" "$retirement_backup"; then
-    rm -f "$retirement_tmp"
+    rm -f "$retirement_tmp" "$retirement_backup"
+    retirement_backup=
     return 1
   fi
   if ! cp "$META" "$retirement_tmp"; then

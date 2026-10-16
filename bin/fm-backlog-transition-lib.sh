@@ -1220,6 +1220,17 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
   case "$row_state" in
     done\ *)
       if [ "$mode" = retain ]; then
+        if [ "${args[0]-}" = --note ] \
+          && [[ ${args[1]-} == 'Preserved unfinished work: worktree '* ]]; then
+          fm_backlog_atomic_transition retain '' "$marker" "$data" "$id" "$state" \
+            "${args[@]+"${args[@]}"}" || return 1
+          if [ "$cleanup_incomplete" = 1 ]; then
+            FM_BACKLOG_CLOSE_REPLAY_RESULT=retained_incomplete
+          else
+            FM_BACKLOG_CLOSE_REPLAY_RESULT=retained
+          fi
+          return 0
+        fi
         # The captain's answer closed the row before this replay; the retained
         # transition owes it nothing more than retiring the record.
         fm_backlog_close_marker_remove "$marker" "$state" || return 1
