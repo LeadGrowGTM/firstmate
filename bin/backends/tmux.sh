@@ -159,13 +159,7 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
 }
 
 fm_backend_tmux_show_label() {  # <window-target> <label>
-  local target=$1 label=$2 opt format
-  tmux set-window-option -t "$target" @fm_label "$label" || return 1
-  for opt in window-status-format window-status-current-format; do
-    format=$(tmux show-window-options -gv "$opt") || return 1
-    case "$format" in *'#{?@fm_label,'*) continue ;; esac
-    tmux set-window-option -g "$opt" "#{?@fm_label,#I:#{@fm_label},$format}" || return 1
-  done
+  tmux set-window-option -t "$1" @fm_label "$2"
 }
 
 # fm_backend_tmux_current_path: the live pane's current working directory, or

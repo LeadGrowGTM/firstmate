@@ -201,60 +201,47 @@ pass "real tmux: fm_backend_tmux_capture's -S -N bound trims old history for a s
 tmux set-window-option -gu window-status-format || fail "could not restore the built-in window-status-format"
 tmux set-window-option -gu window-status-current-format || fail "could not restore the built-in window-status-current-format"
 builtin=$(tmux show-window-options -gv window-status-format)
+builtin_current=$(tmux show-window-options -gv window-status-current-format)
+local_format=$(tmux show-window-options -v -t "$TARGET" window-status-format)
+local_current=$(tmux show-window-options -v -t "$TARGET" window-status-current-format)
 fm_backend_tmux_show_label "$TARGET" "nap-crew-smoke1" || fail "fm_backend_tmux_show_label failed"
 [ "$(tmux display-message -p -t "$TARGET" '#{window_name}')" = "$WINDOW" ] \
   || fail "showing a label renamed the addressed window"
 [ "$(tmux show-window-options -v -t "$TARGET" @fm_label)" = "nap-crew-smoke1" ] \
   || fail "the label was not recorded on the window"
+[ "$(tmux show-window-options -gv window-status-format)" = "$builtin" ] || fail "labeling changed the built-in window-status-format"
+[ "$(tmux show-window-options -gv window-status-current-format)" = "$builtin_current" ] || fail "labeling changed the built-in window-status-current-format"
+[ "$(tmux show-window-options -v -t "$TARGET" window-status-format)" = "$local_format" ] || fail "labeling changed the window's status format"
+[ "$(tmux show-window-options -v -t "$TARGET" window-status-current-format)" = "$local_current" ] || fail "labeling changed the window's current status format"
 for opt in window-status-format window-status-current-format; do
-  [ -z "$(tmux show-window-options -v -t "$TARGET" "$opt")" ] || fail "labeling shadowed the server's $opt"
   shown=$(tmux display-message -p -t "$TARGET" "$(tmux show-window-options -gv "$opt")")
-  case "$shown" in [0-9]*:nap-crew-smoke1*) ;; *) fail "the built-in $opt would show '$shown', not the label" ;; esac
+  case "$shown" in *"$WINDOW"*) ;; *) fail "the built-in $opt changed the plain name to '$shown'" ;; esac
 done
-tmux new-window -d -t "$SESSION:" -n fm-plain || fail "could not create an unlabeled window"
-for opt in window-status-format window-status-current-format; do
-  shown=$(tmux display-message -p -t "$SESSION:fm-plain" "$(tmux show-window-options -gv "$opt")")
-  expected=$(tmux display-message -p -t "$SESSION:fm-plain" "$builtin")
-  [ "$shown" = "$expected" ] || fail "labeling changed an unlabeled window's $opt"
-done
-tmux kill-window -t "$SESSION:fm-plain"
-pass "real tmux: built-in status formats show a crew label without changing addresses or unlabeled windows"
+pass "real tmux: a crew label leaves built-in status formats and the addressed name unchanged"
 
 idx=0
-for custom in ' #I:#W ' '#I:#{window_name}' '#I:#{=20:window_name}' '#I'; do
+for custom in ' #I:#W ' ' #I:#W#F ' '#I:#{window_name}' '#I:#{=20:window_name}' '#I'; do
   idx=$((idx + 1))
   tmux set-window-option -g window-status-format "$custom" || fail "could not set custom format $idx"
   tmux set-window-option -g window-status-current-format "$custom" || fail "could not set custom current format $idx"
   fm_backend_tmux_create_task "$SESSION" "fm-custom$idx" "$HOME" >/dev/null || fail "could not create custom window $idx"
+  local_format=$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" window-status-format)
+  local_current=$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" window-status-current-format)
   fm_backend_tmux_show_label "$SESSION:fm-custom$idx" "nap-crew-custom$idx" || fail "custom format '$custom' refused the label"
   for opt in window-status-format window-status-current-format; do
-    [ -z "$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" "$opt")" ] \
-      || fail "custom $opt '$custom' gained a per-window override"
+    [ "$(tmux show-window-options -gv "$opt")" = "$custom" ] || fail "labeling changed custom $opt '$custom'"
+    case "$opt" in
+      window-status-format) expected=$local_format ;;
+      window-status-current-format) expected=$local_current ;;
+    esac
+    [ "$(tmux show-window-options -v -t "$SESSION:fm-custom$idx" "$opt")" = "$expected" ] \
+      || fail "labeling changed the window's custom $opt '$custom'"
     shown=$(tmux display-message -p -t "$SESSION:fm-custom$idx" "$(tmux show-window-options -gv "$opt")")
-    case "$shown" in *nap-crew-custom$idx*) ;; *) fail "custom $opt '$custom' hid the label as '$shown'" ;; esac
+    case "$shown" in *nap-crew-custom$idx*) fail "custom $opt '$custom' showed the crew label as '$shown'" ;; esac
   done
-  tmux new-window -d -t "$SESSION:" -n fm-plain || fail "could not create a custom-format control window"
-  shown=$(tmux display-message -p -t "$SESSION:fm-plain" "$(tmux show-window-options -gv window-status-format)")
-  expected=$(tmux display-message -p -t "$SESSION:fm-plain" "$custom")
-  [ "$shown" = "$expected" ] || fail "custom format '$custom' changed an unlabeled window"
-  tmux kill-window -t "$SESSION:fm-plain"
   tmux kill-window -t "$SESSION:fm-custom$idx"
 done
-tmux set-window-option -g window-status-format ' #I:#W '
-tmux set-window-option -g window-status-current-format ' #I:#W '
-fm_backend_tmux_create_task "$SESSION" fm-oldtheme "$HOME" >/dev/null || fail "could not create a window under the old theme"
-fm_backend_tmux_show_label "$SESSION:fm-oldtheme" nap-crew-oldtheme || fail "the old theme refused the label"
-shown=$(tmux display-message -p -t "$SESSION:fm-oldtheme" "$(tmux show-window-options -gv window-status-format)")
-case "$shown" in *nap-crew-oldtheme*) ;; *) fail "the old theme hid the label as '$shown'" ;; esac
-tmux set-window-option -g window-status-format ' #I:#{?@fm_label,#{@fm_label},#W} '
-tmux set-window-option -g window-status-current-format ' #I:#{?@fm_label,#{@fm_label},#W} '
-for opt in window-status-format window-status-current-format; do
-  [ -z "$(tmux show-window-options -v -t "$SESSION:fm-oldtheme" "$opt")" ] || fail "old format shadowed the loaded theme's $opt"
-  shown=$(tmux display-message -p -t "$SESSION:fm-oldtheme" "$(tmux show-window-options -gv "$opt")")
-  case "$shown" in *nap-crew-oldtheme*) ;; *) fail "the loaded theme's $opt hid the label as '$shown'" ;; esac
-done
-tmux kill-window -t "$SESSION:fm-oldtheme"
-pass "real tmux: custom formats and a later theme show labels without per-window overrides"
+pass "real tmux: a crew label leaves custom status formats unchanged"
 
 # --- resolve_bare_selector (live-window-listing) -----------------------------
 

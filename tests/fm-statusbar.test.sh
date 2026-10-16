@@ -842,16 +842,41 @@ pass "theme can be sourced repeatedly"
 
 # The theme shows a recorded crew label instead of the addressed window name,
 # from the server-wide format alone, and an unlabeled window keeps its name.
+. "$ROOT/bin/fm-backend.sh"
+fm_backend_source tmux || fail "could not load the tmux backend"
 tmux new-window -d -t restarted: -n fm-themed 'sleep 600' || fail "could not open a themed task window"
-tmux set-window-option -t restarted:fm-themed @fm_label nap-crew-themed || fail "could not record a crew label"
-theme_fmt=$(tmux show-window-options -gv window-status-format)
-[ "$(tmux display-message -p -t restarted:fm-themed "$theme_fmt")" = " 1:nap-crew-themed " ] \
-  || fail "theme did not show the crew label" "$(tmux display-message -p -t restarted:fm-themed "$theme_fmt")"
-[ "$(tmux display-message -p -t restarted:0 "$theme_fmt")" = " 0:$(tmux display-message -p -t restarted:0 '#{window_name}') " ] \
-  || fail "theme changed an unlabeled window's name" "$(tmux display-message -p -t restarted:0 "$theme_fmt")"
+fm_backend_tmux_show_label restarted:fm-themed nap-crew-themed || fail "could not record a crew label"
+for opt in window-status-format window-status-current-format; do
+  theme_fmt=$(tmux show-window-options -gv "$opt")
+  [ "$(tmux display-message -p -t restarted:fm-themed "$theme_fmt")" = " 1:nap-crew-themed " ] \
+    || fail "theme $opt did not show the crew label" "$(tmux display-message -p -t restarted:fm-themed "$theme_fmt")"
+  [ "$(tmux display-message -p -t restarted:0 "$theme_fmt")" = " 0:$(tmux display-message -p -t restarted:0 '#{window_name}') " ] \
+    || fail "theme $opt changed an unlabeled window's name" "$(tmux display-message -p -t restarted:0 "$theme_fmt")"
+done
 [ "$(tmux display-message -p -t restarted:fm-themed '#{window_name}')" = fm-themed ] || fail "theme label renamed the window"
 [ -z "$(tmux show-window-options -v -t restarted:fm-themed window-status-format)" ] \
   || fail "the theme label needed a per-window format"
 pass "theme shows a recorded crew label while the window keeps its addressed name"
+
+tmux set-window-option -g window-status-format ' #I:#W '
+tmux set-window-option -g window-status-current-format ' #I:#W '
+tmux new-window -d -t restarted: -n fm-later 'sleep 600' || fail "could not open a task window before loading the theme"
+fm_backend_tmux_show_label restarted:fm-later nap-crew-later || fail "could not record a label before loading the theme"
+for opt in window-status-format window-status-current-format; do
+  [ "$(tmux show-window-options -gv "$opt")" = ' #I:#W ' ] || fail "label changed the previous $opt"
+  [ -z "$(tmux show-window-options -v -t restarted:fm-later "$opt")" ] || fail "label changed the window's $opt"
+  shown=$(tmux display-message -p -t restarted:fm-later "$(tmux show-window-options -gv "$opt")")
+  case "$shown" in *fm-later*) ;; *) fail "previous $opt changed the plain name to '$shown'" ;; esac
+done
+statusbar "$SB" "$SOCKET_PATH" theme || fail "could not load the theme after recording a crew label"
+for opt in window-status-format window-status-current-format; do
+  [ -z "$(tmux show-window-options -v -t restarted:fm-later "$opt")" ] || fail "previous $opt shadowed the loaded theme"
+  theme_fmt=$(tmux show-window-options -gv "$opt")
+  shown=$(tmux display-message -p -t restarted:fm-later "$theme_fmt")
+  case "$shown" in *nap-crew-later*) ;; *) fail "loaded theme $opt hid the label as '$shown'" ;; esac
+  shown=$(tmux display-message -p -t restarted:0 "$theme_fmt")
+  case "$shown" in *"$(tmux display-message -p -t restarted:0 '#{window_name}')"*) ;; *) fail "loaded theme $opt changed an unlabeled window to '$shown'" ;; esac
+done
+pass "loading the theme after spawn shows the recorded label"
 
 echo "fm-statusbar: all passed"
