@@ -1,0 +1,12 @@
+$ fm-boat-worker.sh validate < accepted ship request
+exit=0
+(no output)
+$ fm-boat-worker.sh validate < rejected goal field request
+exit=1
+error: invalid code-only Boat request
+$ fm-boat-worker.sh validate < rejected off_limits field request
+exit=1
+error: invalid code-only Boat request
+$ fm-boat-worker.sh validate < rejected contracts field request
+exit=1
+error: invalid code-only Boat request
