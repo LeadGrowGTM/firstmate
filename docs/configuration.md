@@ -490,7 +490,7 @@ Bootstrap reports a code-root `data/backlog.md` or `data/done-archive.md` that i
 
 ## Crew names (config/mate-short-name)
 
-By default every worker window shows `fm-<task-id>` and every ship branch is `fm/<task-id>`, so a second mate's crew reads as the first mate's own.
+By default every tmux task window shows `fm-<task-id>` and every ship branch is `fm/<task-id>`, so a second mate's crew reads as the first mate's own.
 Set `config/mate-short-name` in a home to the short form of the mate that owns it, for example `nap` in Napoleon's home or `chu` in the main home.
 New work that home starts then reads as that mate's crew:
 
@@ -503,12 +503,13 @@ New work that home starts then reads as that mate's crew:
 The file holds one short form of 1-16 lowercase letters, digits, and inner dashes, on one line with an optional final newline.
 A missing or empty file keeps today's names exactly.
 Any other content stops new spawns and ship briefs that use the default branch prefix with an error naming the file, rather than guessing a name.
-[`bin/fm-crew-name-lib.sh`](../bin/fm-crew-name-lib.sh) owns the format and the names it produces.
+[`bin/fm-crew-name-lib.sh`](../bin/fm-crew-name-lib.sh) implements this format and the resulting names.
 
 The branch is only a default: a project's registered `branch=<prefix>` and an explicit `--branch-prefix` still win, and `bin/fm-project-mode.sh --branch-prefix <project>` reports the resolved prefix.
 The label is display only.
 Scripts keep addressing every task window by its `fm-<task-id>` name, so steering, peeking, monitoring, and recovery are unchanged.
-Only the tmux backend shows the label, through that window's own status-bar formats with the name replaced by the label; tmux's window list and any status format that never shows the window name still show `fm-<task-id>`.
+Only the tmux backend shows the label, through that window's own status-bar formats with the name replaced by the label.
+The window name reported by `tmux list-windows` remains `fm-<task-id>`; a status format that omits the window name cannot show the crew label.
 Herdr, zellij, cmux, and Orca keep their current tab names, because those backends also use the tab name to find and recover a task.
 Existing branches, pull requests, and live windows are never renamed.
 A relaunch restores a new task's recorded label if its tmux window must be replaced; older tasks without a recorded label keep their original names.
