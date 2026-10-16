@@ -1,0 +1,9 @@
+command: grok --permission-mode bypassPermissions --max-turns 3 --cwd <worktree> -p <bounded proof prompt>
+exit=0
+stdout:
+I'll run that command exactly, then reply.done
+
+stderr:
+
+proof=permission-mode-live
+

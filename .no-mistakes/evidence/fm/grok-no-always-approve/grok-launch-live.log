@@ -1,0 +1,133 @@
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh create /tmp/fm-lab.4kp8gxhj/home
+exit=0
+/tmp/fm-lab.4kp8gxhj/home
+
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux-dir /tmp/fm-lab.4kp8gxhj/home
+exit=0
+/tmp/fml.3ekfaD
+
+$ git -C /tmp/fm-lab.4kp8gxhj/mate init -q -b main
+exit=0
+
+
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.4kp8gxhj/home new-session -d -s primary -x 120 -y 40 -c /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93 -e FM_HOME=/tmp/fm-lab.4kp8gxhj/home grok
+exit=0
+
+
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-spawn.sh nm-grok-live /tmp/fm-lab.4kp8gxhj/mate --secondmate --harness grok --backend tmux
+exit=0
+spawned nm-grok-live harness=grok kind=secondmate mode=secondmate yolo=off window=primary:fm-nm-grok-live worktree=/tmp/fm-lab.4kp8gxhj/mate
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.4kp8gxhj/home
+warning: secondmate nm-grok-live sync skipped before launch: primary default-branch commit cannot be resolved
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.4kp8gxhj/home display-message -p -t primary:fm-nm-grok-live #{pane_pid}
+exit=0
+20566
+
+LIVE_WORKER_ARGV: [b'-bash']
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.4kp8gxhj/home capture-pane -p -t primary:fm-nm-grok-live
+exit=0
+/t/fm-lab.4kp8gxhj/mate
+
+
+
+
+                                                     ⠀⠀⠀⠀⠀⠀⣀⣀⡀⠀⠀⠀⢀⠄
+                                                     ⠀⠀⠀⣠⣾⠿⠛⠛⠛⠛⢀⡴⠁⠀
+                                                     ⠀⠀⣼⡟⠁⠀⠀⠀⢀⡴⠻⣿⡀⠀
+                                                     ⠀⠀⣿⡇⠀⠀⠀⠔⠁⠀⠀⣿⡇⠀
+                                                     ⠀⠀⢹⣷⠀⠀⠀⠀⠀⢀⣴⡿⠀⠀
+                                                     ⠀⢀⠞⠁⠠⢶⣶⣶⣶⠿⠋⠀⠀⠀
+                                                     ⠐⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
+
+                                      Do you trust the contents of this directory?
+                                                /tmp/fm-lab.4kp8gxhj/mate
+
+                                Grok Build may run or modify contents in this directory,
+                                                 posing security risks.
+
+                                             Yes, proceed                 y
+                                             No, quit                     n
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                           Grok Build  1.0.60 [stable]
+
+LIVE_WORKER_PANE:
+
+  /t/fm-lab.4kp8gxhj/mate
+
+
+
+
+                                                     ⠀⠀⠀⠀⠀⠀⣀⣀⡀⠀⠀⠀⢀⠄
+                                                     ⠀⠀⠀⣠⣾⠿⠛⠛⠛⠛⢀⡴⠁⠀
+                                                     ⠀⠀⣼⡟⠁⠀⠀⠀⢀⡴⠻⣿⡀⠀
+                                                     ⠀⠀⣿⡇⠀⠀⠀⠔⠁⠀⠀⣿⡇⠀
+                                                     ⠀⠀⢹⣷⠀⠀⠀⠀⠀⢀⣴⡿⠀⠀
+                                                     ⠀⢀⠞⠁⠠⢶⣶⣶⣶⠿⠋⠀⠀⠀
+                                                     ⠐⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
+
+                                      Do you trust the contents of this directory?
+                                                /tmp/fm-lab.4kp8gxhj/mate
+
+                                Grok Build may run or modify contents in this directory,
+                                                 posing security risks.
+
+                                             Yes, proceed                 y
+                                             No, quit                     n
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                           Grok Build  1.0.60 [stable]
+
+
+META:
+window=primary:fm-nm-grok-live
+endpoint_task_id=nm-grok-live
+worktree=/tmp/fm-lab.4kp8gxhj/mate
+project=/tmp/fm-lab.4kp8gxhj/mate
+harness=grok
+kind=secondmate
+mode=secondmate
+yolo=off
+tasktmp=/tmp/fm-nm-grok-live
+model=default
+effort=default
+realized_effort=default
+spawn_gen=s1792121714.18813.31178
+tmux_socket=/tmp/fml.3ekfaD/tmux-1000/fm-lab
+home=/tmp/fm-lab.4kp8gxhj/mate
+projects=none
+
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.4kp8gxhj/home kill-server
+exit=0
+
+
+$ /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh teardown /tmp/fm-lab.4kp8gxhj/home
+exit=0
+
+

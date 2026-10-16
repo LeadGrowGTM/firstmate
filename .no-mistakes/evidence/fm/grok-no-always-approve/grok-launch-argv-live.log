@@ -1,0 +1,122 @@
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh create /tmp/fm-lab.cqm7hx5b/home
+exit=0
+/tmp/fm-lab.cqm7hx5b/home
+
+
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux-dir /tmp/fm-lab.cqm7hx5b/home
+exit=0
+/tmp/fml.U6JWpO
+
+
+command=git -C /tmp/fm-lab.cqm7hx5b/mate init -q -b main
+exit=0
+
+
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.cqm7hx5b/home new-session -d -s primary -x 120 -y 40 -c /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93 -e FM_HOME=/tmp/fm-lab.cqm7hx5b/home grok
+exit=0
+
+
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-spawn.sh nm-grok-live /tmp/fm-lab.cqm7hx5b/mate --secondmate --harness grok --backend tmux
+exit=0
+spawned nm-grok-live harness=grok kind=secondmate mode=secondmate yolo=off window=primary:fm-nm-grok-live worktree=/tmp/fm-lab.cqm7hx5b/mate
+
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.cqm7hx5b/home
+warning: secondmate nm-grok-live sync skipped before launch: primary default-branch commit cannot be resolved
+
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.cqm7hx5b/home display-message -p -t primary:fm-nm-grok-live #{pane_pid}
+exit=0
+48739
+
+
+LIVE_GROK_ARGV=['grok', '--permission-mode', 'bypassPermissions', '\u2063FIRSTMATE_OP: v1 launch-brief: # Charter\nWait in this disposable lab.']
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.cqm7hx5b/home capture-pane -p -t primary:fm-nm-grok-live
+exit=0
+
+  /t/fm-lab.cqm7hx5b/mate
+
+
+
+
+                                                     ⠀⠀⠀⠀⠀⠀⣀⣀⡀⠀⠀⠀⢀⠄
+                                                     ⠀⠀⠀⣠⣾⠿⠛⠛⠛⠛⢀⡴⠁⠀
+                                                     ⠀⠀⣼⡟⠁⠀⠀⠀⢀⡴⠻⣿⡀⠀
+                                                     ⠀⠀⣿⡇⠀⠀⠀⠔⠁⠀⠀⣿⡇⠀
+                                                     ⠀⠀⢹⣷⠀⠀⠀⠀⠀⢀⣴⡿⠀⠀
+                                                     ⠀⢀⠞⠁⠠⢶⣶⣶⣶⠿⠋⠀⠀⠀
+                                                     ⠐⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
+
+                                      Do you trust the contents of this directory?
+                                                /tmp/fm-lab.cqm7hx5b/mate
+
+                                Grok Build may run or modify contents in this directory,
+                                                 posing security risks.
+
+                                             Yes, proceed                 y
+                                             No, quit                     n
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                           Grok Build  1.0.60 [stable]
+
+
+
+WORKER_PANE=
+
+  /t/fm-lab.cqm7hx5b/mate
+
+
+
+
+                                                     ⠀⠀⠀⠀⠀⠀⣀⣀⡀⠀⠀⠀⢀⠄
+                                                     ⠀⠀⠀⣠⣾⠿⠛⠛⠛⠛⢀⡴⠁⠀
+                                                     ⠀⠀⣼⡟⠁⠀⠀⠀⢀⡴⠻⣿⡀⠀
+                                                     ⠀⠀⣿⡇⠀⠀⠀⠔⠁⠀⠀⣿⡇⠀
+                                                     ⠀⠀⢹⣷⠀⠀⠀⠀⠀⢀⣴⡿⠀⠀
+                                                     ⠀⢀⠞⠁⠠⢶⣶⣶⣶⠿⠋⠀⠀⠀
+                                                     ⠐⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
+
+                                      Do you trust the contents of this directory?
+                                                /tmp/fm-lab.cqm7hx5b/mate
+
+                                Grok Build may run or modify contents in this directory,
+                                                 posing security risks.
+
+                                             Yes, proceed                 y
+                                             No, quit                     n
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                           Grok Build  1.0.60 [stable]
+
+
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh tmux /tmp/fm-lab.cqm7hx5b/home kill-server
+exit=0
+
+
+command=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51BY5MA6H1ZM3YG13220N93/bin/fm-lab-home.sh teardown /tmp/fm-lab.cqm7hx5b/home
+exit=0
+

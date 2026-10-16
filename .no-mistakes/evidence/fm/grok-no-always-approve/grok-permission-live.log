@@ -1,0 +1,11 @@
+command: grok --permission-mode bypassPermissions --max-turns 1 --cwd <worktree> -p <bounded proof prompt>
+exit=1
+stdout:
+I'll run that exact command and then confirm.
+
+stderr:
+Max turns reached
+Error: max turns reached
+
+proof=permission-mode-live
+
