@@ -3934,13 +3934,9 @@ teardown_legacy_stamp_rollback() {
   [ "$(wc -c < "$META" | tr -d ' ')" = "$TEARDOWN_LEGACY_PRESTAMP_SIZE" ]
 }
 
-  # The accepted legacy incarnation is stamped under the meta lock already
-  # held, right before the close marker binds to it: every refusal above leaves
-  # the record byte-identical, and every later replay reads the same stamped
-  # token the marker carries. A failed close-marker write rolls the stamp back
-  # to the record's pre-stamp bytes, so a retried teardown re-runs the
-  # dead-or-agent-less endpoint gate instead of sailing past it on a stamp the
-  # abandoned attempt left behind.
+# Stamp under the meta lock just before the close marker binds its token.
+# Claim retirement defers this until its original record has been archived.
+teardown_legacy_stamp_apply() {
   if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ] && [ -z "$TEARDOWN_LEGACY_RETAINED_STAMP" ]; then
     TEARDOWN_LEGACY_PRESTAMP_SIZE=$(wc -c < "$META" | tr -d ' ')
     TEARDOWN_LEGACY_STAMP_FAILED=
@@ -3963,8 +3959,13 @@ teardown_legacy_stamp_rollback() {
       else
         echo "error: could not stamp the accepted legacy incarnation into task $ID's record; refusing destructive teardown" >&2
       fi
-      exit 1
+      return 1
     fi
+  fi
+  return 0
+}
+  if [ "$RETIRE_CLAIM" != 1 ]; then
+    teardown_legacy_stamp_apply || exit 1
   fi
   BACKLOG_CLOSED=1
   META_SPAWN_GEN=$TEARDOWN_META_SPAWN_GEN
@@ -4348,6 +4349,9 @@ retirement_prepare() {
 }
 retirement_rollback() {
   local rc=0 restore_tmp=
+  if [ "$TEARDOWN_LEGACY_PRESTAMP_SIZE" -gt 0 ]; then
+    teardown_legacy_stamp_rollback || rc=1
+  fi
   if [ -n "$retirement_backup" ] && [ -f "$retirement_backup" ]; then
     if [ -e "$META" ] || [ -L "$META" ]; then
       cmp -s "$retirement_backup" "$META" || rc=1
@@ -4391,6 +4395,10 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
     echo "REFUSED: stale claim archive or slot release failed; its active record was retained" >&2
     exit 1
   }
+  if [ "$BACKLOG_CLOSED" = 1 ] && ! teardown_legacy_stamp_apply; then
+    retirement_rollback || true
+    exit 1
+  fi
   # The retirement intent must never be replayable before its archive and
   # slot transition exist. An active record also blocks replay after rollback.
   if [ "$BACKLOG_CLOSED" = 1 ] && ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \

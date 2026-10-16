@@ -1662,6 +1662,84 @@ test_retire_claim_archives_without_spawn_generation() {
   pass 'legacy claims use distinct timestamp archives when spawn generation is absent'
 }
 
+test_legacy_retirement_refusal_preserves_original_bytes() {
+  local dir id mode rc archive
+  for mode in snapshot archive marker; do
+    id="retire-legacy-refusal-$mode"
+    dir=$(make_retire_claim_case "$id" "$id")
+    sed '/^spawn_gen=/d' "$dir/home/state/$id.meta" > "$dir/legacy.meta"
+    mv "$dir/legacy.meta" "$dir/home/state/$id.meta"
+    printf 'harness=codex' >> "$dir/home/state/$id.meta"
+    cp "$dir/home/state/$id.meta" "$dir/original.meta"
+    cp "$dir/pool/1/.fm-slot-owner" "$dir/original.claim"
+    printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
+    tasks-axi add "$id" 'legacy retirement fixture' --kind ship --file "$dir/home/data/backlog.md" >/dev/null
+    tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    printf '%s\n' "$mode" > "$dir/fail-mode"
+    cat > "$dir/fakebin/perl" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+if [ "$(cat "$base/fail-mode" 2>/dev/null)" = snapshot ] \
+  && [ "${1:-}" = -MDigest::SHA=sha256_hex ] && [ "${2:-}" = -0777 ]; then
+  : > "$base/fault-hit"
+  exit 1
+fi
+exec /usr/bin/perl "$@"
+SH
+    cat > "$dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+mode=$(cat "$base/fail-mode" 2>/dev/null || true)
+case "$mode:${1:-}" in
+  archive:*/.retired-worktree-claim.*)
+    : > "$base/fault-hit"
+    exit 1
+    ;;
+esac
+exec /usr/bin/mktemp "$@"
+SH
+    cat > "$dir/fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+base=${FM_RUNTIME_LOG%/runtime.log}
+if [ "$(cat "$base/fail-mode" 2>/dev/null)" = marker ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      */state/retire-legacy-refusal-marker.backlog-close)
+        : > "$base/fault-hit"
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /bin/mv "$@"
+SH
+    chmod +x "$dir/fakebin/perl" "$dir/fakebin/mktemp" "$dir/fakebin/mv"
+    rc=0
+    run_retire_claim "$dir" "$id" --legacy-record > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
+    [ "$rc" -ne 0 ] || fail "$mode: legacy retirement accepted the injected failure"
+    assert_present "$dir/fault-hit" "$mode: fixture failed before reaching its intended refusal"
+    cmp -s "$dir/original.meta" "$dir/home/state/$id.meta" \
+      || fail "$mode: refused legacy retirement changed the original record bytes"
+    cmp -s "$dir/original.claim" "$dir/pool/1/.fm-slot-owner" \
+      || fail "$mode: refused legacy retirement changed its slot claim"
+    assert_absent "$dir/home/state/$id.backlog-close" "$mode: refused legacy retirement left replay intent"
+    if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+      fail "$mode: refused legacy retirement left an archive"
+    fi
+    rm "$dir/fail-mode"
+    run_retire_claim "$dir" "$id" --legacy-record > "$dir/retry.out" 2> "$dir/retry.err" \
+      || fail "$mode: legacy retirement retry failed: $(cat "$dir/retry.err")"
+    archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+    assert_present "$archive" "$mode: successful retry did not preserve its archive"
+    cmp -s "$dir/original.meta" "$archive" || fail "$mode: retry archived an abandoned legacy stamp"
+    assert_absent "$dir/home/state/$id.meta" "$mode: successful retry retained the task record"
+    assert_absent "$dir/pool/1/.fm-slot-owner" "$mode: successful retry retained the slot claim"
+    assert_absent "$dir/home/state/$id.backlog-close" "$mode: successful retry retained replay intent"
+    assert_present "$dir/worktree/.git-hooks/pre-commit" "$mode: retirement changed the worktree hooks"
+  done
+  pass 'refused legacy retirement preserves exact original bytes through failure and retry'
+}
+
 test_retire_claim_preserves_partial_backlog_transitions() {
   local dir id mode rc before archive row expected
   for mode in prepare backup 'done' reopen update remove marker-remove close-marker; do
@@ -2474,6 +2552,7 @@ test_already_gone_endpoint_still_completes_without_a_refusal() {
   pass "fm-teardown: an already-exited endpoint, and a server that is already gone, still complete cleanup silently"
 }
 
+test_legacy_retirement_refusal_preserves_original_bytes
 test_retire_claim_refuses_active_interactive_builtins
 test_retire_claim_preserves_partial_backlog_transitions
 test_invalid_endpoint_records_refuse_before_mutation

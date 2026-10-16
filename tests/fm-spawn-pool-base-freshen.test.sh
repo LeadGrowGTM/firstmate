@@ -711,6 +711,55 @@ lay_out_as_pool_slot() {
   SLOT_CLAIM="$slot_root/1/.fm-slot-owner"
 }
 
+test_pool_custody_refuses_unreadable_nested_registry() {
+  local rec id=pool-nested-registry first sibling descendant registry out status before_head before_reflog
+  rec=$(make_case nested-registry "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  first="$CASE_DIR/first-home"
+  sibling="$CASE_DIR/later-home"
+  descendant="$CASE_DIR/grandchild-home"
+  mkdir -p "$first/state" "$first/data" "$sibling/state" "$sibling/data" \
+    "$descendant/state" "$descendant/data"
+  printf '%s\n' \
+    "- first - fixture (home: $first; scope: test; projects: project; added 2026-01-01)" \
+    "- later - fixture (home: $sibling; scope: test; projects: project; added 2026-01-01)" \
+    > "$HOME_DIR/data/secondmates.md"
+  registry="$first/data/secondmates.md"
+  printf '%s\n' "- child - fixture (home: $descendant; scope: test; projects: project; added 2026-01-01)" \
+    > "$registry"
+  : > "$sibling/data/secondmates.md"
+  fm_write_meta "$descendant/state/prior-worker.meta" \
+    'window=firstmate:fm-prior-worker' 'endpoint_task_id=prior-worker' \
+    "worktree=$POOL_DIR" "project=$PROJECT_DIR" 'kind=scout'
+  chmod 000 "$registry"
+  if ( : < "$registry" ) 2>/dev/null; then
+    chmod 600 "$registry"
+    echo 'skip - current user can read a mode-000 registry'
+    return 0
+  fi
+  before_head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  before_reflog=$(git -C "$POOL_DIR" reflog)
+  out=$(FM_FAKE_PANE_LOG="$CASE_DIR/pane.log" FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" \
+    run_spawn "$id" --scout)
+  status=$?
+  chmod 600 "$registry"
+  [ "$status" -ne 0 ] || fail 'spawn accepted custody after omitting a registered grandchild'
+  assert_contains "$out" 'local Firstmate registry' 'spawn did not name the unreadable registry'
+  assert_absent "$HOME_DIR/state/$id.meta" 'unreadable registry refusal published a new task record'
+  assert_present "$descendant/state/prior-worker.meta" 'unreadable registry refusal removed the prior reservation'
+  assert_absent "$SLOT_CLAIM" 'unreadable registry refusal claimed the copy'
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before_head" ] \
+    || fail 'unreadable registry refusal refreshed the copy'
+  [ "$(git -C "$POOL_DIR" reflog)" = "$before_reflog" ] \
+    || fail 'unreadable registry refusal changed the reflog'
+  [ ! -s "$CASE_DIR/launch.log" ] || fail 'unreadable registry refusal launched a worker'
+  if [ -f "$CASE_DIR/pane.log" ]; then
+    assert_no_grep 'treehouse get' "$CASE_DIR/pane.log" 'unreadable registry refusal happened after acquisition'
+  fi
+  pass 'spawn refuses an unreadable intermediate registry despite a later readable sibling'
+}
+
 test_pool_custody_refuses_before_refresh_or_claim() {
   local variant rec id other other_home recorded before_head before_remote before_reflog before_claim out status launch_log pane_log
   for variant in same-home sibling-home unreadable-sibling alias unsafe-metadata other-claim; do
@@ -1421,6 +1470,7 @@ SH
   pass 'failed pool dispatch releases only prelaunch own claims and keeps postlaunch or unreleasable claims paired'
 }
 
+test_pool_custody_refuses_unreadable_nested_registry
 test_returned_pool_copy_refuses_active_interactive_builtins
 test_pool_rollback_preserves_or_releases_custody
 
