@@ -1,0 +1,8 @@
+fm-control relaunch exit=0
+warning: /tmp/fm-control-relaunch.lmdKpQ/evidence-recovery-9251/home/data/rlevidence/launch-brief.md records no ship branch; defaulting to legacy branch fm/rlevidence
+warning: /tmp/fm-control-relaunch.lmdKpQ/evidence-recovery-9251/home/data/rlevidence/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rlevidence harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-rlevidence worktree=/tmp/fm-control-relaunch.lmdKpQ/evidence-recovery-9251/wt
+replacement windows=1
+recorded window=firstmate:fm-rlevidence
+recorded worktree=/tmp/fm-control-relaunch.lmdKpQ/evidence-recovery-9251/wt
+HEAD unchanged=yes dirty work preserved=yes

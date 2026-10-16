@@ -1,0 +1,17 @@
+first retirement exit=1
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+injected snapshot failure
+REFUSED: cannot record the pre-retirement backlog state for retire-evidence
+original metadata bytes preserved=yes claim bytes preserved=yes replay marker=absent
+retry exit=0
+/tmp/fm-teardown-endpoint-safety.u7tUzM/retire-evidence/project: skipped: no origin remote
+stale claim retire-evidence retired (unfinished work queued; copy /tmp/fm-teardown-endpoint-safety.u7tUzM/retire-evidence/worktree and branch fm/retire-evidence preserved; metadata archived at /tmp/fm-teardown-endpoint-safety.u7tUzM/retire-evidence/home/data/retire-evidence/retired-worktree-claim.20261016T064320.78094.meta)
+Backlog: retire-evidence was requeued in /tmp/fm-teardown-endpoint-safety.u7tUzM/retire-evidence/home/data/backlog.md with its preserved worktree and branch recorded.
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+archived original bytes=yes active record=absent slot claim=absent

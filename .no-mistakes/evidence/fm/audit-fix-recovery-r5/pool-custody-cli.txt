@@ -1,0 +1,5 @@
+fm-spawn exit=1
+REFUSED: pool custody cannot be established: local Firstmate registry is unreadable at /tmp/fm-spawn-pool-base-freshen.Y7GQih/evidence/first-home/data/secondmates.md
+prior reservation=/tmp/fm-spawn-pool-base-freshen.Y7GQih/evidence/grandchild-home/state/prior-worker.meta
+new record=absent slot claim=absent launch=absent
+HEAD unchanged=yes reflog unchanged=yes
