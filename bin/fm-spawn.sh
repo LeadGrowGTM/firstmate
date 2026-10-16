@@ -208,7 +208,7 @@
 #   capacity.
 #   Disk pressure: a fresh ship or scout is deferred the same way, before any
 #   launch side effect, when the root home's state/disk-guard.pause is a
-#   regular file. bin/fm-disk-guard.sh owns that flag. A relaunch and a
+#   regular file or symlink. bin/fm-disk-guard.sh owns that flag. A relaunch and a
 #   --secondmate spawn are not deferred by it.
 #   With no harness arg, a crewmate/scout spawn resolves the CREW harness only when
 #   config/crew-dispatch.json is absent. When that file exists, crewmate/scout

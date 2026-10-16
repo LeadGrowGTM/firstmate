@@ -7,10 +7,10 @@
 #
 # FM_HOME is required and must be a real directory, not `/` or anything under
 # `/mnt`. The pause flag is `state/disk-guard.pause` in the root Firstmate
-# home (`fm_firstmate_root_home` in bin/fm-wake-lib.sh). While that path is a
-# regular file, bin/fm-spawn.sh defers a fresh ship or scout and leaves its
-# backlog item queued. This script removes the flag only when the sample is
-# healthy, and it never removes a symlink.
+# home (`fm_firstmate_root_home` in bin/fm-wake-lib.sh).
+# bin/fm-spawn.sh owns admission behavior for that flag.
+# This script removes the flag only when the sample is healthy, and it never
+# removes a symlink.
 #
 # Optional `config/disk-guard` in the root home replaces any default below.
 # One directive per line. `#` comments and blank lines are ignored.
