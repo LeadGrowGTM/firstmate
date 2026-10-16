@@ -301,17 +301,8 @@ fm_control_backend_state_verified() {  # <backend>
   return 1
 }
 
-# A second mate's recorded worktree is its whole home, and its own live crew
-# workers run in recorded copies under that home, so an unfiltered rooted
-# inventory counts the crew as the old supervisor agent and a mate with live
-# crew can never restart. The helpers below attribute rooted processes to
-# that crew: a process belongs to the crew when its cwd sits in a crew task's
-# recorded worktree from the mate home's state/*.meta, or when it descends
-# from a recorded crew endpoint pane. Anything unattributed stays counted,
-# and an unreadable crew record refuses the proof rather than exempting by
-# guess. Ordinary ship and scout records never take this path.
-fm_control_secondmate_crew_roots() {  # <meta> <worktree> -> crew worktree paths
-  local meta=$1 worktree=$2 home_canon f kind root
+fm_control_secondmate_crew_ids() {  # <meta> <worktree> -> crew task ids
+  local meta=$1 worktree=$2 home_canon f kind id
   [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 0
   [ -d "$worktree" ] || return 1
   home_canon=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
@@ -323,20 +314,16 @@ fm_control_secondmate_crew_roots() {  # <meta> <worktree> -> crew worktree paths
       return 1
     fi
     kind=$(fm_meta_get "$f" kind)
-    [ "$kind" != secondmate ] || continue
-    root=$(fm_backend_meta_exact_value "$f" worktree) || root=
-    [ -n "$root" ] || continue
-    if [ -d "$root" ]; then
-      root=$(CDPATH='' cd -- "$root" && pwd -P) || return 1
-    fi
-    [ "$root" != "$home_canon" ] || continue
-    case "$home_canon" in "$root"/*) continue ;; esac
-    printf '%s\n' "$root"
+    case "$kind" in ship|scout) ;; *) continue ;; esac
+    id=$(fm_backend_meta_exact_value "$f" endpoint_task_id) || continue
+    [ "$id.meta" = "${f##*/}" ] || continue
+    case "$id" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+    printf '%s\n' "$id"
   done
 }
 
-fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> <backend> -> crew pane shell pids
-  local meta=$1 worktree=$2 backend=$3 home_canon f window pid
+fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> -> crew pane shell pids
+  local meta=$1 worktree=$2 home_canon f window pid backend kind id
   [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 0
   [ -d "$worktree" ] || return 0
   home_canon=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 0
@@ -347,37 +334,49 @@ fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> <backend> -> crew 
     if [ ! -f "$f" ] || [ -L "$f" ] || [ ! -r "$f" ]; then
       continue
     fi
-    [ "$(fm_meta_get "$f" kind)" != secondmate ] || continue
+    kind=$(fm_meta_get "$f" kind)
+    case "$kind" in ship|scout) ;; *) continue ;; esac
+    id=$(fm_backend_meta_exact_value "$f" endpoint_task_id) || continue
+    [ "$id.meta" = "${f##*/}" ] || continue
+    case "$id" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
     window=$(fm_backend_meta_exact_value "$f" window) || window=
     [ -n "$window" ] || continue
+    if grep -q '^backend=' "$f"; then
+      backend=$(fm_backend_meta_exact_value "$f" backend) || continue
+    else
+      backend=tmux
+    fi
     pid=
     if [ "$backend" = tmux ]; then
       pid=$(tmux display-message -p -t "$window" '#{pane_pid}' 2>/dev/null) || pid=
-    elif [ "$backend" = herdr ] && fm_backend_herdr_parse_target "$window"; then
-      pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
-        | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
-          'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pid=
+    elif [ "$backend" = herdr ]; then
+      fm_backend_source herdr >/dev/null 2>&1 || continue
+      if fm_backend_herdr_parse_target "$window"; then
+        pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+          | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
+            'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pid=
+      fi
     fi
     case "$pid" in ''|*[!0-9]*) ;; *) printf '%s\n' "$pid" ;; esac
   done
   return 0
 }
 
-fm_control_process_cwd() {  # <pid> -> cwd path
-  local pid=$1 cwd
-  case "$(uname -s)" in
-    Linux)
-      cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || return 1
-      ;;
-    Darwin)
-      cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
-      [ -n "$cwd" ] || return 1
-      ;;
-    *) return 1 ;;
-  esac
-  case "$cwd" in *' (deleted)') cwd=${cwd% (deleted)} ;; esac
-  [ -n "$cwd" ] || return 1
-  printf '%s' "$cwd"
+fm_control_process_task_id() {  # <pid> -> FM_TASK_ID
+  local pid=$1 entry id='' seen=0
+  [ "$(uname -s)" = Linux ] || return 1
+  [ -r "/proc/$pid/environ" ] || return 1
+  while IFS= read -r -d '' entry; do
+    case "$entry" in
+      FM_TASK_ID=*)
+        [ "$seen" = 0 ] || return 1
+        id=${entry#FM_TASK_ID=}
+        seen=1
+        ;;
+    esac
+  done < "/proc/$pid/environ" 2>/dev/null || return 1
+  case "$id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  printf '%s' "$id"
 }
 
 fm_control_pid_descends_from() {  # <pid> <ancestor-pid>
@@ -396,23 +395,23 @@ fm_control_pid_descends_from() {  # <pid> <ancestor-pid>
 # mate crew attribution above applied. Prints pids; nonzero means absence
 # could not be proven, exactly as the unfiltered inventory means it.
 fm_control_rooted_processes() {  # <backend> <meta> <worktree> [<pane-shell-pid>] -> pids
-  local backend=$1 meta=$2 worktree=$3 pane_pid=${4:-} rooted roots_text pid cwd root keep
-  local -a ancestors=() roots=()
+  local backend=$1 meta=$2 worktree=$3 pane_pid=${4:-} rooted ids_text pid ancestor id task_id keep
+  local -a ancestors=() ids=()
   if [ "$(fm_meta_get "$meta" kind)" != secondmate ]; then
     fm_agent_worktree_processes "$worktree" "$pane_pid"
     return
   fi
-  roots_text=$(fm_control_secondmate_crew_roots "$meta" "$worktree") || return 1
-  while IFS= read -r root; do
-    [ -n "$root" ] || continue
-    roots+=("$root")
+  ids_text=$(fm_control_secondmate_crew_ids "$meta" "$worktree") || return 1
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    ids+=("$id")
   done <<EOF
-$roots_text
+$ids_text
 EOF
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
     ancestors+=("$pid")
-  done < <(fm_control_secondmate_crew_ancestors "$meta" "$worktree" "$backend")
+  done < <(fm_control_secondmate_crew_ancestors "$meta" "$worktree")
   rooted=$(fm_agent_worktree_processes "$worktree" "$pane_pid" ${ancestors[@]+"${ancestors[@]}"}) || return 1
   [ -n "$rooted" ] || return 0
   while IFS= read -r pid; do
@@ -421,15 +420,15 @@ EOF
     if [ -n "$pane_pid" ] && fm_control_pid_descends_from "$pid" "$pane_pid"; then
       keep=1
     else
-      for root in ${ancestors[@]+"${ancestors[@]}"}; do
-        if fm_control_pid_descends_from "$pid" "$root"; then
+      for ancestor in ${ancestors[@]+"${ancestors[@]}"}; do
+        if fm_control_pid_descends_from "$pid" "$ancestor"; then
           keep=0
           break
         fi
       done
-      if [ "$keep" = 1 ] && cwd=$(fm_control_process_cwd "$pid"); then
-        for root in ${roots[@]+"${roots[@]}"}; do
-          case "$cwd" in "$root"|"$root"/*) keep=0; break ;; esac
+      if [ "$keep" = 1 ] && task_id=$(fm_control_process_task_id "$pid"); then
+        for id in ${ids[@]+"${ids[@]}"}; do
+          [ "$task_id" != "$id" ] || { keep=0; break; }
         done
       fi
     fi

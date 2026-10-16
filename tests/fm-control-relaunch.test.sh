@@ -1384,21 +1384,19 @@ test_secondmate_relaunch_waits_for_exiting_home_process() {
 # Regression (PR 79 fallout): a second mate's recorded worktree is its whole
 # home, so its own live crew workers - rooted in a crew copy under the home -
 # were counted as the old supervisor agent and the restart always refused.
-test_secondmate_relaunch_ignores_live_crew_processes() {
-  local dir home out rc=0 crew_pid crew_shell_pid crew_home_pid i
-  dir=$(new_case crew-live sm-crew)
-  home="$dir/home"
+setup_secondmate_crew_case() {
+  local dir=$1 id=$2 home="$1/home"
   mkdir -p "$home/config"
   printf 'claude\n' > "$home/config/secondmate-harness"
   fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
   mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" \
     "$dir/smhome/projects/crewcopy"
-  printf 'sm-crew\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '%s\n' "$id" > "$dir/smhome/.fm-secondmate-home"
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
   printf 'charter\n' > "$dir/smhome/data/charter.md"
   {
-    echo 'window=fmses:fm-sm-crew'
-    echo 'endpoint_task_id=sm-crew'
+    echo "window=fmses:fm-$id"
+    echo "endpoint_task_id=$id"
     echo "worktree=$dir/smhome"
     echo "project=$dir/smhome"
     echo 'harness=claude'
@@ -1409,7 +1407,7 @@ test_secondmate_relaunch_ignores_live_crew_processes() {
     echo 'effort=default'
     echo "home=$dir/smhome"
     echo 'backend=tmux'
-  } > "$home/state/sm-crew.meta"
+  } > "$home/state/$id.meta"
   {
     echo 'window=fmses:fm-crew1'
     echo 'endpoint_task_id=crew1'
@@ -1422,12 +1420,18 @@ test_secondmate_relaunch_ignores_live_crew_processes() {
     echo 'model=default'
     echo 'effort=default'
   } > "$dir/smhome/state/crew1.meta"
-  printf 'fm-sm-crew\n' > "$dir/fake/windows"
+  printf 'fm-%s\n' "$id" > "$dir/fake/windows"
   printf '%s' "$dir/smhome" > "$dir/fake/cwd"
-  ( cd "$dir/smhome/projects/crewcopy" && exec /bin/sleep 60 ) &
+}
+
+test_secondmate_relaunch_ignores_live_crew_processes() {
+  local dir out rc=0 crew_pid crew_shell_pid crew_home_pid i
+  dir=$(new_case crew-live sm-crew)
+  setup_secondmate_crew_case "$dir" sm-crew
+  ( cd "$dir/smhome/projects/crewcopy" && export FM_TASK_ID=crew1 && exec /bin/sleep 60 ) &
   crew_pid=$!
   ROOTED_PIDS+=("$crew_pid")
-  ( cd "$dir/smhome/projects/crewcopy" && /bin/bash -c '
+  ( unset FM_TASK_ID; cd "$dir/smhome/projects/crewcopy" && /bin/bash -c '
     cd "$1"
     /bin/sleep 60 &
     printf "%s\n" "$!" > "$2"
@@ -1452,6 +1456,23 @@ test_secondmate_relaunch_ignores_live_crew_processes() {
   kill -0 "$crew_home_pid" 2>/dev/null \
     || fail "the crew command rooted in the mate home did not survive restart"
   pass 'a secondmate restarts while its crew copy and home-rooted command stay live'
+}
+
+test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy() {
+  local dir out rc=0 mate_pid
+  dir=$(new_case mate-in-crew-copy sm-foreign)
+  setup_secondmate_crew_case "$dir" sm-foreign
+  ( unset FM_TASK_ID; cd "$dir/smhome/projects/crewcopy" && exec /bin/sleep 60 ) &
+  mate_pid=$!
+  ROOTED_PIDS+=("$mate_pid")
+  printf '%s\n' "$mate_pid" > "$dir/fake/process-pids"
+  out=$(run_control "$dir" sm-foreign relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a mate-launched process in a crew copy was excluded: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the mate process'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving mate process'
+  kill -0 "$mate_pid" 2>/dev/null || fail 'the mate process died during the refused restart'
+  pass 'a mate process in a crew copy blocks restart without a crew task marker'
 }
 
 test_secondmate_relaunch_refuses_a_live_home_process() {
@@ -3925,6 +3946,7 @@ test_turnend_auth_paths_are_owned_by_the_control_adapter
 test_secondmate_relaunch_picks_up_the_configured_harness_pin
 test_secondmate_relaunch_waits_for_exiting_home_process
 test_secondmate_relaunch_ignores_live_crew_processes
+test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy
 test_secondmate_relaunch_refuses_a_live_home_process
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings
