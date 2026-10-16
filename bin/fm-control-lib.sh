@@ -323,7 +323,7 @@ fm_control_secondmate_crew_ids() {  # <meta> <worktree> -> crew task ids
 }
 
 fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> -> crew pane shell pids
-  local meta=$1 worktree=$2 home_canon f window windows pid backend kind id
+  local meta=$1 worktree=$2 home_canon f window session name socket windows pid backend kind id
   [ "$(fm_meta_get "$meta" kind)" = secondmate ] || return 0
   [ -d "$worktree" ] || return 0
   home_canon=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 0
@@ -352,19 +352,19 @@ fm_control_secondmate_crew_ancestors() {  # <meta> <worktree> -> crew pane shell
       # stale crew record must prove exact window membership before its pane
       # PID can attribute anything; otherwise the ancestor is skipped and the
       # process stays unattributed (and therefore blocks).
-      fm_backend_source tmux >/dev/null 2>&1 || continue
-      declare -F fm_backend_tmux_window_inventory >/dev/null 2>&1 || continue
+      socket=$(fm_backend_meta_exact_value "$f" tmux_socket) || continue
+      case "$socket" in /*) ;; *) continue ;; esac
+      case "$socket" in *[$'\n\r\t']*) continue ;; esac
       case "$window" in
-        *:*)
-          if windows=$(fm_backend_tmux_window_inventory "${window%%:*}"); then
-            printf '%s\n' "$windows" | grep -Fqx "${window#*:}" || continue
-          else
-            continue
-          fi
-          ;;
+        *:*:*) continue ;;
+        ?*:?*) ;;
         *) continue ;;
       esac
-      pid=$(tmux display-message -p -t "$window" '#{pane_pid}' 2>/dev/null) || pid=
+      session=${window%%:*}
+      name=${window#*:}
+      windows=$(tmux -S "$socket" list-windows -t "=$session" -F '#{window_name}' 2>/dev/null) || continue
+      printf '%s\n' "$windows" | grep -Fqx -- "$name" || continue
+      pid=$(tmux -S "$socket" display-message -p -t "=$session:=$name" '#{pane_pid}' 2>/dev/null) || pid=
     elif [ "$backend" = herdr ]; then
       fm_backend_source herdr >/dev/null 2>&1 || continue
       if fm_backend_herdr_parse_target "$window"; then
