@@ -1,0 +1,22 @@
+Private tmux lab with real Claude primary and dead-agent secondmate endpoint
+claude claude
+fm-sm1 bash
+
+Regular retirement marker, watcher tick:
+Terminated
+retirement marker: started=1
+last watcher triage: [2026-10-16T00:24:57-0400] secondmate sm1 liveness: retirement is in progress; endpoint left untouched
+endpoint after tick: fm-sm1 bash
+wake queue empty: yes
+
+Symlink retirement marker, watcher tick:
+check: rearm-resurface
+new watcher triage lines: 1
+last watcher triage: [2026-10-16T00:25:15-0400] secondmate sm1 liveness: retirement is in progress; endpoint left untouched
+endpoint after tick: fm-sm1 bash
+symlink target: sentinel
+wake queue empty: yes
+
+No retirement marker, watcher control tick:
+check: secondmate sm1 auto-relaunch failed after confirmed agent absence on existing endpoint: fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51EHBHHQCFA5HD7TNZJ0CYB/.nm-retirement-proof
+fm-sm1 endpoint after tick: absent
