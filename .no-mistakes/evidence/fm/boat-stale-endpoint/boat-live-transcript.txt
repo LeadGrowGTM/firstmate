@@ -1,0 +1,46 @@
+sandbox=bx_ahnbu3qr state=running
+endpoint: 127.0.0.1:46637
+hostkey:  none -> SHA256:DZOeQz3YlN/UPqcjIFwCqcD5ROCs9KnwWZEXIokWJH8
+hydrated=true waited=0s
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+resolved alias: hostname=boat-prove
+port=22
+proxycommand=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52GRX5J4HQPXM87QD1MA4QJ/bin/fm-boat-alias-refresh.sh
+Connection closed by UNKNOWN port 65535
+initial direct SSH accepts: old=1 new=0
+error: Boat did not verify boat-prove; refusing proxy connection
+Connection closed by UNKNOWN port 65535
+moved endpoint accepts: old=1 new=0
+error: Boat did not verify boat-prove; refusing proxy connection
+Connection closed by UNKNOWN port 65535
+re-keyed endpoint accepts: old=1 new=0
+sandbox=bx_ahnbu3qr state=running
+endpoint: 127.0.0.1:47335
+hostkey:  SHA256:DZOeQz3YlN/UPqcjIFwCqcD5ROCs9KnwWZEXIokWJH8 -> SHA256:RV7QubvVcDBgGnMQWpYJIj1m+mD2WyZ68LWwtYuVpVE
+hydrated=true waited=0s
+ssh_dispatch_run_fatal: Connection to UNKNOWN port 65535: Broken pipe
+explicit refresh after move and re-key accepts: old=1 new=1; pinned_fingerprint=SHA256:RV7QubvVcDBgGnMQWpYJIj1m+mD2WyZ68LWwtYuVpVE
+error: Boat did not verify boat-prove; refusing proxy connection
+Connection closed by UNKNOWN port 65535
+unreadable API accepts: old=1 new=1
+error: Boat did not verify boat-prove; refusing proxy connection
+Connection closed by UNKNOWN port 65535
+stopped endpoint accepts: old=1 new=1; pin_exists=no
+Connection closed by UNKNOWN port 65535
+missing alias recovery accepts: old=1 new=2
+error: sandbox bx_ahnbu3qr is not running (state=stopped); resume it first
+error: Boat did not confirm a running sandbox for boat-prove; not connecting
+missing alias stopped accepts: old=1 new=2
+error: boat info failed for bx_ahnbu3qr
+error: Boat did not confirm a running sandbox for boat-prove; not connecting
+missing alias unreadable API accepts: old=1 new=2
+sandbox=bx_ahnbu3qr state=running
+endpoint: 127.0.0.1:46637
+hostkey:  none -> SHA256:DZOeQz3YlN/UPqcjIFwCqcD5ROCs9KnwWZEXIokWJH8
+hydrated=true waited=0s
+error: boat info failed for bx_ahnbu3qr
+error: Boat did not verify boat-prove; refusing proxy connection
+Connection closed by UNKNOWN port 65535
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+post-stop API failure: pin_exists=no; resolved_hostname=boat-prove
+Boat calls: info and exec only
