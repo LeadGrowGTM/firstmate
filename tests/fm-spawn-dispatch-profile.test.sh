@@ -2209,7 +2209,7 @@ test_skill_overrides_never_reach_workers() {
 
 test_claude_plugin_directories_are_home_scoped() {
   local rec id sm plugin out status launch args_log
-  id=profile-claude-plugins-z41
+  id="profile-claude-plugins-z41"
   rec=$(make_spawn_case profile-claude-plugins claude "$id")
   read_case_record "$rec"
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
@@ -2264,7 +2264,7 @@ SH
 
 test_claude_plugin_directories_invalid_file_is_skipped() {
   local rec id out status bad
-  id=profile-claude-plugins-invalid-z42
+  id="profile-claude-plugins-invalid-z42"
   rec=$(make_spawn_case profile-claude-plugins-invalid claude "$id")
   read_case_record "$rec"
   mkdir -p "$HOME_DIR/config"

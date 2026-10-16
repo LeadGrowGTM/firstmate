@@ -26,7 +26,7 @@
 # No side effects on source.
 
 fm_crew_short_name() {  # <config-dir> -> prints the short form, or nothing when unset
-  local file=$1/mate-short-name value= extra=
+  local file=$1/mate-short-name value='' extra=''
   [ -e "$file" ] || [ -L "$file" ] || return 0
   if [ ! -f "$file" ] || [ ! -r "$file" ]; then
     echo "error: $file is not a readable file" >&2
