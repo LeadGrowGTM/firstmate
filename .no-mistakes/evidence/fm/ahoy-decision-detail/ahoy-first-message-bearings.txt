@@ -1,0 +1,93 @@
+❯ /ahoy
+
+  Ran 1 shell command
+
+● This is the first real captain message, so I'm following the bearings skill.
+
+  Read 1 file, ran 1 shell command
+
+● Captain, here are your bearings. This is a fresh session. The home has no backlog, no registered projects, no secondmates and no tasks
+  under way.
+
+  Captain's Call
+  - No decision is recorded. Coverage is incomplete, so this isn't proof that nothing needs you. The check covered 0 of 0 known
+    contributions, and one contribution record couldn't be read.
+  - The startup network checks (GitHub login, secondmate and clone refresh) were still running when I gathered this. Treat them as
+    unconfirmed.
+  - You didn't ask for open PRs, so they weren't checked. The GitHub context loaded at session start lists three PRs from MitchellkellerLG:
+    https://github.com/LeadGrowGTM/firstmate/pull/79 (agent exit and pooled worktree claims),
+    https://github.com/LeadGrowGTM/firstmate/pull/75 (data cleanup and disk pressure monitoring) and
+    https://github.com/LeadGrowGTM/firstmate/pull/71 (naming the Boat no-mistakes proof file). None of them has a review. Run /bearings
+    include PRs if you want their status.
+
+  Recently Landed
+  No recent completions are in the current baseline.
+
+  Underway
+  Nothing is underway.
+
+  Charted Next
+  Nothing is queued. The GitHub context also lists three open issues, which this home isn't tracking as work: FM-04 (transition log and
+  closure-reason rule), FM-05 (in-repo worktree containment) and FM-06 (Orca backend on Windows).
+
+✻ Cooked for 19s · done 9:19 AM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                      tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M52DDRY5A7B0YN8F548Q0H72  ◆ Sonnet 5.5  ctx 9%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

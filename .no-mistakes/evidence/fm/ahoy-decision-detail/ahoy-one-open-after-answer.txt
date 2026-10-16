@@ -1,0 +1,42 @@
+❯ /ahoy
+
+● Captain, the only change since your last message is that I acknowledged your Decision B choice. That decision is closed: we keep the
+  current reporting service, defer the replacement, and the team does nothing for now. The session-start digest is already visible, so I did
+  not run it again. One decision is still open.
+
+  Ordering: Decision A is the only open decision. It leads because it has a hard deadline of 14:00 UTC tomorrow and the demo is blocked
+  until it is settled.
+
+  1. Decision A: Unblock the partner demo (rank 1: deadline)
+
+  What it is and how it got here: A partner demo is tomorrow at 14:00 UTC. The export button is broken, so the demo is blocked. You asked
+  for this to stay open, and you have said it remains unanswered.
+
+  What is at stake: If nothing is done, the demo stays blocked as the deadline approaches. A1 meets the deadline with some data risk. A2
+  gives up a week of momentum and possibly partner trust.
+
+  Options:
+  - A1: temporary manual CSV export.
+    - Who does what: you approve today, and I prepare it in 45 minutes.
+    - Cost: 45 minutes of my time.
+    - Risk: human error and stale data.
+    - Reversible: yes, by deleting the file.
+  - A2: delay the demo.
+    - Who does what: you contact the partner.
+    - Cost: one week of momentum and possible trust.
+    - Risk: damage to the partner relationship.
+    - Reversible: only by rescheduling.
+
+  Recommendation: A1, with a second-person review. It meets the deadline, and its risks are small and reversible.
+
+  Evidence: https://example.org/demo-issue and /tmp/demo-notes.txt
+
+  You can answer Decision A whenever you are ready.
+
+✻ Baked for 3s · done 9:18 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M52DDRY5A7B0YN8F548Q0H72  ◆ Sonnet 5.5  ctx 9%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

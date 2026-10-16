@@ -1,0 +1,69 @@
+❯ /ahoy
+
+  Ran 1 shell command
+
+● Captain, I ran the session-start check, since the no-tools limit was lifted. It reports no queued wakes and no work under way, and the
+  startup network checks have not finished.
+
+  Since your last message: Your last real message clarified that the no-tools limit was lifted, and I acknowledged it. The only other event
+  is the session-start run. It changed nothing about either decision, and both remain open and unanswered.
+
+  Ordering: Decision A leads because it has a hard deadline of 14:00 UTC tomorrow and the demo is blocked until it is settled. Decision B
+  has no deadline and can wait.
+
+  1. Decision A: Unblock the partner demo (rank 1: deadline)
+
+  What it is and how it got here: A partner demo is tomorrow at 14:00 UTC. The export button is broken, so the demo is blocked. You asked
+  for this to stay open.
+
+  What is at stake: If nothing is done, the demo stays blocked as the deadline approaches. A1 meets the deadline with some data risk. A2
+  gives up a week of momentum and possibly partner trust.
+
+  Options:
+  - A1: temporary manual CSV export.
+    - Who does what: you approve today, and I prepare it in 45 minutes.
+    - Cost: 45 minutes of my time.
+    - Risk: human error and stale data.
+    - Reversible: yes, by deleting the file.
+  - A2: delay the demo.
+    - Who does what: you contact the partner.
+    - Cost: one week of momentum and possible trust.
+    - Risk: damage to the partner relationship.
+    - Reversible: only by rescheduling.
+
+  Recommendation: A1, with a second-person review. It meets the deadline, and its risks are small and reversible.
+
+  Evidence: https://example.org/demo-issue and /tmp/demo-notes.txt
+
+  2. Decision B: Reporting service replacement next quarter (rank 2: no deadline)
+
+  What it is and how it got here: The team wants to replace a reporting service next quarter. You asked for this to stay open too.
+
+  What is at stake: There is no deadline. Choosing B2 means ongoing monthly support cost continues. Choosing B1 spends engineering time to
+  test the savings assumption.
+
+  Options:
+  - B1: 2-week prototype.
+    - Who does what: you approve the budget, and I build it.
+    - Cost: 2 engineer weeks.
+    - Risk: distraction.
+    - Reversible: yes, by stopping.
+  - B2: keep the current service.
+    - Who does what: you decide to defer, and the team does nothing.
+    - Cost: no immediate engineering time.
+    - Risk: ongoing monthly support cost.
+    - Reversible: yes, you can revisit it later.
+
+  Recommendation: B1, because it tests the savings assumption.
+
+  Evidence: https://example.org/service-design
+
+  You can answer either decision in any order.
+
+✻ Churned for 11s · done 9:17 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M52DDRY5A7B0YN8F548Q0H72  ◆ Sonnet 5.5  ctx 9%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
