@@ -1,0 +1,26 @@
+Fresh worker on configured home
+name=claude label=
+name=fm-crew-proof label=nap-crew-crew-proof
+status_bar=1:nap-crew-crew-proof 
+recorded_branch=nap/crew/crew-proof
+actual_branch=nap/crew/crew-proof
+fm-send response=● CREW_ROUTE_OK
+
+Change short form after spawn to chu
+name=claude label=
+name=fm-crew-proof label=nap-crew-crew-proof
+existing_recorded_branch=nap/crew/crew-proof
+new_default_prefix=chu/crew/
+
+Unset short form for future work
+unset_default_prefix=fm/
+Ship branch: fm/unset-proof
+existing_window_after_unset=nap-crew-crew-proof
+
+Project branch override in configured home
+registered_prefix=fix/
+Ship branch: fix/override-proof
+
+Malformed short form refuses new branch selection
+refusal=error: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M52NGD4JHC9N5T7EEY4NAPB1/.lab-crew-naming-38372/config/mate-short-name holds 'Nap'; a short form is 1-16 lowercase letters, digits and inner dashes
+existing_window_after_invalid_config=nap-crew-crew-proof
