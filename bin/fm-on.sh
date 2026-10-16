@@ -25,6 +25,13 @@
 # configured SendEnv patterns. The remote entrypoint executes the selected
 # command under an empty environment with only its fixed runtime values.
 #
+# Before any connection, fm-boat-alias-refresh.sh --verify checks whether the
+# alias is a Boat sandbox alias. For one, ssh runs only after Boat reports the
+# sandbox running at that moment, and only with the address and pinned host key
+# Boat confirmed, passed as -o options; otherwise this command exits 255 without
+# connecting, so a stopped or moved sandbox reads as unavailable transport. It
+# never resumes a sandbox. That helper's header owns the check.
+#
 # ServerAliveInterval/ServerAliveCountMax arm dead-peer detection so a vanished
 # peer (a reboot, a dropped link) becomes a bounded ssh failure (exit 255)
 # instead of an indefinite hang on a half-open TCP connection. The remote
@@ -111,7 +118,45 @@ case "$ALIVE_COUNT_MAX" in ''|*[!0-9]*) die "FM_SSH_ALIVE_COUNT_MAX must be a po
 [ "$ALIVE_INTERVAL" -gt 0 ] || die "FM_SSH_ALIVE_INTERVAL must be a positive integer: $ALIVE_INTERVAL"
 [ "$ALIVE_COUNT_MAX" -gt 0 ] || die "FM_SSH_ALIVE_COUNT_MAX must be a positive integer: $ALIVE_COUNT_MAX"
 
-SSH_ARGS=(
+VERIFY_ARGS=(--verify "$HOST")
+if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
+  [ "$HOST" = boat-prove ] || die "boat-eng must use boat-prove"
+  BOX_CONFIG="$FM_HOME/config/boat-box-id"
+  [ -d "$FM_HOME/config" ] && [ ! -L "$FM_HOME/config" ] &&
+    [ -f "$BOX_CONFIG" ] && [ ! -L "$BOX_CONFIG" ] || die "safe config/boat-box-id is required for $ROUTE"
+  [ "$(wc -c < "$BOX_CONFIG")" -le 12 ] || die "invalid config/boat-box-id for $ROUTE"
+  BOX=$(cat "$BOX_CONFIG")
+  [[ "$BOX" =~ ^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$ ]] || die "invalid config/boat-box-id for $ROUTE"
+  VERIFY_ARGS+=("$BOX")
+fi
+BOAT_STATUS=0
+BOAT_PINS=$("$SCRIPT_DIR/fm-boat-alias-refresh.sh" "${VERIFY_ARGS[@]}" < /dev/null) || BOAT_STATUS=$?
+if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
+  if [ "$BOAT_STATUS" -eq 3 ]; then
+    FM_BOAT_HYDRATE_WAIT=0 "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" "$HOST" < /dev/null >/dev/null || {
+      printf 'error: Boat did not confirm a running sandbox for %s; not connecting\n' "$HOST" >&2
+      exit 255
+    }
+    BOAT_STATUS=0
+    BOAT_PINS=$("$SCRIPT_DIR/fm-boat-alias-refresh.sh" "${VERIFY_ARGS[@]}" < /dev/null) || BOAT_STATUS=$?
+  fi
+fi
+case "$BOAT_STATUS" in
+  0) ;;
+  3)
+    [ "$ROUTE" != boat-eng ] && [ "$HOST" != boat-prove ] || die "Boat alias $HOST is missing; not connecting"
+    BOAT_PINS=
+    ;;
+  *)
+    printf 'error: Boat did not confirm a running sandbox at the pinned address for %s; not connecting\n' "$HOST" >&2
+    exit 255
+    ;;
+esac
+SSH_ARGS=()
+while IFS= read -r pin; do
+  [ -n "$pin" ] && SSH_ARGS+=(-o "$pin")
+done <<< "$BOAT_PINS"
+SSH_ARGS+=(
   -o ForwardAgent=no
   -o ClearAllForwardings=yes
   -o 'SendEnv=-*'

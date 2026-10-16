@@ -32,7 +32,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-remote-job-worker.sh` | Long-lived remote queue worker for tracked `fm-*.sh` commands in the account runtime |
 | `fm-remote-job-reap-orphans.sh` | Stop remote job workers left running by a pruned code root, never one whose checkout still exists |
 | `fm-remote-doctor.sh`    | Check, and with `--fix` repair, one remote account's second-mate readiness (remote job worker, Herdr, Aqua launch agents, PATH, and required tools) |
-| `fm-boat-alias-refresh.sh` | Optional: refresh or remove the pinned SSH alias for a Boat sandbox remote host after each resume ([remote-secondmates.md](remote-secondmates.md#linux-hosts-and-boat-sandboxes)) |
+| `fm-boat-alias-refresh.sh` | Optional: refresh or remove the pinned SSH alias for a Boat sandbox remote host after each resume, and verify it against Boat before `fm-on.sh` and direct SSH connections ([remote-secondmates.md](remote-secondmates.md#linux-hosts-and-boat-sandboxes)) |
 | `fm-boat-send.sh`       | Send a selected code-only task to the guarded Boat overflow route, or tear it down ([remote-secondmates.md](remote-secondmates.md#code-only-boat-overflow)) |
 | `fm-boat-worker.sh`     | Validate, spawn, or tear down a task in the dedicated Boat overflow home |
 | [`fm-backlog-handoff.sh`](../bin/fm-backlog-handoff.sh) | Move queued backlog items into a secondmate home; its header owns route-specific wake outcomes and retries |
