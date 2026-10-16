@@ -7,7 +7,8 @@ WRAPPER=$ROOT/bin/fm-scheduled-worker.sh
 
 make_case() {
   local name=$1 dir=$TMP_ROOT/$1
-  mkdir -p "$dir/bin" "$dir/home/state" "$dir/home/data" "$dir/project"
+  mkdir -p "$dir/bin" "$dir/home/state" "$dir/home/data/job" "$dir/project"
+  printf 'Ship branch: fm/job\n' > "$dir/home/data/job/brief.md"
   chmod 700 "$dir/home/state"
   cp "$ROOT/bin/fm-scheduled-worker.sh" "$ROOT/bin/fm-wake-lib.sh" \
     "$ROOT/bin/fm-control-lib.sh" "$ROOT/bin/fm-path-lib.sh" \
@@ -210,24 +211,11 @@ check_generation_change_at_control_admission() {
   pass 'scheduled continuation forwards G1 and refuses when control admits G2'
 }
 
-# The ship branch the spawn would derive from its recorded arguments: the
-# forwarded --branch-prefix, else this home's default crew prefix.
-spawn_branch() {
-  local dir=$1 prefix
-  prefix=$(sed -n 's/^spawn .* --branch-prefix \([^ ]*\).*/\1/p' "$dir/home/calls")
-  [ -n "$prefix" ] || prefix=$(bash -c '. "$1/bin/fm-crew-name-lib.sh" && fm_crew_default_branch_prefix "$2"' _ "$ROOT" "$dir/home/config")
-  printf '%s%s\n' "$prefix" job
-}
-
-# The plan's branch_prefix reaches the spawn so the branch it derives is the
-# one the prepared brief records: absent or null forwards no flag, so the spawn
-# takes the home's default crew prefix just as a flagless brief does; an
-# explicit prefix is forwarded verbatim; an explicit empty prefix is refused
-# before any owner call.
 check_branch_prefix_forwarding() {
-  local dir out rc variant brief_branch invalid index=0
+  local dir out rc variant brief_branch expected_prefix invalid index=0
   for variant in absent null explicit; do
     dir=$(make_case "prefix-$variant")
+    rm -f "$dir/home/data/job/brief.md"
     mkdir -p "$dir/home/config"
     printf 'nap\n' > "$dir/home/config/mate-short-name"
     case "$variant" in
@@ -241,15 +229,15 @@ check_branch_prefix_forwarding() {
         FM_HOME="$dir/home" "$ROOT/bin/fm-brief.sh" job project --mode direct-PR --branch-prefix fix/ >/dev/null ;;
     esac || fail "$variant prefix brief should scaffold"
     brief_branch=$(sed -n 's/^Ship branch: //p' "$dir/home/data/job/brief.md")
+    printf 'leg\n' > "$dir/home/config/mate-short-name"
     out=$(run_case "$dir"); rc=$?
     expect_code 0 "$rc" "$variant prefix spawn: $out"
-    assert_equals "$brief_branch" "$(spawn_branch "$dir")" "$variant prefix spawn arguments disagree with the prepared brief"
     case "$variant" in
-      explicit) assert_equals fix/job "$brief_branch" 'explicit prefix brief lost its prefix' ;;
-      *)
-        assert_equals nap/crew/job "$brief_branch" "$variant prefix brief did not take the crew default"
-        assert_no_grep '--branch-prefix' "$dir/home/calls" "$variant prefix forwarded a prefix instead of the home default" ;;
+      explicit) expected_prefix=fix/ ;;
+      *) expected_prefix=nap/crew/ ;;
     esac
+    assert_equals "${expected_prefix}job" "$brief_branch" "$variant prefix brief lost its prefix"
+    assert_contains "$(cat "$dir/home/calls")" "--branch-prefix $expected_prefix" "$variant prefix did not forward the prepared brief's prefix"
   done
   for invalid in '""' '"bad prefix"' false true 0 '[]' '{}'; do
     index=$((index + 1))

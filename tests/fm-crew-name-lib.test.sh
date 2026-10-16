@@ -19,11 +19,11 @@ test_unset_keeps_todays_names() {
   out=$(fm_crew_short_name "$config") || fail "a missing short form refused"
   assert_equals "" "$out" "a missing short form produced a name"
   assert_equals "fm/" "$(fm_crew_default_branch_prefix "$config")" "a missing short form changed the branch prefix"
-  assert_equals "" "$(fm_crew_window_label "$config" ship email-waterfall-order)" "a missing short form produced a worker label"
-  assert_equals "" "$(fm_crew_window_label "$config" secondmate napoleon)" "a missing short form produced a second-mate label"
+  assert_equals "" "$(fm_crew_label_for "$(fm_crew_usable_short_name "$config")" ship email-waterfall-order)" "a missing short form produced a worker label"
+  assert_equals "" "$(fm_crew_label_for "$(fm_crew_usable_short_name "$config")" secondmate napoleon)" "a missing short form produced a second-mate label"
   : > "$config/mate-short-name"
   assert_equals "fm/" "$(fm_crew_default_branch_prefix "$config")" "an empty declaration changed the branch prefix"
-  assert_equals "" "$(fm_crew_window_label "$config" scout probe)" "an empty declaration produced a label"
+  assert_equals "" "$(fm_crew_label_for "$(fm_crew_usable_short_name "$config")" scout probe)" "an empty declaration produced a label"
   pass "crew names: an unset or empty short form keeps fm- labels and the fm/ branch prefix"
 }
 
@@ -33,10 +33,10 @@ test_short_form_names_new_work() {
   printf 'nap\n' > "$config/mate-short-name"
   assert_equals "nap" "$(fm_crew_short_name "$config")" "the short form was not read"
   assert_equals "nap/crew/" "$(fm_crew_default_branch_prefix "$config")" "the branch prefix did not name the crew"
-  assert_equals "nap-crew-email-waterfall-order" "$(fm_crew_window_label "$config" ship email-waterfall-order)" \
+  assert_equals "nap-crew-email-waterfall-order" "$(fm_crew_label_for "$(fm_crew_usable_short_name "$config")" ship email-waterfall-order)" \
     "a ship's label did not read short form, crew, job"
-  assert_equals "nap-crew-probe" "$(fm_crew_window_label "$config" scout probe)" "a scout's label did not read as crew"
-  assert_equals "legion" "$(fm_crew_window_label "$config" secondmate legion)" "a second mate's label was not its plain name"
+  assert_equals "nap-crew-probe" "$(fm_crew_label_for "$(fm_crew_usable_short_name "$config")" scout probe)" "a scout's label did not read as crew"
+  assert_equals "legion" "$(fm_crew_label_for "$(fm_crew_usable_short_name "$config")" secondmate legion)" "a second mate's label was not its plain name"
   printf 'alexander-media' > "$config/mate-short-name"
   assert_equals "alexander-media/crew/" "$(fm_crew_default_branch_prefix "$config")" \
     "a dashed short form without a trailing newline was not read"
@@ -55,7 +55,7 @@ test_malformed_short_form_falls_back() {
     out=$(fm_crew_default_branch_prefix "$config" 2>"$TMP_ROOT/warn") || fail "malformed short form '$value' blocked the branch prefix"
     assert_equals "fm/" "$out" "malformed short form '$value' did not fall back to fm/"
     assert_contains "$(cat "$TMP_ROOT/warn")" "holds '$value'" "the fallback for '$value' did not warn"
-    out=$(fm_crew_window_label "$config" ship x 2>/dev/null) || fail "malformed short form '$value' blocked the label"
+    out=$(fm_crew_label_for "$(fm_crew_usable_short_name "$config" 2>/dev/null)" ship x) || fail "malformed short form '$value' blocked the label"
     assert_equals "" "$out" "malformed short form '$value' produced a label"
   done
   printf 'nap\nleg\n' > "$config/mate-short-name"

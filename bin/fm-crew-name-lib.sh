@@ -67,7 +67,3 @@ fm_crew_label_for() {  # <short-or-empty> <kind> <id> -> visible label, or nothi
 fm_crew_default_branch_prefix() {  # <config-dir> -> "<short>/crew/" or "fm/"
   fm_crew_branch_prefix_for "$(fm_crew_usable_short_name "$1")"
 }
-
-fm_crew_window_label() {  # <config-dir> <kind> <id> -> visible label, or nothing
-  fm_crew_label_for "$(fm_crew_usable_short_name "$1")" "$2" "$3"
-}
