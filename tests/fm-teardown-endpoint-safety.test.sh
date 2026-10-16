@@ -1150,7 +1150,7 @@ assert_foreign_slot_untouched() {  # <case> <other-id> <description>
 }
 
 test_recycled_slot_of_another_clone_is_already_gone() {
-  local dir id=stale-child other=live-owner worker rc subhome parent leftover
+  local dir id=stale-child other=live-owner worker rc subhome parent leftover lock holder waited
   local recorded foreign
 
   # Ordinary teardown of the child, without --force. The landed-work test used
@@ -1281,6 +1281,7 @@ test_recycled_slot_of_another_clone_is_already_gone() {
   foreign="$dir/foreign/projects/legion"
   mkdir -p "$parent/state" "$parent/data" "$subhome/state"
   printf 'website-genie\n' > "$subhome/.fm-secondmate-home"
+  write_local_parent_record "$subhome" "$parent"
   seed_foreign_clone_slot "$dir" "$recorded" "$foreign" "$other" "$dir/foreign"
   fm_write_secondmate_meta "$parent/state/website-genie.meta" "$subhome" "" legion
   printf '%s\n' "- website-genie - fixture (home: $subhome; scope: fixture; projects: legion; added 2026-10-15)" \
@@ -1289,6 +1290,37 @@ test_recycled_slot_of_another_clone_is_already_gone() {
     "window=firstmate:fm-$id" "endpoint_task_id=$id" \
     "worktree=$dir/pool/1/project" "project=$recorded" \
     "kind=ship" "mode=no-mistakes"
+  lock=$(resolve_project_lock "$subhome" "$recorded") \
+    || fail "could not resolve the recorded project's slot lock"
+  (
+    . "$ROOT/bin/fm-wake-lib.sh"
+    fm_lock_try_acquire "$lock" || exit 1
+    : > "$dir/lock-held"
+    exec sleep 30
+  ) &
+  holder=$!
+  waited=0
+  while [ ! -e "$dir/lock-held" ] && [ "$waited" -lt 100 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  [ -e "$dir/lock-held" ] || fail "the slot lock holder did not start"
+  set +e
+  FM_HOME="$parent" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" website-genie --force > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  [ "$rc" -ne 0 ] || fail "forced retirement crossed the recorded project's held slot lock"
+  assert_contains "$(cat "$dir/stderr")" "another Treehouse slot allocation or return is in progress" \
+    "forced retirement should refuse at the recorded project's slot lock"
+  assert_present "$parent/state/website-genie.meta" \
+    "slot-lock refusal removed the secondmate record"
+  assert_present "$subhome/state/$id.meta" \
+    "slot-lock refusal removed the child record"
+  assert_foreign_slot_untouched "$dir" "$other" "slot-lock refusal"
   ( cd "$dir/pool/1/project" && exec sleep 30 ) &
   worker=$!
   set +e

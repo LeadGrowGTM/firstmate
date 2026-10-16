@@ -1579,27 +1579,19 @@ fm_treehouse_pool_slot() {  # <project-dir> <worktree>
 # True when both directories are checkouts of one clone. Common-dir equality is
 # the whole test: a plain linked worktree has no treehouse state file, and
 # requiring one would refuse every non-pool copy this home already launches.
-# Sets FM_TREEHOUSE_CLONE_RELATION for callers that must tell a different clone
-# from a path that cannot be proved either way:
-#   same       - both common dirs resolve and are equal
-#   other      - both resolve and differ
-#   unprovable - a directory is missing or a common dir cannot be resolved
+# Sets FM_TREEHOUSE_OTHER_CLONE only when both common dirs resolve and differ.
 fm_treehouse_same_clone() {  # <project-dir> <worktree>
   local project=$1 worktree=$2 project_common slot_common
   # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
-  FM_TREEHOUSE_CLONE_RELATION=unprovable
+  FM_TREEHOUSE_OTHER_CLONE=0
   [ -d "$project" ] && [ -d "$worktree" ] || return 1
   project_common=$(git -C "$project" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
   slot_common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
   project_common=$(CDPATH='' cd -- "$project_common" 2>/dev/null && pwd -P) || return 1
   slot_common=$(CDPATH='' cd -- "$slot_common" 2>/dev/null && pwd -P) || return 1
-  if [ "$project_common" = "$slot_common" ]; then
-    # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
-    FM_TREEHOUSE_CLONE_RELATION=same
-    return 0
-  fi
+  [ "$project_common" != "$slot_common" ] || return 0
   # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
-  FM_TREEHOUSE_CLONE_RELATION=other
+  FM_TREEHOUSE_OTHER_CLONE=1
   return 1
 }
 

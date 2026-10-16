@@ -2654,15 +2654,11 @@ require_exclusive_task_worktree_slot() {
 # only for an unreadable claim that is not accompanied by a different clone.
 # Prints nothing.
 TEARDOWN_SLOT_REASSIGNED_RC=3
-teardown_recorded_worktree_disposition() {  # <task-id> <worktree> [project]
-  local record_id=$1 worktree=$2 project=${3:-}
+teardown_recorded_worktree_disposition() {  # <task-id> <worktree> <project>
+  local record_id=$1 worktree=$2 project=$3
   fm_treehouse_slot_owner_state "$worktree" "$record_id"
-  # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
-  FM_TREEHOUSE_CLONE_RELATION=
-  if [ -n "$project" ]; then
-    fm_treehouse_same_clone "$project" "$worktree" || true
-  fi
-  if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ] || [ "${FM_TREEHOUSE_CLONE_RELATION:-}" = other ]; then
+  fm_treehouse_same_clone "$project" "$worktree" || true
+  if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ] || [ "$FM_TREEHOUSE_OTHER_CLONE" = 1 ]; then
     return "$TEARDOWN_SLOT_REASSIGNED_RC"
   fi
   case "$FM_TREEHOUSE_SLOT_OWNER" in
@@ -2671,16 +2667,16 @@ teardown_recorded_worktree_disposition() {  # <task-id> <worktree> [project]
   return 1
 }
 
-require_owned_worktree_slot_record() {  # <task-id> <worktree> [project]
-  local record_id=$1 worktree=$2 project=${3:-} marker rc=0 clone_note=
+require_owned_worktree_slot_record() {  # <task-id> <worktree> <project>
+  local record_id=$1 worktree=$2 project=$3 marker rc=0 clone_note=
   teardown_recorded_worktree_disposition "$record_id" "$worktree" "$project" || rc=$?
   if [ "$rc" -eq "$TEARDOWN_SLOT_REASSIGNED_RC" ]; then
     if [ "$FM_TREEHOUSE_SLOT_OWNER" = other ]; then
-      [ "${FM_TREEHOUSE_CLONE_RELATION:-}" = other ] \
+      [ "$FM_TREEHOUSE_OTHER_CLONE" = 1 ] \
         && clone_note="; its git common dir belongs to a different clone than $record_id's recorded project"
       echo "warning: task $record_id's recorded worktree $worktree was reassigned to task $FM_TREEHOUSE_SLOT_OWNER_ID${FM_TREEHOUSE_SLOT_OWNER_HOME:+ (home $FM_TREEHOUSE_SLOT_OWNER_HOME)}, which claimed that pool slot after this record was written${clone_note}; that slot is no longer $record_id's, so its processes, copy, and claim are left untouched and only $record_id's own cleanup runs." >&2
     else
-      echo "warning: task $record_id's recorded worktree $worktree is a worktree of a different clone than its recorded project ${project:-<missing>}; that path is no longer $record_id's, so its processes, copy, and claim are left untouched and only $record_id's own cleanup runs." >&2
+      echo "warning: task $record_id's recorded worktree $worktree is a worktree of a different clone than its recorded project $project; that path is no longer $record_id's, so its processes, copy, and claim are left untouched and only $record_id's own cleanup runs." >&2
     fi
     return "$TEARDOWN_SLOT_REASSIGNED_RC"
   fi
@@ -3207,9 +3203,7 @@ preflight_descendant_treehouse_slots() {
     if [ "$kind" = secondmate ] || [ "$backend" = orca ]; then
       continue
     fi
-    if ! fm_treehouse_pool_slot "$project" "$worktree"; then
-      continue
-    fi
+    [ -d "$worktree" ] || continue
     lock_path=$(fm_treehouse_project_lock_path "$project") || {
       echo "REFUSED: cannot resolve the shared Treehouse project lock for child $task_id; forced teardown changed nothing" >&2
       return 1
@@ -3618,10 +3612,9 @@ if [ "$KIND" = secondmate ]; then
   pending_replies_recovery_validate initial || exit 1
   validate_firstmate_home_for_removal "$HOME_PATH" "secondmate home" "$ID" >/dev/null || exit 1
   if [ "$FORCE" = "--force" ]; then
-    validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
     preflight_descendant_task_locks "$HOME_PATH" || exit 1
-    validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
     preflight_descendant_treehouse_slots || exit 1
+    validate_firstmate_home_children_removal "$HOME_PATH" || exit 1
     if [ "$BACKEND" = herdr ]; then
       teardown_herdr_preflight_target "$T" "$ID" || exit 1
     fi
