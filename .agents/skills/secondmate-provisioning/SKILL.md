@@ -260,7 +260,7 @@ A plain-clone home with no pool slot is simply removed.
 If `treehouse return` fails for a leased home, teardown stops with state intact rather than raw-removing the directory and hiding a held lease.
 Before either return or direct removal, teardown asks the target home's process-event runner to retire its registrations and physically owned machine-wide claims through the safe generation-bound path.
 It refuses retirement while that cleanup is uncertain or unavailable, preserving the home and retirement records for a later retry.
-From the moment retirement holds the mate's liveness lock, `state/.secondmate-retiring-<id>` stands liveness relaunch down across a refused pass until retirement completes; `bin/fm-secondmate-liveness-lib.sh` owns the marker.
+The [retirement liveness stand-down](../../../docs/architecture.md) remains in effect across a refused pass; retry teardown to finish retirement.
 Raw deletion is unsupported because a blocking process-event child can outlive its home.
 
 With `--force`, teardown is the explicit discard path.

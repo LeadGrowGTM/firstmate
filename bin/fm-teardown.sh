@@ -192,8 +192,6 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Secondmate retirement writes state/.secondmate-retiring-<id> as soon as it holds that mate's liveness lock and before any later refusal, and removes the marker only when retirement completes.
-# bin/fm-secondmate-liveness-lib.sh owns the marker.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped]
 #   --only-if-stopped is the automatic sweep guard: under the lifecycle and
 #   metadata locks, accept only a positively dead or missing worker endpoint,
