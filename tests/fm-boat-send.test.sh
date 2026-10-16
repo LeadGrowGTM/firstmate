@@ -294,7 +294,7 @@ test_validation() {
     '.home = "/home/user/other"' '.origin = "https://example.invalid/repo"' '.yolo = "on"' \
     '.flags = ["--unsafe"]' '.secrets = {}' '.mode = "local-only"' '.kind = "secondmate"' \
     '.harness = "echo"' '.effort = "unknown"' '.model = ""' '.intent = ""' \
-    '.spec = ""' '.git_name = ""' '.git_email = "invalid"' '.git_name = "Fixture"' '.git_name = "Fixture" | .git_email = "fixture@example.invalid"' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
+    '.spec = ""' '.goal = "still {GOAL}"' '.off_limits = "no pushes"' '.contracts = "none"' '.git_name = ""' '.git_email = "invalid"' '.git_name = "Fixture"' '.git_name = "Fixture" | .git_email = "fixture@example.invalid"' '.id = "../task"' '.id = "-task"' 'del(.spec)' \
     '.intent = "hidden\u0000text"' '.kind = "scout"'; do
     n=$((n + 1))
     new_case "invalid-$n"
@@ -866,21 +866,6 @@ test_brief_placeholder_fill() {
   assert_grep 'Off-limits: Secrets, client data, pushes, merges, deploys, and captain contact.' "$brief" 'fallback off-limits'
   assert_grep 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none' "$brief" 'fallback contracts'
   assert_grep 'Implement the requested fix' "$brief" 'fallback kept intent'
-  new_case brief-tokens-request
-  seed_project firstmate
-  : > "$FIXTURES/use-real-brief"
-  set_json request '.goal = "Ship the token fill." | .off_limits = "No live Boat calls." | .contracts = "merge waits for the captain"'
-  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
-  expect_code 0 "$CODE" 'optional brief lines validate'
-  spawn_task
-  expect_code 0 "$CODE" "request brief lines reach spawn: $OUT"
-  brief="$REMOTE_HOME/data/task-one/brief.md"
-  placeholders_present "$brief" && fail 'request brief still has unfilled task placeholders'
-  [ "$?" -eq 1 ] || fail 'request brief placeholder check did not run'
-  assert_grep 'Goal: Ship the token fill.' "$brief" 'request goal'
-  assert_grep 'Off-limits: No live Boat calls.' "$brief" 'request off-limits'
-  assert_grep 'Contracts and gates (follow them; spawned inside a pipeline, move only through its states): merge waits for the captain' "$brief" 'request contracts'
-  assert_no_grep 'Complete the one code-only task in the spec.' "$brief" 'request goal kept the fallback'
   new_case brief-tokens-scout
   seed_project firstmate
   : > "$FIXTURES/use-real-brief"
@@ -891,22 +876,6 @@ test_brief_placeholder_fill() {
   placeholders_present "$brief" && fail 'scout brief still has unfilled task placeholders'
   [ "$?" -eq 1 ] || fail 'scout brief placeholder check did not run'
   assert_grep '--scout' "$FIXTURES/spawn.argv" 'scout brief was not spawned as a scout'
-  new_case brief-tokens-placeholder-goal
-  seed_project firstmate
-  : > "$FIXTURES/use-real-brief"
-  set_json request '.goal = "still {GOAL}"'
-  spawn_task
-  expect_code 1 "$CODE" 'a goal that keeps the placeholder must refuse'
-  assert_contains "$OUT" 'unfilled task placeholders' 'placeholder goal did not report the brief check'
-  assert_no_grep '^spawn ' "$FIXTURES/calls" 'placeholder goal reached spawn'
-  new_case brief-tokens-blank-goal
-  set_json request '.goal = ""'
-  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
-  expect_code 1 "$CODE" 'blank goal is not a brief line'
-  new_case brief-tokens-newline-goal
-  set_json request '.goal = "one\ntwo"'
-  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
-  expect_code 1 "$CODE" 'multiline goal is not a brief line'
   pass 'Boat brief rewrite fills every scaffold placeholder before spawn'
 }
 
