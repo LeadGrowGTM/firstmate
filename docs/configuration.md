@@ -516,6 +516,7 @@ The window name reported by `tmux list-windows` remains `fm-<task-id>` in every 
 Herdr, zellij, cmux, and Orca keep their current tab names, because those backends also use the tab name to find and recover a task.
 Existing branches, pull requests, and live windows are never renamed.
 A relaunch restores a new task's recorded label if its tmux window must be replaced; older tasks without a recorded label keep their original names.
+A second mate's respawn keeps its recorded label even if this home's short form changes.
 
 ## Runtime backend (config/backend / FM_BACKEND)
 

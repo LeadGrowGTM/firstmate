@@ -349,6 +349,39 @@ test_crew_short_name_spawn_records_the_ship_branch() {
   pass "crew names: a flagless spawn records the crew branch and an explicit prefix still wins"
 }
 
+test_secondmate_respawn_keeps_recorded_crew_label() {
+  local rec id sm out status
+  for initial in unset nap; do
+    id="crew-secondmate-$initial"
+    rec=$(make_spawn_case "$id" codex "$id")
+    read_case_record "$rec"
+    sm="$CASE_DIR/secondmate-home"
+    make_seeded_secondmate_home "$sm" "$id"
+    if [ "$initial" = nap ]; then
+      printf 'nap\n' > "$HOME_DIR/config/mate-short-name"
+    fi
+    out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+    status=$?
+    expect_code 0 "$status" "first secondmate launch should succeed"$'\n'"$out"
+    if [ "$initial" = nap ]; then
+      assert_grep "crew_label=$id" "$HOME_DIR/state/$id.meta" "first launch lost the configured secondmate label"
+      rm "$HOME_DIR/config/mate-short-name"
+    else
+      ! grep -q '^crew_label=' "$HOME_DIR/state/$id.meta" || fail "unconfigured mate gained a label"
+      printf 'nap\n' > "$HOME_DIR/config/mate-short-name"
+    fi
+    out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+    status=$?
+    expect_code 0 "$status" "secondmate respawn should succeed after short form changed"$'\n'"$out"
+    if [ "$initial" = nap ]; then
+      assert_grep "crew_label=$id" "$HOME_DIR/state/$id.meta" "respawn lost the mate's recorded label"
+    else
+      ! grep -q '^crew_label=' "$HOME_DIR/state/$id.meta" || fail "respawn labeled a previously unlabeled mate"
+    fi
+  done
+  pass "secondmate respawn keeps its recorded label across short form changes"
+}
+
 # Claude Code strips U+2063 from the launch-prompt argument, so a claude launch
 # publishes the launch-brief envelope as a record in the receiving home's
 # operational inbox and passes only a printable doorbell naming it. Parsing the
@@ -2948,6 +2981,7 @@ test_configured_default_model_has_no_realized_model
 test_scheduled_plan_sets_class_beside_unrelated_dispatch
 test_no_profile_keeps_claude_profile_defaults
 test_crew_short_name_spawn_records_the_ship_branch
+test_secondmate_respawn_keeps_recorded_crew_label
 test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home
 test_claude_spawn_refuses_when_the_brief_record_cannot_publish

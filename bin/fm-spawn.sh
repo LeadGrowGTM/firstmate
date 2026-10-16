@@ -1855,7 +1855,7 @@ fi
 # A fresh endpoint's visible label (bin/fm-crew-name-lib.sh). Empty keeps
 # today's fm-<id> display.
 CREW_LABEL=
-if [ "$RELAUNCH" -eq 0 ]; then
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
   CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
 fi
 if [ -e "$STATE" ] || [ -L "$STATE" ]; then
@@ -4157,6 +4157,21 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
+fi
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" = secondmate ]; then
+  if [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
+    fm_backlog_record_present "$STATE/$ID.meta" "task record" "$STATE" || {
+      echo "error: secondmate task record is unsafe: $FM_BACKLOG_TRANSITION_ERROR" >&2
+      exit 1
+    }
+    if [ "$(fm_meta_get "$STATE/$ID.meta" kind)" = secondmate ]; then
+      CREW_LABEL=$(fm_meta_get "$STATE/$ID.meta" crew_label)
+    else
+      CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
+    fi
+  else
+    CREW_LABEL=$(fm_crew_window_label "$CONFIG" "$KIND" "$ID") || exit 1
+  fi
 fi
 if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
   echo "error: task $ID has a pending authoritative backlog close at $STATE/$ID.backlog-close; finish or repair that close before dispatching a new worker" >&2
