@@ -52,10 +52,9 @@ Give the captain a concise session-only recap without gathering fresh state.
    - What is at stake: the consequence of each way it can go, what happens if nothing is done, and any deadline.
    - The options: for each option, its cost, its risk, whether it can be reversed, and who does what to carry it out.
    - The recommendation and why.
-   - The evidence: the full PR URLs and full absolute paths that are visible in the session history.
+   - The evidence: every visible evidence link or full absolute path relevant to that decision, including non-PR URLs.
    State only what the visible history supports; write "not visible in this session" for any element it does not, rather than inventing it.
 9. After the list, the captain may answer decisions in any order, and each answer is handled as an ordinary captain message.
-   Do not re-present the list one decision at a time, and do not restate an element in a later message unless the captain asks.
 
 The current `/ahoy` message is outside the recap interval.
 A previous `/ahoy` is a real captain message and may be the next interval boundary.
