@@ -1662,9 +1662,9 @@ test_retire_claim_archives_without_spawn_generation() {
   pass 'legacy claims use distinct timestamp archives when spawn generation is absent'
 }
 
-test_retire_claim_restores_partial_backlog_transitions() {
-  local dir id mode rc before archive backup
-  for mode in prepare backup 'done' reopen remove rollback; do
+test_retire_claim_preserves_partial_backlog_transitions() {
+  local dir id mode rc before archive row expected
+  for mode in prepare backup done reopen update remove marker-remove close-marker; do
     id="retire-partial-$mode"
     dir=$(make_retire_claim_case "retire-partial-$mode" "$id")
     printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
@@ -1672,7 +1672,9 @@ test_retire_claim_restores_partial_backlog_transitions() {
     tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
     if [ "$mode" = reopen ]; then
       tasks-axi hold "$id" --reason 'captain answer pending' --kind captain --file "$dir/home/data/backlog.md" >/dev/null
-    elif [ "$mode" = 'done' ]; then
+    elif [ "$mode" = update ]; then
+      tasks-axi done "$id" --file "$dir/home/data/backlog.md" >/dev/null
+    elif [ "$mode" = done ] || [ "$mode" = close-marker ]; then
       git -C "$dir/worktree" add -A
       git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid commit -qm landed
       git -C "$dir/project" merge --ff-only "fm/$id" >/dev/null
@@ -1683,32 +1685,30 @@ test_retire_claim_restores_partial_backlog_transitions() {
     cat > "$dir/fakebin/tasks-axi" <<'SH'
 #!/usr/bin/env bash
 mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
-if [ "${1:-}" = "$mode" ]; then printf 'injected %s failure\n' "$mode" >&2; exit 1; fi
+if { [ "$mode" != update ] && [ "${1:-}" = "$mode" ]; } \
+   || { [ "$mode" = update ] && [ "${1:-}" = update ] && [[ " $* " == *' --body-file '* ]]; }; then
+  printf 'injected %s failure\n' "$mode" >&2
+  exit 1
+fi
 exec "$FM_TEST_REAL_TASKS_AXI" "$@"
 SH
     cat > "$dir/fakebin/rm" <<'SH'
 #!/usr/bin/env bash
 mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
-if [ "$mode" = remove ] || [ "$mode" = rollback ]; then
+if [ "$mode" = remove ] || [ "$mode" = marker-remove ] || [ "$mode" = close-marker ]; then
   for arg in "$@"; do
-    case "$arg" in */state/retire-partial-*.meta)
+    case "$mode:$arg" in
+      remove:*/state/retire-partial-remove.meta)
       /bin/rm "$@"
       exit 1
       ;;
+      marker-remove:*/state/retire-partial-marker-remove.backlog-close|close-marker:*/state/retire-partial-close-marker.backlog-close)
+        exit 1
+        ;;
     esac
   done
 fi
 exec /bin/rm "$@"
-SH
-    cat > "$dir/fakebin/mv" <<'SH'
-#!/usr/bin/env bash
-mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
-if [ "$mode" = rollback ]; then
-  for arg in "$@"; do
-    case "$arg" in */state/retire-partial-rollback.meta) exit 1 ;; esac
-  done
-fi
-exec /bin/mv "$@"
 SH
     cat > "$dir/fakebin/mktemp" <<'SH'
 #!/usr/bin/env bash
@@ -1740,35 +1740,50 @@ if [ "$mode" = backup ]; then
 fi
 exec /bin/cp "$@"
 SH
-    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mv" "$dir/fakebin/mktemp" "$dir/fakebin/cp"
+    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mktemp" "$dir/fakebin/cp"
     rc=0
     run_retire_claim "$dir" "$id" > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
     [ "$rc" -ne 0 ] || fail "$mode: injected retirement failure was accepted"
     assert_absent "$dir/premature-marker" "$mode: retirement published replay intent before archival and claim release"
-    if [ "$mode" = rollback ]; then
-      assert_absent "$dir/home/state/$id.meta" 'rollback failure unexpectedly restored the task record'
-      archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
-      backup=$(printf '%s\n' "$dir/home/data/$id"/.retired-worktree-record.*)
-      cmp -s "$before" "$archive" || fail 'rollback failure lost the archival record'
-      cmp -s "$before" "$backup" || fail 'rollback failure lost the exact recovery copy'
-      cp "$backup" "$dir/home/state/$id.meta"
-      assert_present "$dir/home/state/$id.backlog-close" 'failed record restoration lost its recovery marker'
-      rm "$dir/home/state/$id.backlog-close"
-    else
+    if [ "$mode" = prepare ] || [ "$mode" = backup ]; then
       cmp -s "$before" "$dir/home/state/$id.meta" || fail "$mode: exact task record was not restored"
-      assert_absent "$dir/home/state/$id.backlog-close" "$mode: failed retirement left a replayable close marker"
+      assert_absent "$dir/home/state/$id.backlog-close" "$mode: failed preparation left a replayable close marker"
+      assert_present "$dir/pool/1/.fm-slot-owner" "$mode: own marker was not restored"
+      if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
+        fail "$mode: failed preparation discarded its rollback record"
+      fi
+    else
+      assert_absent "$dir/home/state/$id.meta" "$mode: interrupted retirement restored an active record: $(cat "$dir/failed.err")"
+      assert_present "$dir/home/state/$id.backlog-close" "$mode: interrupted retirement lost its replay intent"
+      assert_absent "$dir/pool/1/.fm-slot-owner" "$mode: interrupted retirement restored its old claim"
+      archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+      cmp -s "$before" "$archive" || fail "$mode: interrupted retirement lost its archived record"
+      if [ "$mode" = update ] || [ "$mode" = marker-remove ] || [ "$mode" = close-marker ]; then
+        row=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
+        expected=queued
+        [ "$mode" != close-marker ] || expected=done
+        assert_contains "$row" "state: $expected" "$mode: fixture did not reach its partial backlog mutation"
+      fi
     fi
-    assert_present "$dir/pool/1/.fm-slot-owner" "$mode: own marker was not restored"
     assert_present "$dir/worktree/.git-hooks/pre-commit" "$mode: task hook was removed"
-    if [ "$mode" != rollback ] && compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
-      fail "$mode: failed retirement discarded its rollback record"
-    fi
     rm "$dir/fail-mode"
-    run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
-      || fail "$mode: retirement retry failed: $(cat "$dir/retry.err")"
+    if [ "$mode" = prepare ] || [ "$mode" = backup ]; then
+      run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
+        || fail "$mode: retirement retry failed: $(cat "$dir/retry.err")"
+    else
+      FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" FM_BOOTSTRAP_NETWORK=skip \
+        FM_RUNTIME_LOG="$dir/runtime.log" FM_TEST_REAL_TASKS_AXI="$(command -v tasks-axi)" \
+        PATH="$dir/fakebin:$PATH" "$ROOT/bin/fm-bootstrap.sh" > "$dir/retry.out" 2> "$dir/retry.err" \
+        || fail "$mode: retirement replay failed: $(cat "$dir/retry.err")"
+      expected=queued
+      [ "$mode" != done ] && [ "$mode" != close-marker ] || expected=done
+      row=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
+      assert_contains "$row" "state: $expected" "$mode: replay did not finish its backlog transition"
+      assert_absent "$dir/home/state/$id.backlog-close" "$mode: replay kept the retirement marker"
+    fi
     assert_absent "$dir/home/state/$id.meta" "$mode: retry retained task record"
   done
-  pass 'retirement restores exact records and markers after partial backlog transitions'
+  pass 'retirement rolls back preparation and replays interrupted backlog transitions'
 }
 
 test_retire_claim_requeues_unlanded_work() {
@@ -2460,7 +2475,7 @@ test_already_gone_endpoint_still_completes_without_a_refusal() {
 }
 
 test_retire_claim_refuses_active_interactive_builtins
-test_retire_claim_restores_partial_backlog_transitions
+test_retire_claim_preserves_partial_backlog_transitions
 test_invalid_endpoint_records_refuse_before_mutation
 test_control_lock_contention_refuses_before_mutation
 test_non_pool_teardown_ignores_task_set_lock

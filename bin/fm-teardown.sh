@@ -4412,7 +4412,6 @@ if [ "$BACKLOG_CLOSED" = 1 ]; then
     fi
   }
   if ! retirement_transition; then
-    [ "$RETIRE_CLAIM" != 1 ] || retirement_rollback || true
     fm_lock_release "$META_LOCK"
     META_LOCK_HELD=0
     if [ "$RETIRE_CLAIM" = 1 ]; then

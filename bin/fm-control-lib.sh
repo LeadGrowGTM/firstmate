@@ -303,8 +303,8 @@ fm_control_backend_state_verified() {  # <backend>
 
 # fm_control_endpoint_absence_verdict: the ONE owner of the per-backend proof
 # that an endpoint reading `missing` is actually GONE rather than merely
-# unreachable from this seat. Call it only for a `missing` raw state. A tmux
-# caller passes the task record; every other backend ignores it.
+# unreachable from this seat. Call it only for a `missing` raw state. Tmux and
+# Herdr callers pass the task record.
 #
 # Prints "<verdict>\t<reason>" - always exactly one TAB, so a caller splits
 # unambiguously with ${raw%%$'\t'*} and ${raw#*$'\t'}. The reason is empty
@@ -330,8 +330,8 @@ fm_control_backend_state_verified() {  # <backend>
 # reading:
 #   herdr CAN prove it. Every read goes through fm_backend_herdr_cli, which
 #     passes `--session <session>`, so the recheck starts and reads the session
-#     the RECORD names, through that session's own socket. The answer is about
-#     the task's endpoint and nothing else.
+#     the RECORD names, through that session's own socket. A missing pane also
+#     needs a worktree process inventory before absence is proven.
 #   tmux requires socket and server attribution plus a same-user process-cwd
 #     inventory proving no process remains rooted in the recorded worktree.
 #     A legacy record without a socket must pass the same conservative proof.
@@ -447,7 +447,20 @@ EOF
       case "$(fm_backend_herdr_endpoint_absence_recheck "$target")" in
         dead) printf 'dead\t' ;;
         alive) printf 'alive\t' ;;
-        missing) printf 'gone\t' ;;
+        missing)
+          if [ ! -f "$meta" ] || [ -L "$meta" ] || [ ! -r "$meta" ]; then
+            printf 'unproven\therdr absence requires a readable regular task record'
+            return 0
+          fi
+          worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
+          if ! rooted=$(fm_agent_worktree_processes "$worktree"); then
+            printf 'unproven\tprocess absence in the recorded worktree could not be proven'
+          elif [ -n "$rooted" ]; then
+            printf 'unproven\tlive processes still have cwd in the recorded worktree (pids %s)' "$(printf '%s' "$rooted" | tr '\n' ' ')"
+          else
+            printf 'gone\tno live process is rooted in the recorded worktree'
+          fi
+          ;;
         *) printf 'unproven\tthe recorded herdr session'"'"'s server could not be started, or its pane could not be classified once it was running' ;;
       esac
       ;;
@@ -458,15 +471,28 @@ EOF
 }
 
 fm_control_dead_endpoint_process_verdict() {
-  local backend=$1 target=$2 meta=$3 worktree pane_pid pane_comm rooted
-  [ "$backend" = tmux ] || { printf 'clear\t'; return 0; }
-  fm_backend_source tmux || { printf 'unproven\ttmux backend could not be loaded'; return 0; }
+  local backend=$1 target=$2 meta=$3 worktree pane_pid='' pane_comm rooted
+  case "$backend" in
+    tmux|herdr) ;;
+    *) printf 'clear\t'; return 0 ;;
+  esac
+  if [ ! -f "$meta" ] || [ -L "$meta" ] || [ ! -r "$meta" ]; then
+    printf 'unproven\tprocess absence requires a readable regular task record'
+    return 0
+  fi
+  fm_backend_source "$backend" || { printf 'unproven\t%s backend could not be loaded' "$backend"; return 0; }
   worktree=$(fm_backend_meta_exact_value "$meta" worktree) || worktree=
-  pane_pid=$(tmux display-message -p -t "$target" '#{pane_pid}' 2>/dev/null) || pane_pid=
-  case "$pane_pid" in ''|*[!0-9]*) pane_pid= ;; esac
-  if [ -n "$pane_pid" ]; then
-    pane_comm=$(ps -p "$pane_pid" -o comm= 2>/dev/null) || pane_comm=
-    [ "$(fm_agent_process_classify_name "$pane_comm")" = shell ] || pane_pid=
+  if [ "$backend" = tmux ]; then
+    pane_pid=$(tmux display-message -p -t "$target" '#{pane_pid}' 2>/dev/null) || pane_pid=
+    case "$pane_pid" in ''|*[!0-9]*) pane_pid= ;; esac
+    if [ -n "$pane_pid" ]; then
+      pane_comm=$(ps -p "$pane_pid" -o comm= 2>/dev/null) || pane_comm=
+      [ "$(fm_agent_process_classify_name "$pane_comm")" = shell ] || pane_pid=
+    fi
+  elif fm_backend_herdr_parse_target "$target"; then
+    pane_pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+      | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
+        'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || pane_pid=
   fi
   if ! rooted=$(fm_agent_worktree_processes "$worktree" "$pane_pid"); then
     printf 'unproven\tprocess absence in the recorded worktree could not be proven'

@@ -3115,6 +3115,13 @@ SH
   chmod +x "$fb/herdr"
   cat > "$fb/ps" <<'SH'
 #!/usr/bin/env bash
+case "$*" in
+  *'-o pid='*)
+    printf '%s\n' "$PPID"
+    [ ! -f "$FM_FAKE_DIR/process-pids" ] || cat "$FM_FAKE_DIR/process-pids"
+    exit 0
+    ;;
+esac
 if [ -f "$FM_FAKE_DIR/herdr-agent-registration" ]; then
   case "$*" in
     '-axo pid=,ppid=,comm=') printf '4242 1 bash\n' ;;
@@ -3301,6 +3308,40 @@ test_herdr_rebind_stays_in_the_recorded_session() {
   [ "$(meta_field "$dir" rl73 herdr_pane_id)" = '%9' ] \
     || fail "the rebound record should name the pane the reclaim minted, got $(meta_field "$dir" rl73 herdr_pane_id)"
   pass "reclaim: a herdr rebind is created in the session the record names, never the ambient one"
+}
+
+test_herdr_relaunch_refuses_rooted_processes() {
+  local dir id endpoint out rc
+  for endpoint in missing dead; do
+    id="herdr-rooted-$endpoint"
+    if [ "$endpoint" = missing ]; then
+      herdr_case_or_skip "$id" "$id" fmlab '%none' || {
+        echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
+        return 0
+      }
+    else
+      herdr_case_or_skip "$id" "$id" || {
+        echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
+        return 0
+      }
+      rm -f "$HERDR_CASE_DIR/fake/herdr-stopped"
+    fi
+    dir=$HERDR_CASE_DIR
+    cp "$dir/home/state/$id.meta" "$dir/before.meta"
+    start_rooted_process "$dir" nested
+    rc=0
+    out=$(run_control "$dir" "$id" relaunch --note 'resume after endpoint loss') || rc=$?
+    expect_code 1 "$rc" "$endpoint Herdr control relaunch accepted a surviving rooted process: $out"
+    assert_contains "$out" 'live processes still have cwd' "$endpoint Herdr control relaunch did not explain refusal"
+    rc=0
+    out=$(run_spawn "$dir" "$id" --relaunch --harness claude) || rc=$?
+    expect_code 1 "$rc" "$endpoint Herdr spawn relaunch accepted a surviving rooted process: $out"
+    assert_contains "$out" 'live processes still have cwd' "$endpoint Herdr spawn relaunch did not explain refusal"
+    cmp -s "$dir/before.meta" "$dir/home/state/$id.meta" || fail "$endpoint Herdr refusal changed task metadata"
+    assert_absent "$dir/fake/launched-command" "$endpoint Herdr refusal launched another agent"
+    assert_absent "$dir/fake/herdr-created-tabs" "$endpoint Herdr refusal created another pane"
+  done
+  pass 'both Herdr relaunch paths refuse surviving processes beside missing and dead endpoints'
 }
 
 test_herdr_reclaim_refuses_an_agent_that_came_back() {
@@ -3779,6 +3820,7 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server
 test_herdr_rebind_stays_in_the_recorded_session
+test_herdr_relaunch_refuses_rooted_processes
 test_herdr_reclaim_refuses_an_agent_that_came_back
 test_herdr_reclaim_keeps_the_task_whole
 test_herdr_reclaim_of_a_secondmate_names_its_own_owner
