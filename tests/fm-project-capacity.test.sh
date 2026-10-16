@@ -35,6 +35,9 @@ Run the project's heavy suite for $2.
 
 ## Firstmate spec
 Exercise project capacity admission.
+Goal: Exercise project capacity admission.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 
 # Definition of done
 Delivery contract: mode=no-mistakes
@@ -542,6 +545,28 @@ ROWS
   pass "an unreadable declaration refuses every fresh spawn rather than guessing the limit"
 }
 
+test_disk_guard_pause_defers_a_fresh_spawn() {
+  local case_dir home out rc=0 before worktrees
+  case_dir=$(make_case disk-guard task-c)
+  home="$case_dir/home"
+  printf 'paused\n' > "$home/state/disk-guard.pause"
+  before=$(call_count "$case_dir")
+  worktrees=$(worktree_list "$case_dir")
+  out=$(spawn_ship "$case_dir" task-c "$case_dir/unused") || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "a spawn during a disk pause was not deferred: $out"
+  assert_contains "$out" "pausing new local spawns ($home/state/disk-guard.pause)" \
+    "the deferral did not name the pause flag"
+  assert_contains "$out" "task task-c was not launched and its backlog item stays queued" \
+    "the deferral did not say the task stays queued"
+  assert_nothing_created "$case_dir" "$home" task-c "$before" "$worktrees"
+  rm -f "$home/state/disk-guard.pause"
+  rc=0
+  out=$(spawn_ship "$case_dir" task-c) || rc=$?
+  expect_code 0 "$rc" "removing the pause flag did not admit the spawn: $out"
+  assert_contains "$out" "spawned task-c" "a cleared pause did not launch the worker"
+  pass "a disk-guard pause defers a fresh spawn until the flag is removed"
+}
+
 test_batch_reports_a_deferred_pair() {
   local case_dir home out rc=0
   case_dir=$(make_case batch task-c)
@@ -550,7 +575,7 @@ test_batch_reports_a_deferred_pair() {
   write_live "$home" live-a "$case_dir/project"
   out=$(run_spawn "$case_dir" "$home" "$case_dir/unused" "task-c=$case_dir/project" --mode no-mistakes --yolo off) || rc=$?
   expect_code "$DEFER_EXIT" "$rc" "a batch whose only pair was deferred did not exit with the deferral status: $out"
-  assert_contains "$out" "batch: DEFERRED task-c ($case_dir/project) - its project is at capacity, so it stays queued" \
+  assert_contains "$out" "batch: DEFERRED task-c ($case_dir/project) - it stays queued" \
     "the batch did not report the deferral"
   assert_not_contains "$out" "batch: FAILED" "the batch reported a deferral as a failure"
   pass "a batch reports a capacity deferral as deferred, not failed"
@@ -638,5 +663,6 @@ test_unreadable_holders_refuse_admission
 test_concurrent_spawns_cannot_both_take_the_last_place
 test_failed_spawn_after_admission_holds_no_place
 test_unreadable_declaration_refuses_every_spawn
+test_disk_guard_pause_defers_a_fresh_spawn
 test_batch_reports_a_deferred_pair
 test_orca_spawn_is_admitted_under_the_shared_project_lock

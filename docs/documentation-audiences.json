@@ -357,6 +357,30 @@
       "audience": "operator-example"
     },
     {
+      "path": "docs/examples/data-management/data-management.example",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/data-management/fm-data-manage.service",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/data-management/fm-data-manage.timer",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/data-management/disk-guard.example",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/data-management/fm-disk-guard.service",
+      "audience": "operator-example"
+    },
+    {
+      "path": "docs/examples/data-management/fm-disk-guard.timer",
+      "audience": "operator-example"
+    },
+    {
       "path": "docs/examples/process-event-extension/file-signal.mjs",
       "audience": "operator-example"
     },

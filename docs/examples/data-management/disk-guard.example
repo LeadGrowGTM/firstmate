@@ -1,0 +1,11 @@
+# Copy to the root Firstmate home as config/disk-guard.
+# The script header of bin/fm-disk-guard.sh owns this grammar.
+# Omit the file to keep the defaults: 8 GiB RAM, 100 GiB free on C:,
+# 70 percent Linux disk, and a 30 minute lead.
+# vhdx is optional. The guard stats that one file and does not walk it.
+
+ram-floor-kib 8388608
+c-free-floor-kib 104857600
+linux-used-pct 70
+lead-seconds 1800
+vhdx /path/to/ext4.vhdx

@@ -206,6 +206,10 @@
 #   A batch reports such a pair as `batch: DEFERRED` and exits 75 when nothing
 #   else failed. A relaunch and a --secondmate spawn are never counted against
 #   capacity.
+#   Disk pressure: a fresh ship or scout is deferred the same way, before any
+#   launch side effect, when the root home's state/disk-guard.pause is a
+#   regular file. bin/fm-disk-guard.sh owns that flag. A relaunch and a
+#   --secondmate spawn are not deferred by it.
 #   With no harness arg, a crewmate/scout spawn resolves the CREW harness only when
 #   config/crew-dispatch.json is absent. When that file exists, crewmate/scout
 #   spawns require an explicit harness so firstmate cannot silently skip dispatch
@@ -1772,7 +1776,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
     pair_rc=0
     FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair_args[@]}" || pair_rc=$?
     if [ "$pair_rc" -eq "$FM_PROJECT_CAPACITY_DEFER_EXIT" ]; then
-      echo "batch: DEFERRED ${pair%%=*} (${pair#*=}) - its project is at capacity, so it stays queued" >&2
+      echo "batch: DEFERRED ${pair%%=*} (${pair#*=}) - it stays queued" >&2
       [ "$rc" -ne 0 ] || rc=$FM_PROJECT_CAPACITY_DEFER_EXIT
     elif [ "$pair_rc" -ne 0 ]; then
       echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2
@@ -3471,6 +3475,18 @@ if [ "$RELAUNCH" -eq 1 ] && [ "$KIND" != secondmate ]; then
       fi
       ;;
   esac
+fi
+# Machine pressure (bin/fm-disk-guard.sh owns the flag). A fresh worker is
+# deferred while the root home's state/disk-guard.pause exists, before any
+# brief, endpoint, worktree, record, or backlog move, so the item stays queued.
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
+  DISK_GUARD_ROOT=$(fm_firstmate_root_home "$FM_HOME" 2>/dev/null) || DISK_GUARD_ROOT=
+  if [ -n "$DISK_GUARD_ROOT" ] && [ -f "$DISK_GUARD_ROOT/state/disk-guard.pause" ] && [ ! -L "$DISK_GUARD_ROOT/state/disk-guard.pause" ]; then
+    echo "deferred: this machine is pausing new local spawns ($DISK_GUARD_ROOT/state/disk-guard.pause); task $ID was not launched and its backlog item stays queued - dispatch it again once that flag is removed" >&2
+    FM_LAUNCH_OUTCOME=capacity
+    FM_LAUNCH_OUTCOME_REASON="disk-guard"
+    exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
+  fi
 fi
 # Project capacity admission (bin/fm-project-capacity-lib.sh owns the
 # declaration, what holds a place, and why this is race-safe). A fresh worker

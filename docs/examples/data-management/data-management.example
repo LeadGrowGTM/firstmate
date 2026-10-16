@@ -1,0 +1,25 @@
+# Copy to the home as config/data-management and replace every placeholder path.
+# The script header of bin/fm-data-manage.sh owns this grammar.
+# Days are the retention. A missing category is not deleted.
+# home and pool-root are measured. This script never removes a pool slot itself.
+# --live may ask the pool guard to prune a project whose slots are landed, clean, and idle.
+# tmp, log, and cache are file deletion roots, and only with --live.
+# procevent-result, claude-sessions, codex-sessions, and cache-tool are
+# separate retention actions. The script header owns their rules.
+# procevent-result 14
+# codex-sessions 2
+# claude-sessions /path/to/claude-projects 14
+# cache-tool npm /path/to/npm-cache
+
+home /path/to/firstmate-home
+pool-root /path/to/treehouse-pools
+
+tmp /path/to/firstmate-home/.tmp 7
+log /path/to/firstmate-home/state/logs 14
+
+# cache deletes aged regular files. Do not point it at a package-manager store,
+# a session store, or a directory that holds secrets. Those stay measure-only.
+measure-only sessions-codex /path/to/codex-sessions
+measure-only sessions-claude /path/to/claude-sessions
+measure-only npm-cache /path/to/npm-cache
+measure-only pip-cache /path/to/pip-cache
