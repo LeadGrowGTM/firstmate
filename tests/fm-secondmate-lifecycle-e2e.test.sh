@@ -335,6 +335,8 @@ SH
     "teardown left the relaunch park marker a same-id replacement would inherit"
   assert_absent "$HOME_DIR/state/.secondmate-liveness-design.lock" \
     "teardown left the liveness lock it took to retire relaunch state"
+  assert_absent "$HOME_DIR/state/.secondmate-retiring-design" \
+    "teardown left the retiring marker a same-id replacement would never recover past"
   assert_absent "$leftover_rec" "teardown left a resolved pending-reply for the retired secondmate"
   assert_no_grep '- design ' "$HOME_DIR/data/secondmates.md" "teardown did not remove the registry route"
   # The parent's source projects are untouched (no write through a parent home).

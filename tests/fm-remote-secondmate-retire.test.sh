@@ -149,6 +149,8 @@ assert_parent_records_cleared() { # <context>
   local context=$1 leftover
   assert_absent "$PARENT/state/$SM.meta" "$context: the parent still holds the secondmate's task record"
   assert_no_grep "- $SM " "$PARENT/data/secondmates.md" "$context: the parent still holds the registry route"
+  assert_absent "$PARENT/state/.secondmate-retiring-$SM" \
+    "$context: the parent still holds the retiring marker"
   assert_absent "$PARENT/state/procevent/$SID.source" "$context: the parent still holds the reply-source registration"
   leftover=$(remote_env "$ROOT/bin/fm-procevent.sh" list 2>/dev/null | awk -v id="$SID" 'NR > 1 && $1 == id')
   [ -z "$leftover" ] || fail "$context: the parent still lists the reply source: $leftover"

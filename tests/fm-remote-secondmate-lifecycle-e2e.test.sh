@@ -1590,6 +1590,8 @@ assert_absent "$PARENT/state/.secondmate-relaunch-ios" \
 assert_absent "$PARENT/state/.secondmate-relaunch-bound-ios" \
   "remote retirement left the relaunch park marker a same-id replacement would inherit"
 assert_absent "$liveness_lock" "remote retirement left its liveness lock behind"
+assert_absent "$PARENT/state/.secondmate-retiring-ios" \
+  "remote retirement left the retiring marker a same-id replacement would never recover past"
 assert_no_grep '- ios ' "$PARENT/data/secondmates.md" "remote retirement did not remove the registry route"
 jq -e --arg workspace "$SIBLING_WORKSPACE" --arg pane "$SIBLING_PANE" '
   any(.workspaces[]; .workspace_id == $workspace and .label == "2ndmate-macos")

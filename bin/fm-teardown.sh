@@ -192,7 +192,11 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
-# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped]
+# Secondmate retirement writes state/.secondmate-retiring-<id> as soon as it holds that mate's liveness lock and before any later refusal, and removes the marker only when retirement completes.
+# --abandon-retirement removes only that marker so liveness recovery is allowed again.
+# It applies only to a secondmate and cannot be combined with --force, --legacy-record, or --only-if-stopped.
+# bin/fm-secondmate-liveness-lib.sh owns the marker.
+# Usage: fm-teardown.sh <task-id> [--force] [--legacy-record] [--only-if-stopped] [--abandon-retirement]
 #   --only-if-stopped is the automatic sweep guard: under the lifecycle and
 #   metadata locks, accept only a positively dead or missing worker endpoint,
 #   with no open status decision or captain hold. Secondmates, remote records,
@@ -413,12 +417,14 @@ ID=$1
 FORCE=
 LEGACY_RECORD_GIVEN=0
 ONLY_IF_STOPPED=0
+ABANDON_RETIREMENT=0
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=--force ;;
     --legacy-record) LEGACY_RECORD_GIVEN=1 ;;
     --only-if-stopped) ONLY_IF_STOPPED=1 ;;
+    --abandon-retirement) ABANDON_RETIREMENT=1 ;;
     *)
       echo "error: invalid teardown request" >&2
       exit 2
@@ -430,6 +436,10 @@ done
   echo "error: --only-if-stopped cannot discard work with --force" >&2
   exit 2
 }
+if [ "$ABANDON_RETIREMENT" = 1 ] && { [ -n "$FORCE" ] || [ "$ONLY_IF_STOPPED" = 1 ] || [ "$LEGACY_RECORD_GIVEN" = 1 ]; }; then
+  echo "error: --abandon-retirement cannot be combined with --force, --legacy-record, or --only-if-stopped" >&2
+  exit 2
+fi
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
@@ -551,10 +561,25 @@ if [ ! -e "$META" ] && [ ! -L "$META" ] \
   && fm_backlog_record_parent_authorized "$META" "task record" "$STATE" \
   && ! grep -qE "^- $ID( |\$)" "$SECONDMATE_REG" 2>/dev/null \
   && "$SCRIPT_DIR/fm-procevent-remote-reply.sh" retired "$ID" >/dev/null 2>&1; then
+  if [ -e "$STATE/.secondmate-retiring-$ID" ] || [ -L "$STATE/.secondmate-retiring-$ID" ]; then
+    # shellcheck source=bin/fm-secondmate-liveness-lib.sh
+    . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
+    fm_secondmate_retirement_clear "$ID" || exit 1
+  fi
   echo "teardown $ID: already retired; this home holds no record of it and nothing was changed"
   exit 0
 fi
 fm_backlog_record_present "$META" "task record" "$STATE" || {
+  # Meta removal can land before the marker clear. A leftover marker with no
+  # route would stand a reused id down forever.
+  if { [ -e "$STATE/.secondmate-retiring-$ID" ] || [ -L "$STATE/.secondmate-retiring-$ID" ]; } \
+    && ! grep -qE "^- $ID( |\$)" "$SECONDMATE_REG" 2>/dev/null; then
+    if ! declare -F fm_secondmate_retirement_clear >/dev/null 2>&1; then
+      # shellcheck source=bin/fm-secondmate-liveness-lib.sh
+      . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
+    fi
+    fm_secondmate_retirement_clear "$ID" || exit 1
+  fi
   echo "error: teardown refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
 }
@@ -567,6 +592,10 @@ fm_backlog_record_present "$META" "task record" "$STATE" || {
 }
 TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
+if [ "$ABANDON_RETIREMENT" = 1 ] && [ "$TEARDOWN_META_KIND" != secondmate ]; then
+  echo "error: --abandon-retirement applies only to a secondmate" >&2
+  exit 2
+fi
 if [ "$ONLY_IF_STOPPED" = 1 ]; then
   case "$TEARDOWN_META_KIND" in ship|scout) ;; *) exit 3 ;; esac
   [ -z "$(fm_meta_get "$META" remote_host)" ] || exit 3
@@ -603,15 +632,26 @@ fi
 # is read under the metadata lock (role partition: bin/fm-lease-lib.sh).
 [ "$TEARDOWN_META_KIND" != secondmate ] || fm_lease_forbid_branch "secondmate retirement (fm-teardown)"
 # A secondmate's endpoint-liveness episodes (bin/fm-secondmate-liveness-lib.sh)
-# serialize on this lock; retirement holds it to the end so no probe or relaunch
-# can act on the route mid-teardown, and its relaunch ledger and park marker are
-# removed with the route instead of surviving for a reused id.
+# serialize on this lock while this process holds it. The retiring marker
+# written here is what still stands relaunch down after a refused pass exits
+# and releases the lock. The relaunch ledger and park marker are removed with
+# the route instead of surviving for a reused id.
 if [ "$TEARDOWN_META_KIND" = secondmate ]; then
+  if ! declare -F fm_secondmate_retirement_mark >/dev/null 2>&1; then
+    # shellcheck source=bin/fm-secondmate-liveness-lib.sh
+    . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
+  fi
   fm_lock_try_acquire "$STATE/.secondmate-liveness-$ID.lock" || {
     echo "error: a secondmate liveness check is in progress for $ID; nothing was changed - retry teardown" >&2
     exit 1
   }
   SM_LIVENESS_LOCK="$STATE/.secondmate-liveness-$ID.lock"
+  if [ "$ABANDON_RETIREMENT" = 1 ]; then
+    fm_secondmate_retirement_clear "$ID" || exit 1
+    echo "teardown $ID retirement abandoned; liveness recovery is allowed again"
+    exit 0
+  fi
+  fm_secondmate_retirement_mark "$ID" || exit 1
 fi
 TEARDOWN_CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
 TEARDOWN_META_SPAWN_GEN=
@@ -1152,6 +1192,7 @@ remote_secondmate_teardown() {
   rm -f -- "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
     "$(fm_wake_signal_seen_path "$STATE" "$STATE/$ID.turn-ended")" \
     "$STATE/.secondmate-relaunch-$ID" "$STATE/.secondmate-relaunch-bound-$ID"
+  fm_secondmate_retirement_clear "$ID" || return 1
   printf 'teardown %s complete (remote %s:%s)\n' "$ID" "$remote_host" "$remote_home"
   return 0
 }
@@ -4128,6 +4169,9 @@ else
     echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
+fi
+if [ "$KIND" = secondmate ]; then
+  fm_secondmate_retirement_clear "$ID" || exit 1
 fi
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
