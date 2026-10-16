@@ -120,10 +120,19 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
 # Print matching pids; a failed inventory or an unreadable live cwd refuses.
 # Linux uses kernel cwd links, including descendants in subdirectories. macOS
 # uses the bounded cwd-only lsof inventory, never a recursive file-tree walk.
-fm_agent_worktree_processes() {  # <worktree> [<excluded-pane-pid>] -> pids (empty means none)
-  local worktree=$1 excluded_pid=${2:-} out pid path line
-  [ -d "$worktree" ] || return 1
-  worktree=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
+fm_agent_worktree_processes() {  # <worktree> [<pane-shell-pid>] [allow-missing] -> pids (empty means none)
+  local worktree=$1 excluded_pid=${2:-} allow_missing=${3:-} out pid path line parent leaf
+  if [ -d "$worktree" ]; then
+    worktree=$(CDPATH='' cd -- "$worktree" && pwd -P) || return 1
+  else
+    [ "$allow_missing" = allow-missing ] || return 1
+    [ ! -e "$worktree" ] && [ ! -L "$worktree" ] || return 1
+    parent=${worktree%/*}
+    leaf=${worktree##*/}
+    [ -n "$parent" ] && [ -n "$leaf" ] && [ "$leaf" != . ] && [ "$leaf" != .. ] || return 1
+    parent=$(CDPATH='' cd -- "$parent" && pwd -P) || return 1
+    worktree="$parent/$leaf"
+  fi
   case "$excluded_pid" in ''|*[!0-9]*) excluded_pid= ;; esac
   case "$(uname -s)" in
     Linux)
@@ -141,6 +150,33 @@ try:
     ).stdout.split()
     if not inventory or any(not pid.isdigit() for pid in inventory):
         raise RuntimeError("unreadable process inventory")
+    def process_fields(pid):
+        fields = ((Path('/proc') / pid / 'stat').read_text()).rsplit(')', 1)[1].split()
+        return int(fields[1]), int(fields[2]), int(fields[5]), fields[0]
+
+    def task_shell(pid):
+        if not excluded or not excluded.isdigit():
+            return False
+        original = int(excluded)
+        try:
+            original_name = ((Path('/proc') / str(original) / 'comm').read_text()).strip().lstrip('-')
+            if original_name not in {'zsh', 'bash', 'sh', 'dash', 'ash', 'ksh', 'mksh', 'tcsh', 'csh', 'fish'}:
+                return False
+            if int(pid) == original:
+                return True
+            name = ((Path('/proc') / pid / 'comm').read_text()).strip().lstrip('-')
+            if name not in {'zsh', 'bash', 'sh', 'dash', 'ash', 'ksh', 'mksh', 'tcsh', 'csh', 'fish'}:
+                return False
+            _, group, foreground, _ = process_fields(pid)
+            if group <= 0 or group != foreground:
+                return False
+            current = int(pid)
+            while current != original and current > 1:
+                current = process_fields(str(current))[0]
+            return current == original
+        except (OSError, ValueError, IndexError):
+            return False
+
     for pid in inventory:
         process = Path("/proc") / pid
         try:
@@ -154,7 +190,9 @@ try:
             if fields[0] == "Z":
                 continue
             raise RuntimeError(f"cannot read live process {pid}'s cwd")
-        if (cwd == root or cwd.startswith(root + "/")) and pid != excluded:
+        if cwd.endswith(' (deleted)'):
+            cwd = cwd[:-10]
+        if (cwd == root or cwd.startswith(root + "/")) and not task_shell(pid):
             print(pid)
 except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, IndexError) as error:
     print(f"process absence unproven: {error}", file=sys.stderr)
@@ -172,9 +210,14 @@ PY
           n*)
             [ -n "$pid" ] || return 1
             path=${line#n}
+            path=${path% (deleted)}
             case "$path" in
               "$worktree"|"$worktree"/*)
-                [ -n "$excluded_pid" ] && [ "$pid" = "$excluded_pid" ] || printf '%s\n' "$pid"
+                if [ -n "$excluded_pid" ] && fm_agent_verified_pane_shell "$pid" "$excluded_pid"; then
+                  :
+                else
+                  printf '%s\n' "$pid"
+                fi
                 ;;
             esac
             ;;
@@ -187,4 +230,36 @@ EOF
       ;;
     *) return 1 ;;
   esac
+}
+
+fm_agent_verified_pane_shell() {
+  python3 - "$1" "$2" <<'PY'
+import subprocess
+import sys
+
+shells = {'zsh', 'bash', 'sh', 'dash', 'ash', 'ksh', 'mksh', 'tcsh', 'csh', 'fish'}
+
+def fields(pid):
+    row = subprocess.run(
+        ['ps', '-p', str(pid), '-o', 'ppid=,pgid=,tpgid=,comm='],
+        check=True, capture_output=True, text=True,
+    ).stdout.split()
+    if len(row) != 4:
+        raise ValueError('unreadable process identity')
+    return int(row[0]), int(row[1]), int(row[2]), row[3].split('/')[-1].lstrip('-')
+
+try:
+    candidate, original = map(int, sys.argv[1:])
+    if fields(original)[3] not in shells or fields(candidate)[3] not in shells:
+        sys.exit(1)
+    if candidate != original:
+        _, group, foreground, _ = fields(candidate)
+        if group <= 0 or group != foreground:
+            sys.exit(1)
+        while candidate != original and candidate > 1:
+            candidate = fields(candidate)[0]
+    sys.exit(0 if candidate == original else 1)
+except (OSError, ValueError, subprocess.SubprocessError):
+    sys.exit(1)
+PY
 }

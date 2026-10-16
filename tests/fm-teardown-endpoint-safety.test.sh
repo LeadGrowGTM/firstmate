@@ -1456,7 +1456,8 @@ run_retire_claim() {  # <case> <id> [extra flags]
   FM_RUNTIME_LOG="$dir/runtime.log" FM_TEST_RUN_STATUS="$dir/run.status" \
   FM_TEST_RUN_OVERVIEW="$dir/run.overview" FM_TEST_GLOBAL_STATUS="$dir/global.status" \
   FM_TEST_REAL_PS="$(command -v ps)" FM_TEST_REAL_TASKS_AXI="$(command -v tasks-axi)" \
-  FM_TEST_PROCESS_PIDS="$dir/process-pids" PATH="$dir/fakebin:$PATH" \
+  FM_TEST_PROCESS_PIDS="$dir/process-pids" FM_TEST_CLEARED_ROOT="${FM_TEST_CLEARED_ROOT:-}" \
+  PATH="$dir/fakebin:$PATH" \
     "$TEARDOWN" "$id" --retire-claim "$@"
 }
 
@@ -1663,7 +1664,7 @@ test_retire_claim_archives_without_spawn_generation() {
 
 test_retire_claim_restores_partial_backlog_transitions() {
   local dir id mode rc before archive backup
-  for mode in done reopen remove rollback; do
+  for mode in prepare done reopen remove rollback; do
     id="retire-partial-$mode"
     dir=$(make_retire_claim_case "retire-partial-$mode" "$id")
     printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
@@ -1671,6 +1672,10 @@ test_retire_claim_restores_partial_backlog_transitions() {
     tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
     if [ "$mode" = reopen ]; then
       tasks-axi hold "$id" --reason 'captain answer pending' --kind captain --file "$dir/home/data/backlog.md" >/dev/null
+    elif [ "$mode" = done ]; then
+      git -C "$dir/worktree" add -A
+      git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid commit -qm landed
+      git -C "$dir/project" merge --ff-only "fm/$id" >/dev/null
     fi
     before="$dir/original.meta"
     cp "$dir/home/state/$id.meta" "$before"
@@ -1705,7 +1710,15 @@ if [ "$mode" = rollback ]; then
 fi
 exec /bin/mv "$@"
 SH
-    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mv"
+    cat > "$dir/fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+mode=$(cat "${FM_RUNTIME_LOG%/runtime.log}/fail-mode" 2>/dev/null || true)
+if [ "$mode" = prepare ]; then
+  case "${1:-}" in */.retired-worktree-claim.*) exit 1 ;; esac
+fi
+exec /usr/bin/mktemp "$@"
+SH
+    chmod +x "$dir/fakebin/tasks-axi" "$dir/fakebin/rm" "$dir/fakebin/mv" "$dir/fakebin/mktemp"
     rc=0
     run_retire_claim "$dir" "$id" > "$dir/failed.out" 2> "$dir/failed.err" || rc=$?
     [ "$rc" -ne 0 ] || fail "$mode: injected retirement failure was accepted"
@@ -1716,8 +1729,11 @@ SH
       cmp -s "$before" "$archive" || fail 'rollback failure lost the archival record'
       cmp -s "$before" "$backup" || fail 'rollback failure lost the exact recovery copy'
       cp "$backup" "$dir/home/state/$id.meta"
+      assert_present "$dir/home/state/$id.backlog-close" 'failed record restoration lost its recovery marker'
+      rm "$dir/home/state/$id.backlog-close"
     else
       cmp -s "$before" "$dir/home/state/$id.meta" || fail "$mode: exact task record was not restored"
+      assert_absent "$dir/home/state/$id.backlog-close" "$mode: failed retirement left a replayable close marker"
     fi
     assert_present "$dir/pool/1/.fm-slot-owner" "$mode: own marker was not restored"
     assert_present "$dir/worktree/.git-hooks/pre-commit" "$mode: task hook was removed"
@@ -1730,6 +1746,86 @@ SH
     assert_absent "$dir/home/state/$id.meta" "$mode: retry retained task record"
   done
   pass 'retirement restores exact records and markers after partial backlog transitions'
+}
+
+test_retire_claim_requeues_unlanded_work() {
+  local dir id=retire-unlanded shown
+  dir=$(make_retire_claim_case retire-unlanded "$id")
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
+  tasks-axi add "$id" 'unfinished retirement fixture' --kind ship --file "$dir/home/data/backlog.md" >/dev/null
+  tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+  printf 'unfinished\n' > "$dir/worktree/dirty.txt"
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "unlanded claim did not retire: $(cat "$dir/retire.err")"
+  shown=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
+  assert_contains "$shown" 'queued' 'unlanded claim was not requeued'
+  assert_contains "$shown" "Preserved unfinished work: worktree $dir/worktree; branch fm/$id" \
+    'requeued item does not name the preserved worktree and branch'
+  assert_contains "$(cat "$dir/retire.out")" 'stale claim' 'retirement reported task completion'
+  assert_not_contains "$(cat "$dir/retire.out")" 'complete' 'retirement reported task completion'
+  assert_present "$dir/worktree/dirty.txt" 'retirement lost unlanded work'
+  pass 'unlanded claim retirement requeues the backlog item with its preserved worktree and branch'
+}
+
+test_retire_claim_accepts_cleared_task_temp_with_process_proof() {
+  local dir id=retire-cleared-temp
+  dir=$(make_retire_claim_case retire-cleared-temp "$id")
+  printf 'tasktmp=%s\n' "$dir/cleared-temp" >> "$dir/home/state/$id.meta"
+  if [ "$(uname -s)" = Linux ]; then
+    mv "$dir/fakebin/ps" "$dir/fakebin/ps.fixture"
+    cat > "$dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -u ] && [ "${3:-}" = -o ] && [ "${4:-}" = pid= ]; then
+  parent_command=$(tr '\0' ' ' < "/proc/$PPID/cmdline")
+  case "$parent_command" in
+    *"$FM_TEST_CLEARED_ROOT"*) printf 'unreadable\n'; exit 0 ;;
+  esac
+fi
+exec "$(dirname "$0")/ps.fixture" "$@"
+SH
+    chmod +x "$dir/fakebin/ps"
+    FM_TEST_CLEARED_ROOT="$dir/cleared-temp" \
+      assert_retire_refused_unchanged "$dir" "$id" 'missing task temp root with unreadable inventory'
+    assert_grep "process absence is unproven under $dir/cleared-temp" "$dir/retire.err" \
+      'unreadable evidence did not reach the cleared temp root check'
+    mv "$dir/fakebin/ps.fixture" "$dir/fakebin/ps"
+  fi
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "missing task temp root with readable absence evidence refused: $(cat "$dir/retire.err")"
+  assert_absent "$dir/home/state/$id.meta" 'cleared task temp claim was not retired'
+  pass 'cleared task temp root requires a readable process absence inventory'
+}
+
+test_retire_claim_accepts_its_nested_foreground_shell() {
+  local dir id=retire-nested-shell label socket pane nested capture
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  dir=$(make_retire_claim_case retire-nested-shell "$id")
+  label="retire-nested-$RANDOM"
+  tmux -L "$label" new-session -d -s firstmate -n "fm-$id" -c "$dir/worktree" 'bash --noprofile --norc -i'
+  socket=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{socket_path}')
+  pane=$(tmux -L "$label" display-message -p -t "firstmate:fm-$id" '#{pane_pid}')
+  printf 'tmux_socket=%s\n' "$socket" >> "$dir/home/state/$id.meta"
+  tmux -L "$label" send-keys -t "firstmate:fm-$id" 'bash --noprofile --norc -i' Enter
+  nested=
+  for _ in $(seq 1 30); do
+    tmux -L "$label" send-keys -t "firstmate:fm-$id" 'printf "NESTED=%s\n" "$$"' Enter
+    sleep 0.05
+    capture=$(tmux -L "$label" capture-pane -p -t "firstmate:fm-$id")
+    nested=$(printf '%s\n' "$capture" | sed -n 's/^NESTED=\([0-9][0-9]*\).*$/\1/p' | tail -1)
+    [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
+  done
+  [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private retirement pane did not start a nested foreground shell'
+  printf '%s\n%s\n' "$pane" "$nested" > "$dir/process-pids"
+  mv "$dir/fakebin/tmux" "$dir/fakebin/tmux.fixture"
+  ln -s "$REAL_TMUX" "$dir/fakebin/tmux"
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "retirement refused its nested foreground shell: $(cat "$dir/retire.err")"
+  assert_absent "$dir/home/state/$id.meta" 'retirement kept its active claim record'
+  tmux -L "$label" has-session -t firstmate \
+    || fail 'records-only retirement closed the private task pane'
+  tmux -L "$label" kill-server
+  rm -f "$socket"
+  pass 'retirement accepts its verified nested foreground shell without closing the pane'
 }
 
 test_retire_claim_refuses_unsafe_identity_and_options() {
@@ -2290,6 +2386,9 @@ test_retire_claim_archives_only_the_gone_agents_record
 test_retire_claim_preserves_archives_across_task_id_reuse
 test_retire_claim_archives_without_spawn_generation
 test_retire_claim_restores_partial_backlog_transitions
+test_retire_claim_requeues_unlanded_work
+test_retire_claim_accepts_cleared_task_temp_with_process_proof
+test_retire_claim_accepts_its_nested_foreground_shell
 test_retire_claim_refuses_live_agent
 test_retire_claim_refuses_unsafe_identity_and_options
 test_retire_claim_preserves_tasktmp_and_retries_after_refusals

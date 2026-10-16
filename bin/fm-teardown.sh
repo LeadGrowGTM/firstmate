@@ -1758,7 +1758,9 @@ backlog_done_args() {
       BACKLOG_DONE_ARGS=(--report "$data_relative/$ID/report.md")
       ;;
     *)
-      if [ "$MODE" = local-only ]; then
+      if [ "$RETIRE_CLAIM" = 1 ] && [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+        BACKLOG_DONE_ARGS=(--note "Preserved unfinished work: worktree $WT; branch $retirement_branch")
+      elif [ "$MODE" = local-only ]; then
         BACKLOG_DONE_ARGS=(--note "local main")
       elif [ -n "$PR_URL" ]; then
         BACKLOG_DONE_ARGS=(--pr "$PR_URL")
@@ -1785,7 +1787,13 @@ backlog_refresh_reminder() {
   else
     backlog_display="${DATA%/}/backlog.md"
   fi
-  if [ "$BACKLOG_CLOSED" = 1 ] && [ "$BACKLOG_TRANSITION" = retain ]; then
+  if [ "$RETIRE_CLAIM" = 1 ] && [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+    if [ "$BACKLOG_CLOSED" = 1 ]; then
+      printf '%s\n' "Backlog: $ID was requeued in $backlog_display with its preserved worktree and branch recorded."
+    else
+      printf '%s\n' "Backlog: $ID was not changed automatically in $backlog_display ($BACKLOG_SKIP_REASON); its unfinished work remains at $WT on $retirement_branch."
+    fi
+  elif [ "$BACKLOG_CLOSED" = 1 ] && [ "$BACKLOG_TRANSITION" = retain ]; then
     printf '%s\n' "Backlog: $ID stays open in $backlog_display, still held for the captain with its deliverable recorded. Relay the question and close it only with bin/fm-captain-hold.sh answer."
   elif [ "$BACKLOG_CLOSED" = 1 ]; then
     printf '%s\n' "Backlog: $ID is closed in $backlog_display. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due."
@@ -3689,9 +3697,19 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
     dead) ;;
     *) echo "REFUSED: stale claim's agent is $retirement_state; nothing was changed" >&2; exit 1 ;;
   esac
+  retirement_pane_pid=
+  if [ "$retirement_state" = dead ] && [ "$BACKEND" = tmux ]; then
+    retirement_pane_pid=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || retirement_pane_pid=
+  elif [ "$retirement_state" = dead ] && [ "$BACKEND" = herdr ] && fm_backend_herdr_parse_target "$T"; then
+    retirement_pane_pid=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+      | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" \
+        'select(.result.type == "pane_process_info" and .result.process_info.pane_id == $pane) | .result.process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null) || retirement_pane_pid=
+  fi
   for retirement_root in "$WT" "$TASK_TMP"; do
     [ -n "$retirement_root" ] || continue
-    retirement_processes=$(fm_agent_worktree_processes "$retirement_root") || {
+    retirement_missing_option=
+    [ "$retirement_root" != "$TASK_TMP" ] || retirement_missing_option=allow-missing
+    retirement_processes=$(fm_agent_worktree_processes "$retirement_root" "$retirement_pane_pid" "$retirement_missing_option") || {
       echo "REFUSED: stale claim's process absence is unproven under $retirement_root; nothing was changed" >&2
       exit 1
     }
@@ -3705,6 +3723,14 @@ if [ "$RETIRE_CLAIM" = 1 ]; then
       echo "REFUSED: stale claim's validation branch is unproven; nothing was changed" >&2
       exit 1
     }
+    retirement_dirty=$(git -C "$WT" status --porcelain --untracked-files=all 2>/dev/null) || {
+      echo "REFUSED: stale claim's worktree state is unproven; nothing was changed" >&2
+      exit 1
+    }
+    if [ -n "$retirement_dirty" ] || ! work_is_landed "$retirement_branch"; then
+      RETIREMENT_UNLANDED=1
+      TEARDOWN_BACKLOG_TRANSITION=retain
+    fi
     retirement_overview=$(fm_nm_run_checked "$WT" "$NM_TEARDOWN_TIMEOUT" axi) || {
       echo "REFUSED: stale claim's validation run inventory is unproven; nothing was changed" >&2
       exit 1
@@ -4329,7 +4355,15 @@ retirement_rollback() {
     rc=1
   fi
   if [ "$retirement_owner_released" = 1 ]; then
-    fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME" || rc=1
+    fm_treehouse_slot_owner_state "$WT" "$ID" "$FM_HOME"
+    case "$FM_TREEHOUSE_SLOT_OWNER" in
+      mine) ;;
+      absent) fm_treehouse_slot_owner_claim "$WT" "$ID" "$FM_HOME" || rc=1 ;;
+      *) rc=1 ;;
+    esac
+  fi
+  if [ "$rc" = 0 ] && [ "$BACKLOG_CLOSED" = 1 ]; then
+    fm_backlog_close_marker_remove "$BACKLOG_CLOSE_MARKER" "$STATE" || rc=1
   fi
   if [ "$rc" = 0 ]; then
     [ "$retirement_archive_created" = 0 ] || rm -f "$retirement_archive" || rc=1
@@ -4403,7 +4437,11 @@ if [ -d "$STATE" ]; then
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 fi
 if [ "$RETIRE_CLAIM" = 1 ]; then
-  echo "teardown $ID complete (stale claim retired; copy $WT preserved; metadata archived at $retirement_archive)"
+  if [ "${RETIREMENT_UNLANDED:-0}" = 1 ]; then
+    echo "stale claim $ID retired (unfinished work queued; copy $WT and branch $retirement_branch preserved; metadata archived at $retirement_archive)"
+  else
+    echo "stale claim $ID retired (copy $WT preserved; metadata archived at $retirement_archive)"
+  fi
 elif [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then

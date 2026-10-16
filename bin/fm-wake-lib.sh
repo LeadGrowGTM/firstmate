@@ -2000,11 +2000,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
   while IFS= read -r line; do
     case "$line" in worktree\ *) path=${line#worktree } ;; *) continue ;; esac
     [ -d "$path" ] || continue
-    if [ -n "$pool" ]; then
-      _fm_treehouse_path_inside "$path" "$pool" || continue
-    else
-      fm_treehouse_pool_slot "$project" "$path" || continue
-    fi
+    fm_treehouse_pool_slot "$project" "$path" || continue
     fm_treehouse_slot_owner_state "$path" '' ''
     [ "$FM_TREEHOUSE_SLOT_OWNER" != absent ] || continue
     [ "$FM_TREEHOUSE_SLOT_OWNER" != unsafe ] || {

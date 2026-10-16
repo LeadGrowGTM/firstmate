@@ -625,7 +625,10 @@ fm_backlog_retain() {  # <data-dir> <id> [flag...]
       FM_BACKLOG_TRANSITION_ERROR="could not decode the task body of $id"
       return 1
     }
-    line="Deliverable of the finished work: $deliverable"
+    case "$deliverable" in
+      'Preserved unfinished work: '*) line=$deliverable ;;
+      *) line="Deliverable of the finished work: $deliverable" ;;
+    esac
     case $'\n'"$body"$'\n' in
       *$'\n'"$line"$'\n'*) ;;
       *)
@@ -888,7 +891,7 @@ fm_backlog_close_marker_path() {  # <state-dir> <id>
 
 fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <expected-id> <state-dir>
   local marker=$1 authorized_data data_resolved expected_id=$3 state=$4
-  local id='' data='' marker_spawn_gen='' cleanup_incomplete=0 mode=close line raw_bytes arg_value
+  local id='' data='' marker_spawn_gen='' cleanup_incomplete=0 mode=close line raw_bytes arg_value decoded_note
   local url_tail url_authority url_path url_host url_port host_rest host_label host_valid
   local percent_tail percent_valid
   local id_count=0 data_count=0 spawn_gen_count=0 cleanup_incomplete_count=0 mode_count=0
@@ -985,7 +988,21 @@ fm_backlog_close_marker_validate() {  # <marker-path> <authorized-data-dir> <exp
     0) ;;
     2)
       case "${args[0]}" in
-        --note) [ "${args[1]}" = "local%20main" ] ;;
+        --note)
+          if [ "${args[1]}" = "local%20main" ]; then
+            true
+          elif [ "$mode" = retain ] && [[ ${args[1]} == hex:* ]]; then
+            arg_value=${args[1]#hex:}
+            [ -n "$arg_value" ] && [ "${#arg_value}" -le 8192 ] \
+              && [ $(( ${#arg_value} % 2 )) -eq 0 ] \
+              && [[ $arg_value != *[!0-9a-f]* ]] \
+              && decoded_note=$(perl -e 'print pack("H*", $ARGV[0])' -- "$arg_value") \
+              && fm_backlog_control_bytes_valid 0 "$(fm_backlog_bytes_of_string "$decoded_note")" \
+              && [[ $decoded_note == "Preserved unfinished work: worktree "*"; branch "* ]]
+          else
+            false
+          fi
+          ;;
         --pr)
           arg_value=${args[1]}
           [ "${#arg_value}" -le 2048 ] \
@@ -1085,6 +1102,8 @@ fm_backlog_close_marker_stage() {  # <temporary-path> <id> <data-dir> <spawn-gen
   for arg in "$@"; do
     if [ "$previous_arg" = --note ] && [ "$arg" = "local main" ]; then
       serialized_args+=("local%20main")
+    elif [ "$previous_arg" = --note ]; then
+      serialized_args+=("hex:$(perl -e 'print unpack("H*", $ARGV[0])' -- "$arg")")
     else
       serialized_args+=("$arg")
     fi
@@ -1160,7 +1179,11 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
   [ "$mode" = close ] || mode_flags=(--retain)
   args=("${FM_BACKLOG_CLOSE_VALIDATED_ARGS[@]+"${FM_BACKLOG_CLOSE_VALIDATED_ARGS[@]}"}")
   if [ "${args[0]-}" = --note ]; then
-    args[1]="local main"
+    if [ "${args[1]-}" = local%20main ]; then
+      args[1]="local main"
+    else
+      args[1]=$(perl -e 'print pack("H*", $ARGV[0])' -- "${args[1]#hex:}") || return 1
+    fi
   fi
   meta="$state/$id.meta"
   if [ -e "$meta" ] || [ -L "$meta" ]; then

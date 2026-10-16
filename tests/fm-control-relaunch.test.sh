@@ -2819,6 +2819,41 @@ test_tmux_dead_checks_background_descendants() {
   pass 'tmux: dead panes reject background descendants and permit an idle shell'
 }
 
+test_tmux_dead_accepts_its_nested_foreground_shell() {
+  local api dir id label pane nested capture out rc
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  for api in spawn control; do
+    id="rl-nested-$api"
+    dir=$(new_case "dead-nested-$api" "$id")
+    add_ship_task "$dir" "$id" claude
+    printf 'zsh' > "$dir/fake/command"
+    label="rl-nested-$api-$RANDOM"
+    tmux -L "$label" new-session -d -s nested -n task -c "$dir/wt" 'bash --noprofile --norc -i'
+    pane=$(tmux -L "$label" display-message -p -t nested:task '#{pane_pid}')
+    tmux -L "$label" send-keys -t nested:task 'bash --noprofile --norc -i' Enter
+    nested=
+    for _ in $(seq 1 30); do
+      tmux -L "$label" send-keys -t nested:task 'printf "NESTED=%s\n" "$$"' Enter
+      sleep 0.05
+      capture=$(tmux -L "$label" capture-pane -p -t nested:task)
+      nested=$(printf '%s\n' "$capture" | sed -n 's/^NESTED=\([0-9][0-9]*\).*$/\1/p' | tail -1)
+      [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
+    done
+    [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private tmux did not start a nested foreground shell'
+    printf '%s\n' "$pane" > "$dir/fake/pane-pid"
+    printf '%s\n%s\n' "$pane" "$nested" > "$dir/fake/process-pids"
+    rc=0
+    if [ "$api" = spawn ]; then
+      out=$(run_spawn "$dir" "$id" --relaunch --harness claude) || rc=$?
+    else
+      out=$(run_control "$dir" "$id" relaunch --note continue) || rc=$?
+    fi
+    expect_code 0 "$rc" "$api relaunch refused its nested foreground shell: $out"
+    tmux -L "$label" kill-server
+  done
+  pass 'both tmux relaunch interfaces accept the verified nested foreground task shell'
+}
+
 test_tmux_missing_legacy_record_refuses_a_live_rooted_process() {
   local dir
   dir=$(new_case tmux-legacy-rooted rl66)
@@ -3686,6 +3721,7 @@ test_relaunch_refuses_another_tasks_canonical_worktree_claim
 test_relaunch_refuses_a_conflicting_pooled_slot_owner
 test_tmux_missing_refuses_a_live_rooted_process
 test_tmux_dead_checks_background_descendants
+test_tmux_dead_accepts_its_nested_foreground_shell
 test_tmux_missing_legacy_record_refuses_a_live_rooted_process
 test_tmux_missing_legacy_record_reclaims_without_rooted_process
 test_tmux_missing_refuses_unreadable_or_ambiguous_process_inventory

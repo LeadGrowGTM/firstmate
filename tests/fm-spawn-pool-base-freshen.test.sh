@@ -910,6 +910,62 @@ SH
   done
 }
 
+test_returned_pool_copy_accepts_its_foreground_task_shell() {
+  local rec id=nested-shell-worker label=pulse-nested-shell pane nested capture out status
+  [ -n "${FM_TEST_TMUX_REAL:-}" ] || { echo 'skip - tmux not installed'; return 0; }
+  rec=$(make_case returned-nested-shell "$id")
+  read_case_record "$rec"
+  lay_out_as_pool_slot
+  tmux -L "$label" new-session -d -s nested -n task -c "$POOL_DIR" 'bash --noprofile --norc -i'
+  pane=$(tmux -L "$label" display-message -p -t nested:task '#{pane_pid}')
+  tmux -L "$label" send-keys -t nested:task 'bash --noprofile --norc -i' Enter
+  nested=
+  for _ in $(seq 1 30); do
+    tmux -L "$label" send-keys -t nested:task 'printf "NESTED=%s\n" "$$"' Enter
+    sleep 0.05
+    capture=$(tmux -L "$label" capture-pane -p -t nested:task)
+    nested=$(printf '%s\n' "$capture" | sed -n 's/^NESTED=\([0-9][0-9]*\).*$/\1/p' | tail -1)
+    [ -n "$nested" ] && [ "$nested" != "$pane" ] && break
+  done
+  [ -n "$nested" ] && [ "$nested" != "$pane" ] || fail 'private tmux did not start a nested foreground task shell'
+  printf '%s\n%s\n' "$pane" "$nested" > "$CASE_DIR/process-pids"
+  printf '%s\n' "$pane" > "$CASE_DIR/pane-pid"
+  mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux.fixture"
+  cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'#{pane_pid}'*) cat "$FM_TEST_PANE_PID_FILE"; exit ;;
+  *'#{pane_current_path}'*)
+    if [ -f "$FM_TEST_PANE_EXITED" ]; then printf '%s\n' "$FM_TEST_PANE_PROJECT"; exit; fi
+    ;;
+  *'treehouse get'*) : > "$FM_TEST_PANE_REACHED" ;;
+  *' exit Enter'*) : > "$FM_TEST_PANE_EXITED" ;;
+esac
+exec "$(dirname "$0")/tmux.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/tmux"
+  mv "$FAKEBIN_DIR/treehouse" "$FAKEBIN_DIR/treehouse.fixture"
+  cat > "$FAKEBIN_DIR/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = status ] && [ -f "$FM_TEST_PANE_EXITED" ]; then
+  printf '1  available  %s\n' "$FM_TEST_PANE_COPY"
+  exit
+fi
+exec "$(dirname "$0")/treehouse.fixture" "$@"
+SH
+  chmod +x "$FAKEBIN_DIR/treehouse"
+  out=$(FM_TEST_PANE_COPY="$POOL_DIR" FM_TEST_PANE_PROJECT="$PROJECT_DIR" \
+    FM_TEST_PANE_PID_FILE="$CASE_DIR/pane-pid" FM_TEST_PANE_REACHED="$CASE_DIR/reached" \
+    FM_TEST_PANE_EXITED="$CASE_DIR/exited" FM_TEST_PROCESS_PIDS="$CASE_DIR/process-pids" \
+    run_spawn "$id" --scout)
+  status=$?
+  expect_code 0 "$status" "the returned copy's foreground nested shell was refused: $out"
+  assert_present "$CASE_DIR/reached" 'nested-shell spawn did not reach Treehouse allocation'
+  assert_grep "worktree=$POOL_DIR" "$HOME_DIR/state/$id.meta" 'nested-shell spawn did not publish the returned copy'
+  tmux -L "$label" kill-server
+  pass 'returned pool copy accepts its verified nested foreground task shell'
+}
+
 test_provider_pool_marker_from_sibling_clone_blocks_allocation() {
   local rec id=pool-cross-clone-r1 provider sibling marker before_head out status launch_log
   rec=$(make_case cross-clone "$id")
@@ -1232,6 +1288,7 @@ test_pool_slot_claim_follows_the_spawn_outcome
 test_pool_custody_refuses_before_refresh_or_claim
 test_returned_pool_copy_rechecks_custody_before_refresh
 test_returned_pool_copy_rechecks_process_evidence
+test_returned_pool_copy_accepts_its_foreground_task_shell
 test_provider_pool_marker_from_sibling_clone_blocks_allocation
 test_state_override_pane_preflight_blocks_retained_claim
 test_linked_spawning_home_rejects_primary_before_refresh
