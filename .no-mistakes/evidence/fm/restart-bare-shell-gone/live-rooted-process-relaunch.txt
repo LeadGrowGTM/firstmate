@@ -1,0 +1,16 @@
+start 2026-10-16T09:20:17Z
+  PID STAT COMMAND
+17407 S    sleep
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+warning: secondmate labmate sync skipped before launch: on labmate, expected main
+relaunched labmate harness=claude from=claude model=default effort=default backend=tmux endpoint=primary:fm-labmate worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/.live-restart.HqhJwh/mate
+end 2026-10-16T09:20:32Z
+  PID STAT COMMAND
+
+Completed control journal:
+phase=complete
+endpoint=primary:fm-labmate
+exit_result=stopped
+
+Replacement endpoint (private lab socket):
+claude 95582 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/.live-restart.HqhJwh/mate

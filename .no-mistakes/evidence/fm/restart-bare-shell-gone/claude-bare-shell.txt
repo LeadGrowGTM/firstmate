@@ -1,0 +1,18 @@
+Scenario: real Claude exits to a bare bash shell in an isolated lab tmux session
+before exit: alive
+after exit: dead
+pane command: bash
+pane shell pid: 29273
+pane visible tail:
+
+
+
+
+
+
+
+
+
+
+
+

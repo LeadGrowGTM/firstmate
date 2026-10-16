@@ -1,0 +1,39 @@
+Before relaunch:
+claude 17075 claude
+fm-labmateh9 28393 bash
+
+
+
+
+
+
+
+
+
+Control relaunch:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/.fm-test-lab.h9GlGS
+error: task labmateh9's dead endpoint is not safe to relaunch; cannot prove the old agent gone: live processes still have cwd in the recorded worktree (pids 31467 31843)
+
+After relaunch:
+claude 17075 claude
+fm-labmateh9 28393 bash
+.fm-test-mate.h9GlGS$ export COMPACT_ADVISER_DISABLE=1
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/
+.fm-test-mate.h9GlGS$ . '/tmp/fm-labmateh9+149d0c710ee6ad5ace07cd7e153d1f837798f
+67946e32e2f4c720574e652a9e2/launch.s1792140521.27675.32576.sh'
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/
+.fm-test-mate.h9GlGS$
+
+
+
+
+
+
+
+
+
+
+
+
+
+

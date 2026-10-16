@@ -1,0 +1,30 @@
+Target commit: c5cb357f56ada2ccd93b9a90c64872a5ca740197
+
+Disposable mate persistence confirmations:
+done [at=1792140839]: corr=9b6ed6f1227241aa open-record persistence done: this session held no open work (no tasks, no in-flight workers, no unregistered captain calls), so nothing needed filing or correcting; ready for restart
+done [at=1792140896]: corr=aed6599efd715a9b open-record persistence complete - this session held no open work (no backlog, no in-flight workers, no unregistered captain calls), so nothing needed filing or correcting; ready for restart
+done [at=1792141020]: corr=69b4c7e3fcb299f8 open-record persistence complete: this session held no open work, no unregistered captain calls, and no tasks; nothing filed or corrected, nothing left alone. Safe to restart.
+
+Pane state after failed restart:
+claude 17075 claude
+fm-labmateh9 28393 bash
+fm-labmate2h9 39837 grok
+fm-labmate3h9 76911 bash
+
+Underlying restart refusal from shell trace:
+6665:error: task labmate3h9'\''s dead endpoint is not safe to relaunch; cannot prove the old agent gone: live processes still have cwd in the recorded worktree (pids 7621)
+
+Restart public output:
+unreached: labmate3h9: the restart outcome is unknown: WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+
+Direct control recovery after the short lived process ended:
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+warning: secondmate labmate3h9 sync skipped before launch: primary default-branch commit cannot be resolved
+relaunched labmate3h9 harness=omp from=omp model=default effort=default backend=tmux endpoint=primary:fm-labmate3h9 worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/.fm-test-mate3.h9GlGS
+
+Pane state after direct recovery:
+claude 17075 claude
+fm-labmateh9 28393 bash
+fm-labmate2h9 39837 grok
+fm-labmate3h9 76911 omp

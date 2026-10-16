@@ -1,0 +1,1 @@
+liveness status=relaunchable state=dead kill-shell=1 cause=confirmed agent absence on existing endpoint

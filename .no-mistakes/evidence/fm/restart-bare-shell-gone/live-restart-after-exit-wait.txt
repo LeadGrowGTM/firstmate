@@ -1,0 +1,33 @@
+restarted: labmate (claude)
+summary: 1 of 1 restarted, 0 nudged, 0 unreached
+
+Correlated persistence acknowledgement:
+done corr=999a037995189ccf [at=1792142348]: nothing to persist; no open records, tasks or unregistered captain calls held in this conversation, so the restart can proceed
+
+Completed relaunch journal:
+v1
+task=labmate
+phase=complete
+ts=2026-10-16T09:19:16Z
+backend=tmux
+endpoint=primary:fm-labmate
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/.live-restart.HqhJwh/mate
+kind=secondmate
+from_harness=claude
+from_model=default
+from_effort=default
+to_harness=claude
+to_model=default
+to_effort=default
+worktree_head=0fc19fee147aa26bdd647fa00996fd7a7a6a4c16
+worktree_dirty=no
+children=0
+note=none
+exit_result=stopped
+
+Replacement endpoint (private lab socket):
+claude 95582 /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/.live-restart.HqhJwh/mate
+
+Replacement process:
+  PID  PPID STAT COMMAND
+11956 95582 Sl+  claude

@@ -1,0 +1,7 @@
+Real Claude CLI was running in exited pane; after /exit:
+claude 33600 claude
+exited 33645 bash
+pane_child_processes:
+  PID  PPID STAT COMMAND
+agent_state=dead
+terminal_input_proof=yes

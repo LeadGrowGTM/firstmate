@@ -1,0 +1,3 @@
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+warning: secondmate labmate3h9 sync skipped before launch: primary default-branch commit cannot be resolved
+relaunched labmate3h9 harness=omp from=omp model=default effort=default backend=tmux endpoint=primary:fm-labmate3h9 worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/.fm-test-mate3.h9GlGS

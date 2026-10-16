@@ -1,0 +1,6 @@
+unreached: labmateh9: the request to write down its open work could not be delivered: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/mitch/.no-mistakes/repos/5782b7185c5e.git); the re-read message could not be delivered either: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/mitch/.no-mistakes/repos/5782b7185c5e.git)
+summary: 0 of 1 restarted, 0 nudged, 1 unreached
+
+Retry from disposable source checkout at target commit, same lab home and private socket:
+nudged: labmateh9: it did not confirm within 180s that its open work is written down, so its conversation was not spent
+summary: 0 of 1 restarted, 1 nudged, 0 unreached

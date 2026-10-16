@@ -1,0 +1,39 @@
+Live secondmate restart proof attempt, 2026-10-16
+Workspace: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T
+Focused check: bash tests/fm-secondmate-restart.test.sh exited 0; all T1-T16 checks passed.
+
+Isolation: copied tracked Firstmate source into .live-restart-proof/repo inside the worktree and committed a disposable local repository. Created a marked lab FM_HOME at .live-restart-proof/parent, seeded a project-less secondmate at .live-restart-proof/mate, and started tmux on the private named socket /tmp/fml.RIYVfv/tmux-1000/fm-lab. fm-spawn.sh liveproof --secondmate --harness claude reported: spawned liveproof harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-liveproof.
+
+Observed real process: private tmux pane firstmate:fm-liveproof reported pane_current_command=claude and pane_current_path=.live-restart-proof/mate. Claude Code v2.1.301 opened its first-run text-style screen, then its login-method screen. Its CLAUDE_CONFIG_DIR was isolated at .live-restart-proof/claude-config; no credential or user-level config was read or modified. The approved secret check `lg has ANTHROPIC_API_KEY` reported `ANTHROPIC_API_KEY NOT in prod (firstmate)`.
+
+Verdict: live restart outcome inconclusive. Claude could not receive the persistence request or confirm it without authenticating in the isolated config. The session was stopped at login. A real persist, bare-shell exit, and replacement were therefore not observed. The deterministic restart test with the corrected foreground-process fixture passed; this is not evidence of the missing live scenario.
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/
+.live-restart-proof/mate$ export GOTMPDIR=/tmp/fm-liveproof/gotmp
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/
+.live-restart-proof/mate$ export COMPACT_ADVISER_DISABLE=1
+mitch@The-GOAT:~/.no-mistakes/worktrees/5782b7185c5e/01M51WZPE4B9WSD25CSEWKSR0T/
+.live-restart-proof/mate$ . '/tmp/fm-liveproof+064d6d17c2f96b5e571cca6949cf0f4bc
+cc10668c170d5edfd1bd8c68d080b8c/launch.s1792140290.30257.13473.sh'
+Welcome to Claude Code v2.1.301
+
+ Claude Code can be used with your Claude subscription or billed based on API
+ usage through your Console account.
+
+ Select login method:
+
+ ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise
+   2. Anthropic Console account · API usage billing
+   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, Google Vertex AI
+
+
+
+
+
+
+
+
+
+
+
+
+
