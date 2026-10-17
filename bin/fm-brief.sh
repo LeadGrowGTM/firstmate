@@ -57,6 +57,11 @@
 # captain's standing posture as context, and this script never reads it:
 #   no-mistakes  implement -> /no-mistakes pipeline -> PR -> configured merge authority
 #   direct-PR    implement -> push + open PR via gh-axi (no pipeline) -> configured merge authority
+#                When projects/<repo-name> (or an absolute repo path) has a GitHub
+#                origin, the definition of done names `gh-axi pr create --repo`
+#                as that origin's owner/repo, never the upstream remote. A
+#                non-GitHub origin stays unpinned. A GitHub origin that is not
+#                one owner/repo stops the scaffold. The clone is only read.
 #   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
 #                the configured merge authority approves, firstmate merges to local main
 # no-mistakes-prod-only is a registry policy, not a task mode; resolve it to one of
@@ -423,6 +428,14 @@ if [ "$TASK_TYPE_SET" -eq 1 ]; then
     exit 1
   fi
   fm_task_type_render "$CONFIG" "$TASK_TYPE" "${POS[1]}" || exit 1
+fi
+
+# Resolved before the brief directory is created, so a GitHub origin that is
+# not one owner/repo leaves nothing behind. Empty when this ship is not a
+# GitHub-origin direct-PR. The clone is only read.
+ORIGIN_REPO=
+if [ "$KIND" = ship ] && [ "$MODE" = direct-PR ] && [ "$FORGE" = none ] && [ -n "${POS[1]:-}" ]; then
+  ORIGIN_REPO=$(fm_brief_direct_pr_origin_repo "$FM_HOME" "${POS[1]}") || exit 1
 fi
 
 BRIEF="$DATA/$ID/brief.md"
@@ -793,7 +806,7 @@ case "$MODE" in
     ;;
 esac
 RULE1=$(fm_ship_rule_one "$MODE" "$ID" "$BRANCH" "$FORGE" "$BASE_BRANCH") || exit 1
-DOD=$(fm_dod_block "$MODE" "$ID" "$BRANCH" "$FORGE" "$BASE_BRANCH") || exit 1
+DOD=$(fm_dod_block "$MODE" "$ID" "$BRANCH" "$FORGE" "$BASE_BRANCH" "$ORIGIN_REPO") || exit 1
 
 cat > "$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.

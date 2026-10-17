@@ -17,6 +17,11 @@
 # --base-branch; empty means the repository default. A named base is the branch
 # the worker starts from, never pushes to, and targets with its pull request, and
 # fm_base_branch_valid refuses it where no pull request carries the work.
+# The optional sixth argument is a GitHub owner/repo. For direct-PR with no
+# forge it is printed as `gh-axi pr create --repo <owner/repo>`, plus `--base`
+# when a base branch is named. Callers pass the project's origin remote and
+# never upstream: gh otherwise submits a fork's pull request to the parent.
+# Empty keeps the unpinned sentence, used when that origin is not GitHub.
 # Callers of the gate are bin/fm-crew-state.sh (current-state done),
 # bin/fm-pr-check.sh (PR registration), and bin/fm-inactive-reconcile.sh
 # (secondmate ledger-first publish of a child done). A ship `done:` is not
@@ -67,6 +72,8 @@
 # report, read back from the forge; a lane that deliberately holds a draft
 # declares a paused wait instead. bin/fm-pr-check.sh refuses to arm merge
 # monitoring on a draft through the same reading bin/fm-pr-merge.sh uses.
+# A direct-PR block that receives an origin owner/repo names that repository
+# on the create command. Omitting --repo is how gh chooses a fork's parent.
 # This file is the one owner of the no-mistakes `--intent` contract: only the
 # brief's `## Captain's intent` subsection plus later captain words, never
 # `## Firstmate spec` and never the worker's own tradeoffs.
@@ -421,18 +428,112 @@ There is no pull request, no \`gh-axi\` call, and no forge CI result to report: 
 EOF
 }
 
-fm_dod_block() {  # <mode> <task-id> [branch] [<forge>] [<base>]
-  local mode=$1 id=$2 forge=${4:-none} base=${5:-}
-  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove proof_path
+# Print owner/repo when <slug> is one GitHub repository name, else return 1.
+fm_github_owner_repo_valid() {  # <owner/repo>
+  local slug=$1
+  local LC_ALL=C
+  [[ "$slug" =~ ^([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9-]{0,37}[A-Za-z0-9])/([A-Za-z0-9._-]{1,100})$ ]] || return 1
+  [[ "${BASH_REMATCH[1]}" != *--* ]] || return 1
+  [ "${BASH_REMATCH[2]}" != . ] && [ "${BASH_REMATCH[2]}" != .. ] || return 1
+  printf '%s/%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+}
+
+# Print owner/repo for a GitHub remote URL. Print nothing and return 0 when
+# the URL is not GitHub. Return 1 when it is GitHub but not one owner/repo.
+# The URL itself is never printed: it can carry credentials.
+fm_github_owner_repo_from_url() {  # <url>
+  local url=$1
+  url=${url%%\?*}
+  url=${url%%#*}
+  url=${url%.git}
+  url=${url%/}
+  case "$url" in
+    *://*)
+      url=${url#*://}
+      case "$url" in *@*) url=${url#*@} ;; esac
+      case "$url" in
+        github.com/*) url=${url#github.com/} ;;
+        github.com:*) url=${url#github.com:}; url=${url#*/} ;;
+        *) return 0 ;;
+      esac
+      ;;
+    git@github.com:*)
+      url=${url#git@github.com:}
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+  case "$url" in
+    ''|*/|*/*/*) return 1 ;;
+  esac
+  fm_github_owner_repo_valid "$url"
+}
+
+# Print the GitHub owner/repo of <dir>'s origin remote, or nothing when origin
+# is absent or not GitHub. Never reads any other remote. Return 1 when origin
+# is a GitHub URL that is not one owner/repo.
+fm_direct_pr_origin_repo() {  # <git-dir>
+  local dir=$1 url slug
+  [ -n "$dir" ] && [ -d "$dir" ] || return 0
+  git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  url=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
+  [ -n "$url" ] || return 0
+  if ! slug=$(fm_github_owner_repo_from_url "$url"); then
+    echo "error: origin remote is a GitHub URL that is not a single owner/repo; refusing to leave the pull request target unpinned" >&2
+    return 1
+  fi
+  [ -n "$slug" ] || return 0
+  printf '%s\n' "$slug"
+}
+
+# Resolve the clone a brief or promotion names, then its origin owner/repo.
+# A relative name is only the clone at <home>/projects/<name> (or
+# projects/<name> under that same directory). Absolute paths are used as
+# given. Names that climb out of the home are ignored.
+fm_brief_direct_pr_origin_repo() {  # <home> <repo-name-or-path>
+  local home=$1 name=$2 dir
+  case "$name" in
+    ''|.*|*..*) return 0 ;;
+  esac
+  if [[ "$name" == /* ]]; then
+    dir=$name
+  elif [ -d "$home/projects/$name" ]; then
+    dir="$home/projects/$name"
+  elif [[ "$name" == projects/* ]] && [ -d "$home/projects/${name#projects/}" ]; then
+    dir="$home/projects/${name#projects/}"
+  else
+    return 0
+  fi
+  fm_direct_pr_origin_repo "$dir"
+}
+
+fm_dod_block() {  # <mode> <task-id> [branch] [<forge>] [<base>] [<origin-repo>]
+  local mode=$1 id=$2 forge=${4:-none} base=${5:-} origin_repo=${6:-}
+  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove proof_path create_cmd
   proof_path="\`${FM_HOME:-.}/data/$id/proof.md\`"
   prove=$(fm_prove_it_clause ship "$proof_path")
   fm_forge_valid_for_mode "$forge" "$mode" fm_dod_block || return 1
   fm_base_branch_valid "$base" "$mode" "$forge" fm_dod_block || return 1
+  if [ -n "$origin_repo" ]; then
+    origin_repo=$(fm_github_owner_repo_valid "$origin_repo") || {
+      echo "error: fm_dod_block: pull-request repository must be a GitHub owner/repo" >&2
+      return 1
+    }
+  fi
   if [ -n "$base" ]; then
     printf -v base_q '%q' "$base"
     pr_base=", against the base branch \`$base\` (\`--base $base_q\`), not the repository default"
     nm_base="This task's base branch is \`$base\`, not the repository default: pass \`--base-branch $base_q\` on every \`no-mistakes axi run\` that starts a run, so the pipeline rebases onto, opens its PR against, and watches CI for that branch.
 "
+  fi
+  create_cmd=
+  if [ "$mode" = direct-PR ] && [ "$forge" = none ] && [ -n "$origin_repo" ]; then
+    if [ -n "$base" ]; then
+      create_cmd="gh-axi pr create --repo $origin_repo --base $base_q"
+    else
+      create_cmd="gh-axi pr create --repo $origin_repo"
+    fi
   fi
   case "$mode:$forge" in
     direct-PR:gerrit)
@@ -489,7 +590,21 @@ Delivery contract: mode=direct-PR
 Ship branch: $branch
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch and $prove
+EOF
+      if [ -n "$create_cmd" ]; then
+        cat <<EOF
+When it is implemented and committed, push your branch and open a PR with \`$create_cmd\` that is ready for review, not a draft$pr_base.
+That \`--repo\` is this copy's \`origin\` remote, read when these instructions were written.
+Pass that \`--repo\` on every pull-request create, including \`gh pr create\`.
+A create that omits \`--repo\` lets gh choose a fork's parent repository.
+Never substitute the \`upstream\` remote.
+EOF
+      else
+        cat <<EOF
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\` that is ready for review, not a draft$pr_base.
+EOF
+      fi
+      cat <<EOF
 Before you report done, read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
 Then append \`done [at=<epoch>]: PR {url}\` to the status file and stop.
