@@ -63,6 +63,7 @@ COMPLETION_FILE="$STATE/.session-start-complete"
 . "$SCRIPT_DIR/fm-hook-host-lib.sh"
 
 SOURCE=
+SESSION_ID=
 PI_PREREQUISITE=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -135,7 +136,28 @@ if [ -z "$SOURCE" ] && [ ! -t 0 ]; then
     seen == 1 { seen = 0 }
     $0 == "source" { seen = 1 }
   ')
+  SESSION_ID=$(printf '%s' "$PAYLOAD" | awk '
+    BEGIN { RS = "\"" }
+    seen == 2 { print; exit }
+    seen == 1 && $0 ~ /^[[:space:]]*:[[:space:]]*$/ { seen = 2; next }
+    seen == 1 { seen = 0 }
+    $0 == "session_id" { seen = 1 }
+  ')
 fi
+
+# Print a session-start digest. A symlinked Claude project directory cannot
+# store a long hook body, so the persist helper writes that body through the
+# symlink and prints a short pointer instead. The helper copies every other
+# body through unchanged.
+emit_digest() {
+  local tmp
+  tmp=$(mktemp)
+  "$SCRIPT_DIR/fm-session-start.sh" "$@" > "$tmp" || true
+  if ! "$SCRIPT_DIR/fm-claude-hook-persist.sh" --session-id "$SESSION_ID" < "$tmp"; then
+    cat "$tmp"
+  fi
+  rm -f "$tmp"
+}
 
 case "$SOURCE" in
   resume|reload|fork)
@@ -143,13 +165,13 @@ case "$SOURCE" in
     ;;
   clear|compact)
     if session_start_completed; then
-      "$SCRIPT_DIR/fm-session-start.sh" --reemit --source "$SOURCE" || true
+      emit_digest --reemit --source "$SOURCE"
     else
-      "$SCRIPT_DIR/fm-session-start.sh" --source "$SOURCE" || true
+      emit_digest --source "$SOURCE"
     fi
     ;;
   *)
-    "$SCRIPT_DIR/fm-session-start.sh" --source "$SOURCE" || true
+    emit_digest --source "$SOURCE"
     ;;
 esac
 exit 0
