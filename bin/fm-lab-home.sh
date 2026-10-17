@@ -51,7 +51,8 @@ case "${1:-}" in
       fm_lab_home_error "refusing '$dir': a lab marker is only ever stamped on a fresh empty dir"
       exit 1
     }
-    mkdir -p "$dir/state" "$dir/data" "$dir/config" "$dir/projects" || exit 1
+    mkdir -p "$dir/data" "$dir/config" "$dir/projects" || exit 1
+    (umask 077; mkdir -p -- "$dir/state") || exit 1
     printf '%s\n' "$dir"
     ;;
   tmux-dir|tmux-check|tmux)

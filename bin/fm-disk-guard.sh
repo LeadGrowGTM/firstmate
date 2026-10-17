@@ -317,7 +317,7 @@ write_pause_flag() {
     printf 'symlink\n'
     return 0
   fi
-  mkdir -p "$ROOT/state"
+  (umask 077; mkdir -p -- "$ROOT/state")
   if [ -L "$flag" ]; then
     printf 'symlink\n'
     return 0

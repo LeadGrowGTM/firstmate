@@ -174,7 +174,7 @@ if [ -e "$FM_HOME/$SUB_HOME_MARKER" ] || [ -L "$FM_HOME/$SUB_HOME_MARKER" ]; the
 fi
 emit 'role=primary'
 if [ "$RECORD_PASS" -eq 1 ]; then
-  mkdir -p "$STATE" || die 'cannot create the primary pass state directory'
+  (umask 077; mkdir -p -- "$STATE") || die 'cannot create the primary pass state directory'
   stamp=$(mktemp "$STATE/.last-stow-primary-pass.XXXXXX") || exit 1
   if ! date +%s > "$stamp" || ! mv -f -- "$stamp" "$STATE/.last-stow-primary-pass"; then
     rm -f -- "$stamp"

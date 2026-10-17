@@ -930,7 +930,7 @@ fm_config_reread_mark_pending() {
   local instruction_path=$1 pending_path=$2 parent tmp
   parent=${pending_path%/*}
   [ -n "$parent" ] && [ "$parent" != "$pending_path" ] || return 1
-  mkdir -p "$parent" 2>/dev/null || return 1
+  (umask 077; mkdir -p -- "$parent") 2>/dev/null || return 1
   tmp=$(umask 077; mktemp "$parent/.fm-config-reread-pending.XXXXXX" 2>/dev/null) || return 1
   if ! printf '%s\n' "$instruction_path" > "$tmp"; then
     rm -f "$tmp"
@@ -951,7 +951,7 @@ fm_config_reread_publish_stage() {
   local dest_home=$1 stage=$2 state final pending_pointer tmp
   [ -f "$stage" ] && [ ! -L "$stage" ] || return 1
   state="$dest_home/${FM_CONFIG_REREAD_INSTRUCTION_PREFIX_REL%/*}"
-  mkdir -p "$state" 2>/dev/null || return 1
+  (umask 077; mkdir -p -- "$state") 2>/dev/null || return 1
   final="$state/${stage##*/}"
   if [ -f "$final.pending" ] && [ ! -L "$final.pending" ]; then
     pending_pointer=$(cat "$final.pending" 2>/dev/null || true)
