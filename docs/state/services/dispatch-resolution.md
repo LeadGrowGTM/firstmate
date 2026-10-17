@@ -1,0 +1,102 @@
+---
+id: dispatch-resolution
+title: Dispatch choice
+kind: statechart
+status: implemented
+summary: An explicit profile wins, otherwise a configured rule or the static harness is chosen, and a profile array is ranked only after eligibility, reasoning class, and runway.
+parent: fleet-runtime
+sources:
+  - bin/fm-dispatch-resolve.sh
+  - bin/fm-spawn.sh
+  - .agents/skills/quota-array-dispatch/SKILL.md
+  - docs/architecture.md
+  - AGENTS.md
+diagramLinks: {}
+diagramDetails:
+  - diagram: 0
+    node: Typed
+    section: The typed resolver is opt-in
+  - diagram: 0
+    node: Ranked
+    section: Three gates, then one ranker
+  - diagram: 0
+    edge:
+      from: Typed
+      to: Intake
+      label: not clear
+    section: A non-clear result does not launch by itself
+---
+
+# Dispatch choice
+
+Every spawn needs a concrete harness, and sometimes a model and an effort.
+The first mate chooses them before launch.
+Spawn checks the concrete result.
+It does not look up the delivery mode, and it does not pick a profile array on its own.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Precedence
+    Precedence --> Launch: captain named the profile
+    Precedence --> Typed: key present
+    Precedence --> Intake: key absent
+    Typed --> Clear: resolver prints one profile
+    Typed --> Intake: not clear
+    Intake --> Ranked: array passes three gates
+    Intake --> Launch: single candidate
+    Ranked --> Launch: highest known spendPriority
+    Clear --> Launch
+```
+
+The precedence the instructions name is narrower than the chart's first split.
+An explicit per-task choice wins.
+Otherwise the best-fit configured rule wins, then the configured default, then the static crew harness.
+The chart folds the last three into Typed or Intake depending on whether the optional resolver is on.
+Unverified: no dispatch was executed in this pilot, so the split is from reading the resolver and the selection skill.
+
+## The typed resolver is opt-in
+
+bin/fm-dispatch-resolve.sh does nothing on the network unless TYPESAFE_API_KEY is set in the environment or in the home's .env file.
+If both are absent it prints dispatch-resolve: off and exits 0.
+A never-send list, when present and matched, takes the same off path and sends nothing.
+The header describes that list.
+This pilot did not open the matcher function.
+When the key is present, the script POSTs the project name and the brief's task sections to https://api.typesafe.ai/v1/systemone.
+The model sees the rule text, not the quota numbers.
+Local code then applies confidence floors and ranks eligible candidates by spendPriority.
+A clear result prints one profile line for spawn.
+ambiguous, escalate, and error also exit 0.
+They mean the first mate continues with the ordinary intake instead of treating the tool as a hard stop.
+Exit 2 is reserved for a bad invocation or a broken rules file.
+
+## A non-clear result does not launch by itself
+
+The not-clear arrow returns to intake.
+The first mate still has to account for every candidate.
+It must not drop a candidate silently or call the choice quota-informed without the evidence.
+A malformed profile configuration is an error to report, not a reason to skip to the next name in the file.
+
+## Three gates, then one ranker
+
+When a rule or the default resolves to more than one profile, the quota-array-dispatch skill is the selection procedure.
+quota-axi only publishes numbers.
+It does not pick a winner.
+The three gates are eligibility, reasoning-class fit, and runway.
+spendPriority ranks only the candidates that pass all three.
+A missing quota number keeps a candidate eligible and is disclosed.
+It does not block the candidate.
+A catalog that says the model is unsupported, or proof that the credential that candidate would use is unusable, does block it.
+If every candidate that meets the strongest reasoning class is too tight to proceed, the intake stops and reports that.
+It does not quietly downgrade the class to save quota.
+A genuine tie is reported for a human choice.
+Array order and harness name are not tie-breakers.
+The optional helper bin/fm-quota-choose.sh is a narrower picker for a worker that already fixed the candidate order.
+The skill says it does not replace this intake.
+
+## What spawn still checks
+
+The chosen profile is passed to bin/fm-spawn.sh.
+Spawn still refuses an unverified harness, a mode the brief does not agree with, and a copy that is not isolated.
+An explicit backend flag applies only to that spawn.
+A missing tool or a failed login is a blocker.
+The instructions say not to retry on a different backend in silence.
