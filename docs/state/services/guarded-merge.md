@@ -21,12 +21,6 @@ diagramDetails:
   - diagram: 0
     node: GerritStop
     section: Gerrit is not submitted
-  - diagram: 0
-    edge:
-      from: Github
-      to: Merged
-      label: merge command accepted
-    section: The merge is bound to the commit that was checked
 ---
 
 # Guarded merge
@@ -46,20 +40,16 @@ stateDiagram-v2
     Chosen --> Gitlab: GitLab merge request
     Chosen --> GerritStop: Gerrit change
     Chosen --> Local: local-only branch
-    Github --> Merged: merge command accepted
     Github --> Stopped: a live check fails or the merge command fails
     Gitlab --> Accepted: glab merge accepted
     Gitlab --> Stopped: a live condition fails or the merge command fails
     Accepted --> Recorded: read-back shows merged
-    Accepted --> Queued: could not confirm, exit 0, no outcome recorded
     Local --> Landed: fast-forward succeeds
     Local --> Stopped: hold open, checkout not clean or not on default, or not a fast-forward
     GerritStop --> Stopped: submit refused
-    Merged --> Recorded: forge read-back shows merged
-    Merged --> Queued: only queued, no outcome recorded
-    Merged --> Stopped: neither merged nor queued
-    Merged --> Stopped: read-back could not be read
 ```
+
+Unverified: the chart does not include a GitHub acceptance state or a GitLab unconfirmed result, because those edges were not confirmed.
 
 ## GitHub checks are live
 
@@ -77,15 +67,14 @@ Both are refused while an away record exists and are not accepted on GitLab.
 
 ## The merge is bound to the commit that was checked
 
-The merge-command-accepted arrow is the gh invocation that includes --match-head-commit.
-If that command itself fails, the script exits with the command's status and records no landed outcome.
+If the merge command itself fails, the script exits with the command's status and records no landed outcome.
 That failure is the GitHub stop for a merge command, distinct from a live check that never issues the command.
 After the command returns success, the script reads the pull request again.
-If that read-back cannot be read, the script exits 1 and records no landed outcome.
+Unverified: what the script does when that read-back cannot be read was not confirmed.
 A read-back that shows merged continues to the outcome record.
 A read-back that shows only queued exits 0 and records no landed outcome.
 A read-back that is neither merged nor queued is refused and names the state it saw.
-docs/architecture.md states the same confirmation rule for a merge the poll discovers later.
+Unverified: whether docs/architecture.md states that confirmation rule for a merge a later poll discovers was not confirmed.
 
 ## GitLab
 

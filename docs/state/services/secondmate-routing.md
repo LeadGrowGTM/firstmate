@@ -44,16 +44,16 @@ stateDiagram-v2
     Expected --> Inbox: enqueue succeeded
     Inbox --> Reported: correlated line seen
     Reported --> Published: parent channel has the fact
-    Expected --> Unconfirmed: remote transport lost
     Unconfirmed --> Expected: same correlation resent
     Inbox --> Missing: request turn done, grace elapsed, no correlated report
     Missing --> RecoverySent: one recovery request
     RecoverySent --> Reported: correlated line seen
     RecoverySent --> Escalated: still no correlated report
-    RecoverySent --> Escalated: recovery delivery failed or unknown
     Unconfirmed --> Escalated: delivery still unknown
     Escalated --> Reported: correlated line seen
 ```
+
+Unverified: the chart does not show a failed or unknown recovery delivery, or how a send becomes unconfirmed, because those edges were not confirmed.
 
 ## The expectation is stored before delivery
 

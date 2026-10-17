@@ -78,19 +78,19 @@ A needs-decision or blocked line stays open until a resolved line with the same 
 Workers are told a done line will not close it, but the status fold does retire every open decision when a ship or scout writes its own terminal done or failed line.
 A second mate's done line does not close a decision.
 The answer is written by the sender that resolves the key, not by hoping the worker types the closing line.
-That answer path is owned by bin/fm-send.sh and is described on the second-mate page when the target is a second mate.
-For an ordinary worker the same resolve flag closes the record.
+Unverified: which page describes the resolve flag, and whether that flag differs for a second mate, was not confirmed.
 
 ## Ready means the commit is visible elsewhere
 
 For a ship task, a done line that reports the work as ready is accepted only when the named head exists outside the disposable copy.
 That gate always applies in direct-PR and local-only.
-In no-mistakes it applies when the note says CI is ready or the change is published.
+In no-mistakes it applies when the note says CI is ready.
+Unverified: the exact published-change wording that also opens that gate was not confirmed.
 Scout tasks and other done lines are not gated.
 bin/fm-dod-lib.sh checks the ship gate.
 For local-only, a branch in the project clone that contains the commit is enough.
 A remote-tracking ref in the worker copy or in the project clone also counts.
-If the only place the commit exists is the disposable copy, the done line is refused because the named head is unreachable outside the worker copy.
+Unverified: what is reported when the named head exists only in the disposable copy was not confirmed.
 A Gerrit change is checked by comparing the change's current patch set to the copy's HEAD tree.
 In no-mistakes that comparison runs only after the copy's own passed run has returned custody of the branch.
 A pull request URL satisfies the gate without that ref walk when the task record's pr= equals the URL and either a recorded pr_head exists in a mode where the forge head is the named head, or the merge was already notified, or the change is Gerrit.
@@ -105,11 +105,10 @@ Gerrit changes are published for review and are not submitted by the merge scrip
 
 ## Cleanup refuses unfinished work
 
-bin/fm-teardown.sh inspects the copy before it returns the slot.
-Uncommitted changes refuse cleanup.
-For local-only, commits that are not on the default branch and not on a remote also refuse, and the message says to merge locally first.
+Unverified: which task kinds the ordinary dirty-copy check applies to was not confirmed.
+For local-only, commits that are not on the default branch and not on a remote refuse, and the message says to merge locally first.
 For other modes, commits that are not on a remote and not already landed refuse.
-The automatic cleanup sweep (--only-if-stopped) also refuses a copy with any tracked path flagged assume-unchanged or skip-worktree, because status cannot show edits hidden behind those flags.
+The automatic cleanup sweep (--only-if-stopped) refuses a copy with any tracked path flagged assume-unchanged or skip-worktree, because status cannot show edits hidden behind those flags.
 Ordinary cleanup does not make that check.
 The force flag can skip the ordinary dirty and landed checks, and the script header says that flag is the explicit discard authorization.
 Without it, cleanup stops and the copy stays.

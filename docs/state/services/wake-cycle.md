@@ -31,7 +31,7 @@ diagramDetails:
 # Wake handling
 
 The first mate should not poll the fleet by hand.
-A bash watcher sleeps, classifies what changed, and writes a durable row only when something needs action.
+Unverified: whether only the watcher appends a queue row was not confirmed.
 The handling turn drains that queue, does the work, and then acknowledges the rows it was shown.
 If the turn stops before the acknowledgement, the rows are still there for the next turn.
 
@@ -78,7 +78,7 @@ The acknowledgement has not consumed it.
 The next drain shows it again.
 Acknowledging the same sequence again is harmless.
 The drain exits 0 and consumes nothing, and it prints a note only when a presented row above that cutoff is still waiting.
-The supervisor instructions tell the handler not to acknowledge a sequence twice (AGENTS.md section 8).
+Unverified: which acknowledgement AGENTS.md section 8 tells the handler not to repeat was not confirmed.
 A separate command, bin/fm-branch-outcome.sh mark-processed, does refuse an already-processed sequence.
 The required command format was read at the WAKE_ACK_REQUIRED print.
 

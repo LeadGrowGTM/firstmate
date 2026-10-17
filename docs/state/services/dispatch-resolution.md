@@ -63,15 +63,14 @@ Unverified: no dispatch was executed in this pilot, so the split is from reading
 
 bin/fm-dispatch-resolve.sh does nothing on the network unless TYPESAFE_API_KEY is set in the environment or in the home's .env file.
 If both are absent it prints a one-line dispatch-resolve: off notice, with a parenthetical, on stderr and exits 0.
-A never-send list, when present and matched, prints dispatch-resolve: off with a parenthetical that says nothing was sent, on stderr, and exits 0.
-The matcher compares request text with the list and sends nothing on a match.
+Unverified: when a never-send list prints an off line, including when the list cannot be read or checked, was not confirmed.
 When the key is present, the script POSTs the project name and the brief's task sections to https://api.typesafe.ai/v1/systemone.
 The model sees the rule text, not the quota numbers.
 Local code then applies confidence floors and ranks eligible candidates by spendPriority.
 A clear result prints one profile line for spawn.
 ambiguous, escalate, and error also exit 0.
 They mean the first mate continues with the ordinary intake instead of treating the tool as a hard stop.
-Exit 2 is reserved for a usage or configuration error: an unreadable brief, an unreadable or malformed rules file, an unknown flag, or missing jq.
+Unverified: which usage errors exit 2, and whether they run before or after the key gate, was not confirmed.
 
 ## A non-clear result does not launch by itself
 
@@ -104,7 +103,7 @@ The skill says it does not replace this intake.
 The chosen profile is passed to bin/fm-spawn.sh.
 Spawn refuses a harness name it has no launch template for, a mode the brief does not agree with, and a copy that is not isolated.
 A raw launch command is the escape hatch for an unverified adapter.
-Spawn still refuses that raw command when effort is ultra, and when a configured dispatch profile receipt is present.
+Unverified: which raw launch commands spawn still refuses was not confirmed.
 AGENTS.md section 4 tells the first mate not to dispatch on an unverified adapter.
 An explicit backend flag applies only to that spawn.
 A missing tool or a failed login is a blocker.
