@@ -74,8 +74,9 @@ The yolo refusal is in the same spawn block as the mode check.
 ## Working and held
 
 Once the copy is accepted, the worker reads the brief and edits only that copy.
-A needs-decision or blocked line stays open until a resolved line with the same key is appended.
-A later done line does not close it.
+A needs-decision or blocked line stays open until a resolved line with the same key is appended, or a verified captain-held transfer closes it.
+Workers are told a done line will not close it, but the status fold does retire every open decision when a ship or scout writes its own terminal done or failed line.
+A second mate's done line does not close a decision.
 The answer is written by the sender that resolves the key, not by hoping the worker types the closing line.
 That answer path is owned by bin/fm-send.sh and is described on the second-mate page when the target is a second mate.
 For an ordinary worker the same resolve flag closes the record.

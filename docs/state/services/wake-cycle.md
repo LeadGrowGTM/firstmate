@@ -39,6 +39,7 @@ If the turn stops before the acknowledgement, the rows are still there for the n
 stateDiagram-v2
     [*] --> Polling
     Polling --> Silent: nothing actionable
+    Silent --> Polling
     Polling --> Queued: wake row appended
     Queued --> Shown: drain presents the row
     Shown --> Consumed: ack-through matches
@@ -71,6 +72,7 @@ Current state comes from bin/fm-crew-state.sh when the action depends on it.
 ## Stopping early keeps the event
 
 The chart's return from Shown to Queued is the interruption case.
+That arrow is conceptual: the row never leaves the queue until the acknowledgement deletes it.
 The drain has already shown the row.
 The acknowledgement has not consumed it.
 The next drain shows it again.

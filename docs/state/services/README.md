@@ -11,6 +11,7 @@ sources:
   - bin/fm-watch.sh
   - bin/fm-wake-lib.sh
   - bin/fm-send.sh
+  - AGENTS.md
 diagramLinks:
   Lifecycle: task-lifecycle
   Wakes: wake-cycle
@@ -49,7 +50,8 @@ A wake is not a step inside a merge, and a merge is not a step inside dispatch.
 Each task has a status log and a metadata file under the home's state directory.
 The status log is an append-only history of events, not the current truth.
 bin/fm-crew-state.sh is the owner of current-state reconciliation.
-docs/architecture.md states that, and this page does not restate the reconciler's code.
+AGENTS.md states that, in the layout section and the supervision section, and docs/architecture.md describes how the script reads run and pane evidence.
+This page does not restate the reconciler's code.
 The wake queue is state/.wake-queue.
 Second-mate reply expectations are state/pending-replies/.
 Those paths are private to the home and are not part of the git project the worker edits.

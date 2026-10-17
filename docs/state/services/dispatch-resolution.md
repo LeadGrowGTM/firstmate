@@ -33,8 +33,10 @@ Every spawn needs a concrete harness, and sometimes a model and an effort.
 The first mate chooses them before launch.
 Spawn checks the concrete result.
 It does not choose a profile from a configured array on its own.
-When crew-dispatch rules exist, spawn refuses a launch that names no harness, and it validates the profile it is given.
-Delivery mode is a separate input that spawn checks against the brief and the project's registered posture.
+When crew-dispatch rules exist, spawn refuses a crewmate or scout launch that names no harness, and it validates the profile it is given.
+A second mate is exempt.
+Delivery mode is a separate input.
+Spawn refuses a mode that disagrees with the brief, and it only prints a notice when the mode is below the project's registered posture.
 
 ```mermaid
 stateDiagram-v2
@@ -47,6 +49,7 @@ stateDiagram-v2
     Intake --> Ranked: array passes three gates
     Intake --> Launch: single candidate
     Ranked --> Launch: highest known spendPriority
+    Ranked --> Reported: a tie or unrankable set stops and reports
     Clear --> Launch
 ```
 
@@ -59,17 +62,16 @@ Unverified: no dispatch was executed in this pilot, so the split is from reading
 ## The typed resolver is opt-in
 
 bin/fm-dispatch-resolve.sh does nothing on the network unless TYPESAFE_API_KEY is set in the environment or in the home's .env file.
-If both are absent it prints dispatch-resolve: off and exits 0.
-A never-send list, when present and matched, takes the same off path and sends nothing.
-The header describes that list.
-This pilot did not open the matcher function.
+If both are absent it prints a one-line dispatch-resolve: off notice, with a parenthetical, on stderr and exits 0.
+A never-send list, when present and matched, prints dispatch-resolve: off with a parenthetical that says nothing was sent, on stderr, and exits 0.
+The matcher compares request text with the list and sends nothing on a match.
 When the key is present, the script POSTs the project name and the brief's task sections to https://api.typesafe.ai/v1/systemone.
 The model sees the rule text, not the quota numbers.
 Local code then applies confidence floors and ranks eligible candidates by spendPriority.
 A clear result prints one profile line for spawn.
 ambiguous, escalate, and error also exit 0.
 They mean the first mate continues with the ordinary intake instead of treating the tool as a hard stop.
-Exit 2 is reserved for a bad invocation or a broken rules file.
+Exit 2 is reserved for a usage or configuration error: an unreadable brief, an unreadable or malformed rules file, an unknown flag, or missing jq.
 
 ## A non-clear result does not launch by itself
 
@@ -92,6 +94,8 @@ If every candidate that meets the strongest reasoning class is too tight to proc
 It does not quietly downgrade the class to save quota.
 A genuine tie is reported for a human choice.
 Array order and harness name are not tie-breakers.
+A tie, or a set that cannot be ranked, stops and reports.
+It does not launch.
 The optional helper bin/fm-quota-choose.sh is a narrower picker for a worker that already fixed the candidate order.
 The skill says it does not replace this intake.
 

@@ -3,7 +3,7 @@ id: guarded-merge
 title: Guarded merge
 kind: statechart
 status: implemented
-summary: A GitHub or GitLab landing is checked live and then confirmed, a Gerrit change is never submitted, and a local-only branch fast-forwards only when it is a clean descendant.
+summary: A GitHub or GitLab landing is checked live and then confirmed, a Gerrit change is never submitted, and a local-only branch fast-forwards only when it is a clean descendant and its hold is released.
 parent: fleet-runtime
 sources:
   - bin/fm-pr-merge.sh
@@ -47,16 +47,18 @@ stateDiagram-v2
     Chosen --> GerritStop: Gerrit change
     Chosen --> Local: local-only branch
     Github --> Merged: merge command accepted
-    Github --> Stopped: a live check fails
-    Gitlab --> Landed: live checks pass
-    Gitlab --> Stopped: a live condition fails
+    Github --> Stopped: a live check fails or the merge command fails
+    Gitlab --> Accepted: glab merge accepted
+    Gitlab --> Stopped: a live condition fails or the merge command fails
+    Accepted --> Recorded: read-back shows merged
+    Accepted --> Queued: could not confirm, exit 0, no outcome recorded
     Local --> Landed: fast-forward succeeds
-    Local --> Stopped: not a fast-forward
+    Local --> Stopped: hold open, checkout not clean or not on default, or not a fast-forward
     GerritStop --> Stopped: submit refused
     Merged --> Recorded: forge read-back shows merged
     Merged --> Queued: only queued, no outcome recorded
     Merged --> Stopped: neither merged nor queued
-    Landed --> Recorded: landing confirmed
+    Merged --> Stopped: read-back could not be read
 ```
 
 ## GitHub checks are live
@@ -70,14 +72,16 @@ A push that arrives between the read and the merge fails the merge instead of la
 The default method is squash when the caller did not pass one.
 While an away record exists, the authority read and the forge command share that record's lock.
 A required check that has not reported is missing, not red.
-An attended waiver can name one check.
-Unverified: the waiver flag parser was not line-traced beyond the header that describes it.
+An attended merge may waive one red check with --allow-red and one unreported required check with --allow-missing, each by exact name.
+Both are refused while an away record exists and are not accepted on GitLab.
 
 ## The merge is bound to the commit that was checked
 
 The merge-command-accepted arrow is the gh invocation that includes --match-head-commit.
 If that command itself fails, the script exits with the command's status and records no landed outcome.
+That failure is the GitHub stop for a merge command, distinct from a live check that never issues the command.
 After the command returns success, the script reads the pull request again.
+If that read-back cannot be read, the script exits 1 and records no landed outcome.
 A read-back that shows merged continues to the outcome record.
 A read-back that shows only queued exits 0 and records no landed outcome.
 A read-back that is neither merged nor queued is refused and names the state it saw.
@@ -86,10 +90,13 @@ docs/architecture.md states the same confirmation rule for a merge the poll disc
 ## GitLab
 
 The GitLab path is a merge request URL merged through glab, with the instance taken from the URL.
+Passing the live checks only precedes the merge command.
 docs/architecture.md says the live read must show the request open, mergeable, conflict-free, with blocking discussions resolved and a successful pipeline at the current head.
 The call is glab mr merge with the project URL, --sha set to the verified head, and --yes.
 If that command fails, the script exits with the command's status.
-If the command succeeds but the merge cannot be confirmed, the script exits 0 and records no landed outcome.
+If the command succeeds, landing is known only after gitlab_confirm_merged reads the request back.
+A read-back that shows merged continues to the outcome record.
+If the merge cannot be confirmed, the script exits 0 and records no landed outcome.
 
 ## Gerrit is not submitted
 
@@ -111,11 +118,13 @@ The script prints the short hashes before and after when the fast-forward succee
 
 ## After landing
 
-A confirmed merge writes a durable outcome through the shared merge-outcome helper rather than leaving the fact in the merging agent's memory.
-Cleanup then runs the landed-work test on the task lifecycle page.
+A confirmed GitHub or GitLab merge writes a durable outcome through the shared merge-outcome helper rather than leaving the fact in the merging agent's memory.
+A local-only fast-forward writes no merge outcome.
+It prints the hashes and appends to the optional fleet ledger.
+Cleanup then runs bin/fm-teardown.sh's landed-work test, described on the task lifecycle page.
 A request that is queued or whose merge cannot be confirmed records no landed outcome and leaves its poll armed.
 A red request is refused by the live check before any merge command.
 That refusal records no landed outcome and does not change the poll.
 The poll stays armed because the request was registered, not because the refusal re-armed it.
-Unverified: the outcome helper's file format was not opened in this pilot.
+bin/fm-merge-outcome-lib.sh owns the outcome's destination and deduplication.
 The merge script's header and docs/architecture.md name it as the publisher.

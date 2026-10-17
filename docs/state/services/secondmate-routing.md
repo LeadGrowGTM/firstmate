@@ -46,16 +46,19 @@ stateDiagram-v2
     Reported --> Published: parent channel has the fact
     Expected --> Unconfirmed: remote transport lost
     Unconfirmed --> Expected: same correlation resent
-    Inbox --> Missing: no correlated report
+    Inbox --> Missing: request turn done, grace elapsed, no correlated report
     Missing --> RecoverySent: one recovery request
     RecoverySent --> Reported: correlated line seen
     RecoverySent --> Escalated: still no correlated report
+    RecoverySent --> Escalated: recovery delivery failed or unknown
+    Unconfirmed --> Escalated: delivery still unknown
+    Escalated --> Reported: correlated line seen
 ```
 
 ## The expectation is stored before delivery
 
 When the target's metadata says kind=secondmate, bin/fm-send.sh uses the from-firstmate carrier owned by bin/fm-operational-input.sh.
-The carrier label is the literal [fm-from-firstmate].
+The carrier label is the literal [fm-from-firstmate] followed by an invisible U+2063 separator.
 An ordinary worker, an explicit backend target, and the key-only path are not marked.
 For a reply-bearing marked request, bin/fm-pending-reply-lib.sh records an expectation under state/pending-replies/ before delivery.
 The record gets a privacy-safe correlation id.
@@ -69,7 +72,7 @@ A remote second mate receives the same inbox record through an SSH leg that writ
 Exit 0 means the record was written.
 A lost transport (ssh exit 255) is retried once on the identical leg, because the remote write deduplicates the same request onto the same record.
 A transport that exceeds its time budget (exit 124, FM_SEND_REMOTE_BUDGET, default 30 seconds) is not retried.
-Either way, if completion is still unknown, the command prints one resend that sets FM_PENDING_REPLY_EXISTING_CORR to the existing id.
+Either way, for a reply-bearing request whose completion is still unknown, the command exits 1 and prints one resend that sets FM_PENDING_REPLY_EXISTING_CORR to the existing id.
 A non-255 failure on that retry also prints the same resend.
 That resend must be the one printed.
 A new correlation would create a second expectation.
@@ -80,6 +83,8 @@ The remote writer is bin/fm-remote-secondmate-control.sh, which exits 0 once the
 
 The pending-reply library resolves an expectation only from a correlated line in the asked task's parent status log, or from a document that line points to.
 Transport success, chat text, unrelated status activity, and another task quoting the token do not count.
+Missing is not a stored phase.
+It is the point where the request turn is done, the grace has elapsed, and there is still no correlated report.
 If the mate answers only in its own chat, the parent sends one recovery request asking for a repost on the parent channel.
 After that request the record's phase is recovery_sent, not the original awaiting state.
 The recovery request and the missed-report escalation each wait out a grace period, 120 seconds unless FM_PENDING_REPLY_GRACE_SECS says otherwise, measured from the relevant turn's completion.
