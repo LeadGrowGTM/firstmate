@@ -47,7 +47,9 @@ stateDiagram-v2
     Expected --> Unconfirmed: remote transport lost
     Unconfirmed --> Expected: same correlation resent
     Inbox --> Missing: no correlated report
-    Missing --> Expected: one recovery request
+    Missing --> RecoverySent: one recovery request
+    RecoverySent --> Reported: correlated line seen
+    RecoverySent --> Escalated: still no correlated report
 ```
 
 ## The expectation is stored before delivery
@@ -65,20 +67,26 @@ An explicit fire-and-forget send uses the same inbox and creates no expectation.
 
 A remote second mate receives the same inbox record through an SSH leg that writes the remote home's steering inbox.
 Exit 0 means the record was written.
-A lost transport, including ssh exit 255, means completion is unknown.
-The send retries the identical leg once, because the remote write deduplicates the same request onto the same record.
-If it is still unknown, the command prints one resend that sets FM_PENDING_REPLY_EXISTING_CORR to the existing id.
+A lost transport (ssh exit 255) is retried once on the identical leg, because the remote write deduplicates the same request onto the same record.
+A transport that exceeds its time budget (exit 124, FM_SEND_REMOTE_BUDGET, default 30 seconds) is not retried.
+Either way, if completion is still unknown, the command prints one resend that sets FM_PENDING_REPLY_EXISTING_CORR to the existing id.
+A non-255 failure on that retry also prints the same resend.
 That resend must be the one printed.
 A new correlation would create a second expectation.
-Unverified: the SSH retry loop was read from the bin/fm-send.sh header, and the remote writer in bin/fm-remote-secondmate-control.sh was not opened in this pilot.
+A fire-and-forget send that is still unconfirmed exits 3 and tells the caller to retry with the same delivery id, and it creates no correlation.
+The remote writer is bin/fm-remote-secondmate-control.sh, which exits 0 once the inbox record exists.
 
 ## What counts as an answer
 
 The pending-reply library resolves an expectation only from a correlated line in the asked task's parent status log, or from a document that line points to.
 Transport success, chat text, unrelated status activity, and another task quoting the token do not count.
 If the mate answers only in its own chat, the parent sends one recovery request asking for a repost on the parent channel.
-If that recovery also finishes without a correlated report, the parent escalates once.
-It does not loop and it does not let the record expire quietly.
+After that request the record's phase is recovery_sent, not the original awaiting state.
+The recovery request and the missed-report escalation each wait out a grace period, 120 seconds unless FM_PENDING_REPLY_GRACE_SECS says otherwise, measured from the relevant turn's completion.
+When config/wait-no-turns exists, the recovery request is held back while the mate has its own open decision or blocker.
+If the recovery turn also ends without a correlated report, the phase becomes escalated and a keyed decision is opened.
+A recovery whose delivery failed or stayed unknown escalates once as well, without that grace.
+The parent does not loop and it does not let the record expire quietly.
 A same-basename copy from the mate home's status file onto the parent channel repairs a home mix-up.
 It is not permission to treat an arbitrary file in the mate home as the answer.
 

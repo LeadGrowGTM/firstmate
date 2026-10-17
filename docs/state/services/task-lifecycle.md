@@ -82,13 +82,18 @@ For an ordinary worker the same resolve flag closes the record.
 
 ## Ready means the commit is visible elsewhere
 
-A done line is accepted only when the named head exists outside the disposable copy.
-bin/fm-dod-lib.sh checks that.
+For a ship task, a done line that reports the work as ready is accepted only when the named head exists outside the disposable copy.
+That gate always applies in direct-PR and local-only.
+In no-mistakes it applies when the note says CI is ready or the change is published.
+Scout tasks and other done lines are not gated.
+bin/fm-dod-lib.sh checks the ship gate.
 For local-only, a branch in the project clone that contains the commit is enough.
 A remote-tracking ref in the worker copy or in the project clone also counts.
-If the only place the commit exists is the disposable copy, the done line is refused with the reason that the named head is unreachable outside the worker copy.
-A pull request URL that the task record already says is on the forge can satisfy the gate without that ref walk.
-Unverified: the forge-URL shortcut was read at fm_dod_accept_ship_done and was not exercised against a live forge.
+If the only place the commit exists is the disposable copy, the done line is refused because the named head is unreachable outside the worker copy.
+A Gerrit change is checked by comparing the change's current patch set to the copy's HEAD tree.
+In no-mistakes that comparison runs only after the copy's own passed run has returned custody of the branch.
+A pull request URL satisfies the gate without that ref walk when the task record's pr= equals the URL and either a recorded pr_head exists in a mode where the forge head is the named head, or the merge was already notified, or the change is Gerrit.
+Unverified: that forge shortcut and the Gerrit patch-set read were not exercised against a live forge.
 
 ## Approved landing
 
@@ -103,7 +108,8 @@ bin/fm-teardown.sh inspects the copy before it returns the slot.
 Uncommitted changes refuse cleanup.
 For local-only, commits that are not on the default branch and not on a remote also refuse, and the message says to merge locally first.
 For other modes, commits that are not on a remote and not already landed refuse.
-A flag that hides tracked edits, assume-unchanged or skip-worktree, refuses as well.
+The automatic cleanup sweep (--only-if-stopped) also refuses a copy with any tracked path flagged assume-unchanged or skip-worktree, because status cannot show edits hidden behind those flags.
+Ordinary cleanup does not make that check.
 The force flag can skip the ordinary dirty and landed checks, and the script header says that flag is the explicit discard authorization.
 Without it, cleanup stops and the copy stays.
 Unverified: the force flag's full interaction with second-mate retirement was not line-traced beyond the header.

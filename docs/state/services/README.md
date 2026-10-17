@@ -27,7 +27,7 @@ diagramDetails:
 
 The fleet runtime is the set of bash scripts and files that survive a restarted chat.
 The first mate follows them.
-A worker cannot invent a second copy of the rules in its own window and have that copy win.
+The scripts and on-disk records, not any chat window's memory, are the source of truth after a restart.
 
 ```mermaid
 flowchart LR

@@ -1,5 +1,8 @@
 projects/
 state/
+# docs/state is the tracked system map. The unanchored state/ pattern above would ignore it.
+!docs/state/
+!docs/state/**
 data/
 scratchpad*
 .no-mistakes/

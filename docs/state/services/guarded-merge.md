@@ -24,8 +24,8 @@ diagramDetails:
   - diagram: 0
     edge:
       from: Github
-      to: Landed
-      label: live checks pass
+      to: Merged
+      label: merge command accepted
     section: The merge is bound to the commit that was checked
 ---
 
@@ -46,12 +46,16 @@ stateDiagram-v2
     Chosen --> Gitlab: GitLab merge request
     Chosen --> GerritStop: Gerrit change
     Chosen --> Local: local-only branch
-    Github --> Landed: live checks pass
+    Github --> Merged: merge command accepted
     Github --> Stopped: a live check fails
     Gitlab --> Landed: live checks pass
+    Gitlab --> Stopped: a live condition fails
     Local --> Landed: fast-forward succeeds
     Local --> Stopped: not a fast-forward
     GerritStop --> Stopped: submit refused
+    Merged --> Recorded: forge read-back shows merged
+    Merged --> Queued: only queued, no outcome recorded
+    Merged --> Stopped: neither merged nor queued
     Landed --> Recorded: landing confirmed
 ```
 
@@ -71,19 +75,21 @@ Unverified: the waiver flag parser was not line-traced beyond the header that de
 
 ## The merge is bound to the commit that was checked
 
-The live-checks-pass arrow is the gh invocation that includes --match-head-commit.
-After the command returns, the script reads the pull request again.
-Only a confirmed landing records a landed outcome.
-A result that is neither merged nor queued is refused and names the state it saw.
-A queued request does not count as landed.
+The merge-command-accepted arrow is the gh invocation that includes --match-head-commit.
+If that command itself fails, the script exits with the command's status and records no landed outcome.
+After the command returns success, the script reads the pull request again.
+A read-back that shows merged continues to the outcome record.
+A read-back that shows only queued exits 0 and records no landed outcome.
+A read-back that is neither merged nor queued is refused and names the state it saw.
 docs/architecture.md states the same confirmation rule for a merge the poll discovers later.
 
 ## GitLab
 
 The GitLab path is a merge request URL merged through glab, with the instance taken from the URL.
 docs/architecture.md says the live read must show the request open, mergeable, conflict-free, with blocking discussions resolved and a successful pipeline at the current head.
-Unverified: this pilot did not re-read the glab argument list in bin/fm-pr-merge.sh.
-Treat the GitLab box as documented behavior from that architecture section until that call is opened.
+The call is glab mr merge with the project URL, --sha set to the verified head, and --yes.
+If that command fails, the script exits with the command's status.
+If the command succeeds but the merge cannot be confirmed, the script exits 0 and records no landed outcome.
 
 ## Gerrit is not submitted
 
@@ -107,6 +113,7 @@ The script prints the short hashes before and after when the fast-forward succee
 
 A confirmed merge writes a durable outcome through the shared merge-outcome helper rather than leaving the fact in the merging agent's memory.
 Cleanup then runs the landed-work test on the task lifecycle page.
-A red or unconfirmed request stays armed for another poll.
+A request that is queued or whose merge cannot be confirmed records no landed outcome and leaves its poll armed.
+A red request is refused before any merge command and changes nothing.
 Unverified: the outcome helper's file format was not opened in this pilot.
 The merge script's header and docs/architecture.md name it as the publisher.

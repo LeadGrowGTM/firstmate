@@ -32,7 +32,9 @@ diagramDetails:
 Every spawn needs a concrete harness, and sometimes a model and an effort.
 The first mate chooses them before launch.
 Spawn checks the concrete result.
-It does not look up the delivery mode, and it does not pick a profile array on its own.
+It does not choose a profile from a configured array on its own.
+When crew-dispatch rules exist, spawn refuses a launch that names no harness, and it validates the profile it is given.
+Delivery mode is a separate input that spawn checks against the brief and the project's registered posture.
 
 ```mermaid
 stateDiagram-v2
@@ -96,7 +98,10 @@ The skill says it does not replace this intake.
 ## What spawn still checks
 
 The chosen profile is passed to bin/fm-spawn.sh.
-Spawn still refuses an unverified harness, a mode the brief does not agree with, and a copy that is not isolated.
+Spawn refuses a harness name it has no launch template for, a mode the brief does not agree with, and a copy that is not isolated.
+A raw launch command is the escape hatch for an unverified adapter.
+Spawn still refuses that raw command when effort is ultra, and when a configured dispatch profile receipt is present.
+AGENTS.md section 4 tells the first mate not to dispatch on an unverified adapter.
 An explicit backend flag applies only to that spawn.
 A missing tool or a failed login is a blocker.
 The instructions say not to retry on a different backend in silence.

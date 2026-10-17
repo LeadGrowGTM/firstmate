@@ -33,9 +33,9 @@ diagramDetails:
 Firstmate is a directory of instructions and scripts that turns a coding agent into a supervisor.
 That supervisor is the only agent that talks with the person running the fleet.
 It launches workers in isolated git copies, watches them, and hands back a pull request, a local merge, or a written report.
-This map was read from source on 2026-10-16.
+This map was read from source on 2026-10-16 and corrected against those scripts the same day.
 The scripts below were not executed as a live fleet during this pilot.
-Choose a box with a + for one of the five hardest flows.
+Choose a box with a + to open the page for that flow.
 
 ```mermaid
 flowchart LR

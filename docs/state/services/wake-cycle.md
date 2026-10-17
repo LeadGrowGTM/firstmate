@@ -74,9 +74,10 @@ The chart's return from Shown to Queued is the interruption case.
 The drain has already shown the row.
 The acknowledgement has not consumed it.
 The next drain shows it again.
-Acknowledging the same sequence twice is refused after a successful acknowledgement.
-That rule is in the supervisor instructions and is pinned by the drain's acknowledgement messages.
-Unverified: the double-ack refusal text was not re-read line by line in this pilot.
+Acknowledging the same sequence again is harmless.
+The drain exits 0 and consumes nothing, and it prints a note only when a presented row above that cutoff is still waiting.
+The supervisor instructions tell the handler not to acknowledge a sequence twice (AGENTS.md section 8).
+A separate command, bin/fm-branch-outcome.sh mark-processed, does refuse an already-processed sequence.
 The required command format was read at the WAKE_ACK_REQUIRED print.
 
 ## How the watcher stays armed
