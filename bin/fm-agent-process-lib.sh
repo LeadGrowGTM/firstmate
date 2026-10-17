@@ -115,8 +115,10 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
   fi
 }
 
-# Recovery proof, independent of harness names: EVERY same-user process rooted
-# in the recorded copy is a possible surviving worker. No signals are sent.
+# Recovery proof, independent of harness names: every same-user process rooted
+# in the recorded copy is a possible surviving worker, except an orphaned
+# chrome-devtools-axi bridge session on Linux (bin/fm-agent-process.py owns
+# that argv and parentage rule). No signals are sent.
 # Print matching pids; a failed inventory refuses, as does an unreadable live
 # cwd on a process that could be the agent (in the pane's tree or harness-named).
 # Linux uses kernel cwd links, including descendants in subdirectories. macOS

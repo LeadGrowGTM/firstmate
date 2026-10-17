@@ -1615,6 +1615,216 @@ test_secondmate_relaunch_refuses_a_live_home_process() {
   pass 'a secondmate with a live process rooted in its home is still refused'
 }
 
+# A detached chrome-devtools-axi bridge keeps the cwd of the mate that launched
+# it and is reparented to the user session manager when that mate exits. It is
+# not the agent. A harness-named process, and a bridge that is still parented
+# to an ordinary process, still block.
+write_bridge_standin() { # <dir>
+  mkdir -p "$1/tools/chrome-devtools-axi/dist/bin" "$1/bin"
+  cat > "$1/bin/npm" <<'SH'
+#!/bin/bash
+exec /bin/sleep 180
+SH
+  cat > "$1/bin/chrome" <<'SH'
+#!/bin/bash
+exec /bin/sleep 180
+SH
+  chmod +x "$1/bin/npm" "$1/bin/chrome"
+  cat > "$1/tools/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js" <<'JS'
+const { spawn } = require('child_process');
+const fs = require('fs');
+fs.writeFileSync(process.env.BRIDGE_PIDFILE, String(process.pid));
+spawn(process.env.BRIDGE_NPM, ['exec', 'chrome-devtools-mcp@latest', '--isolated', '--headless'], { stdio: 'ignore' });
+spawn(process.env.BRIDGE_CHROME, ['--headless=new', '--enable-automation'], { stdio: 'ignore' });
+if (process.env.BRIDGE_GROK) {
+  const child = spawn(process.env.BRIDGE_GROK, ['180'], { stdio: 'ignore' });
+  fs.writeFileSync(process.env.BRIDGE_PIDFILE + '.grok', String(child.pid));
+}
+setInterval(() => {}, 1000);
+JS
+}
+
+home_rooted_pids() { # <worktree>
+  python3 - "$1" <<'PY'
+import os, sys
+from pathlib import Path
+root = os.path.realpath(sys.argv[1])
+for proc in Path('/proc').iterdir():
+    if not proc.name.isdigit():
+        continue
+    try:
+        if proc.stat().st_uid != os.geteuid():
+            continue
+        cwd = os.path.realpath(os.readlink(proc / 'cwd'))
+    except OSError:
+        continue
+    if cwd == root or cwd.startswith(root + os.sep):
+        print(proc.name)
+PY
+}
+
+remember_rooted_pids() { # <pid>...
+  local pid
+  for pid in "$@"; do
+    [ -n "$pid" ] || continue
+    ROOTED_PIDS+=("$pid")
+  done
+}
+
+setup_bridge_mate() { # <case-dir> <id>
+  local dir=$1 id=$2 home="$1/home"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data/render" "$dir/smhome/bin"
+  printf '%s\n' "$id" > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo "window=fmses:fm-$id"
+    echo "endpoint_task_id=$id"
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo 'harness=claude'
+    echo 'kind=secondmate'
+    echo 'mode=secondmate'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+    echo "home=$dir/smhome"
+    echo 'backend=tmux'
+  } > "$home/state/$id.meta"
+  printf 'fm-%s\n' "$id" > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  write_bridge_standin "$dir"
+}
+
+launch_orphan_bridge() { # <case-dir>
+  local dir=$1 node
+  node=$(command -v node)
+  BRIDGE_PIDFILE="$dir/bridge.pid" BRIDGE_NPM="$dir/bin/npm" BRIDGE_CHROME="$dir/bin/chrome" \
+    BRIDGE_GROK="${BRIDGE_GROK:-}" \
+    python3 - "$dir/smhome/data/render" "$node" \
+      "$dir/tools/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js" <<'PY'
+import os, sys
+home, node, script = sys.argv[1:]
+if os.fork() > 0:
+    raise SystemExit(0)
+os.setsid()
+os.chdir(home)
+os.execv(node, ["node", script])
+PY
+  local i
+  for ((i=0; i<50; i++)); do
+    [ -s "$dir/bridge.pid" ] || { sleep 0.05; continue; }
+    [ -z "${BRIDGE_GROK:-}" ] || [ -s "$dir/bridge.pid.grok" ] || { sleep 0.05; continue; }
+    break
+  done
+  [ -s "$dir/bridge.pid" ] || fail 'the orphan bridge never started'
+}
+
+snapshot_home_pids() { # <case-dir>
+  local dir=$1 pids pid
+  local i
+  pids=
+  for ((i=0; i<50; i++)); do
+    pids=$(home_rooted_pids "$dir/smhome")
+    [ -n "$pids" ] || { sleep 0.05; continue; }
+    [ "$(printf '%s\n' "$pids" | grep -c .)" -ge 3 ] && break
+    sleep 0.05
+  done
+  [ "$(printf '%s\n' "$pids" | grep -c .)" -ge 3 ] \
+    || fail "the bridge tree was not rooted in the mate home: $pids"
+  printf '%s\n' "$pids" > "$dir/fake/process-pids"
+  while IFS= read -r pid; do
+    remember_rooted_pids "$pid"
+  done <<EOF
+$pids
+EOF
+}
+
+stop_orphan_bridge() { # <bridge-pid>
+  [ -n "${1:-}" ] || return 0
+  kill -TERM -- -"$1" 2>/dev/null || true
+  kill "$1" 2>/dev/null || true
+}
+
+test_secondmate_relaunch_ignores_orphaned_browser_bridge() {
+  local dir bpid out rc=0
+  [ "$(uname -s)" = Linux ] || { echo 'skip - orphan bridge proof needs Linux /proc'; return 0; }
+  dir=$(new_case orphan-bridge sm-bridge)
+  setup_bridge_mate "$dir" sm-bridge
+  unset BRIDGE_GROK
+  launch_orphan_bridge "$dir"
+  bpid=$(cat "$dir/bridge.pid")
+  snapshot_home_pids "$dir"
+  grep -qx "$bpid" "$dir/fake/process-pids" \
+    || fail 'the bridge was not actually rooted in the mate home'
+  out=$(run_control "$dir" sm-bridge relaunch) || rc=$?
+  expect_code 0 "$rc" "an orphaned browser bridge should not block restart: $out"
+  assert_contains "$out" 'relaunched sm-bridge' 'the replacement was not reported'
+  kill -0 "$bpid" 2>/dev/null \
+    || fail 'the bridge was killed instead of ignored'
+  stop_orphan_bridge "$bpid"
+  pass 'a secondmate restarts while an orphaned browser bridge keeps its cwd in the home'
+}
+
+test_secondmate_relaunch_refuses_harness_descendant_of_browser_bridge() {
+  local dir bpid grok out rc=0
+  [ "$(uname -s)" = Linux ] || { echo 'skip - orphan bridge proof needs Linux /proc'; return 0; }
+  dir=$(new_case bridge-agent sm-agent)
+  setup_bridge_mate "$dir" sm-agent
+  cp /bin/sleep "$dir/bin/grok"
+  BRIDGE_GROK="$dir/bin/grok" launch_orphan_bridge "$dir"
+  unset BRIDGE_GROK
+  bpid=$(cat "$dir/bridge.pid")
+  grok=$(cat "$dir/bridge.pid.grok")
+  snapshot_home_pids "$dir"
+  out=$(FM_TEST_CONTROL_EXIT_WAIT=0.3 run_control "$dir" sm-agent relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a harness-named child of the bridge was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the harness process'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${grok}([^0-9]|$)" \
+    || fail "the refusal did not name the harness-named process: $out"
+  if printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${bpid}([^0-9]|$)"; then
+    fail "the orphan bridge itself was still treated as the agent: $out"
+  fi
+  kill -0 "$grok" 2>/dev/null || fail 'the harness-named process died during the refused restart'
+  stop_orphan_bridge "$bpid"
+  pass 'a harness-named descendant of an orphaned browser bridge still blocks restart'
+}
+
+test_secondmate_relaunch_refuses_bridge_still_parented() {
+  local dir node held out rc=0
+  [ "$(uname -s)" = Linux ] || { echo 'skip - orphan bridge proof needs Linux /proc'; return 0; }
+  dir=$(new_case parented-bridge sm-parent)
+  setup_bridge_mate "$dir" sm-parent
+  node=$(command -v node)
+  unset BRIDGE_GROK
+  BRIDGE_PIDFILE="$dir/bridge.pid" BRIDGE_NPM="$dir/bin/npm" BRIDGE_CHROME="$dir/bin/chrome" \
+    bash -c 'cd "$1" && exec -a node "$2" "$3"' _ \
+      "$dir/smhome/data/render" "$node" \
+      "$dir/tools/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js" &
+  held=$!
+  remember_rooted_pids "$held"
+  local i
+  for ((i=0; i<50; i++)); do
+    [ -s "$dir/bridge.pid" ] && break
+    sleep 0.05
+  done
+  [ -s "$dir/bridge.pid" ] || fail 'the parented bridge never started'
+  [ "$(cat "$dir/bridge.pid")" = "$held" ] \
+    || fail 'the parented bridge was reparented, so this case would prove nothing'
+  snapshot_home_pids "$dir"
+  out=$(FM_TEST_CONTROL_EXIT_WAIT=0.3 run_control "$dir" sm-parent relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a bridge still parented to an ordinary process was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the parented bridge'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${held}([^0-9]|$)" \
+    || fail "the refusal did not name the parented bridge: $out"
+  kill -0 "$held" 2>/dev/null || fail 'the parented bridge died during the refused restart'
+  kill "$held" 2>/dev/null || true
+  pass 'a browser bridge that is still parented to an ordinary process blocks restart'
+}
+
 # The watcher's secondmate auto-relaunch and a control-plane relaunch must not
 # both launch the same mate. The old agent's exit is exactly the gap a liveness
 # probe reads as a dead mate, so this drives the real watcher through that gap:
@@ -4058,6 +4268,9 @@ test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy
 test_secondmate_relaunch_refuses_borrowed_pane_for_absent_crew_window
 test_secondmate_relaunch_refuses_pane_on_wrong_crew_socket
 test_secondmate_relaunch_refuses_a_live_home_process
+test_secondmate_relaunch_ignores_orphaned_browser_bridge
+test_secondmate_relaunch_refuses_harness_descendant_of_browser_bridge
+test_secondmate_relaunch_refuses_bridge_still_parented
 test_secondmate_relaunch_arms_the_semantic_busy_record
 test_secondmate_relaunch_never_removes_operator_settings
 test_secondmate_relaunch_ignores_invalid_configured_effort_before_stop
