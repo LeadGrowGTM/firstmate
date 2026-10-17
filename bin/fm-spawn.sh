@@ -3524,7 +3524,7 @@ if [ "$KIND" = secondmate ]; then
   else
     echo "warning: secondmate $ID sync skipped before launch: primary default-branch commit cannot be resolved" >&2
   fi
-  mkdir -p "$PROJ_ABS/state" || {
+  (umask 077; mkdir -p -- "$PROJ_ABS/state") || {
     echo "error: could not create secondmate state directory for $PROJ_ABS" >&2
     exit 1
   }

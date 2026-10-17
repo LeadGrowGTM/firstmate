@@ -1039,6 +1039,23 @@ fm_procevent_private_directory_valid() {
   [ "$canonical" = "$normalized" ]
 }
 
+# fm_procevent_state_root_tighten <directory>
+# Drop group and other write on a state root this user owns.
+# The private-directory check refuses those bits, and a directory created
+# under umask 0002 is mode 775 until something clears them.
+# A symlink is not followed.
+# A directory this user does not own is left unchanged so that check still refuses it.
+fm_procevent_state_root_tighten() {
+  local directory=$1 mode
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 0
+  fm_procevent_directory_owned_by_current_user "$directory" || return 0
+  mode=$(fm_pr_file_mode "$directory") || return 1
+  case "$mode" in ''|*[!0-7]*) return 1 ;; esac
+  if [ $((8#$mode & 8#022)) -ne 0 ]; then
+    chmod go-w -- "$directory" || return 1
+  fi
+}
+
 fm_procevent_capture_inbox_prepare() {
   local state=$1 inbox
   state=$(fm_procevent_state_root_resolve "$state") || return 1

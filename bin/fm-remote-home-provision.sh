@@ -206,7 +206,14 @@ for operational_dir in data state config projects; do
     [ -d "$operational_path" ] && [ ! -L "$operational_path" ] \
       || die "remote home has unsafe operational directory: $operational_dir"
   else
-    mkdir "$operational_path" || die "cannot create remote operational directory: $operational_dir"
+    # The state root is the directory the Lavish arm checks.
+    # A bare mkdir under umask 0002 creates it mode 775, which that check refuses.
+    if [ "$operational_dir" = state ]; then
+      (umask 077; mkdir -- "$operational_path") \
+        || die "cannot create remote operational directory: $operational_dir"
+    else
+      mkdir "$operational_path" || die "cannot create remote operational directory: $operational_dir"
+    fi
   fi
 done
 if [ -e "$FM_HOME/data/backlog.md" ] || [ -L "$FM_HOME/data/backlog.md" ]; then

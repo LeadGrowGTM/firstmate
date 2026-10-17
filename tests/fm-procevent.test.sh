@@ -5005,4 +5005,63 @@ PATH="$UNDISP/bin:$PATH" FM_HOME="$UNDISP/home" \
   "$ROOT/bin/fm-procevent-lavish.sh" retire "$undisp_art" >/dev/null 2>&1 || true
 pass "arm does not launch beside a stale claim whose process group is alive"
 
+# A secondmate state directory created under umask 0002 is mode 775.
+# The Lavish arm enters through this runner and refuses that mode.
+# When this user owns the directory, the arm clears group and other write.
+# A symlink is not a directory this runner owns, so its target is left alone.
+procevent_mode() {
+  bash -c '. "$1/bin/fm-pr-lib.sh"; fm_pr_file_mode "$2"' _ "$ROOT" "$1"
+}
+
+HMODE="$TMP_ROOT/state-mode"
+mkdir -p "$HMODE/state"
+chmod 775 "$HMODE/state"
+mode_status=0
+mode_out=$(FM_HOME="$HMODE" "$ROOT/bin/fm-procevent.sh" list 2>"$TMP_ROOT/state-mode.err") || mode_status=$?
+[ "$mode_status" -eq 0 ] || fail "an owned group-writable state root was refused: $(cat "$TMP_ROOT/state-mode.err")"
+[ "$mode_out" = "no sources registered" ] || fail "listing an owned group-writable state root did not proceed: $mode_out"
+[ "$(procevent_mode "$HMODE/state")" = 755 ] || fail "an owned mode 775 state root was not tightened to 755"
+chmod 707 "$HMODE/state"
+FM_HOME="$HMODE" "$ROOT/bin/fm-procevent.sh" list >/dev/null \
+  || fail "an owned other-writable state root was refused"
+[ "$(procevent_mode "$HMODE/state")" = 705 ] || fail "an owned mode 707 state root did not lose other write"
+pass "an owned over-permissive state root is tightened before the private-directory check"
+
+HMODE_TARGET="$TMP_ROOT/state-mode-target"
+mkdir -p "$HMODE_TARGET"
+chmod 775 "$HMODE_TARGET"
+rm -rf "$HMODE/state"
+ln -s "$HMODE_TARGET" "$HMODE/state"
+link_status=0
+link_out=$(FM_HOME="$HMODE" "$ROOT/bin/fm-procevent.sh" list 2>&1) || link_status=$?
+[ "$link_status" -ne 0 ] || fail "a symlinked state root was accepted"
+assert_contains "$link_out" "process-event state root is not a private directory" \
+  "a symlinked state root did not keep the private-directory refusal"
+[ "$(procevent_mode "$HMODE_TARGET")" = 775 ] || fail "tightening followed a state-root symlink"
+pass "a state root this runner does not own is still refused"
+
+HARM="$TMP_ROOT/arm-mode"
+mkdir -p "$HARM/state"
+chmod 775 "$HARM/state"
+fm_test_track_procevent_home "$HARM"
+ARM_ART="$TMP_ROOT/arm-mode.html"
+printf '<h1>arm mode</h1>\n' > "$ARM_ART"
+ARM_BIN=$(fm_fakebin "$TMP_ROOT/arm-mode-bin")
+cat > "$ARM_BIN/lavish-axi" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$ARM_BIN/lavish-axi"
+arm_status=0
+arm_out=$(PATH="$ARM_BIN:$PATH" FM_HOME="$HARM" \
+  "$ROOT/bin/fm-procevent-lavish.sh" arm "$ARM_ART" 2>&1) || arm_status=$?
+assert_not_contains "$arm_out" "process-event state root is not a private directory" \
+  "the Lavish arm still refused an owned mode 775 state root"
+[ "$(procevent_mode "$HARM/state")" = 755 ] || fail "the Lavish arm left an owned state root group-writable"
+if [ "$arm_status" -eq 0 ]; then
+  PATH="$ARM_BIN:$PATH" FM_HOME="$HARM" \
+    "$ROOT/bin/fm-procevent-lavish.sh" retire "$ARM_ART" >/dev/null 2>&1 || true
+fi
+pass "the Lavish arm tightens an owned mode 775 state root instead of refusing it"
+
 printf '\nall procevent tests passed\n'

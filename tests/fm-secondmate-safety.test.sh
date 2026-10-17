@@ -544,6 +544,24 @@ test_home_seed_no_projects_end_to_end() {
   pass "home seeding scaffolds, registers, and spawns a project-less home end to end"
 }
 
+test_home_seed_state_root_is_private_under_permissive_umask() {
+  # umask 0002 is what turned a seeded secondmate state directory into mode 775.
+  # The Lavish arm refuses that directory, so seeding must not depend on umask.
+  local home sub mode
+  home="$TMP_ROOT/permissive-umask-seed-home"
+  sub="$TMP_ROOT/permissive-umask-seed-subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  (umask 002
+    FM_HOME="$home" FM_SECONDMATE_CHARTER='private state root' \
+      FM_SECONDMATE_SCOPE='private state root scope' \
+      "$ROOT/bin/fm-home-seed.sh" privstate "$sub" --no-projects >/dev/null) \
+    || fail "seed under umask 0002 failed"
+  mode=$(file_mode "$sub/state")
+  [ "$mode" = 700 ] || fail "seeded state root under umask 0002 was mode $mode, not 700"
+  [ $((8#$mode & 8#022)) -eq 0 ] || fail "seeded state root is still group- or world-writable"
+  pass "home seeding creates a private state root under umask 0002"
+}
+
 test_secondmate_spawn_resolves_punctuated_registry_projects() {
   local home sub sub_abs fakebin log meta projects
   home="$TMP_ROOT/punctuated-spawn-home"
@@ -3061,6 +3079,7 @@ test_home_seed_refuses_missing_filled_charter
 test_home_seed_refuses_placeholder_charter
 test_home_seed_refuses_empty_charter_fields
 test_home_seed_no_projects_end_to_end
+test_home_seed_state_root_is_private_under_permissive_umask
 test_secondmate_spawn_resolves_punctuated_registry_projects
 test_secondmate_spawn_refuses_ambiguous_and_mismatched_registry_bindings
 test_home_seed_refuses_projectful_reused_charter_for_projectless_home

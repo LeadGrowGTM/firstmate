@@ -273,6 +273,7 @@ state_root_bind() {  # [create]
     [ "${1-}" = create ] || return 1
     (umask 077; mkdir -p "$STATE") || return 1
   fi
+  fm_procevent_state_root_tighten "$STATE" || return 1
   STATE=$(fm_procevent_state_root_resolve "$STATE") || return 1
   REG=$(fm_procevent_registry_dir "$STATE")
   EXTENSION_LIFECYCLE_LOCK="$REG/.extension-binding-lifecycle.lock"

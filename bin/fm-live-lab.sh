@@ -530,7 +530,8 @@ cmd_up() {
   git -C "$LAB" fetch -q "$source" "$ref" || die "cannot fetch $ref from $source"
   git -C "$LAB" checkout -q -f -B main FETCH_HEAD || die "cannot check out $ref"
   git -C "$LAB" config user.name lab && git -C "$LAB" config user.email lab@example.invalid
-  mkdir -p "$LAB/state" "$LAB/data" "$LAB/config" "$LAB/projects"
+  mkdir -p "$LAB/data" "$LAB/config" "$LAB/projects"
+  (umask 077; mkdir -p -- "$LAB/state")
   printf 'tmux\n' > "$LAB/config/backend"
   printf 'claude\n' > "$LAB/config/crew-harness"
   printf 'claude sonnet low\n' > "$LAB/config/secondmate-harness"
