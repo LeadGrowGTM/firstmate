@@ -130,6 +130,9 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
 
 The shared same-user process check also guards `dead` endpoints: a live process with cwd in the recorded worktree or a subdirectory blocks relaunch unless it is positively attributed to a second mate's own recorded ship or scout.
 A descendant of a crew pane confirmed at its recorded backend address is attributed to that crew; on Linux, a readable rooted process whose `FM_TASK_ID` matches that mate home's recorded ship or scout task id is attributed too.
+On Linux, one further process is not the agent: a session-leader `node` process reparented to pid 1 or the user session manager, whose arguments are exactly `node` and a path ending in `/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js`, plus descendants of that process.
+A descendant whose kernel name or an argument basename is a harness name still blocks, and a bridge-shaped process that is still parented to an ordinary process still blocks.
+macOS has no equivalent argv proof here, so its cwd inventory is unchanged.
 A process belonging to the mate's own pane, an unattributed process, or an unattributed unreadable possible worker still blocks; an unreadable process inventory refuses.
 Linux reads kernel cwd links, and macOS reads a bounded cwd-only `lsof` inventory.
 

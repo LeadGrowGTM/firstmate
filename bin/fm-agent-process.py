@@ -41,6 +41,82 @@ def agent_named(pid):
             or any(fragment in base for fragment in AGENT_NAME_FRAGMENTS))
 
 
+BRIDGE_SCRIPT_SUFFIX = '/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js'
+
+
+def cmdline(pid):
+    raw = (Path('/proc') / str(pid) / 'cmdline').read_bytes()
+    if not raw:
+        return []
+    parts = raw.split(b'\0')
+    if parts and parts[-1] == b'':
+        parts.pop()
+    return [part.decode('utf-8', 'surrogateescape') for part in parts]
+
+
+def stat_row(pid):
+    row = (Path('/proc') / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()
+    return row[0], int(row[1]), int(row[2]), int(row[3])
+
+
+def harness_argv(argv):
+    for arg in argv:
+        base = os.path.basename(arg).lstrip('-')
+        if not base:
+            continue
+        if (base in AGENT_NAMES or base.startswith('muse-bin-')
+                or any(fragment in base for fragment in AGENT_NAME_FRAGMENTS)):
+            return True
+    return False
+
+
+def orphan_bridge_process(pid):
+    """Detached chrome-devtools-axi bridge reparented off the agent.
+
+    The argv has to be exactly `node` and the bridge script. The process has
+    to be its own session leader, which is what `detached: true` does, and its
+    parent has to be pid 1 or the user session manager. A bridge still parented
+    to an ordinary process is not this case.
+    """
+    try:
+        argv = cmdline(pid)
+        _, ppid, _, sid = stat_row(pid)
+    except (OSError, ValueError, IndexError):
+        return False
+    if sid != int(pid) or len(argv) != 2:
+        return False
+    if os.path.basename(argv[0]) != 'node':
+        return False
+    script = argv[1]
+    if not script.endswith(BRIDGE_SCRIPT_SUFFIX):
+        return False
+    if ppid == 1:
+        return True
+    return session_manager(ppid)
+
+
+def orphan_bridge_noise(pid):
+    """The orphan bridge, or a descendant that is not itself a harness."""
+    try:
+        if agent_named(pid) or harness_argv(cmdline(pid)):
+            return False
+    except OSError:
+        return False
+    current = int(pid)
+    seen = set()
+    hops = 0
+    while current > 1 and current not in seen and hops < 64:
+        seen.add(current)
+        hops += 1
+        if orphan_bridge_process(current):
+            return True
+        try:
+            current = stat_row(current)[1]
+        except (OSError, ValueError, IndexError):
+            return False
+    return False
+
+
 def session_manager(pid):
     try:
         proc = Path('/proc') / str(pid)
@@ -180,6 +256,15 @@ def worktree_processes(root, original, excluded_ancestors=()):
         deleted = cwd.endswith(' (deleted)') and (
             cwd[:-10] == root or cwd[:-10].startswith(root + '/'))
         if (literal or deleted) and (deleted or not task_shell(pid)):
+            # An orphaned chrome-devtools-axi bridge keeps the cwd of whoever
+            # launched it. It is not the agent this proof is guarding. A
+            # harness-named process, including one inside that tree, still
+            # counts. Deleted cwd stays unfiltered.
+            try:
+                if not deleted and orphan_bridge_noise(pid):
+                    continue
+            except (OSError, ValueError, IndexError):
+                pass
             print(pid)
 
 
