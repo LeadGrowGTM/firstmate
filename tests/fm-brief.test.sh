@@ -1869,6 +1869,116 @@ test_task_type_tools_render_and_validate() {
   pass "fm-brief: task-type tools are rendered, omitted when empty, and validated"
 }
 
+# A direct-PR brief for a fork must name the origin repository on the create
+# command. gh otherwise opens the pull request on the fork's parent. The clone
+# under projects/<name> is the source; the upstream remote must not appear.
+test_direct_pr_brief_pins_origin_not_upstream() {
+  local home proj brief out rc instructions
+  home="$TMP_ROOT/fork-pr-home"
+  proj="$home/projects/forkproj"
+  mkdir -p "$proj" "$home/state" "$home/data"
+  git -C "$proj" init -q
+  git -C "$proj" remote add origin 'https://x-access-token:ghp_exampletoken@github.com/LeadGrowGTM/forkproj.git'
+  git -C "$proj" remote add upstream 'https://github.com/kunchenguid/forkproj.git'
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" pin-default forkproj --mode direct-PR >/dev/null \
+    || fail "direct-PR scaffold against a GitHub origin should succeed"
+  brief="$home/data/pin-default/brief.md"
+  assert_grep 'gh-axi pr create --repo LeadGrowGTM/forkproj' "$brief" \
+    "the direct-PR brief did not pin origin's owner/repo"
+  assert_no_grep 'kunchenguid/forkproj' "$brief" "the direct-PR brief named the upstream parent"
+  assert_no_grep 'ghp_exampletoken' "$brief" "the direct-PR brief copied credentials from the origin URL"
+  # shellcheck disable=SC2016  # the brief's backticks are the text under test
+  assert_grep 'Never substitute the `upstream` remote.' "$brief" \
+    "the direct-PR brief did not forbid the upstream remote"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" pin-base forkproj --mode direct-PR --base-branch feature/hub >/dev/null \
+    || fail "direct-PR --base-branch against a GitHub origin should succeed"
+  assert_grep 'gh-axi pr create --repo LeadGrowGTM/forkproj --base feature/hub' \
+    "$home/data/pin-base/brief.md" \
+    "the direct-PR create command did not carry origin and the named base"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" pin-nm forkproj --mode no-mistakes >/dev/null \
+    || fail "no-mistakes scaffold should still succeed when origin is GitHub"
+  assert_no_grep 'pr create --repo' "$home/data/pin-nm/brief.md" \
+    "no-mistakes told the worker to open the pull request; the pipeline owns that"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" pin-gerrit forkproj --mode direct-PR --forge gerrit >/dev/null \
+    || fail "gerrit direct-PR scaffold should still succeed when origin is GitHub"
+  assert_no_grep 'pr create --repo' "$home/data/pin-gerrit/brief.md" \
+    "a Gerrit direct-PR was told to open a GitHub pull request"
+
+  local sshproj="$home/projects/sshproj"
+  mkdir -p "$sshproj"
+  git -C "$sshproj" init -q
+  git -C "$sshproj" remote add origin 'git@github.com:LeadGrowGTM/sshproj.git'
+  git -C "$sshproj" remote add upstream 'https://github.com/kunchenguid/sshproj.git'
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" pin-ssh sshproj --mode direct-PR >/dev/null \
+    || fail "an ssh GitHub origin should scaffold"
+  assert_grep 'gh-axi pr create --repo LeadGrowGTM/sshproj' "$home/data/pin-ssh/brief.md" \
+    "an ssh origin URL was not parsed to owner/repo"
+  assert_no_grep 'kunchenguid/sshproj' "$home/data/pin-ssh/brief.md" \
+    "an ssh-origin brief named the upstream parent"
+
+  local localproj="$home/projects/localproj"
+  mkdir -p "$localproj"
+  git -C "$localproj" init -q
+  git -C "$localproj" remote add origin "file://$localproj"
+  git -C "$localproj" remote add upstream 'https://github.com/kunchenguid/localproj.git'
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" pin-local localproj --mode direct-PR >/dev/null \
+    || fail "a non-GitHub origin should still scaffold"
+  assert_no_grep 'pr create --repo' "$home/data/pin-local/brief.md" \
+    "a non-GitHub origin was pinned as if it were GitHub"
+  assert_no_grep 'kunchenguid/localproj' "$home/data/pin-local/brief.md" \
+    "a non-GitHub origin brief still named the upstream parent"
+  # shellcheck disable=SC2016  # the brief's backticks are the text under test
+  assert_grep 'open a PR with `gh-axi` that is ready for review, not a draft.' \
+    "$home/data/pin-local/brief.md" \
+    "a non-GitHub origin lost the unpinned direct-PR sentence"
+
+  local badproj="$home/projects/badproj"
+  mkdir -p "$badproj"
+  git -C "$badproj" init -q
+  git -C "$badproj" remote add origin 'https://github.com/LeadGrowGTM/forkproj/extra'
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" pin-bad badproj --mode direct-PR 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a GitHub origin that is not one repository should be refused"
+  assert_contains "$out" "not a single owner/repo" "the malformed-origin refusal did not explain itself"
+  assert_absent "$home/data/pin-bad/brief.md" "a malformed origin still wrote a brief"
+  case "$out" in
+    *forkproj/extra*) fail "the refusal printed the origin URL" ;;
+  esac
+
+  mkdir -p "$home/data/pin-promote"
+  cat > "$home/data/pin-promote/brief.md" <<'EOF'
+# Task
+## Captain's intent
+Pin the pull request to the fork.
+
+## Firstmate spec
+Goal: Pin the pull request to the fork.
+Keep the existing reproduction.
+Off-limits: Unrelated files.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
+
+# Setup
+You are in a disposable git worktree of forkproj, at a detached HEAD on a clean default branch.
+EOF
+  printf 'window=fm-pin-promote\nkind=scout\nworktree=/tmp/unused-pin-promote\nproject=%s\n' "$proj" \
+    > "$home/state/pin-promote.meta"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-promote.sh" pin-promote \
+    --mode direct-PR --yolo off --goal 'Pin the pull request to the fork.' \
+    --off-limits 'Unrelated files.' --contracts 'none' 2>&1); rc=$?
+  [ "$rc" -eq 0 ] || fail "promoting a scout on a GitHub-origin project should succeed"$'\n'"$out"
+  instructions="$home/data/pin-promote/ship-instructions.md"
+  assert_grep 'gh-axi pr create --repo LeadGrowGTM/forkproj' "$instructions" \
+    "promotion did not pin origin on the ship instructions"
+  assert_grep 'gh-axi pr create --repo LeadGrowGTM/forkproj' "$home/data/pin-promote/brief.md" \
+    "promotion did not pin origin on the relaunch brief"
+  assert_no_grep 'kunchenguid/forkproj' "$instructions" \
+    "promotion named the upstream parent"
+
+  pass "direct-PR briefs pin origin and never the fork parent"
+}
+
 test_wait_no_turns_absent_keeps_the_previous_brief
 test_home_brief_include_is_appended_last
 test_base_branch_is_rendered_and_bounded
@@ -1886,3 +1996,4 @@ test_task_type_list_and_example
 test_ship_and_scout_briefs_grant_bounded_sub_agents
 test_briefs_are_bounded_and_demand_real_proof
 test_task_type_tools_render_and_validate
+test_direct_pr_brief_pins_origin_not_upstream

@@ -11,7 +11,9 @@
 # bin/fm-dod-lib.sh, the single owner an ordinary ship brief also uses - the
 # mode-specific Definition of done, so a promoted worker receives exactly the same
 # delivery contract as a briefed one, including the no-mistakes mode's ask-user
-# escalation rule and --yes ban. The instructions also carry `# Task` with
+# escalation rule and --yes ban. A direct-PR promotion also passes the project's
+# GitHub origin owner/repo into that definition of done, the same pin bin/fm-brief.sh
+# writes, so a promoted worker on a fork does not open the pull request on the parent. The instructions also carry `# Task` with
 # `## Captain's intent` preserved from the scout brief and promotion's ship-time
 # instructions under `## Firstmate spec`; the scout-time spec remains context but
 # is not relabeled as the ship spec. Promotion refuses unfilled Captain intent
@@ -223,6 +225,10 @@ PROMOTE_BASE_WORDS='default-branch base'
 # An unbound project keeps the exact wording it always had.
 PROMOTE_FORGE_WORDS=
 [ "$FORGE" = none ] || PROMOTE_FORGE_WORDS=" forge=$FORGE"
+PR_ORIGIN_REPO=
+if [ "$MODE" = direct-PR ] && [ "$FORGE" = none ] && [ -n "$PROMOTE_PROJECT" ]; then
+  PR_ORIGIN_REPO=$(fm_brief_direct_pr_origin_repo "$FM_HOME" "$PROMOTE_PROJECT") || exit 1
+fi
 
 SCOUT_BRIEF="$DATA/$ID/brief.md"
 if fm_brief_task_placeholders_present "$SCOUT_BRIEF"; then
@@ -295,7 +301,7 @@ EOF
     printf '%s\n' "$PROMOTION_ASK_USER_BLOCK"
   fi
   printf '\n'
-  fm_dod_block "$MODE" "$ID" "$BRANCH" "$FORGE" "$BASE_BRANCH"
+  fm_dod_block "$MODE" "$ID" "$BRANCH" "$FORGE" "$BASE_BRANCH" "$PR_ORIGIN_REPO"
 }
 mkdir -p "$DATA/$ID"
 [ ! -d "$INSTRUCTIONS" ] || { echo "error: ship instructions path is a directory: $INSTRUCTIONS" >&2; exit 1; }
