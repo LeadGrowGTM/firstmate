@@ -114,6 +114,8 @@ The script prints the short hashes before and after when the fast-forward succee
 A confirmed merge writes a durable outcome through the shared merge-outcome helper rather than leaving the fact in the merging agent's memory.
 Cleanup then runs the landed-work test on the task lifecycle page.
 A request that is queued or whose merge cannot be confirmed records no landed outcome and leaves its poll armed.
-A red request is refused before any merge command and changes nothing.
+A red request is refused by the live check before any merge command.
+That refusal records no landed outcome and does not change the poll.
+The poll stays armed because the request was registered, not because the refusal re-armed it.
 Unverified: the outcome helper's file format was not opened in this pilot.
 The merge script's header and docs/architecture.md name it as the publisher.
