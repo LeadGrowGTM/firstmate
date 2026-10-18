@@ -231,9 +231,21 @@ def fm_home_is(pid, root):
 
 
 def script_arg(arg, script):
-    if not arg.startswith('/'):
+    """True when this absolute argv path is exactly ``script``.
+
+    ``normpath`` collapses ``..`` without looking at symlinks, so
+    ``<home>/bin/link/../fm-procevent.sh`` can name a file outside the home
+    while comparing equal to the home script. The kernel opens the resolved
+    file, so the comparison has to resolve it too.
+    """
+    if not isinstance(arg, str) or not arg.startswith('/'):
         return False
-    return os.path.normpath(arg) == script
+    try:
+        if not os.path.exists(arg):
+            return False
+        return os.path.realpath(arg) == script
+    except OSError:
+        return False
 
 
 def trusted_interpreter_ids():

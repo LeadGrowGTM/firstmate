@@ -1926,6 +1926,24 @@ test_secondmate_relaunch_refuses_an_argv_lookalike_of_the_procevent_runner() {
   assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the PATH lookalike'
   printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
     || fail "the refusal did not name the PATH lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  mkdir -p "$dir/outside/subdir"
+  cat > "$dir/outside/fm-procevent.sh" <<'SH'
+#!/usr/bin/env bash
+sleep 180
+SH
+  chmod +x "$dir/outside/fm-procevent.sh"
+  ln -s "$dir/outside/subdir" "$home_real/bin/link"
+  spoof=$(launch_procevent_lookalike "$home_real" bash /usr/bin/bash \
+    "$home_real/bin/link/../fm-procevent.sh")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a symlink escape to another fm-procevent.sh was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the symlink escape'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the symlink escape: $out"
   pass 'an argv lookalike of the home process-event runner still blocks restart'
 }
 
