@@ -236,25 +236,46 @@ def script_arg(arg, script):
     return os.path.normpath(arg) == script
 
 
-def is_home_procevent_runner(pid, script, root):
-    """The process is executing this home's fm-procevent.sh for this home.
+def executable_name(pid):
+    """Basename of the kernel executable, ignoring an argv disguise.
 
-    The live argv is either the script itself or a shell interpreter whose
-    next argument is that exact path (the ``#!/usr/bin/env bash`` shape).
-    A basename, a copy of the script outside the home, or the path buried
-    later in the argument list is not this runner. FM_HOME must resolve to
-    the same home.
+    A replaced interpreter keeps a `` (deleted)`` suffix on the symlink
+    text. The inode is still that interpreter, so the suffix is not part
+    of its name.
+    """
+    try:
+        exe = os.readlink(f'/proc/{int(pid)}/exe')
+    except (OSError, TypeError, ValueError):
+        return None
+    suffix = ' (deleted)'
+    if exe.endswith(suffix):
+        exe = exe[:-len(suffix)]
+    name = os.path.basename(exe).lstrip('-')
+    return name or None
+
+
+def is_home_procevent_runner(pid, script, root):
+    """The process is a shell interpreter executing this home's script.
+
+    ``/proc/<pid>/exe`` has to be a shell interpreter, and the live argv has
+    to name that interpreter with this exact script path as the next
+    argument. That is what the kernel leaves after ``#!/usr/bin/env bash``.
+    An argv that only names the script, or that names a shell while the
+    executable is something else, is not this runner. A basename, a copy of
+    the script outside the home, or the path buried later in the argument
+    list is not this runner either. FM_HOME must resolve to the same home.
     """
     try:
         argv = cmdline(pid)
     except OSError:
         return False
-    if not argv:
+    if len(argv) < 2:
         return False
-    direct = script_arg(argv[0], script)
-    interpreted = (len(argv) >= 2 and script_arg(argv[1], script)
-                   and os.path.basename(argv[0]).lstrip('-') in SHELL_INTERPRETERS)
-    if not direct and not interpreted:
+    if executable_name(pid) not in SHELL_INTERPRETERS:
+        return False
+    if os.path.basename(argv[0]).lstrip('-') not in SHELL_INTERPRETERS:
+        return False
+    if not script_arg(argv[1], script):
         return False
     return fm_home_is(pid, root)
 

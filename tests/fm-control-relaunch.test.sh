@@ -1680,6 +1680,30 @@ os.execv(script, [script, '_start', 'lavish-src'])
 PY
 }
 
+# Prints the child pid. The child is not the runner: its executable is the
+# named binary, and its argv only claims to be one.
+launch_procevent_lookalike() { # <cwd> <argv0> <executable> [argv1]
+  python3 - "$1" "$2" "$3" "${4-}" <<'PY'
+import os, sys
+cwd, argv0, exe, extra = sys.argv[1:]
+pid = os.fork()
+if pid > 0:
+    print(pid)
+    raise SystemExit(0)
+os.setsid()
+null = os.open("/dev/null", os.O_RDWR)
+os.dup2(null, 0)
+os.dup2(null, 1)
+os.dup2(null, 2)
+os.chdir(cwd)
+os.environ["FM_HOME"] = cwd
+argv = [argv0]
+if extra:
+    argv.append(extra)
+os.execv(exe, argv)
+PY
+}
+
 record_home_pids() { # <case-dir>
   local dir=$1 pids pid i
   for ((i=0; i<50; i++)); do
@@ -1842,6 +1866,39 @@ test_secondmate_relaunch_refuses_a_procevent_name_that_is_not_the_home_runner() 
   printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${loose}([^0-9]|$)" \
     || fail "the refusal did not name the name-only process: $out"
   pass 'a same-named script, another FM_HOME, or a bare name still blocks restart'
+}
+
+test_secondmate_relaunch_refuses_an_argv_lookalike_of_the_procevent_runner() {
+  local dir home_real script standin out rc=0 spoof
+  [ "$(uname -s)" = Linux ] || { echo 'skip - process-event runner proof needs Linux /proc'; return 0; }
+  dir=$(new_case procevent-lookalike sm-procevent-lookalike)
+  setup_dead_secondmate_home "$dir" sm-procevent-lookalike
+  home_real=$(cd "$dir/smhome" && pwd -P)
+  script="$home_real/bin/fm-procevent.sh"
+  write_procevent_standin "$script"
+  standin=$(fm_agent_standin "$dir/standin-src") || {
+    echo 'skip - no argv-stable executable for the process-event lookalike'
+    return 0
+  }
+  spoof=$(launch_procevent_lookalike "$home_real" "$script" "$standin")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a process whose argv0 is the home runner path was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the absolute-path lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the absolute-path lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  spoof=$(launch_procevent_lookalike "$home_real" bash "$standin" "$script")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a process claiming to be bash running the home runner was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the interpreter lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the interpreter lookalike: $out"
+  pass 'an argv lookalike of the home process-event runner still blocks restart'
 }
 
 # A detached chrome-devtools-axi bridge keeps the cwd of the mate that launched
@@ -4501,6 +4558,7 @@ test_secondmate_relaunch_ignores_its_own_procevent_runner
 test_secondmate_relaunch_refuses_a_different_home_process_beside_procevent
 test_secondmate_relaunch_refuses_a_harness_descendant_of_procevent
 test_secondmate_relaunch_refuses_a_procevent_name_that_is_not_the_home_runner
+test_secondmate_relaunch_refuses_an_argv_lookalike_of_the_procevent_runner
 test_secondmate_relaunch_ignores_orphaned_browser_bridge
 test_secondmate_relaunch_refuses_harness_descendant_of_browser_bridge
 test_secondmate_relaunch_refuses_bridge_still_parented
