@@ -530,6 +530,35 @@ grep -F "check: idle-sweep refused: invalid configuration" "$invalid_home/state/
 awk -F '\t' '$3 == "check" && $4 == "idle-sweep" { n++ } END { exit !(n == 1) }' "$invalid_home/state/.wake-queue" \
   || fail 'invalid configuration changed the wake cadence'
 pass 'invalid configuration names itself in the record and the wake'
+PATH="$invalid_home/fakebin:$TMP_ROOT/fakebin:$PATH" FM_HOME="$invalid_home" FM_ROOT_OVERRIDE="$watch_code" \
+  FM_STATE_OVERRIDE="$invalid_home/state" FM_CONFIG_OVERRIDE="$invalid_home/config" \
+  FM_DATA_OVERRIDE="$invalid_home/data" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+  FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=1 FM_WATCH_HANDLING_SUCCESSOR=1 \
+  bash "$watch_code/bin/fm-watch.sh" > "$invalid_home/watch-again.out" 2>> "$invalid_home/watch.err" &
+watch_pid=$!
+wait_for_exit "$watch_pid" 200 || fail "successor did not finish the next refusal: $(cat "$invalid_home/watch.err" "$invalid_home/watch-again.out" 2>/dev/null)"
+cmp -s "$invalid_home/watch-again.out" "$TMP_ROOT/expected-wake" \
+  || fail "the next cycle reported the same refusal again: $(cat "$invalid_home/watch-again.out")"
+awk -F '\t' '$3 == "signal" && $4 == "idle-sweep.status" { n++ } END { exit !(n == 0) }' \
+  "$invalid_home/state/.wake-queue" \
+  || fail "refusal record was queued again as a status signal: $(cat "$invalid_home/state/.wake-queue")"
+awk -F '\t' '$3 == "check" && $4 == "idle-sweep" { n++ } END { exit !(n == 2) }' \
+  "$invalid_home/state/.wake-queue" \
+  || fail "each new refusal did not keep its own check wake: $(cat "$invalid_home/state/.wake-queue")"
+pass 'a recorded refusal stays on its check wake'
+printf 'failed: later event\n' >> "$invalid_home/state/idle-sweep.status"
+rm "$invalid_home/config/idle-sweep.json"
+printf '{"enabled":false}\n' > "$invalid_home/config/idle-sweep.json"
+PATH="$invalid_home/fakebin:$TMP_ROOT/fakebin:$PATH" FM_HOME="$invalid_home" FM_ROOT_OVERRIDE="$watch_code" \
+  FM_STATE_OVERRIDE="$invalid_home/state" FM_CONFIG_OVERRIDE="$invalid_home/config" \
+  FM_DATA_OVERRIDE="$invalid_home/data" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+  FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=99999 FM_WATCH_HANDLING_SUCCESSOR=1 \
+  bash "$watch_code/bin/fm-watch.sh" > "$invalid_home/watch-later.out" 2>> "$invalid_home/watch.err" &
+watch_pid=$!
+wait_for_exit "$watch_pid" 200 || fail "successor hid a later status event: $(cat "$invalid_home/watch.err" "$invalid_home/watch-later.out" 2>/dev/null)"
+grep -F "signal: $invalid_home/state/idle-sweep.status" "$invalid_home/watch-later.out" >/dev/null \
+  || fail "a later status event stayed hidden: $(cat "$invalid_home/watch-later.out")"
+pass 'marking a refusal surfaced leaves a later status event visible'
 cat > "$watch_code/bin/fm-targets.sh" <<'SH'
 #!/usr/bin/env bash
 sleep 30

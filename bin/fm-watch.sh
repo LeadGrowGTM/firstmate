@@ -2699,6 +2699,27 @@ idle_sweep_refusal_since() { # <status-file> <previous-byte-count>
   printf '%s' "$reason"
 }
 
+# The queued check wake is this refusal's notification. Mark the status log
+# through its current end so the next cycle does not report those bytes again.
+# The signal scan for this cycle already ran, so the new bytes are the sweep
+# append just queued. A symlink is left unmarked.
+idle_sweep_mark_refusal_surfaced() { # <status-file>
+  local file=$1 record='' endpoint ident rest rc=0
+  [ -f "$file" ] && [ ! -L "$file" ] || return 0
+  record=$(status_span_first_actionable_record "$file" 0) || rc=$?
+  case "$rc" in
+    0|1) ;;
+    *) return 1 ;;
+  esac
+  endpoint=${record%%$'\t'*}
+  rest=${record#*$'\t'}
+  ident=${rest%%$'\t'*}
+  case "$endpoint" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$ident" ] || return 1
+  fm_wake_status_seen_commit "$STATE" "$file" "$endpoint" "$ident" || return 1
+  mark_surfaced "$file" "$endpoint" "$ident"
+}
+
 while :; do
   # Home-gone exit: a deleted home, state directory, or code root means this
   # watcher's world is gone (a torn-down temporary home or a discarded
@@ -3317,6 +3338,7 @@ EOF
         || idle_sweep_reason='inspect configuration or dispatch evidence'
       triage_log "idle sweep refused: $idle_sweep_reason"
       fm_wake_append check idle-sweep "check: idle-sweep refused: $idle_sweep_reason" || exit 1
+      idle_sweep_mark_refusal_surfaced "$idle_sweep_status" || true
       touch "$STATE/.last-heartbeat"
       wake "check: idle-sweep"
     fi

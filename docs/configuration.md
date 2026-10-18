@@ -234,6 +234,7 @@ The sweep reads briefs without editing them and refuses work whose prepared brie
 Successful starts produce one named status line in `state/idle-sweep.status`; concurrent heartbeat invocations share a local lock, and existing task metadata prevents redispatch.
 Target collection has a shared 120 second budget across the batch; a started `bin/fm-spawn.sh` launch runs to completion under its own lifecycle guards.
 A configuration or dispatch failure returns a normal `check: idle-sweep` wake to supervision, and that wake carries the one-line reason recorded in `state/idle-sweep.status`.
+That delivery accounts for the new refusal record, so supervision is not asked about the same refusal again.
 Script headers and help own the executable mechanics.
 
 ## Pi supervision branch

@@ -11,7 +11,8 @@ set -eu
 # 120 second target-collection budget for a test. Any other value keeps 120.
 # A refusal appends one line to state/idle-sweep.status:
 # [at=<epoch>] idle sweep refused: <reason>
-# bin/fm-watch.sh copies that reason into the check: idle-sweep wake payload.
+# bin/fm-watch.sh copies that reason into the check: idle-sweep wake payload
+# and marks the new record surfaced with that wake.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-targets-lib.sh
 . "$SCRIPT_DIR/fm-targets-lib.sh"
