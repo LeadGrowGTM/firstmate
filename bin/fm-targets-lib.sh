@@ -38,21 +38,29 @@ fm_targets_backlog() {
 # Observe row content at heartbeats, including while work is live. Evaluators
 # only read this ledger. First observation establishes a baseline, never age.
 fm_targets_observe() {  # <canonical backlog JSON>
-  local ledger='{}' tmp
+  local ledger='{}' tmp dir
   if [ -e "$STATE/idle-sweep-backlog.json" ]; then
     ledger=$(cat "$STATE/idle-sweep-backlog.json") || return 1
     printf '%s' "$ledger" | jq -e 'type == "object" and all(.[];
       (.content | type) == "string" and (.changed | type) == "number")' >/dev/null || return 1
   fi
+  # Snapshot and ledger ride in files: one backlog record can exceed the
+  # kernel's single-argument limit, and an argv that large never reaches jq.
   tmp=$(mktemp "$STATE/.idle-sweep-backlog.XXXXXX") || return 1
-  if ! jq -n --argjson snapshot "$1" --argjson old "$ledger" --argjson now "$(date +%s)" '
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-targets-observe.XXXXXX") || { rm -f "$tmp"; return 1; }
+  if ! printf '%s' "$1" > "$dir/snapshot.json" || ! printf '%s' "$ledger" > "$dir/ledger.json"; then
+    rm -rf -- "$dir"; rm -f "$tmp"; return 1
+  fi
+  if ! jq -n --slurpfile snapshot "$dir/snapshot.json" --slurpfile old "$dir/ledger.json" --argjson now "$(date +%s)" '
+    ($snapshot[0]) as $snapshot | ($old[0]) as $old |
     reduce ($snapshot.backlog.records[] | select(.structured)) as $r ({};
       ($r | [.state,.raw,.body_lines] | tojson) as $content |
       .[$r.id] = {content:$content,changed:
         (if $old[$r.id].content == $content then $old[$r.id].changed else $now end)})
   ' > "$tmp"; then
-    rm -f "$tmp"; return 1
+    rm -rf -- "$dir"; rm -f "$tmp"; return 1
   fi
+  rm -rf -- "$dir"
   if ! mv "$tmp" "$STATE/idle-sweep-backlog.json"; then
     rm -f "$tmp"; return 1
   fi
@@ -79,7 +87,7 @@ fm_targets_gh_string() {
 }
 
 fm_targets_collect() {  # <canonical backlog JSON>
-  local snapshot=$1 ledger='{}' repos='[]' dir remote repo identity info sha statuses checks count red row
+  local snapshot=$1 ledger='{}' repos='[]' dir remote repo identity info sha statuses checks count red row payload
   if [ -e "$STATE/idle-sweep-backlog.json" ]; then
     ledger=$(cat "$STATE/idle-sweep-backlog.json") || return 1
   fi
@@ -119,8 +127,15 @@ fm_targets_collect() {  # <canonical backlog JSON>
     row=$(jq -cn --arg project "${dir##*/}" --arg repo "$repo" --argjson open "$count" --argjson red "$red" '{project:$project,repo:$repo,open_prs:$open,red_default_branches:$red}') || return 1
     repos=$(jq -cn --argjson repos "$repos" --argjson row "$row" '$repos + [$row]') || return 1
   done
-  jq -n --argjson snapshot "$snapshot" --argjson repos "$repos" --argjson ledger "$ledger" \
-    --argjson limits "$TARGET_LIMITS" --argjson now "$(date +%s)" '
+  # Same argv bound as fm_targets_observe: the snapshot and the ledger are the
+  # backlog, so they are files. Per-project rows and the numeric limits are not.
+  payload=$(mktemp -d "${TMPDIR:-/tmp}/fm-targets-collect.XXXXXX") || return 1
+  if ! printf '%s' "$snapshot" > "$payload/snapshot.json" || ! printf '%s' "$ledger" > "$payload/ledger.json"; then
+    rm -rf -- "$payload"; return 1
+  fi
+  if ! jq -n --slurpfile snapshot "$payload/snapshot.json" --slurpfile ledger "$payload/ledger.json" \
+    --argjson repos "$repos" --argjson limits "$TARGET_LIMITS" --argjson now "$(date +%s)" '
+    ($snapshot[0]) as $snapshot | ($ledger[0]) as $ledger |
     def count_target($name):
       if any($repos[]; .[$name] == null) then null
       else ([$repos | unique_by(.repo)[] | .[$name]] | add // 0) end;
@@ -135,5 +150,8 @@ fm_targets_collect() {  # <canonical backlog JSON>
         else count_target($name) end) as $value |
        {id:$name,current:$value,limit:$limits[$name],gap:
          (if $value == null then null else ([$value - $limits[$name],0] | max) end)})
-  '
+  '; then
+    rm -rf -- "$payload"; return 1
+  fi
+  rm -rf -- "$payload"
 }

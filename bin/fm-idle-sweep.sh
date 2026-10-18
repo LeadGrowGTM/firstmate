@@ -64,7 +64,13 @@ config=$(idle_config) || { echo 'fm-idle-sweep: invalid configuration' >&2; exit
 mkdir -p "$STATE"
 lock="$STATE/.idle-sweep.lock"
 fm_lock_try_acquire "$lock" || exit 0
-trap 'fm_lock_release "$lock" || true' EXIT
+payload_dir=
+cleanup_idle_payload() {
+  [ -n "$payload_dir" ] || return 0
+  rm -rf -- "$payload_dir"
+  payload_dir=
+}
+trap 'cleanup_idle_payload || true; fm_lock_release "$lock" || true' EXIT
 snapshot=$(fm_targets_backlog)
 fm_targets_observe "$snapshot"
 
@@ -113,12 +119,16 @@ targets=$(fm_run_timed "$collection_remaining" bash "$SCRIPT_DIR/fm-targets.sh" 
 collection_remaining=$((collection_remaining - ($(date +%s) - collection_start)))
 # Red-branch evidence must be complete before a lower-priority task may start.
 printf '%s' "$targets" | jq -e '.targets[] | select(.id == "red_default_branches") | .gap != null' >/dev/null || exit 0
-candidates=$(jq -cn --argjson snapshot "$snapshot" --argjson targets "$targets" '
+payload_dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-idle-sweep.XXXXXX") || exit 1
+printf '%s' "$snapshot" > "$payload_dir/snapshot.json" || exit 1
+printf '%s' "$targets" > "$payload_dir/targets.json" || exit 1
+candidates=$(jq -cn --slurpfile snapshot "$payload_dir/snapshot.json" --slurpfile targets "$payload_dir/targets.json" '
   def row_target:
     [.body_lines[] | select(startswith("Idle target: ")) | ltrimstr("Idle target: ")] as $tags |
     if ($tags | length) == 0 then "backlog"
     elif ($tags | length) == 1 and (["red_default_branches","open_prs","stale_backlog"] | index($tags[0])) != null
     then $tags[0] else null end;
+  ($snapshot[0]) as $snapshot | ($targets[0]) as $targets |
   [$snapshot.backlog.records[] |
     select(.structured and (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
       .state == "queued" and .hold_reason == null and
@@ -160,7 +170,9 @@ while IFS= read -r candidate; do
   [ "$current_config" = "$config" ] || break
   fm_targets_init || { failed=1; break; }
   if [ "$target_kind" != backlog ]; then
-    printf '%s' "$latest_targets" | jq -e --argjson candidate "$candidate" --argjson limits "$TARGET_LIMITS" '
+    printf '%s' "$candidate" > "$payload_dir/candidate.json" || { failed=1; break; }
+    printf '%s' "$latest_targets" | jq -e --slurpfile candidate "$payload_dir/candidate.json" --argjson limits "$TARGET_LIMITS" '
+      ($candidate[0]) as $candidate |
       any(.targets[]; .id == $candidate.target and .limit == $limits[$candidate.target] and .gap != null and .gap > 0) and
       ($candidate.target != "red_default_branches" or
         any(.repos[]; .project == $candidate.repo and .red_default_branches == 1)) and
@@ -207,8 +219,10 @@ while IFS= read -r candidate; do
   [ ! -e "$STATE/$id.meta" ] && [ ! -L "$STATE/$id.meta" ] || continue
   [ -z "$(status_open_decisions "$STATE/$id.status")" ] || continue
   current=$(fm_targets_backlog) || { failed=1; break; }
-  printf '%s' "$current" | jq -e --argjson candidate "$candidate" \
-    'any(.backlog.records[]; .structured and .id == $candidate.id and del(.order) == ($candidate.row | del(.order)))' >/dev/null || continue
+  printf '%s' "$candidate" > "$payload_dir/candidate.json" || { failed=1; break; }
+  printf '%s' "$current" | jq -e --slurpfile candidate "$payload_dir/candidate.json" \
+    '($candidate[0]) as $candidate |
+     any(.backlog.records[]; .structured and .id == $candidate.id and del(.order) == ($candidate.row | del(.order)))' >/dev/null || continue
   home_idle "$current" "${started[@]}" || break
   if bash "$SCRIPT_DIR/fm-spawn.sh" "$id" "$PROJECTS/$project" "${flags[@]}" --harness codex --model gpt-6.1-sol; then
     started+=("$id")
