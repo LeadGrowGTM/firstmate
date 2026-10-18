@@ -27,12 +27,16 @@
 # `/mnt/c`, or `/mnt/d` below that mount's floor, or the Linux filesystem
 # that holds FM_HOME at or above linux-used-pct is pressure now. `/mnt/c`
 # and `/mnt/d` are monitored only when that path is a real directory.
+# FM_DISK_GUARD_ROOT, FM_DISK_GUARD_C, and FM_DISK_GUARD_D, when set, replace
+# `/`, `/mnt/c`, and `/mnt/d`. Each value must be an absolute path. A path
+# that is not a real directory is not monitored.
 # Between samples 30 seconds to 2 hours apart, pressure is also true when a
 # falling free-space reading or a rising Linux percentage would cross its
 # line inside lead-seconds. The comparison is
 # `distance * elapsed <= lead * change`, in integers. A missing reading is
-# not pressure by itself. When a pause flag already exists and any monitored
-# reading is absent, the flag stays and the sample logs action=held-unknown.
+# not pressure by itself. When a pause flag is in place and any monitored
+# reading is absent, the flag stays and the logged action contains
+# held-unknown, including when another reason is also present.
 # The flag is removed only when every monitored reading is present and
 # healthy. The first sample has no projection.
 #
@@ -107,6 +111,9 @@ LINUX_PCT=70
 LEAD=1800
 VHDX=
 DF_SECONDS=15
+ROOT_MOUNT=${FM_DISK_GUARD_ROOT:-/}
+C_MOUNT=${FM_DISK_GUARD_C:-/mnt/c}
+D_MOUNT=${FM_DISK_GUARD_D:-/mnt/d}
 RAM_AVAIL=absent
 SWAP_FREE=absent
 LINUX_PCT_NOW=absent
@@ -245,13 +252,13 @@ load_live_metrics() {
     RAM_AVAIL=$(norm_uint "$RAM_AVAIL" 2>/dev/null || printf 'absent')
     SWAP_FREE=$(norm_uint "$SWAP_FREE" 2>/dev/null || printf 'absent')
   fi
-  read_df_fields / root
+  read_df_fields "$ROOT_MOUNT" root
   read_df_fields "$FM_HOME" linux
-  if mount_real /mnt/c; then
-    read_df_fields /mnt/c c
+  if mount_real "$C_MOUNT"; then
+    read_df_fields "$C_MOUNT" c
   fi
-  if mount_real /mnt/d; then
-    read_df_fields /mnt/d d
+  if mount_real "$D_MOUNT"; then
+    read_df_fields "$D_MOUNT" d
   fi
   if [ -n "$VHDX" ]; then
     if [ -L "$VHDX" ]; then
@@ -488,11 +495,13 @@ reading_incomplete() {
     return 0
   fi
   is_uint_token "$LINUX_PCT_NOW" || return 0
-  is_uint_token "$ROOT_FREE" || return 0
-  if mount_real /mnt/c && ! is_uint_token "$C_FREE"; then
+  if mount_real "$ROOT_MOUNT" && ! is_uint_token "$ROOT_FREE"; then
     return 0
   fi
-  if mount_real /mnt/d && ! is_uint_token "$D_FREE"; then
+  if mount_real "$C_MOUNT" && ! is_uint_token "$C_FREE"; then
+    return 0
+  fi
+  if mount_real "$D_MOUNT" && ! is_uint_token "$D_FREE"; then
     return 0
   fi
   return 1
@@ -569,6 +578,12 @@ sample_once() {
         ;;
     esac
   fi
+  if reading_incomplete && pause_present; then
+    case "$action" in
+      *held-unknown*) ;;
+      *) action="${action}-held-unknown" ;;
+    esac
+  fi
   line=$(printf '%s ram_avail_kib=%s swap_free_kib=%s linux_used_pct=%s linux_size_kib=%s linux_used_kib=%s linux_avail_kib=%s root_free_kib=%s c_free_kib=%s d_free_kib=%s vhdx_bytes=%s alert=%s pressure=%s reasons=%s action=%s' \
     "$now" "$RAM_AVAIL" "$SWAP_FREE" "$LINUX_PCT_NOW" "$LINUX_SIZE" "$LINUX_USED" "$LINUX_AVAIL" "$ROOT_FREE" "$C_FREE" "$D_FREE" "$VHDX_BYTES" "$ALERT" "$pressure" "${REASONS:-none}" "$action")
   append_log "$line" || die "could not write $STATE/disk-guard.log"
@@ -595,6 +610,18 @@ main() {
     /|/mnt|/mnt/*) die "FM_HOME is not a home" ;;
   esac
   export FM_HOME
+  case "$ROOT_MOUNT" in
+    /*) ;;
+    *) die "FM_DISK_GUARD_ROOT must be absolute" ;;
+  esac
+  case "$C_MOUNT" in
+    /*) ;;
+    *) die "FM_DISK_GUARD_C must be absolute" ;;
+  esac
+  case "$D_MOUNT" in
+    /*) ;;
+    *) die "FM_DISK_GUARD_D must be absolute" ;;
+  esac
   # A caller environment must not redirect this sample at another home's queue.
   unset STATE FM_STATE_OVERRIDE FM_ROOT_OVERRIDE FM_WAKE_QUEUE FM_WAKE_QUEUE_LOCK
   # shellcheck source=bin/fm-wake-lib.sh
