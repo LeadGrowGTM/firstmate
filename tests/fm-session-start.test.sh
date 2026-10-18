@@ -299,7 +299,7 @@ SH
 # the given "session:window" target - the exact primitive
 # fm_backend_target_exists uses for a tmux endpoint liveness read.
 make_fake_tmux() {
-  local fakebin=$1 live=$2
+  local fakebin=$1 live=$2 live_window=${2#*:}
   cat > "$fakebin/tmux" <<SH
 #!/usr/bin/env bash
 set -u
@@ -313,6 +313,13 @@ case "\${1:-}" in
     done
     [ "\$target" = "$live" ] && { printf '%%1\n'; exit 0; }
     exit 1
+    ;;
+  list-windows)
+    printf '%s\n' "$live_window"
+    exit 0
+    ;;
+  has-session)
+    exit 0
     ;;
 esac
 exit 1
@@ -1397,6 +1404,105 @@ EOF
   assert_contains "$out" "endpoint: dead (backend=tmux window=fm-sess:dead-window)" "dead tmux endpoint not reported dead"
 
   pass "tmux endpoint liveness is reported per task: alive for a live window, dead for a gone one"
+}
+
+# Real tmux, two private sockets. display-message -t session:window succeeds
+# against the active window when the name is gone, and list-windows without an
+# exact session matches a longer session by unique prefix. The recorded socket
+# is the only server the digest may believe: the ambient server holds the
+# missing names on purpose.
+test_endpoint_liveness_tmux_recorded_socket_missing_window() {
+  local rec root home fakebin real dir recorded decoy out status
+  command -v "${FM_TEST_TMUX_REAL:-tmux}" >/dev/null 2>&1 || { echo "skip: tmux not found"; return 0; }
+  real=${FM_TEST_TMUX_REAL:-$(command -v tmux)}
+  rec=$(new_world liveness-real-socket)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  printf '%s\n' manual > "$home/config/backlog-backend"
+  cat > "$fakebin/tmux" <<SH
+#!/usr/bin/env bash
+exec $(printf '%q' "$real") "\$@"
+SH
+  chmod +x "$fakebin/tmux"
+
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-endpoint-socket.XXXXXX")
+  chmod 700 "$dir"
+  recorded=$dir/recorded
+  decoy=$dir/decoy
+  FM_TEST_CLEANUP_DIRS+=("$dir")
+  env -u TMUX -u TMUX_PANE "$real" -S "$recorded" -f /dev/null new-session -d -s firstmate -n bash -- /bin/sleep 300 \
+    || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "could not start the recorded tmux server"; }
+  env -u TMUX -u TMUX_PANE "$real" -S "$recorded" -f /dev/null new-window -d -t '=firstmate:' -n fm-live -- /bin/sleep 300 \
+    || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "could not create the live window"; }
+  env -u TMUX -u TMUX_PANE "$real" -S "$recorded" -f /dev/null new-session -d -s fmpre-extra -n fm-prefix -- /bin/sleep 300 \
+    || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "could not create the prefix-decoy session"; }
+  env -u TMUX -u TMUX_PANE "$real" -S "$decoy" -f /dev/null new-session -d -s firstmate -n fm-gone -- /bin/sleep 300 \
+    || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "could not start the ambient decoy server"; }
+  env -u TMUX -u TMUX_PANE "$real" -S "$decoy" -f /dev/null new-window -d -t '=firstmate:' -n fm-prefix -- /bin/sleep 300 \
+    || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "could not create the ambient decoy window"; }
+  mkdir -p "$dir/space dir"
+  env -u TMUX -u TMUX_PANE "$real" -S "$dir/space dir/sock" -f /dev/null new-session -d -s firstmate -n bash -- /bin/sleep 300 \
+    || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; "$real" -S "$dir/space dir/sock" kill-server >/dev/null 2>&1 || true; fail "could not start the spaced socket server"; }
+
+  printf 'window=firstmate:fm-live\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-live.meta"
+  printf 'window=firstmate:fm-gone\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-gone.meta"
+  printf 'window=fmpre:fm-prefix\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-prefix.meta"
+  printf 'window=firstmate:fm-gone\nkind=ship\ntmux_socket=\n' > "$home/state/task-blank.meta"
+
+  status=0
+  # shellcheck disable=SC2016 # The single-quoted script is the child bash's source, not this shell's.
+  env -u TMUX_PANE TMUX="$decoy,0,0" FM_HOME="$home" PATH="$fakebin:$BASE_PATH" bash -c '
+    . "$1"
+    fm_backend_target_exists tmux "firstmate:fm-gone" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:fm-live" "" "$2" || exit 1
+    fm_backend_target_exists tmux "fmpre:fm-prefix" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:fm-gone" || exit 1
+    fm_backend_target_exists tmux "firstmate:0" "" "$2" || exit 1
+    fm_backend_target_exists tmux "firstmate:9" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:0.0" "" "$2" || exit 1
+    fm_backend_target_exists tmux "firstmate:0.9" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:fm-gone" "" "" && exit 1
+    pane=$(tmux -S "$2" display-message -p -t "=firstmate:fm-live" "#{pane_id}")
+    wid=$(tmux -S "$2" display-message -p -t "=firstmate:fm-live" "#{window_id}")
+    [ -n "$pane" ] && [ -n "$wid" ] || exit 1
+    fm_backend_target_exists tmux "$pane" "" "$2" || exit 1
+    fm_backend_target_exists tmux "$wid" "" "$2" || exit 1
+    fm_backend_target_exists tmux "%99999" "" "$2" && exit 1
+    fm_backend_target_exists tmux "@99999" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:0" "" "$3" || exit 1
+    fm_backend_target_exists tmux "firstmate:fm-live" "" "$3" && exit 1
+    meta=$(mktemp)
+    printf "window=firstmate:fm-live\ntmux_socket=%s\n" "$2" > "$meta"
+    fm_backend_source tmux || exit 1
+    fm_backend_tmux_bind_record "$meta" || exit 1
+    got=$(tmux display-message -p -t "=firstmate:fm-live" "#{window_name}") || exit 1
+    [ "$got" = fm-live ] || exit 1
+    rm -f "$meta"
+    exit 0
+  ' _ "$ROOT/bin/fm-backend.sh" "$recorded" "$dir/space dir/sock" || status=$?
+  [ "$status" -eq 0 ] || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; "$real" -S "$dir/space dir/sock" kill-server >/dev/null 2>&1 || true; fail "recorded-socket existence check did not keep a live window and reject a missing or prefix-matched one"; }
+  "$real" -S "$dir/space dir/sock" kill-server >/dev/null 2>&1 || true
+
+  out=$(env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT -u TMUX_PANE \
+    TMUX="$decoy,0,0" \
+    FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$fakebin:$BASE_PATH" \
+    "$SESSION_START") || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "session start failed while reading recorded tmux sockets"; }
+  "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true
+  "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true
+  assert_contains "$out" "endpoint: alive (backend=tmux window=firstmate:fm-live)" \
+    "a live window on the recorded socket was not reported alive"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=firstmate:fm-gone)" \
+    "a missing window on the recorded socket was not reported dead"
+  assert_contains "$out" "endpoint: dead (backend=tmux window=fmpre:fm-prefix)" \
+    "a window that exists only as a session-name prefix was not reported dead"
+  assert_not_contains "$out" "endpoint: error (backend=tmux window=firstmate:fm-gone" \
+    "a missing window was reported as a failed read instead of dead"
+  assert_not_contains "$out" "endpoint: alive (backend=tmux window=firstmate:fm-gone)" \
+    "the ambient server's copy of a missing window was reported alive"
+  pass "tmux endpoint liveness uses the recorded socket and exact window, so a missing window is dead and a live one is alive"
 }
 
 test_endpoint_liveness_herdr() {
@@ -3037,6 +3143,7 @@ test_status_tail_bounding
 test_status_tail_line_cap
 test_orphan_status_logs_are_printed
 test_endpoint_liveness_tmux
+test_endpoint_liveness_tmux_recorded_socket_missing_window
 test_endpoint_liveness_herdr
 test_endpoint_read_death_is_isolated_and_reported
 test_endpoint_read_hang_is_bounded_and_reported

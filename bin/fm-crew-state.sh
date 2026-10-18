@@ -315,10 +315,27 @@ fi
 # herdr task is read through fm_backend_capture instead of a bare tmux probe.
 TASK_BACKEND=$(fm_backend_of_meta "$META")
 BACKEND_TARGET=$(fm_backend_target_of_meta "$META")
+TMUX_SOCKET=$(fm_meta_get "$META" tmux_socket)
+# Later tmux reads in this process, including pane capture, must use the same
+# server as the existence check. A record with no socket keeps the ambient
+# server. A socket this binder refuses must not fall through to another one.
+if [ "$TASK_BACKEND" = tmux ]; then
+  if ! { fm_backend_source tmux && fm_backend_tmux_bind_record "$META"; }; then
+    TMUX=/fm-refused-tmux-socket,0,0
+    export TMUX
+    unset TMUX_PANE
+  fi
+fi
 EXPECTED_LABEL="fm-$ID"
 pane_readable() {  # <target>
   case "$TASK_BACKEND" in
-    tmux) fm_backend_target_exists tmux "$1" >/dev/null 2>&1 ;;
+    tmux)
+      if grep -q '^tmux_socket=' "$META"; then
+        fm_backend_target_exists tmux "$1" "" "$TMUX_SOCKET" >/dev/null 2>&1
+      else
+        fm_backend_target_exists tmux "$1" "" >/dev/null 2>&1
+      fi
+      ;;
     *) fm_backend_capture "$TASK_BACKEND" "$1" 1 "$EXPECTED_LABEL" >/dev/null 2>&1 ;;
   esac
 }
@@ -1262,7 +1279,13 @@ if ! pane_readable "$BACKEND_TARGET"; then
   # Backends with no classifier (orca, zellij, and cmux all report unverified)
   # keep their historical capture-failure-means-gone reading.
   case "$TASK_BACKEND" in
-    tmux|herdr) AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET") ;;
+    tmux|herdr)
+      if [ "$TASK_BACKEND" = tmux ] && grep -q '^tmux_socket=' "$META"; then
+        AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET" "$TMUX_SOCKET")
+      else
+        AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET")
+      fi
+      ;;
     *) AGENT_STATE=none ;;
   esac
   case "$TASK_BACKEND:$AGENT_STATE" in
