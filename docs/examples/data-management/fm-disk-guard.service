@@ -12,6 +12,9 @@ Description=Firstmate disk pressure sample
 
 [Service]
 Type=oneshot
+# A oneshot unit has no start timeout unless this is set. 20min is longer
+# than the script's 900s cleanup bound, so a stuck sample cannot run forever.
+TimeoutStartSec=20min
 Environment=FM_HOME=/path/to/firstmate-home
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/path/to/firstmate/bin/fm-disk-guard.sh sample

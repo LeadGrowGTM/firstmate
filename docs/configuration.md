@@ -2293,23 +2293,43 @@ After reviewing the dry-run report, create the authorization marker and add `--l
 
 ## Disk guard (config/disk-guard)
 
-[`bin/fm-disk-guard.sh`](../bin/fm-disk-guard.sh) samples available RAM, free swap, Linux disk, free space on `C:`, and an optional virtual-disk file.
+[`bin/fm-disk-guard.sh`](../bin/fm-disk-guard.sh) samples available RAM, free swap, Linux disk, free space on `/`, `C:`, and `D:`, and an optional virtual-disk file.
 It is the predictive check for this machine.
 The script header owns the floors, the lead window, the projection, the log line, and when the pause flag is written or removed.
-The defaults are 8 GiB of available RAM, 100 GiB free on `C:`, 70 percent of the Linux filesystem, and a 30 minute lead.
+The defaults are 8 GiB of available RAM, 100 GiB free on `/`, `C:`, and `D:`, 70 percent of the Linux filesystem that holds the home, and a 30 minute lead.
+`/mnt/c` and `/mnt/d` are checked only when that path is a real directory.
+The script header owns the optional `FM_DISK_GUARD_ROOT`, `FM_DISK_GUARD_C`, and `FM_DISK_GUARD_D` path overrides.
 Optional `config/disk-guard` in the root Firstmate home replaces any of those and names the virtual-disk file.
 The guard writes `state/disk-guard.pause` in that root home when a floor is already crossed or the lead window says it will be.
 [`bin/fm-spawn.sh`](../bin/fm-spawn.sh) refuses a fresh ship or scout while a regular pause file or symlink exists at that path: it launches nothing, creates no record, leaves the backlog item queued, and exits 75 until the flag is repaired or removed.
 A relaunch and a secondmate are not deferred.
-The guard removes the flag when the sample is healthy, and it does not follow a symlink there.
+The guard removes a regular pause flag only when every monitored reading is present and healthy, and it does not follow a symlink there.
+An absent or timed-out reading is not pressure by itself.
+When a pause flag already exists and a monitored reading is absent, the flag stays and the sample logs `action=held-unknown`.
+Each `df` read stops after 15 seconds.
+Low free space on `/`, `C:`, or `D:` sets `alert=low` and is pressure, so the same `disk-guard` wake is the low-disk alert.
+[`bin/fm-jev-mem-guard.sh`](../bin/fm-jev-mem-guard.sh) is the read-only memory check beside this timer.
+It prints a verdict and, with `--check`, exits 1 on warning or critical.
+It does not schedule itself.
 The sample that first writes the flag runs [`bin/fm-data-manage.sh`](../bin/fm-data-manage.sh) `clean` once when the root home's `config/data-management` is regular, adding `--live` only when the authorization marker is regular too.
 The nightly data-management timer stays a dry-run until its own service command gains `--live`.
 The guard does not trim the page cache.
 The machine's existing root cron owns that trim.
-The guard may stat the configured virtual-disk file and read free space on `C:`, and it never walks `/mnt`.
-Copy [`docs/examples/data-management/fm-disk-guard.service`](examples/data-management/fm-disk-guard.service) and [`fm-disk-guard.timer`](examples/data-management/fm-disk-guard.timer) into `~/.config/systemd/user/`, point `ExecStart` at the installed script, then enable the timer.
+The guard may stat the configured virtual-disk file and read free space on `/`, `/mnt/c`, and `/mnt/d`, and it never walks `/mnt`.
+Copy [`docs/examples/data-management/fm-disk-guard.service`](examples/data-management/fm-disk-guard.service) and [`fm-disk-guard.timer`](examples/data-management/fm-disk-guard.timer) into `~/.config/systemd/user/`, replace `FM_HOME` and `ExecStart` with the root home and the installed script, then enable the timer.
 Enable it only after this change has landed on the default branch.
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp docs/examples/data-management/fm-disk-guard.service ~/.config/systemd/user/fm-disk-guard.service
+cp docs/examples/data-management/fm-disk-guard.timer ~/.config/systemd/user/fm-disk-guard.timer
+systemctl --user daemon-reload
+systemctl --user enable --now fm-disk-guard.timer
+```
+
 The timer is a sample every 10 minutes.
+The example service sets `TimeoutStartSec=20min`, which is longer than the 900 second cleanup bound.
+A oneshot unit has no start timeout unless that setting is present.
 It is not an installer.
 
 ## Mail plane (.env)

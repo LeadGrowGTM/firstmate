@@ -30,9 +30,23 @@ cat > "$stubbin/df" <<EOF
 if [ "\$1" = -kP ] && [ "\$2" = "\$FM_HOME" ]; then
   printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
   printf 'fixture %s %s %s %s%% %s\n' "\$TEST_LINUX_SIZE" "\$TEST_LINUX_USED" "\$TEST_LINUX_AVAIL" "\$TEST_LINUX_PCT" "\$2"
-elif [ "\$1" = -kP ] && [ "\$2" = /mnt/c ]; then
+elif [ "\$1" = -kP ] && [ "\$2" = "\${FM_DISK_GUARD_C:-/mnt/c}" ]; then
+  if [ "\${TEST_C_MODE:-ok}" = fail ]; then
+    exit 1
+  fi
+  if [ "\${TEST_C_MODE:-ok}" = hang ]; then
+    : > "$TMP_ROOT/c-hang-started"
+    sleep 30
+    exit 0
+  fi
   printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
   printf 'fixture 400000000 200000000 %s 50%% /mnt/c\n' "\$TEST_C_FREE"
+elif [ "\$1" = -kP ] && [ "\$2" = "\${FM_DISK_GUARD_ROOT:-/}" ]; then
+  printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+  printf 'fixture 1000000000 100000000 %s 10%% /\n' "\${TEST_ROOT_FREE:-900000000}"
+elif [ "\$1" = -kP ] && [ "\$2" = "\${FM_DISK_GUARD_D:-/mnt/d}" ]; then
+  printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+  printf 'fixture 1000000000 100000000 %s 10%% /mnt/d\n' "\${TEST_D_FREE:-900000000}"
 else
   exec "$real_df" "\$@"
 fi
@@ -286,5 +300,96 @@ assert_absent "$old" "the cleanup removes an aged temp file"
 assert_present "$fresh" "the cleanup leaves a fresh temp file"
 assert_present "$envf" "the cleanup leaves a dotenv file"
 assert_present "$home/state/disk-guard.pause" "cleanup does not clear the pause"
+
+reset_guard
+mkdir -p "$TMP_ROOT/fake-c"
+export FM_DISK_GUARD_C="$TMP_ROOT/fake-c"
+set_collector_values 30000000 8000000 30 1000000 300000 700000 1000
+out=$(run_guard)
+assert_contains "$out" "reasons=c-free" "C: below its floor is pressure"
+assert_contains "$out" "alert=low" "low free space raises the disk alert"
+assert_contains "$out" "action=paused" "low free space pauses spawns"
+assert_contains "$(cat "$home/state/.wake-queue")" "disk-guard pause reasons=c-free" "the alert wake names C:"
+wakes=$(wake_count)
+export TEST_C_MODE=fail
+out=$(run_guard)
+assert_contains "$out" "c_free_kib=absent" "a failed C: read is an absent reading"
+assert_contains "$out" "action=held-unknown" "an absent reading while paused logs held-unknown"
+assert_contains "$out" "alert=unknown" "an absent reading does not claim the disk is healthy"
+assert_present "$home/state/disk-guard.pause" "an absent reading keeps the pause flag"
+assert_equals "$wakes" "$(wake_count)" "holding an unknown reading does not clear or repeat the wake"
+unset TEST_C_MODE
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+out=$(run_guard)
+assert_contains "$out" "action=cleared" "a complete healthy sample clears a held pause"
+assert_absent "$home/state/disk-guard.pause" "the held pause is removed once every reading is healthy"
+
+reset_guard
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
+export TEST_C_MODE=fail
+out=$(run_guard)
+unset TEST_C_MODE
+assert_contains "$out" "reasons=ram" "known RAM pressure is still reported"
+assert_contains "$out" "held-unknown" "an absent reading beside known pressure logs held-unknown"
+assert_present "$home/state/disk-guard.pause" "known pressure with an absent reading still pauses"
+
+reset_guard
+set_collector_values 30000000 8000000 30 1000000 300000 700000 1000
+run_guard >/dev/null
+export TEST_C_MODE=hang
+rm -f "$TMP_ROOT/c-hang-started"
+start=$(date +%s)
+out=$(run_guard)
+elapsed=$(( $(date +%s) - start ))
+unset TEST_C_MODE
+[ -f "$TMP_ROOT/c-hang-started" ] || fail "the hung df fixture did not run"
+[ "$elapsed" -ge 12 ] || fail "a hung C: read returned before the bound (${elapsed}s)"
+[ "$elapsed" -lt 22 ] || fail "a hung C: read was not bounded (${elapsed}s)"
+assert_contains "$out" "c_free_kib=absent" "a timed-out C: read is an absent reading"
+assert_contains "$out" "action=held-unknown" "a timed-out reading keeps the pause"
+assert_present "$home/state/disk-guard.pause" "a timed-out C: read does not clear the pause"
+
+reset_guard
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+export TEST_ROOT_FREE=1000
+out=$(run_guard)
+unset TEST_ROOT_FREE
+assert_contains "$out" "reasons=root-free" "the Linux root below its floor is pressure"
+assert_contains "$out" "alert=low" "low space on / raises the disk alert"
+assert_contains "$(cat "$home/state/.wake-queue")" "reasons=root-free" "the alert wake names /"
+
+reset_guard
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+mkdir -p "$TMP_ROOT/fake-d" "$TMP_ROOT/fake-root"
+export FM_DISK_GUARD_D="$TMP_ROOT/fake-d"
+export FM_DISK_GUARD_ROOT="$TMP_ROOT/fake-root"
+export TEST_D_FREE=1000 TEST_ROOT_FREE=900000000
+printf 'd-free-floor-kib 500\n' > "$home/config/disk-guard"
+out=$(run_guard)
+assert_contains "$out" "pressure=no" "D: above its configured floor is not pressure"
+assert_not_contains "$out" "d-free" "D: above its configured floor is not a reason"
+printf 'd-free-floor-kib 2000\n' > "$home/config/disk-guard"
+out=$(run_guard)
+assert_contains "$out" "reasons=d-free" "D: below its configured floor is pressure"
+assert_contains "$out" "alert=low" "a configured D: floor raises the disk alert"
+assert_contains "$(cat "$home/state/.wake-queue")" "reasons=d-free" "the alert wake names D:"
+printf 'root-free-floor-kib 100\n' > "$home/config/disk-guard"
+export TEST_D_FREE=900000000 TEST_ROOT_FREE=5000
+out=$(run_guard)
+assert_not_contains "$out" "root-free" "the root above its configured floor is not a reason"
+printf 'root-free-floor-kib 9000\n' > "$home/config/disk-guard"
+out=$(run_guard)
+assert_contains "$out" "reasons=root-free" "the root below its configured floor is pressure"
+assert_contains "$out" "alert=low" "a configured root floor raises the disk alert"
+unset FM_DISK_GUARD_D FM_DISK_GUARD_ROOT TEST_D_FREE TEST_ROOT_FREE
+
+reset_guard
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+export FM_DISK_GUARD_D="$TMP_ROOT/missing-d"
+out=$(run_guard)
+unset FM_DISK_GUARD_D
+assert_contains "$out" "d_free_kib=absent" "a missing D: mount is not a reading"
+assert_not_contains "$out" "d-free" "a missing D: mount is not pressure"
+unset FM_DISK_GUARD_C
 
 pass "fm-disk-guard pauses on pressure and clears only when the sample is healthy"

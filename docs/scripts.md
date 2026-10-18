@@ -152,7 +152,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-treehouse-guard.sh` | Trigger safe prune and report pool size ([configuration.md](configuration.md#worktree-pool-guard)) |
 | `fm-deadweight-sweep.sh` | Run the built-in daily cleanup check or sweep an explicit home ([configuration.md](configuration.md#automatic-deadweight-cleanup)) |
 | `fm-data-manage.sh` | Measure configured homes and stores, and plan retention cleanup ([configuration.md](configuration.md#data-management-configdata-management)) |
-| `fm-disk-guard.sh` | Sample memory and disk, and pause new spawns before a stall ([configuration.md](configuration.md#disk-guard-configdisk-guard)) |
+| `fm-disk-guard.sh` | Sample memory and disk, pause new spawns, and wake on low free space ([configuration.md](configuration.md#disk-guard-configdisk-guard)) |
 | `fm-pr-lib.sh`           | Own canonical task and PR validation plus private atomic PR-poll publication, merge-notification identity, and retirement |
 | `fm-pr-poll.sh`          | Provide the byte-static watcher program for validated pull-request, merge-request, and Gerrit-change poll sidecars |
 | `fm-contributions.sh`    | Observe owned publications, retain exact-head judgments, measure required actors, and wake on maintainer signals |
