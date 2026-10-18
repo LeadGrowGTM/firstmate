@@ -25,6 +25,8 @@
 . "$FM_BACKEND_LIB_DIR/fm-agent-process-lib.sh"
 # shellcheck source=bin/fm-wsl-interop-lib.sh
 . "$FM_BACKEND_LIB_DIR/fm-wsl-interop-lib.sh"
+# shellcheck source=bin/fm-secondmate-parent-lib.sh
+. "$FM_BACKEND_LIB_DIR/fm-secondmate-parent-lib.sh"
 
 # Bind lifecycle reads and writes to the task's durable server identity.
 # TMUX is tmux's native socket selector; clearing TMUX_PANE prevents a caller's
@@ -85,11 +87,110 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
   fm_tmux_submit_core "$target" "$text" "$retries" "$sleep_s" "$settle" "$harness"
 }
 
-# fm_backend_tmux_container_ensure: reuse the current tmux session when
-# firstmate itself runs inside tmux, else ensure a dedicated detached
-# "firstmate" session exists. Mirrors fm-spawn.sh's container-ensure block;
-# prints the resolved session name.
+# docs/configuration.md "Captain tmux session" owns config/captain-tmux-session.
+# The effective config directory follows the same override as fm-backend.sh,
+# read at call time so a caller can point one launch at one home.
+fm_backend_tmux_config_dir() {
+  if [ -n "${FM_CONFIG_OVERRIDE:-}" ]; then
+    printf '%s\n' "$FM_CONFIG_OVERRIDE"
+    return 0
+  fi
+  if [ -n "${FM_HOME:-}" ]; then
+    printf '%s/config\n' "$FM_HOME"
+    return 0
+  fi
+  printf '%s\n' "$FM_BACKEND_CONFIG_DIR"
+}
+
+# Prints the session name, or nothing when the file is absent or empty.
+# Returns 1 when a declaration is present but cannot be used.
+fm_backend_tmux_read_captain_session_file() {  # <file>
+  local file=$1 value='' extra=''
+  [ -e "$file" ] || [ -L "$file" ] || return 0
+  if [ ! -f "$file" ] || [ ! -r "$file" ]; then
+    echo "error: $file is not a readable file" >&2
+    return 1
+  fi
+  [ -s "$file" ] || return 0
+  {
+    IFS= read -r value || :
+    if IFS= read -r extra || [ -n "$extra" ]; then
+      echo "error: $file must contain one session name on one line" >&2
+      return 1
+    fi
+  } <"$file"
+  [ -n "$value" ] || return 0
+  if [ "${#value}" -gt 64 ] || ! printf '%s' "$value" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9_-]*'; then
+    echo "error: $file holds '$value'; a tmux session name is 1-64 letters, digits, underscores, and dashes, starting with a letter or digit" >&2
+    return 1
+  fi
+  printf '%s\n' "$value"
+}
+
+# A local secondmate with no file of its own uses its parent's file.
+# A missing or remote parent binding prints nothing. A broken parser does not
+# invent a home.
+fm_backend_tmux_local_parent_home() {
+  local record home
+  [ -n "${FM_HOME:-}" ] || return 0
+  record=$FM_HOME/.fm-secondmate-parent
+  [ -e "$record" ] || [ -L "$record" ] || return 0
+  home=$(
+    fm_secondmate_parent_record_parse "$record" || exit 0
+    [ "${FM_SECONDMATE_PARENT_ROUTE:-}" = local ] || exit 0
+    printf '%s\n' "$FM_SECONDMATE_PARENT_HOME"
+  ) || return 1
+  printf '%s\n' "$home"
+}
+
+# Prints the configured session, or nothing when unset. Returns 1 on a bad file.
+fm_backend_tmux_captain_session() {
+  local dir file name parent
+  dir=$(fm_backend_tmux_config_dir) || return 1
+  file=$dir/captain-tmux-session
+  name=$(fm_backend_tmux_read_captain_session_file "$file") || return 1
+  if [ -n "$name" ]; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+  parent=$(fm_backend_tmux_local_parent_home) || return 1
+  [ -n "$parent" ] || return 0
+  file=$parent/config/captain-tmux-session
+  name=$(fm_backend_tmux_read_captain_session_file "$file") || return 1
+  printf '%s\n' "$name"
+}
+
+# Create <name> on the server this client is already addressing when it is
+# missing. -d keeps the call detached, so an attached client stays where it is.
+# A race that loses session creation to another client still succeeds once the
+# exact session exists. A near-named session is not a match.
+fm_backend_tmux_ensure_named_session() {  # <session-name>
+  local name=$1 live err
+  if tmux has-session -t "=$name" 2>/dev/null; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+  live=$(fm_wsl_live_interop) || live=
+  err=$(tmux new-session -d -s "$name" ${live:+-e} ${live:+"WSL_INTEROP=$live"} 2>&1) || {
+    if tmux has-session -t "=$name" 2>/dev/null; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+    echo "error: could not open tmux session '$name'${err:+: $err}" >&2
+    return 1
+  }
+  printf '%s\n' "$name"
+}
+
+# fm_backend_tmux_container_ensure: the session that receives a new task window.
+# Prints the resolved session name.
 #
+# When config/captain-tmux-session names a session, that exact session is the
+# container, whether or not this process is inside another session. The file's
+# contract is docs/configuration.md "Captain tmux session".
+#
+# Otherwise reuse the current tmux session when firstmate itself runs inside
+# tmux, else ensure a dedicated detached "firstmate" session exists.
 # Inside tmux the session is read from this process's own pane ($TMUX_PANE),
 # and a grouped session resolves to its group's base session. Without that,
 # tmux answers with the session of the most recently active client, so a viewer
@@ -98,7 +199,12 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
 # every later task. A group whose base session is gone keeps the pane's own.
 # A detached caller ensures exact firstmate; a near-named session cannot stand in.
 fm_backend_tmux_container_ensure() {
-  local fmt info ses grouped group live
+  local fmt info ses grouped group live configured
+  configured=$(fm_backend_tmux_captain_session) || return 1
+  if [ -n "$configured" ]; then
+    fm_backend_tmux_ensure_named_session "$configured"
+    return
+  fi
   fmt=$'#{session_name}\t#{session_grouped}\t#{session_group}'
   if [ -n "${TMUX:-}" ]; then
     if [ -n "${TMUX_PANE:-}" ]; then

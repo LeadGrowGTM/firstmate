@@ -385,5 +385,143 @@ wait_for_capture_text "$WSL_WID" "interop=$INTEROP_DIR/2_interop" \
   || fail "the new window's shell did not receive the live interop socket"$'\n'"$(fm_backend_tmux_capture "$WSL_WID" 20)"
 pass "real tmux: a window created on WSL carries the live interop socket, not the inherited one"
 
+# --- configured captain session ------------------------------------------------
+# A launcher sitting in another session must still open mate and crew windows
+# in the named session, on this same private server, and must leave the
+# launcher's own windows where they are.
+
+CAPTAIN_HOME="$SHIM_DIR/captain-home"
+MATE_HOME="$SHIM_DIR/mate-home"
+REMOTE_HOME="$SHIM_DIR/remote-home"
+mkdir -p "$CAPTAIN_HOME/config" "$MATE_HOME/config" "$REMOTE_HOME/config" "$CAPTAIN_HOME/keep"
+printf 'firstmate\n' > "$CAPTAIN_HOME/config/captain-tmux-session"
+cat > "$MATE_HOME/.fm-secondmate-parent" <<EOF
+schema=fm-secondmate-parent.v1
+route=local
+parent_home=$CAPTAIN_HOME
+EOF
+cat > "$REMOTE_HOME/.fm-secondmate-parent" <<EOF
+schema=fm-secondmate-parent.v1
+route=remote
+parent_host=boat
+EOF
+
+tmux new-session -d -s churchill-rc -n launcher -c "$CAPTAIN_HOME/keep" \
+  || fail "could not create the launcher session on the private socket"
+tmux new-window -d -t '=churchill-rc:' -n fm-already -c "$CAPTAIN_HOME/keep" \
+  || fail "could not create the pre-existing crew window"
+LAUNCH_PANE=$(tmux display-message -p -t '=churchill-rc:launcher' '#{pane_id}')
+[ -n "$LAUNCH_PANE" ] || fail "launcher pane id was empty"
+ALREADY_ID=$(tmux display-message -p -t '=churchill-rc:fm-already' '#{window_id}')
+[ -n "$ALREADY_ID" ] || fail "pre-existing window id was empty"
+
+got=$(TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$CAPTAIN_HOME" fm_backend_tmux_container_ensure) \
+  || fail "configured container_ensure failed inside another session"
+[ "$got" = firstmate ] || fail "configured container returned '$got' instead of firstmate"
+[ "$(tmux display-message -p -t "$LAUNCH_PANE" '#{session_name}')" = churchill-rc ] \
+  || fail "opening the named session switched the launcher pane's session"
+tmux has-session -t '=firstmate' || fail "named session was not created on the private server"
+if tmux list-windows -t '=firstmate-recovery' -F '#{window_name}' 2>/dev/null | grep -qx fm-placed; then
+  fail "configured session resolved through the near-named session"
+fi
+
+PLACED_ID=$(TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$CAPTAIN_HOME" \
+  fm_backend_tmux_create_task "$got" fm-placed "$CAPTAIN_HOME/keep") \
+  || fail "could not create the configured-session window"
+[ "$(tmux display-message -p -t "$PLACED_ID" '#{session_name}')" = firstmate ] \
+  || fail "created window is not in the named session"
+[ "$(tmux display-message -p -t "$PLACED_ID" '#{window_name}')" = fm-placed ] \
+  || fail "created window was renamed"
+PLACED_SOCKET=$(fm_backend_tmux_socket_path "$PLACED_ID") || fail "socket path read failed"
+case "$PLACED_SOCKET" in
+  "$TMUX_TMPDIR"/*) ;;
+  *) fail "recorded socket is not this private server: $PLACED_SOCKET" ;;
+esac
+[ "$PLACED_SOCKET" = "$(tmux display-message -p -t "$PLACED_ID" '#{socket_path}')" ] \
+  || fail "socket path does not match the server that holds the window"
+fm_backend_tmux_target_exists "firstmate:fm-placed" \
+  || fail "session:window endpoint is not addressable"
+if tmux list-windows -t '=churchill-rc' -F '#{window_name}' | grep -qx fm-placed; then
+  fail "configured create_task also landed the window in the launcher session"
+fi
+tmux list-windows -t '=churchill-rc' -F '#{window_id}' | grep -qx "$ALREADY_ID" \
+  || fail "configuring a session moved or removed the pre-existing window"
+[ "$(tmux display-message -p -t "$ALREADY_ID" '#{window_name}')" = fm-already ] \
+  || fail "pre-existing window was renamed"
+pass "real tmux: a configured session receives the new window on the same server"
+
+# The one-time link uses the window id, skips an id already in the target
+# session, and leaves the source window in place.
+link_into_firstmate() {
+  local ses=$1 wid=$2 win=$3
+  [ "$ses" = firstmate ] && return 0
+  case "$win" in fm-*) ;; *) return 0 ;; esac
+  if tmux list-windows -t '=firstmate' -F '#{window_id}' | grep -qx "$wid"; then
+    return 0
+  fi
+  tmux link-window -d -s "$wid" -t '=firstmate:'
+}
+link_into_firstmate churchill-rc "$ALREADY_ID" fm-already \
+  || fail "could not link the pre-existing window into the named session"
+tmux list-windows -t '=firstmate' -F '#{window_id}' | grep -qx "$ALREADY_ID" \
+  || fail "linked window is not visible in the named session"
+tmux list-windows -t '=churchill-rc' -F '#{window_id}' | grep -qx "$ALREADY_ID" \
+  || fail "link removed the window from its original session"
+link_into_firstmate churchill-rc "$ALREADY_ID" fm-already \
+  || fail "linking an already linked window should be skipped, not fail"
+pass "real tmux: link-window by id is idempotent and does not move the window"
+
+got=$(TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$MATE_HOME" fm_backend_tmux_container_ensure) \
+  || fail "local secondmate container_ensure failed"
+[ "$got" = firstmate ] || fail "local secondmate ignored the parent session and returned '$got'"
+printf 'bridge\n' > "$MATE_HOME/config/captain-tmux-session"
+got=$(TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$MATE_HOME" fm_backend_tmux_container_ensure) \
+  || fail "secondmate's own session file failed"
+[ "$got" = bridge ] || fail "secondmate's own file lost to the parent, got '$got'"
+tmux has-session -t '=bridge' || fail "the overriding session was not created"
+printf 'firstmate\n' > "$MATE_HOME/config/captain-tmux-session"
+: > "$MATE_HOME/config/captain-tmux-session"
+got=$(TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$MATE_HOME" fm_backend_tmux_container_ensure) \
+  || fail "an empty own file should fall through to the parent"
+[ "$got" = firstmate ] || fail "an empty own file did not use the parent, got '$got'"
+pass "real tmux: a local secondmate uses the parent session unless its own file names one"
+
+got=$(TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$REMOTE_HOME" fm_backend_tmux_container_ensure) \
+  || fail "remote home container_ensure failed"
+[ "$got" = churchill-rc ] || fail "remote home with no file left its current session, got '$got'"
+pass "real tmux: a remote home with no file keeps the launcher session"
+
+bad=$(mktemp "$SHIM_DIR/bad.XXXXXX")
+printf 'not a session\n' > "$CAPTAIN_HOME/config/captain-tmux-session"
+if TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$CAPTAIN_HOME" \
+    fm_backend_tmux_container_ensure >"$bad.out" 2>"$bad.err"; then
+  fail "an invalid session name should refuse"
+fi
+grep -q 'not a session' "$bad.err" || fail "invalid name error did not name the value: $(cat "$bad.err")"
+[ ! -s "$bad.out" ] || fail "invalid name still printed a session: $(cat "$bad.out")"
+printf 'firstmate\nextra\n' > "$CAPTAIN_HOME/config/captain-tmux-session"
+if TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$CAPTAIN_HOME" \
+    fm_backend_tmux_container_ensure >"$bad.out" 2>"$bad.err"; then
+  fail "a two-line session file should refuse"
+fi
+grep -q 'one line' "$bad.err" || fail "two-line file error was not specific: $(cat "$bad.err")"
+printf 'bad:name\n' > "$MATE_HOME/config/captain-tmux-session"
+if TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$MATE_HOME" \
+    fm_backend_tmux_container_ensure >"$bad.out" 2>"$bad.err"; then
+  fail "a secondmate's own invalid file should refuse before the parent is used"
+fi
+rm -f "$MATE_HOME/config/captain-tmux-session"
+printf 'also bad\n' > "$CAPTAIN_HOME/config/captain-tmux-session"
+if TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$MATE_HOME" \
+    fm_backend_tmux_container_ensure >"$bad.out" 2>"$bad.err"; then
+  fail "an invalid parent session file should refuse"
+fi
+grep -q 'also bad' "$bad.err" || fail "parent file error did not name the value: $(cat "$bad.err")"
+rm -f "$CAPTAIN_HOME/config/captain-tmux-session" "$bad.out" "$bad.err"
+got=$(TMUX=x TMUX_PANE="$LAUNCH_PANE" FM_HOME="$CAPTAIN_HOME" fm_backend_tmux_container_ensure) \
+  || fail "removing the file should restore the launcher session"
+[ "$got" = churchill-rc ] || fail "unset file did not restore today's session, got '$got'"
+pass "real tmux: a bad or removed session file refuses or falls back, and never picks a third session"
+
 cleanup_all
 trap - EXIT
