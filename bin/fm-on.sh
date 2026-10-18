@@ -35,8 +35,9 @@
 # approved set from fm-boat-budget-lib.sh. The connection verifies the one id
 # in state/.boat-route-box, which fm-boat-send.sh writes when it selects a box.
 # A command argument that is a task id in state/.boat-task-box uses that
-# task's box instead, and the route record is updated to it. When that box
-# is not the alias's current sandbox, the alias is refreshed to it first.
+# task's box instead. When that box is not the alias's current sandbox, the
+# alias is refreshed to it first, and the route record is updated only after
+# that refresh succeeds.
 #
 # ServerAliveInterval/ServerAliveCountMax arm dead-peer detection so a vanished
 # peer (a reboot, a dropped link) becomes a bounded ssh failure (exit 255)
@@ -157,11 +158,11 @@ if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
         *)
           fm_boat_read_box_ids "$BOX_CONFIG" | grep -Fxq -- "$TASK_BOX" || die "selected Boat box is not an approved box for $ROUTE"
           if [ "$TASK_BOX" != "$BOX" ]; then
-            BOX=$TASK_BOX
             [ ! -L "$ROUTE_BOX" ] || die "unsafe route box record for $ROUTE"
-            printf '%s\n' "$BOX" > "$ROUTE_BOX"
-            FM_BOAT_HYDRATE_WAIT=0 "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" "$HOST" >/dev/null ||
+            FM_BOAT_HYDRATE_WAIT=0 "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$TASK_BOX" "$HOST" >/dev/null ||
               die "Boat alias does not follow the task box for $ROUTE"
+            BOX=$TASK_BOX
+            printf '%s\n' "$BOX" > "$ROUTE_BOX"
           fi
           ;;
       esac
