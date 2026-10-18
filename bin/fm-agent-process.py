@@ -2,7 +2,6 @@
 """Linux process evidence for recovery; never sends signals or reads terminal input."""
 import os
 from pathlib import Path
-import shutil
 import stat
 import subprocess
 import sys
@@ -250,12 +249,10 @@ def trusted_interpreter_ids():
         return cached
     ids = set()
     for name in SHELL_INTERPRETERS:
-        candidates = [os.path.join(directory, name) for directory in
-                      ('/bin', '/usr/bin', '/usr/local/bin')]
-        found = shutil.which(name)
-        if found:
-            candidates.append(found)
-        for path in candidates:
+        # Fixed prefixes only. A PATH entry can name a different program
+        # bash, and that program must not become a trusted interpreter.
+        for directory in ('/bin', '/usr/bin', '/usr/local/bin'):
+            path = os.path.join(directory, name)
             try:
                 info = os.stat(path)
             except OSError:

@@ -1909,6 +1909,23 @@ test_secondmate_relaunch_refuses_an_argv_lookalike_of_the_procevent_runner() {
   assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the renamed-binary lookalike'
   printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
     || fail "the refusal did not name the renamed-binary lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  mkdir -p "$dir/pathbin"
+  cp "$standin" "$dir/pathbin/bash"
+  spoof=$(launch_procevent_lookalike "$home_real" bash "$dir/pathbin/bash" "$script")
+  remember_rooted_pids "$spoof"
+  # The checker's own PATH must not add that copy to the trusted interpreters.
+  # Keep the poisoned PATH on the proof only: a bash-named sleeper earlier on
+  # PATH would replace the shell the relaunch command itself runs.
+  PATH="$dir/pathbin:$PATH" python3 "$ROOT/bin/fm-agent-process.py" home-procevent "$home_real" "$spoof" \
+    && fail 'a PATH entry named bash was trusted as the home runner'
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a non-shell binary found as bash on PATH was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the PATH lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the PATH lookalike: $out"
   pass 'an argv lookalike of the home process-event runner still blocks restart'
 }
 
