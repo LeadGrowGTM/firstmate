@@ -2,6 +2,7 @@
 """Linux process evidence for recovery; never sends signals or reads terminal input."""
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -236,34 +237,57 @@ def script_arg(arg, script):
     return os.path.normpath(arg) == script
 
 
-def executable_name(pid):
-    """Basename of the kernel executable, ignoring an argv disguise.
+def trusted_interpreter_ids():
+    """Device and inode of the shell interpreters this host actually has.
 
-    A replaced interpreter keeps a `` (deleted)`` suffix on the symlink
-    text. The inode is still that interpreter, so the suffix is not part
-    of its name.
+    A basename is not identity: a copy of another program named ``bash``
+    has a different inode from ``/usr/bin/bash``. ``stat`` follows a
+    symlink, so a path that points at the real interpreter counts as that
+    interpreter. The result is cached for this process.
     """
+    cached = getattr(trusted_interpreter_ids, 'ids', None)
+    if cached is not None:
+        return cached
+    ids = set()
+    for name in SHELL_INTERPRETERS:
+        candidates = [os.path.join(directory, name) for directory in
+                      ('/bin', '/usr/bin', '/usr/local/bin')]
+        found = shutil.which(name)
+        if found:
+            candidates.append(found)
+        for path in candidates:
+            try:
+                info = os.stat(path)
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                ids.add((info.st_dev, info.st_ino))
+    trusted_interpreter_ids.ids = ids
+    return ids
+
+
+def is_trusted_interpreter(pid):
+    """True when ``/proc/<pid>/exe`` is one of this host's shell interpreters."""
     try:
-        exe = os.readlink(f'/proc/{int(pid)}/exe')
+        info = os.stat(f'/proc/{int(pid)}/exe')
     except (OSError, TypeError, ValueError):
-        return None
-    suffix = ' (deleted)'
-    if exe.endswith(suffix):
-        exe = exe[:-len(suffix)]
-    name = os.path.basename(exe).lstrip('-')
-    return name or None
+        return False
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    return (info.st_dev, info.st_ino) in trusted_interpreter_ids()
 
 
 def is_home_procevent_runner(pid, script, root):
     """The process is a shell interpreter executing this home's script.
 
-    ``/proc/<pid>/exe`` has to be a shell interpreter, and the live argv has
-    to name that interpreter with this exact script path as the next
-    argument. That is what the kernel leaves after ``#!/usr/bin/env bash``.
-    An argv that only names the script, or that names a shell while the
-    executable is something else, is not this runner. A basename, a copy of
-    the script outside the home, or the path buried later in the argument
-    list is not this runner either. FM_HOME must resolve to the same home.
+    ``/proc/<pid>/exe`` has to be a shell interpreter installed on this
+    host, not a renamed copy, and the live argv has to name an interpreter
+    with this exact script path as the next argument. That is what the
+    kernel leaves after ``#!/usr/bin/env bash``. An argv that only names
+    the script, or that names a shell while the executable is something
+    else, is not this runner. A basename, a copy of the script outside the
+    home, or the path buried later in the argument list is not this runner
+    either. FM_HOME must resolve to the same home.
     """
     try:
         argv = cmdline(pid)
@@ -271,7 +295,7 @@ def is_home_procevent_runner(pid, script, root):
         return False
     if len(argv) < 2:
         return False
-    if executable_name(pid) not in SHELL_INTERPRETERS:
+    if not is_trusted_interpreter(pid):
         return False
     if os.path.basename(argv[0]).lstrip('-') not in SHELL_INTERPRETERS:
         return False

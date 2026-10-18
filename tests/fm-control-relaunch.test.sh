@@ -1898,6 +1898,17 @@ test_secondmate_relaunch_refuses_an_argv_lookalike_of_the_procevent_runner() {
   assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the interpreter lookalike'
   printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
     || fail "the refusal did not name the interpreter lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  cp "$standin" "$dir/bash"
+  spoof=$(launch_procevent_lookalike "$home_real" bash "$dir/bash" "$script")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a non-shell binary named bash and claiming to run the home runner was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the renamed-binary lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the renamed-binary lookalike: $out"
   pass 'an argv lookalike of the home process-event runner still blocks restart'
 }
 
