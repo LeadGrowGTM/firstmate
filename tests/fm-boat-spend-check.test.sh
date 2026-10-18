@@ -381,6 +381,17 @@ test_missing_active_states_is_not_guessed() {
     "with no activeStates the count, size and no-stop conditions should not be evaluated on a guessed list"
 }
 
+test_dispatch_reservation_keys_are_accepted() {
+  local home out
+  home=$(make_world dispatch-caps '{"ceiling_usd":100,"expected_running":3,"account_seconds_per_24h":259200,"box_seconds_per_24h":86400}')
+  out=$(run_check "$home") || fail "dispatch cap keys should still be a normal check: $out"
+  [ -z "$out" ] || fail "dispatch cap keys are not a spend-check condition: $out"
+  home=$(make_world dispatch-caps-bad '{"box_seconds_per_24h":0}')
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: config/boat-spend.json is invalid: box_seconds_per_24h must be a whole number, 1 or more' \
+    "$out" 'a bad per-box ceiling is an invalid file'
+}
+
 test_absent_config_is_off() {
   local home out
   home=$(make_world nocfg none)
@@ -468,6 +479,7 @@ test_invalid_config_is_reported
 test_config_must_be_exactly_one_json_object
 test_missing_active_states_is_not_guessed
 test_absent_config_is_off
+test_dispatch_reservation_keys_are_accepted
 test_only_the_three_read_commands_are_passed
 test_daily_gate_and_persistent_condition
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it

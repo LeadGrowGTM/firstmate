@@ -30,6 +30,8 @@
 #            always-on list
 #   refill   auto-refill is enabled
 #   period   the trial or plan end is within 3 days
+# account_seconds_per_24h and box_seconds_per_24h are accepted and ignored.
+# fm-boat-send.sh owns those reservation ceilings.
 #   read     the check could not see everything (missing jq or CLI, timeout,
 #            malformed JSON, an invalid config, an unreadable field, a sandbox
 #            list with more pages), because a check that cannot see is not
@@ -81,7 +83,7 @@ PROBE_SECS=9
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 usage() {
-  sed -n '2,53{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
+  sed -n '2,55{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
 }
 
 fail() {
@@ -116,13 +118,15 @@ config_normalized() {
     if length != 1 or (.[0] | type) != "object" then error("must be one JSON object")
     else
       .[0] |
-      (keys - ["ceiling_usd", "expected_running", "allowed_sizes", "always_on", "boat_bin"]) as $extra |
+      (keys - ["ceiling_usd", "expected_running", "allowed_sizes", "always_on", "boat_bin", "account_seconds_per_24h", "box_seconds_per_24h"]) as $extra |
       if ($extra | length) > 0 then error("unknown key " + ($extra[0] | tojson))
       elif has("ceiling_usd") and (.ceiling_usd | numpos | not) then error("ceiling_usd must be a number above 0")
       elif has("expected_running") and (.expected_running | (type == "number" and . >= 0 and . == floor) | not) then error("expected_running must be a whole number, 0 or more")
       elif has("allowed_sizes") and (.allowed_sizes | strs | not) then error("allowed_sizes must be a list of size names")
       elif has("always_on") and (.always_on | strs | not) then error("always_on must be a list of sandbox ids")
       elif has("boat_bin") and (.boat_bin | (type == "string" and startswith("/")) | not) then error("boat_bin must be an absolute path")
+      elif has("account_seconds_per_24h") and (.account_seconds_per_24h | (type == "number" and . >= 1 and . == floor) | not) then error("account_seconds_per_24h must be a whole number, 1 or more")
+      elif has("box_seconds_per_24h") and (.box_seconds_per_24h | (type == "number" and . >= 1 and . == floor) | not) then error("box_seconds_per_24h must be a whole number, 1 or more")
       else {
         ceiling_usd: (.ceiling_usd // 30),
         expected_running: (.expected_running // 1),
