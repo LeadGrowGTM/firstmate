@@ -1443,6 +1443,9 @@ SH
     || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "could not start the ambient decoy server"; }
   env -u TMUX -u TMUX_PANE "$real" -S "$decoy" -f /dev/null new-window -d -t '=firstmate:' -n fm-prefix -- /bin/sleep 300 \
     || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "could not create the ambient decoy window"; }
+  mkdir -p "$dir/space dir"
+  env -u TMUX -u TMUX_PANE "$real" -S "$dir/space dir/sock" -f /dev/null new-session -d -s firstmate -n bash -- /bin/sleep 300 \
+    || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; "$real" -S "$dir/space dir/sock" kill-server >/dev/null 2>&1 || true; fail "could not start the spaced socket server"; }
 
   printf 'window=firstmate:fm-live\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-live.meta"
   printf 'window=firstmate:fm-gone\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-gone.meta"
@@ -1456,9 +1459,21 @@ SH
     fm_backend_target_exists tmux "firstmate:fm-live" "" "$2" || exit 1
     fm_backend_target_exists tmux "fmpre:fm-prefix" "" "$2" && exit 1
     fm_backend_target_exists tmux "firstmate:fm-gone" || exit 1
+    fm_backend_target_exists tmux "firstmate:0" "" "$2" || exit 1
+    fm_backend_target_exists tmux "firstmate:9" "" "$2" && exit 1
+    pane=$(tmux -S "$2" display-message -p -t "=firstmate:fm-live" "#{pane_id}")
+    wid=$(tmux -S "$2" display-message -p -t "=firstmate:fm-live" "#{window_id}")
+    [ -n "$pane" ] && [ -n "$wid" ] || exit 1
+    fm_backend_target_exists tmux "$pane" "" "$2" || exit 1
+    fm_backend_target_exists tmux "$wid" "" "$2" || exit 1
+    fm_backend_target_exists tmux "%99999" "" "$2" && exit 1
+    fm_backend_target_exists tmux "@99999" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:0" "" "$3" || exit 1
+    fm_backend_target_exists tmux "firstmate:fm-live" "" "$3" && exit 1
     exit 0
-  ' _ "$ROOT/bin/fm-backend.sh" "$recorded" || status=$?
-  [ "$status" -eq 0 ] || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; fail "recorded-socket existence check did not keep a live window and reject a missing or prefix-matched one"; }
+  ' _ "$ROOT/bin/fm-backend.sh" "$recorded" "$dir/space dir/sock" || status=$?
+  [ "$status" -eq 0 ] || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; "$real" -S "$dir/space dir/sock" kill-server >/dev/null 2>&1 || true; fail "recorded-socket existence check did not keep a live window and reject a missing or prefix-matched one"; }
+  "$real" -S "$dir/space dir/sock" kill-server >/dev/null 2>&1 || true
 
   out=$(env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT -u TMUX_PANE \
     TMUX="$decoy,0,0" \

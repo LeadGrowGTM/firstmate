@@ -76,6 +76,7 @@ Tmux backend calls refuse that home unless its private `fm-lab` socket is select
 ### Agent liveness probe
 
 A target-existence check proves only that the recorded window is present on the task's recorded tmux server.
+A pane id must be that pane, and a numeric window target must be that window index.
 It does not prove a harness is running.
 The deeper tmux agent-liveness probe first verifies exact window membership, then reads process names to distinguish a running harness from a bare idle shell.
 It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, Rovo, and AGY process identities as `alive`, a foreground shell group with positive terminal-input wait proof as `dead`, a window absent from the addressed server as `missing`, unreadable state as `unreadable`, and every other process as `ambiguous`.

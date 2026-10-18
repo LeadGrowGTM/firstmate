@@ -196,8 +196,10 @@ fm_backend_tmux_with_socket() {  # <socket> <command...>
     /*) ;;
     *) return 1 ;;
   esac
+  # A comma is the TMUX selector delimiter, so a comma in the path would
+  # address a different server. Spaces are part of a real socket path.
   case "$socket" in
-    *[$'\n\r\t, ']*) return 1 ;;
+    *[$'\n\r\t,']*) return 1 ;;
   esac
   (
     unset TMUX_PANE
@@ -209,22 +211,38 @@ fm_backend_tmux_with_socket() {  # <socket> <command...>
 
 # fm_backend_tmux_target_exists <target>: the recorded endpoint is present.
 # `tmux display-message -t session:window` returns success for the session's
-# active window when that window is gone, and a session name without a leading
-# '=' can select a different, longer session by unique prefix. Neither is
-# existence. A session:window target must be an exact window name in the
-# exact session's inventory. A bare target must be an exact session. This
-# function uses the ambient server; fm_backend_tmux_with_socket binds a
-# recorded socket around it. A missing window and an inventory that cannot be
-# read both fail. A hung client is the caller's timeout, not success.
+# active window when that window, or that window index, is gone, and a session
+# name without a leading '=' can select a different, longer session by unique
+# prefix. Neither is existence. A session:name target must be an exact window
+# name in the exact session's inventory. A session:index target must be that
+# window index. A pane id (%id) or window id (@id) must be that id: a missing
+# id still makes display-message exit 0, with empty fields. A bare target must
+# be an exact session. This function uses the ambient server;
+# fm_backend_tmux_with_socket binds a recorded socket around it. A missing
+# window and an inventory that cannot be read both fail. A hung client is the
+# caller's timeout, not success.
+fm_backend_tmux_id_is() {  # <target> <format>
+  local got
+  got=$(tmux display-message -p -t "$1" "$2" 2>/dev/null) || return 1
+  [ -n "$got" ] && [ "$got" = "$1" ]
+}
+
 fm_backend_tmux_target_exists() {  # <target>
-  local target=$1 session window windows status
+  local target=$1 session window windows status format
   case "$target" in
+    '') return 1 ;;
+    %*) fm_backend_tmux_id_is "$target" '#{pane_id}' ;;
+    @*) fm_backend_tmux_id_is "$target" '#{window_id}' ;;
     *:*:*) return 1 ;;
     *:*)
       session=${target%%:*}
       window=${target#*:}
       [ -n "$session" ] && [ -n "$window" ] || return 1
-      windows=$(fm_backend_tmux_window_inventory "=$session")
+      case "$window" in
+        *[!0-9]*) format='#{window_name}' ;;
+        *) format='#{window_index}' ;;
+      esac
+      windows=$(fm_backend_tmux_window_inventory "=$session" "$format")
       status=$?
       [ "$status" -eq 0 ] || return 1
       if printf '%s\n' "$windows" | grep -qxF -- "$window"; then
@@ -232,14 +250,14 @@ fm_backend_tmux_target_exists() {  # <target>
       fi
       return 1
       ;;
-    '') return 1 ;;
     *) tmux has-session -t "=$target" >/dev/null 2>&1 ;;
   esac
 }
 
-# fm_backend_tmux_window_inventory: <session-target>'s window names, one per
+# fm_backend_tmux_window_inventory: <session-target>'s window fields, one per
 # line on stdout, together with a verdict on the READ ITSELF, which is what
-# every caller that must not guess depends on:
+# every caller that must not guess depends on. The format defaults to the
+# window name.
 #   0 - the inventory was read; its lines are that session's windows.
 #   2 - tmux answered definitively that the session, or its whole server, is
 #       absent, so no window of that session exists.
@@ -251,9 +269,9 @@ fm_backend_tmux_target_exists() {  # <target>
 # The target is passed through exactly as the caller means it, so a caller that
 # requires the exact recorded session asks for `=session` and still gets the
 # same classification.
-fm_backend_tmux_window_inventory() {  # <session-target>
-  local windows
-  if windows=$(LC_ALL=C tmux list-windows -t "$1" -F '#{window_name}' 2>&1); then
+fm_backend_tmux_window_inventory() {  # <session-target> [format]
+  local windows format=${2:-'#{window_name}'}
+  if windows=$(LC_ALL=C tmux list-windows -t "$1" -F "$format" 2>&1); then
     printf '%s\n' "$windows"
     return 0
   fi
