@@ -9,39 +9,54 @@
 # `/mnt`. The pause flag is `state/disk-guard.pause` in the root Firstmate
 # home (`fm_firstmate_root_home` in bin/fm-wake-lib.sh).
 # bin/fm-spawn.sh owns admission behavior for that flag.
-# This script removes the flag only when the sample is healthy, and it never
-# removes a symlink.
+# This script removes a regular pause flag only when every monitored reading
+# is present and healthy, and it never removes a symlink.
 #
 # Optional `config/disk-guard` in the root home replaces any default below.
 # One directive per line. `#` comments and blank lines are ignored.
 #
 #   ram-floor-kib 8388608
+#   root-free-floor-kib 104857600
 #   c-free-floor-kib 104857600
+#   d-free-floor-kib 104857600
 #   linux-used-pct 70
 #   lead-seconds 1800
 #   vhdx <absolute-path>
 #
-# The two floors are KiB. Available RAM below its floor, C: free space below
-# its floor, or the Linux filesystem that holds FM_HOME at or above
-# linux-used-pct is pressure now. Between samples 30 seconds to 2 hours
-# apart, pressure is also true when a falling free-space reading or a rising
-# Linux percentage would cross its line inside lead-seconds. The comparison
-# is `distance * elapsed <= lead * change`, in integers. A missing reading is
-# not pressure. The first sample has no projection.
+# The floors are KiB. Available RAM below its floor, free space on `/`,
+# `/mnt/c`, or `/mnt/d` below that mount's floor, or the Linux filesystem
+# that holds FM_HOME at or above linux-used-pct is pressure now. `/mnt/c`
+# and `/mnt/d` are monitored only when that path is a real directory.
+# Between samples 30 seconds to 2 hours apart, pressure is also true when a
+# falling free-space reading or a rising Linux percentage would cross its
+# line inside lead-seconds. The comparison is
+# `distance * elapsed <= lead * change`, in integers. A missing reading is
+# not pressure by itself. When a pause flag already exists and any monitored
+# reading is absent, the flag stays and the sample logs action=held-unknown.
+# The flag is removed only when every monitored reading is present and
+# healthy. The first sample has no projection.
+#
+# Each `df` read is bounded to 15 seconds through fm_run_timed in
+# bin/fm-timeout-lib.sh. A timeout or a failed read is an absent reading.
 #
 # Each sample appends one line to `$FM_HOME/state/disk-guard.log` and keeps
 # the last 2000 lines. A symlink at the log or the previous-sample path is
 # left untouched. The line records available RAM, free swap, Linux size,
-# used, available, and percent, free space on C:, the virtual-disk file size,
-# and the decision.
+# used, available, and percent, free space on `/`, `C:`, and `D:`, the
+# virtual-disk file size, alert=ok|low|unknown, and the decision.
+# alert=low means a free-space floor is already crossed or will be inside
+# the lead window. That is the low-disk alert.
 #
-# Entering pressure appends one `check` wake with key `disk-guard`. The same
-# transition runs `fm-data-manage.sh clean` once when the root home's
-# `config/data-management` is regular, adding `--live` only when
+# Entering pressure appends one `check` wake with key `disk-guard`. That wake
+# is the alert. bin/fm-jev-mem-guard.sh only prints a verdict and, with
+# `--check`, exits 1 on warning or critical. It is not scheduled. This
+# sample's wake is the scheduled alert beside that check.
+# The same transition runs `fm-data-manage.sh clean` once when the root
+# home's `config/data-management` is regular, adding `--live` only when
 # `config/data-management.live-authorized` is also regular. A later healthy
-# sample removes the flag and wakes once. This script does not trim the page
-# cache. It may stat the configured virtual-disk file and read free space on
-# `/mnt/c`. It does not walk `/mnt`.
+# sample removes a regular flag and wakes once. This script does not trim
+# the page cache. It may stat the configured virtual-disk file and read free
+# space on `/`, `/mnt/c`, and `/mnt/d`. It does not walk `/mnt`.
 #
 # Exit 0 means a sample was recorded, or another live run holds the lock.
 # Exit 1 means the home, config, or sample could not be trusted. Exit 2
@@ -85,22 +100,30 @@ LOCK_DIR=
 LOCK_FD=
 ROOT=
 RAM_FLOOR=8388608
+ROOT_FLOOR=104857600
 C_FLOOR=104857600
+D_FLOOR=104857600
 LINUX_PCT=70
 LEAD=1800
 VHDX=
+DF_SECONDS=15
 RAM_AVAIL=absent
 SWAP_FREE=absent
 LINUX_PCT_NOW=absent
 LINUX_SIZE=absent
 LINUX_USED=absent
 LINUX_AVAIL=absent
+ROOT_FREE=absent
 C_FREE=absent
+D_FREE=absent
 VHDX_BYTES=absent
 PREV_AT=
 PREV_RAM=
+PREV_ROOT=
 PREV_C=
+PREV_D=
 PREV_LINUX=
+ALERT=ok
 REASONS=
 SAMPLE_BLOCKED=0
 
@@ -152,14 +175,16 @@ load_guard_config() {
     key=$1
     val=${2:-}
     case "$key" in
-      ram-floor-kib|c-free-floor-kib|linux-used-pct|lead-seconds)
+      ram-floor-kib|root-free-floor-kib|c-free-floor-kib|d-free-floor-kib|linux-used-pct|lead-seconds)
         [ "$nwords" -eq 2 ] || die "disk-guard config directive needs one number: $line"
         val=$(norm_uint "$val") || die "disk-guard config number is invalid: $line"
         ;;
     esac
     case "$key" in
       ram-floor-kib) RAM_FLOOR=$val ;;
+      root-free-floor-kib) ROOT_FLOOR=$val ;;
       c-free-floor-kib) C_FLOOR=$val ;;
+      d-free-floor-kib) D_FLOOR=$val ;;
       linux-used-pct)
         [ "$val" -ge 1 ] && [ "$val" -le 99 ] || die "linux-used-pct must be 1-99: $line"
         LINUX_PCT=$val
@@ -185,23 +210,32 @@ load_guard_config() {
   done < "$file"
 }
 
+mount_real() {
+  [ -d "$1" ] && [ ! -L "$1" ]
+}
+
 read_df_fields() {
-  local target=$1 kind=$2 line cap used avail size
-  line=$(df -kP "$target" 2>/dev/null | awk 'NR==2 { print }') || true
-  [ -n "$line" ] || return 0
+  local target=$1 kind=$2 line cap used avail size rc=0
+  line=$(fm_run_timed "$DF_SECONDS" df -kP "$target" 2>/dev/null | awk 'NR==2 { print }') || rc=$?
+  if fm_timed_out "$rc" || [ "$rc" -ne 0 ] || [ -z "$line" ]; then
+    return 0
+  fi
   size=$(printf '%s\n' "$line" | awk '{ print $2 }')
   used=$(printf '%s\n' "$line" | awk '{ print $3 }')
   avail=$(printf '%s\n' "$line" | awk '{ print $4 }')
   cap=$(printf '%s\n' "$line" | awk '{ print $5 }')
   cap=${cap%\%}
-  if [ "$kind" = linux ]; then
-    LINUX_SIZE=$(norm_uint "$size" 2>/dev/null || printf 'absent')
-    LINUX_USED=$(norm_uint "$used" 2>/dev/null || printf 'absent')
-    LINUX_AVAIL=$(norm_uint "$avail" 2>/dev/null || printf 'absent')
-    LINUX_PCT_NOW=$(norm_uint "$cap" 2>/dev/null || printf 'absent')
-  else
-    C_FREE=$(norm_uint "$avail" 2>/dev/null || printf 'absent')
-  fi
+  case "$kind" in
+    linux)
+      LINUX_SIZE=$(norm_uint "$size" 2>/dev/null || printf 'absent')
+      LINUX_USED=$(norm_uint "$used" 2>/dev/null || printf 'absent')
+      LINUX_AVAIL=$(norm_uint "$avail" 2>/dev/null || printf 'absent')
+      LINUX_PCT_NOW=$(norm_uint "$cap" 2>/dev/null || printf 'absent')
+      ;;
+    root) ROOT_FREE=$(norm_uint "$avail" 2>/dev/null || printf 'absent') ;;
+    c) C_FREE=$(norm_uint "$avail" 2>/dev/null || printf 'absent') ;;
+    d) D_FREE=$(norm_uint "$avail" 2>/dev/null || printf 'absent') ;;
+  esac
 }
 
 load_live_metrics() {
@@ -211,9 +245,13 @@ load_live_metrics() {
     RAM_AVAIL=$(norm_uint "$RAM_AVAIL" 2>/dev/null || printf 'absent')
     SWAP_FREE=$(norm_uint "$SWAP_FREE" 2>/dev/null || printf 'absent')
   fi
+  read_df_fields / root
   read_df_fields "$FM_HOME" linux
-  if [ -d /mnt/c ] && [ ! -L /mnt/c ]; then
+  if mount_real /mnt/c; then
     read_df_fields /mnt/c c
+  fi
+  if mount_real /mnt/d; then
+    read_df_fields /mnt/d d
   fi
   if [ -n "$VHDX" ]; then
     if [ -L "$VHDX" ]; then
@@ -231,7 +269,9 @@ load_previous() {
   local file=$STATE/disk-guard.sample line key val
   PREV_AT=
   PREV_RAM=
+  PREV_ROOT=
   PREV_C=
+  PREV_D=
   PREV_LINUX=
   if [ -L "$file" ]; then
     SAMPLE_BLOCKED=1
@@ -249,7 +289,9 @@ load_previous() {
     case "$key" in
       at) PREV_AT=$(norm_uint "$val" 2>/dev/null || true) ;;
       ram_avail_kib) PREV_RAM=$(norm_uint "$val" 2>/dev/null || true) ;;
+      root_free_kib) PREV_ROOT=$(norm_uint "$val" 2>/dev/null || true) ;;
       c_free_kib) PREV_C=$(norm_uint "$val" 2>/dev/null || true) ;;
+      d_free_kib) PREV_D=$(norm_uint "$val" 2>/dev/null || true) ;;
       linux_used_pct) PREV_LINUX=$(norm_uint "$val" 2>/dev/null || true) ;;
     esac
   done < "$file"
@@ -300,6 +342,20 @@ decide() {
       add_reason c-free
     elif crossing_soon "$C_FREE" "$PREV_C" "$C_FLOOR" "$dt" low; then
       add_reason c-free-soon
+    fi
+  fi
+  if is_uint_token "$D_FREE"; then
+    if [ "$D_FREE" -lt "$D_FLOOR" ]; then
+      add_reason d-free
+    elif crossing_soon "$D_FREE" "$PREV_D" "$D_FLOOR" "$dt" low; then
+      add_reason d-free-soon
+    fi
+  fi
+  if is_uint_token "$ROOT_FREE"; then
+    if [ "$ROOT_FREE" -lt "$ROOT_FLOOR" ]; then
+      add_reason root-free
+    elif crossing_soon "$ROOT_FREE" "$PREV_ROOT" "$ROOT_FLOOR" "$dt" low; then
+      add_reason root-free-soon
     fi
   fi
   if is_uint_token "$LINUX_PCT_NOW"; then
@@ -419,10 +475,46 @@ linux_used_pct=$LINUX_PCT_NOW
 linux_size_kib=$LINUX_SIZE
 linux_used_kib=$LINUX_USED
 linux_avail_kib=$LINUX_AVAIL
+root_free_kib=$ROOT_FREE
 c_free_kib=$C_FREE
+d_free_kib=$D_FREE
 vhdx_bytes=$VHDX_BYTES
 EOF
   mv -f -- "$tmp" "$file"
+}
+
+reading_incomplete() {
+  if [ -r /proc/meminfo ] && ! is_uint_token "$RAM_AVAIL"; then
+    return 0
+  fi
+  is_uint_token "$LINUX_PCT_NOW" || return 0
+  is_uint_token "$ROOT_FREE" || return 0
+  if mount_real /mnt/c && ! is_uint_token "$C_FREE"; then
+    return 0
+  fi
+  if mount_real /mnt/d && ! is_uint_token "$D_FREE"; then
+    return 0
+  fi
+  return 1
+}
+
+pause_present() {
+  local flag=$ROOT/state/disk-guard.pause
+  [ -f "$flag" ] || [ -L "$flag" ]
+}
+
+set_alert() {
+  ALERT=ok
+  case ",${REASONS:-}," in
+    *,c-free,*|*,c-free-soon,*|*,d-free,*|*,d-free-soon,*|*,root-free,*|*,root-free-soon,*)
+      ALERT=low
+      ;;
+    *)
+      if reading_incomplete; then
+        ALERT=unknown
+      fi
+      ;;
+  esac
 }
 
 sample_once() {
@@ -432,6 +524,7 @@ sample_once() {
   load_live_metrics
   load_previous
   decide "$now"
+  set_alert
   if [ -n "$REASONS" ]; then
     pressure=yes
     flag_state=$(write_pause_flag "$now") || die "could not write the pause flag"
@@ -455,6 +548,8 @@ sample_once() {
         ;;
       *) die "could not write the pause flag" ;;
     esac
+  elif reading_incomplete && pause_present; then
+    action="held-unknown"
   else
     flag_state=$(clear_pause_flag) || die "could not clear the pause flag"
     case "$flag_state" in
@@ -474,8 +569,8 @@ sample_once() {
         ;;
     esac
   fi
-  line=$(printf '%s ram_avail_kib=%s swap_free_kib=%s linux_used_pct=%s linux_size_kib=%s linux_used_kib=%s linux_avail_kib=%s c_free_kib=%s vhdx_bytes=%s pressure=%s reasons=%s action=%s' \
-    "$now" "$RAM_AVAIL" "$SWAP_FREE" "$LINUX_PCT_NOW" "$LINUX_SIZE" "$LINUX_USED" "$LINUX_AVAIL" "$C_FREE" "$VHDX_BYTES" "$pressure" "${REASONS:-none}" "$action")
+  line=$(printf '%s ram_avail_kib=%s swap_free_kib=%s linux_used_pct=%s linux_size_kib=%s linux_used_kib=%s linux_avail_kib=%s root_free_kib=%s c_free_kib=%s d_free_kib=%s vhdx_bytes=%s alert=%s pressure=%s reasons=%s action=%s' \
+    "$now" "$RAM_AVAIL" "$SWAP_FREE" "$LINUX_PCT_NOW" "$LINUX_SIZE" "$LINUX_USED" "$LINUX_AVAIL" "$ROOT_FREE" "$C_FREE" "$D_FREE" "$VHDX_BYTES" "$ALERT" "$pressure" "${REASONS:-none}" "$action")
   append_log "$line" || die "could not write $STATE/disk-guard.log"
   write_sample "$now" || die "could not write the sample"
   printf '%s\n' "$line"
