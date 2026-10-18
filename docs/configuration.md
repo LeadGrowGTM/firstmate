@@ -8,7 +8,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | What you want to configure | Start here |
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
-| Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend), [captain tmux session](#captain-tmux-session-configcaptain-tmux-session), [crew names](#crew-names-configmate-short-name), and [harness support](#harness-support) |
+| Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend), [captain tmux session](#captain-tmux-session-configcaptain-tmux-session), [crew tmux session](#crew-tmux-session-configcrew-tmux-session), [crew names](#crew-names-configmate-short-name), and [harness support](#harness-support) |
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Grok permission mode](#grok-permission-mode), [Muse permission mode](#muse-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
@@ -635,7 +635,9 @@ Test cleanup must use the guarded path in [`docs/cmux-backend.md`](cmux-backend.
 
 ## Captain tmux session (config/captain-tmux-session)
 
-The optional local, gitignored `config/captain-tmux-session` file names the tmux session that receives every new mate window and crew window created on the tmux backend.
+The optional local, gitignored `config/captain-tmux-session` file names the tmux session that receives every new second-mate window created on the tmux backend.
+
+When [crew tmux session](#crew-tmux-session-configcrew-tmux-session) is unset, the same file also receives new ship and scout windows.
 
 The file holds one session name on one line, with an optional final newline.
 A name is 1 to 64 characters: a letter or digit, then letters, digits, underscores, or dashes.
@@ -657,6 +659,23 @@ The recorded endpoint is the session and window that were created, plus the sock
 A relaunch that finds the recorded window still present adopts that window where it is.
 A relaunch that has to create a window, because the recorded one is gone, uses this same rule.
 Existing live windows are never moved or killed by this setting.
+
+## Crew tmux session (config/crew-tmux-session)
+
+The optional local, gitignored `config/crew-tmux-session` file names the tmux session that receives every new ship window and scout window created on the tmux backend.
+
+The file format, parent inheritance, launch refusal, and detached session creation are the same rules as [captain tmux session](#captain-tmux-session-configcaptain-tmux-session), read from `config/crew-tmux-session` instead of `config/captain-tmux-session`.
+An absent, empty, or newline-only file keeps that captain-session placement for ship and scout windows.
+A remote secondmate record does not read a local parent file, same as the captain file.
+
+Firstmate chooses which file to read from the task kind it is already launching.
+A second-mate charter reads only the captain file.
+A ship or scout reads the crew file, then the captain placement when the crew file is unset.
+The window name is not part of that choice.
+
+A relaunch that creates a replacement window uses this same choice, and a relaunch that finds the recorded window still present adopts that window where it is.
+This setting does not move or kill an existing window.
+`bin/fm-crew-session-migrate.sh` moves one home's live ship and scout windows into the crew session named here, and its header owns the dry-run default, the refusal rules, and the exact invocation.
 
 ## Away-mode supervisor backend (FM_SUPERVISOR_BACKEND / FM_SUPERVISOR_TARGET)
 

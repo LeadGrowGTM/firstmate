@@ -4215,8 +4215,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   elif [ "$BACKEND" = tmux ]; then
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh window for the same task, opened directly in the
-    # recorded worktree, in this process's tmux container session - the
-    # recorded window's server is proven dead
+    # recorded worktree. The session is the one this task's kind selects.
+    # The recorded window's server is proven dead
     # (fm_control_endpoint_absence_verdict owns that proof). The record
     # published below writes window= and tmux_socket= from it, which is the
     # whole rebind - the task id, brief, worktree, armed poll and status log are
@@ -4235,7 +4235,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     else
       unset TMUX_PANE
     fi
-    SES=$(fm_backend_tmux_container_ensure) || {
+    SES=$(fm_backend_tmux_container_ensure "$KIND") || {
       echo "error: could not resolve the tmux container session to re-create task $ID's endpoint in" >&2
       exit 1
     }
@@ -4321,7 +4321,7 @@ EOF
 else
   case "$BACKEND" in
   tmux)
-    SES=$(fm_backend_tmux_container_ensure) || {
+    SES=$(fm_backend_tmux_container_ensure "$KIND") || {
       echo "error: could not resolve the tmux container session" >&2
       exit 1
     }

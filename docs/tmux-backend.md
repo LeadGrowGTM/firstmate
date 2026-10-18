@@ -22,7 +22,7 @@ For the best visible experience, launch the primary harness inside a tmux sessio
 tmux new -s firstmate
 ```
 
-Crew tasks become windows in that session unless [captain tmux session](configuration.md#captain-tmux-session-configcaptain-tmux-session) names a different one.
+Crew tasks become windows in that session unless [captain tmux session](configuration.md#captain-tmux-session-configcaptain-tmux-session) or [crew tmux session](configuration.md#crew-tmux-session-configcrew-tmux-session) names a different one.
 `tmux display-message -p '#S'` prints its name.
 A locked `bin/fm-session-start.sh` labels the primary pane with its home and resolved harness, then enables the detail line on the session's windows.
 Its model and effort use explicit `FM_PRIMARY_MODEL` and `FM_PRIMARY_EFFORT` values, or Claude's launch environment when the primary is Claude; unavailable values appear as `?`.
@@ -41,8 +41,8 @@ The next tmux server startup loads the theme, and session start or spawn restore
 To apply the approved configuration to a running server, source `~/.tmux.conf` explicitly on that server.
 The usage job addresses the rendering server's socket and reads the labeled window's home cache, so grouped views and named servers cannot borrow another home's usage.
 Existing sessions pick up the primary label and detail line at their next locked session start or context re-emit; task windows refresh their pane detail labels at spawn and can refresh them from recorded metadata with `bin/fm-statusbar.sh sync`.
-A viewer attached through a grouped session (`tmux new-session -t <session-name> -s <view>`) does not become the container when `config/captain-tmux-session` is unset: Firstmate reads the primary's pane when `TMUX_PANE` is set and resolves a grouped session to its base session.
-If the primary harness runs outside tmux and that file is unset, Firstmate creates or reuses a detached session named `firstmate`:
+When the session file that applies to the new window is unset, a viewer attached through a grouped session (`tmux new-session -t <session-name> -s <view>`) does not become the container: Firstmate reads the primary's pane when `TMUX_PANE` is set and resolves a grouped session to its base session.
+If the primary harness runs outside tmux and the session file that applies to the new window is unset, Firstmate creates or reuses a detached session named `firstmate`:
 
 ```sh
 tmux attach -t firstmate
