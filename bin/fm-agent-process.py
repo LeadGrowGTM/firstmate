@@ -2,6 +2,7 @@
 """Linux process evidence for recovery; never sends signals or reads terminal input."""
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 
@@ -185,6 +186,120 @@ def pane_input_shell(candidate, original):
             and descendant(candidate, original))
 
 
+SHELL_INTERPRETERS = {'bash', 'sh', 'dash', 'ash', 'ksh', 'mksh', 'zsh', 'env'}
+
+
+def home_procevent_script(root):
+    """The home's own runner, only as a regular file at that exact path.
+
+    A secondmate home is its code root, so the runner it starts is
+    ``<home>/bin/fm-procevent.sh``. A symlink, or the same basename anywhere
+    else, is not that script.
+    """
+    script = root + '/bin/fm-procevent.sh'
+    try:
+        info = os.lstat(script)
+    except OSError:
+        return None
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        return None
+    try:
+        if os.path.realpath(script) != script:
+            return None
+    except OSError:
+        return None
+    return script
+
+
+def fm_home_is(pid, root):
+    """True when this process has exactly one FM_HOME and it is ``root``."""
+    try:
+        raw = (Path('/proc') / str(pid) / 'environ').read_bytes()
+    except OSError:
+        return False
+    found = [entry[len(b'FM_HOME='):] for entry in raw.split(b'\0')
+             if entry.startswith(b'FM_HOME=')]
+    if len(found) != 1:
+        return False
+    value = found[0].decode('utf-8', 'surrogateescape')
+    if not value or '\n' in value or '\x00' in value:
+        return False
+    try:
+        return os.path.realpath(value) == root
+    except OSError:
+        return False
+
+
+def script_arg(arg, script):
+    if not arg.startswith('/'):
+        return False
+    return os.path.normpath(arg) == script
+
+
+def is_home_procevent_runner(pid, script, root):
+    """The process is executing this home's fm-procevent.sh for this home.
+
+    The live argv is either the script itself or a shell interpreter whose
+    next argument is that exact path (the ``#!/usr/bin/env bash`` shape).
+    A basename, a copy of the script outside the home, or the path buried
+    later in the argument list is not this runner. FM_HOME must resolve to
+    the same home.
+    """
+    try:
+        argv = cmdline(pid)
+    except OSError:
+        return False
+    if not argv:
+        return False
+    direct = script_arg(argv[0], script)
+    interpreted = (len(argv) >= 2 and script_arg(argv[1], script)
+                   and os.path.basename(argv[0]).lstrip('-') in SHELL_INTERPRETERS)
+    if not direct and not interpreted:
+        return False
+    return fm_home_is(pid, root)
+
+
+def home_procevent_listener(pid, root):
+    """This home's process-event runner, or a non-harness descendant of one.
+
+    The runner's listener command keeps the runner's cwd. It is part of the
+    same listener. A harness-named process is never ignored, including one
+    inside that tree. The watcher's automatic secondmate restart does not
+    scan cwd at all, so this proof is the one exemption and both relaunch
+    callers reach it through fm_control_rooted_processes.
+    """
+    script = home_procevent_script(root)
+    if script is None:
+        return False
+    try:
+        current = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if is_home_procevent_runner(current, script, root):
+        return True
+    try:
+        if agent_named(current) or harness_argv(cmdline(current)):
+            return False
+    except OSError:
+        return False
+    seen = set()
+    hops = 0
+    try:
+        current = stat_row(current)[1]
+    except (OSError, ValueError, IndexError):
+        return False
+    while current > 1 and current not in seen and hops < 64:
+        seen.add(current)
+        hops += 1
+        if is_home_procevent_runner(current, script, root):
+            return True
+        try:
+            current = stat_row(current)[1]
+        except (OSError, ValueError, IndexError):
+            return False
+    return False
+
+
 def worktree_processes(root, original, excluded_ancestors=()):
     inventory = subprocess.run(['ps', '-u', str(os.geteuid()), '-o', 'pid='],
                                check=True, capture_output=True, text=True).stdout.split()
@@ -276,6 +391,9 @@ try:
         root, pane, *ancestors = args
         worktree_processes(root, int(pane) if pane else 0,
                            tuple(int(a) for a in ancestors))
+    elif mode == 'home-procevent':
+        root, pid = args
+        sys.exit(0 if home_procevent_listener(int(pid), os.path.realpath(root)) else 1)
     elif mode == 'input':
         sys.exit(0 if terminal_input_shell(int(args[0])) else 1)
     else:
