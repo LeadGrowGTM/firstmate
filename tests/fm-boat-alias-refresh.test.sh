@@ -845,4 +845,134 @@ test_fm_on_dials_only_confirmed_boat_addresses
 test_direct_ssh_checks_boat_before_transport
 test_boat_route_recovers_missing_alias
 
+test_boat_route_uses_the_recorded_listed_box() {
+  local fmhome ssh_log saved_id=$ID
+  ID=bx_ahnbu3qr
+  new_case listed-box
+  fmhome="$CASE/fm-home"
+  ssh_log="$CASE/ssh.log"
+  mkdir -p "$fmhome/data" "$fmhome/config" "$fmhome/state"
+  printf '%s\n' 'bx_ahnbu3qr' 'bx_bbbbbbbb' > "$fmhome/config/boat-box-id"
+  printf '%s\n' '{"expected_running":2}' > "$fmhome/config/boat-spend.json"
+  printf '%s\n' "$ID" > "$fmhome/state/.boat-route-box"
+  printf -- '- boat-eng - Boat overflow (host: boat-prove; root: /home/user/firstmate; home: /home/user/fm-boat-eng; scope: overflow; projects: firstmate; added 2026-10-16)\n' \
+    > "$fmhome/data/secondmates.md"
+  cat > "$CASE/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
+SH
+  chmod +x "$CASE/fake-ssh"
+  boat_route() {
+    OUT=$(env HOME="$CASE/home" PATH="$FAKEBIN:$PATH" FAKE_BOAT_DIR="$BOAT" FAKE_BOAT_ID="$ID" \
+      FM_HOME="$fmhome" FM_SSH_BIN="$CASE/fake-ssh" FAKE_SSH_LOG="$ssh_log" \
+      bash "$ROOT/bin/fm-on.sh" boat-eng fm-crew-state.sh 2>"$CASE/stderr")
+    CODE=$?
+    ERR=$(cat "$CASE/stderr")
+  }
+  set_info running 203.0.113.7:19034 null true
+  set_hostkey host1
+  boat_route
+  expect_code 0 "$CODE" "a recorded listed box must recover its alias"$'\n'"$ERR"
+  assert_equals 1 "$(wc -l < "$ssh_log" | tr -d ' ')" "the listed box must connect once"
+  printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+  boat_route
+  expect_code 255 "$CODE" "a different listed box must not reuse the other box's alias"$'\n'"$ERR"
+  assert_equals 1 "$(wc -l < "$ssh_log" | tr -d ' ')" "the other listed box was dialled"
+  rm -f "$fmhome/state/.boat-route-box" "$ssh_log"
+  boat_route
+  expect_code 1 "$CODE" "a list of boxes without a recorded selection must not connect"$'\n'"$ERR"
+  assert_absent "$ssh_log" "an unselected list was dialled"
+  ID=$saved_id
+  pass "T14 a listed Boat route connects only to the recorded box"
+}
+
+test_boat_route_uses_the_recorded_listed_box
+
+test_boat_task_box_overrides_the_route() {
+  local fmhome ssh_log saved_id=$ID
+  ID=bx_ahnbu3qr
+  new_case task-box
+  fmhome="$CASE/fm-home"
+  ssh_log="$CASE/ssh.log"
+  mkdir -p "$fmhome/data" "$fmhome/config" "$fmhome/state"
+  printf '%s\n' 'bx_ahnbu3qr' 'bx_bbbbbbbb' > "$fmhome/config/boat-box-id"
+  printf '%s\n' '{"expected_running":2}' > "$fmhome/config/boat-spend.json"
+  printf '%s\n' "$ID" > "$fmhome/state/.boat-route-box"
+  printf -- '- boat-eng - Boat overflow (host: boat-prove; root: /home/user/firstmate; home: /home/user/fm-boat-eng; scope: overflow; projects: firstmate; added 2026-10-16)\n' \
+    > "$fmhome/data/secondmates.md"
+  cat > "$CASE/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
+SH
+  chmod +x "$CASE/fake-ssh"
+  boat_route() {
+    OUT=$(env HOME="$CASE/home" PATH="$FAKEBIN:$PATH" FAKE_BOAT_DIR="$BOAT" FAKE_BOAT_ID="$ID" \
+      FM_HOME="$fmhome" FM_SSH_BIN="$CASE/fake-ssh" FAKE_SSH_LOG="$ssh_log" \
+      bash "$ROOT/bin/fm-on.sh" "$@" 2>"$CASE/stderr")
+    CODE=$?
+    ERR=$(cat "$CASE/stderr")
+  }
+  set_info running 203.0.113.7:19034 null true
+  set_hostkey host1
+  boat_route boat-eng fm-crew-state.sh
+  expect_code 0 "$CODE" "the route box connects before a task override"$'\n'"$ERR"
+  printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+  printf '%s\n' 'task-one bx_ahnbu3qr' > "$fmhome/state/.boat-task-box"
+  boat_route boat-eng fm-crew-state.sh task-one
+  expect_code 0 "$CODE" "a recorded task connects to its own box"$'\n'"$ERR"
+  assert_equals 2 "$(wc -l < "$ssh_log" | tr -d ' ')" "the task box must be dialled"
+  assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the route follows the task box'
+  printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+  boat_route boat-eng fm-crew-state.sh task-two
+  expect_code 255 "$CODE" "an unrecorded task must not borrow another box"$'\n'"$ERR"
+  assert_equals 2 "$(wc -l < "$ssh_log" | tr -d ' ')" "an unrecorded task was dialled"
+  ID=$saved_id
+  pass "T15 a recorded task is reached on its own box"
+}
+
+test_failed_task_refresh_keeps_the_route() {
+  local fmhome ssh_log saved_id=$ID
+  ID=bx_ahnbu3qr
+  new_case failed-refresh
+  fmhome="$CASE/fm-home"
+  ssh_log="$CASE/ssh.log"
+  mkdir -p "$fmhome/data" "$fmhome/config" "$fmhome/state"
+  printf '%s\n' 'bx_ahnbu3qr' 'bx_bbbbbbbb' > "$fmhome/config/boat-box-id"
+  printf '%s\n' '{"expected_running":2}' > "$fmhome/config/boat-spend.json"
+  printf '%s\n' "$ID" > "$fmhome/state/.boat-route-box"
+  printf '%s\n' 'task-one bx_bbbbbbbb' > "$fmhome/state/.boat-task-box"
+  printf -- '- boat-eng - Boat overflow (host: boat-prove; root: /home/user/firstmate; home: /home/user/fm-boat-eng; scope: overflow; projects: firstmate; added 2026-10-16)\n' \
+    > "$fmhome/data/secondmates.md"
+  cat > "$CASE/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
+SH
+  chmod +x "$CASE/fake-ssh"
+  boat_route() {
+    OUT=$(env HOME="$CASE/home" PATH="$FAKEBIN:$PATH" FAKE_BOAT_DIR="$BOAT" FAKE_BOAT_ID="$ID" \
+      FM_HOME="$fmhome" FM_SSH_BIN="$CASE/fake-ssh" FAKE_SSH_LOG="$ssh_log" \
+      bash "$ROOT/bin/fm-on.sh" "$@" 2>"$CASE/stderr")
+    CODE=$?
+    ERR=$(cat "$CASE/stderr")
+  }
+  set_info running 203.0.113.7:19034 null true
+  set_hostkey host1
+  boat_route boat-eng fm-crew-state.sh
+  expect_code 0 "$CODE" "the current box connects before a failed switch"$'\n'"$ERR"
+  : > "$BOAT/calls"
+  boat_route boat-eng fm-crew-state.sh task-one
+  expect_code 1 "$CODE" "a failed switch must not connect"$'\n'"$ERR"
+  assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'a failed refresh published the new route'
+  boat_route boat-eng fm-crew-state.sh task-one
+  expect_code 1 "$CODE" "a later call must retry the refresh"$'\n'"$ERR"
+  assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the second failure published the new route'
+  assert_no_grep 'rather than configured box' "$CASE/stderr" 'the retry skipped alias refresh and verified the stale alias'
+  assert_equals 2 "$(grep -c 'info bx_bbbbbbbb' "$BOAT/calls")" 'the retry did not ask Boat about the task box again'
+  ID=$saved_id
+  pass "T16 a failed task switch leaves the route unchanged"
+}
+
+test_boat_task_box_overrides_the_route
+test_failed_task_refresh_keeps_the_route
+
 echo "# all fm-boat-alias-refresh tests passed"

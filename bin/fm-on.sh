@@ -31,6 +31,13 @@
 # Boat confirmed, passed as -o options; otherwise this command exits 255 without
 # connecting, so a stopped or moved sandbox reads as unavailable transport. It
 # never resumes a sandbox. That helper's header owns the check.
+# A single id in config/boat-box-id is that sandbox. A longer list is the
+# approved set from fm-boat-budget-lib.sh. The connection verifies the one id
+# in state/.boat-route-box, which fm-boat-send.sh writes when it selects a box.
+# A command argument that is a task id in state/.boat-task-box uses that
+# task's box instead. When that box is not the alias's current sandbox, the
+# alias is refreshed to it first, and the route record is updated only after
+# that refresh succeeds.
 #
 # ServerAliveInterval/ServerAliveCountMax arm dead-peer detection so a vanished
 # peer (a reboot, a dropped link) becomes a bounded ssh failure (exit 255)
@@ -124,9 +131,43 @@ if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
   BOX_CONFIG="$FM_HOME/config/boat-box-id"
   [ -d "$FM_HOME/config" ] && [ ! -L "$FM_HOME/config" ] &&
     [ -f "$BOX_CONFIG" ] && [ ! -L "$BOX_CONFIG" ] || die "safe config/boat-box-id is required for $ROUTE"
-  [ "$(wc -c < "$BOX_CONFIG")" -le 12 ] || die "invalid config/boat-box-id for $ROUTE"
-  BOX=$(cat "$BOX_CONFIG")
-  [[ "$BOX" =~ ^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$ ]] || die "invalid config/boat-box-id for $ROUTE"
+  if [ "$(wc -c < "$BOX_CONFIG")" -le 12 ]; then
+    BOX=$(cat "$BOX_CONFIG")
+    [[ "$BOX" =~ ^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$ ]] || die "invalid config/boat-box-id for $ROUTE"
+  else
+    # shellcheck source=bin/fm-boat-budget-lib.sh
+    . "$SCRIPT_DIR/fm-boat-budget-lib.sh"
+    fm_boat_load_reservation || die "invalid config/boat-spend.json for $ROUTE${FM_BOAT_SPEND_PROBLEM:+: $FM_BOAT_SPEND_PROBLEM}"
+    fm_boat_read_box_ids "$BOX_CONFIG" >/dev/null || die "invalid config/boat-box-id for $ROUTE"
+    ROUTE_BOX="$FM_HOME/state/.boat-route-box"
+    [ -f "$ROUTE_BOX" ] && [ ! -L "$ROUTE_BOX" ] || die "selected Boat box is not recorded for $ROUTE"
+    BOX=$(jq -Rser 'select(test("\\Abx_[23456789abcdefghjkmnpqrstuvwxyz]{8}\\n?\\z")) | rtrimstr("\n")' "$ROUTE_BOX") || die "invalid selected Boat box for $ROUTE"
+    fm_boat_read_box_ids "$BOX_CONFIG" | grep -Fxq -- "$BOX" || die "selected Boat box is not an approved box for $ROUTE"
+    TASK_MAP="$FM_HOME/state/.boat-task-box"
+    if [ -L "$TASK_MAP" ]; then
+      die "unsafe task box record for $ROUTE"
+    elif [ -f "$TASK_MAP" ]; then
+      TASK_BOX=$(awk 'NF >= 2 { print $1, $2 }' "$TASK_MAP" | while read -r tid tbox; do
+        for arg in "$@"; do
+          [ "$arg" = "$tid" ] && printf '%s\n' "$tbox"
+        done
+      done | sort -u)
+      case "$TASK_BOX" in
+        *$'\n'*) die "command names tasks on different Boat boxes for $ROUTE" ;;
+        '') ;;
+        *)
+          fm_boat_read_box_ids "$BOX_CONFIG" | grep -Fxq -- "$TASK_BOX" || die "selected Boat box is not an approved box for $ROUTE"
+          if [ "$TASK_BOX" != "$BOX" ]; then
+            [ ! -L "$ROUTE_BOX" ] || die "unsafe route box record for $ROUTE"
+            FM_BOAT_HYDRATE_WAIT=0 "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$TASK_BOX" "$HOST" >/dev/null ||
+              die "Boat alias does not follow the task box for $ROUTE"
+            BOX=$TASK_BOX
+            printf '%s\n' "$BOX" > "$ROUTE_BOX"
+          fi
+          ;;
+      esac
+    fi
+  fi
   VERIFY_ARGS+=("$BOX")
 fi
 BOAT_STATUS=0

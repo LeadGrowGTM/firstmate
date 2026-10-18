@@ -570,7 +570,10 @@ The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact
 
 Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
-Record the approved box id in the controller home's `config/boat-box-id`; the sender's header owns its validation and the fixed `boat-prove` SSH alias.
+Record approved box ids in the controller home's `config/boat-box-id`, one id per line.
+One id stays valid.
+More ids are allowed up to `expected_running` in `config/boat-spend.json`.
+The sender's header owns that validation, the reservation ceilings, and the fixed `boat-prove` SSH alias.
 `--prepare --code-only` takes a valid task envelope on stdin and performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
 Use the sender for each overflow resume so it establishes the current instance's `fm-code` environment receipt; an independent resume does not authorize later dispatch.
 A box once resumed with `--no-env` can never receive named-environment injection and needs a replacement environment-enabled box.
@@ -600,7 +603,11 @@ The separate live delivery check must prove GitHub authentication, repository ac
 Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.
 The worker does not auto-answer Codex directory-trust text because a rendered transcript cannot prove an active modal.
 Without a fresh worker status declaration, dispatch refuses success and leaves the task intact for same-task reconciliation.
-Running boxes reserve only their existing timer's remaining duration against the unchanged spend caps; dispatch never extends the timer.
+Running boxes reserve only their existing timer's remaining duration against the configured spend caps; dispatch never extends the timer.
+With more than one listed box, dispatch prefers a listed box that is already running and still has room under the three-worker cap, and it does not create boxes.
+An active sandbox that is not listed, or more active sandboxes than `expected_running`, is refused.
+A task stays on the box recorded for it, and a later command that names that task uses that box.
+The account and monthly ceilings include the remaining timers of the other active listed boxes.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
 
