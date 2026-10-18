@@ -1615,6 +1615,338 @@ test_secondmate_relaunch_refuses_a_live_home_process() {
   pass 'a secondmate with a live process rooted in its home is still refused'
 }
 
+# A home-owned process-event runner is bin/fm-procevent.sh under that home,
+# started with FM_HOME set to the home, and it keeps the home as its cwd.
+# The stand-in uses the same shebang shape as bin/fm-procevent.sh so its
+# argv is the interpreter plus that exact script path.
+write_procevent_standin() { # <script>
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<'SH'
+#!/usr/bin/env bash
+if [ -n "${STANDIN_CHILD_PIDFILE:-}" ]; then
+  "${STANDIN_CHILD:-/bin/sleep}" 180 &
+  printf '%s\n' "$!" > "$STANDIN_CHILD_PIDFILE"
+fi
+printf '%s\n' "$$" > "$STANDIN_PIDFILE"
+# Block in this process. A child sleep would be a second cwd in the home and
+# would hide whether the runner itself was the process under test.
+exec 3<"${STANDIN_HOLD:?}"
+read -r _ <&3
+SH
+  chmod +x "$1"
+}
+
+setup_dead_secondmate_home() { # <case-dir> <id>
+  local dir=$1 id=$2 home="$1/home"
+  mkdir -p "$home/config"
+  printf 'claude\n' > "$home/config/secondmate-harness"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin"
+  printf '%s\n' "$id" > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf 'charter\n' > "$dir/smhome/data/charter.md"
+  {
+    echo "window=fmses:fm-$id"
+    echo "endpoint_task_id=$id"
+    echo "worktree=$dir/smhome"
+    echo "project=$dir/smhome"
+    echo 'harness=claude'
+    echo 'kind=secondmate'
+    echo 'mode=secondmate'
+    echo 'yolo=off'
+    echo 'model=default'
+    echo 'effort=default'
+    echo "home=$dir/smhome"
+    echo 'backend=tmux'
+  } > "$home/state/$id.meta"
+  printf 'fm-%s\n' "$id" > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  printf 'zsh' > "$dir/fake/command"
+  printf 'claude' > "$dir/fake/becomes"
+}
+
+launch_procevent_standin() { # <cwd> <script> <fm-home>
+  [ -n "${STANDIN_HOLD:-}" ] || fail 'process-event stand-in has no hold fifo'
+  [ -p "$STANDIN_HOLD" ] || mkfifo "$STANDIN_HOLD"
+  python3 - "$1" "$2" "$3" <<'PY'
+import os, sys
+cwd, script, fm_home = sys.argv[1:]
+if os.fork() > 0:
+    raise SystemExit(0)
+os.setsid()
+os.chdir(cwd)
+os.environ['FM_HOME'] = fm_home
+os.execv(script, [script, '_start', 'lavish-src'])
+PY
+}
+
+# Prints the child pid. The child is not the runner: its executable is the
+# named binary, and its argv only claims to be one.
+launch_procevent_lookalike() { # <cwd> <argv0> <executable> [argv1]
+  python3 - "$1" "$2" "$3" "${4-}" <<'PY'
+import os, sys
+cwd, argv0, exe, extra = sys.argv[1:]
+pid = os.fork()
+if pid > 0:
+    print(pid)
+    raise SystemExit(0)
+os.setsid()
+null = os.open("/dev/null", os.O_RDWR)
+os.dup2(null, 0)
+os.dup2(null, 1)
+os.dup2(null, 2)
+os.chdir(cwd)
+os.environ["FM_HOME"] = cwd
+argv = [argv0]
+if extra:
+    argv.append(extra)
+os.execv(exe, argv)
+PY
+}
+
+record_home_pids() { # <case-dir>
+  local dir=$1 pids pid i
+  for ((i=0; i<50; i++)); do
+    pids=$(home_rooted_pids "$dir/smhome")
+    [ -n "$pids" ] && break
+    sleep 0.05
+  done
+  [ -n "$pids" ] || fail 'no process was rooted in the mate home'
+  printf '%s\n' "$pids" > "$dir/fake/process-pids"
+  while IFS= read -r pid; do
+    remember_rooted_pids "$pid"
+  done <<EOF
+$pids
+EOF
+}
+
+wait_procevent_standin() { # <pidfile> [child-pidfile]
+  local i pid
+  for ((i=0; i<50; i++)); do
+    [ -s "$1" ] || { sleep 0.05; continue; }
+    [ -z "${2:-}" ] || [ -s "$2" ] || { sleep 0.05; continue; }
+    break
+  done
+  [ -s "$1" ] || fail 'the process-event stand-in never started'
+  pid=$(cat "$1")
+  remember_rooted_pids "$pid"
+  if [ -n "${2:-}" ]; then
+    [ -s "$2" ] || fail 'the process-event stand-in did not start its listener child'
+    remember_rooted_pids "$(cat "$2")"
+  fi
+  printf '%s' "$pid"
+}
+
+test_secondmate_relaunch_ignores_its_own_procevent_runner() {
+  local dir home_real script out rc=0 runner child
+  [ "$(uname -s)" = Linux ] || { echo 'skip - process-event runner proof needs Linux /proc'; return 0; }
+  dir=$(new_case procevent-cwd sm-procevent)
+  setup_dead_secondmate_home "$dir" sm-procevent
+  home_real=$(cd "$dir/smhome" && pwd -P)
+  script="$home_real/bin/fm-procevent.sh"
+  write_procevent_standin "$script"
+  STANDIN_HOLD="$dir/hold.fifo" STANDIN_PIDFILE="$dir/runner.pid" \
+    STANDIN_CHILD_PIDFILE="$dir/listener.pid" \
+    launch_procevent_standin "$home_real" "$script" "$home_real"
+  runner=$(wait_procevent_standin "$dir/runner.pid" "$dir/listener.pid")
+  child=$(cat "$dir/listener.pid")
+  record_home_pids "$dir"
+  grep -qx "$runner" "$dir/fake/process-pids" \
+    || fail 'the process-event runner was not actually rooted in the mate home'
+  grep -qx "$child" "$dir/fake/process-pids" \
+    || fail 'the listener child was not actually rooted in the mate home'
+  out=$(run_control "$dir" sm-procevent relaunch) || rc=$?
+  expect_code 0 "$rc" "the mate's own process-event runner should not block restart: $out"
+  assert_contains "$out" 'relaunched sm-procevent' 'the replacement was not reported'
+  kill -0 "$runner" 2>/dev/null \
+    || fail 'the process-event runner was killed instead of ignored'
+  kill -0 "$child" 2>/dev/null \
+    || fail 'the listener child was killed instead of ignored'
+  pass 'a dead secondmate restarts while its own process-event runner keeps cwd in the home'
+}
+
+test_secondmate_relaunch_refuses_a_different_home_process_beside_procevent() {
+  local dir home_real script out rc=0 runner other
+  [ "$(uname -s)" = Linux ] || { echo 'skip - process-event runner proof needs Linux /proc'; return 0; }
+  dir=$(new_case procevent-other sm-procevent-other)
+  setup_dead_secondmate_home "$dir" sm-procevent-other
+  home_real=$(cd "$dir/smhome" && pwd -P)
+  script="$home_real/bin/fm-procevent.sh"
+  write_procevent_standin "$script"
+  STANDIN_HOLD="$dir/hold.fifo" STANDIN_PIDFILE="$dir/runner.pid" \
+    launch_procevent_standin "$home_real" "$script" "$home_real"
+  runner=$(wait_procevent_standin "$dir/runner.pid")
+  ( cd "$home_real" && exec /bin/sleep 60 ) &
+  other=$!
+  remember_rooted_pids "$other"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-other relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a different live process beside the runner was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the other home process'
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the surviving home process'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${other}([^0-9]|$)" \
+    || fail "the refusal did not name the other process: $out"
+  if printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${runner}([^0-9]|$)"; then
+    fail "the home's own process-event runner was still treated as the agent: $out"
+  fi
+  kill -0 "$other" 2>/dev/null || fail 'the other home process died during the refused restart'
+  kill -0 "$runner" 2>/dev/null || fail 'the process-event runner died during the refused restart'
+  pass 'a different live process in the home still blocks restart when a process-event runner is also there'
+}
+
+test_secondmate_relaunch_refuses_a_harness_descendant_of_procevent() {
+  local dir home_real script out rc=0 runner grok
+  [ "$(uname -s)" = Linux ] || { echo 'skip - process-event runner proof needs Linux /proc'; return 0; }
+  dir=$(new_case procevent-harness sm-procevent-harness)
+  setup_dead_secondmate_home "$dir" sm-procevent-harness
+  home_real=$(cd "$dir/smhome" && pwd -P)
+  script="$home_real/bin/fm-procevent.sh"
+  write_procevent_standin "$script"
+  mkdir -p "$dir/bin"
+  cp /bin/sleep "$dir/bin/grok"
+  STANDIN_HOLD="$dir/hold.fifo" STANDIN_PIDFILE="$dir/runner.pid" \
+    STANDIN_CHILD_PIDFILE="$dir/grok.pid" STANDIN_CHILD="$dir/bin/grok" \
+    launch_procevent_standin "$home_real" "$script" "$home_real"
+  runner=$(wait_procevent_standin "$dir/runner.pid" "$dir/grok.pid")
+  grok=$(cat "$dir/grok.pid")
+  record_home_pids "$dir"
+  out=$(FM_TEST_CONTROL_EXIT_WAIT=0.3 run_control "$dir" sm-procevent-harness relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a harness-named child of the process-event runner was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the harness process'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${grok}([^0-9]|$)" \
+    || fail "the refusal did not name the harness-named process: $out"
+  if printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${runner}([^0-9]|$)"; then
+    fail "the process-event runner itself was still treated as the agent: $out"
+  fi
+  kill -0 "$grok" 2>/dev/null || fail 'the harness-named process died during the refused restart'
+  pass 'a harness-named descendant of the home process-event runner still blocks restart'
+}
+
+test_secondmate_relaunch_refuses_a_procevent_name_that_is_not_the_home_runner() {
+  local dir home_real decoy out rc=0 loose wrong_home
+  [ "$(uname -s)" = Linux ] || { echo 'skip - process-event runner proof needs Linux /proc'; return 0; }
+  dir=$(new_case procevent-decoy sm-procevent-decoy)
+  setup_dead_secondmate_home "$dir" sm-procevent-decoy
+  home_real=$(cd "$dir/smhome" && pwd -P)
+  write_procevent_standin "$home_real/bin/fm-procevent.sh"
+  mkdir -p "$dir/decoy" "$dir/other-home"
+  decoy="$dir/decoy/fm-procevent.sh"
+  write_procevent_standin "$decoy"
+  STANDIN_HOLD="$dir/loose.fifo" STANDIN_PIDFILE="$dir/loose.pid" \
+    launch_procevent_standin "$home_real" "$decoy" "$home_real"
+  loose=$(wait_procevent_standin "$dir/loose.pid")
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-decoy relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a same-named script outside the home's code root was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the outside script'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${loose}([^0-9]|$)" \
+    || fail "the refusal did not name the outside script: $out"
+  kill "$loose" 2>/dev/null || true
+  STANDIN_HOLD="$dir/wrong-home.fifo" STANDIN_PIDFILE="$dir/wrong-home.pid" \
+    launch_procevent_standin "$home_real" "$home_real/bin/fm-procevent.sh" "$dir/other-home"
+  wrong_home=$(wait_procevent_standin "$dir/wrong-home.pid")
+  record_home_pids "$dir"
+  rc=0
+  out=$(run_control "$dir" sm-procevent-decoy relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "the home's script with another FM_HOME was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the other-home runner'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${wrong_home}([^0-9]|$)" \
+    || fail "the refusal did not name the other-home runner: $out"
+  ( cd "$home_real" && exec -a fm-procevent.sh /bin/sleep 60 ) &
+  loose=$!
+  remember_rooted_pids "$loose"
+  kill "$wrong_home" 2>/dev/null || true
+  record_home_pids "$dir"
+  rc=0
+  out=$(run_control "$dir" sm-procevent-decoy relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a process merely named fm-procevent.sh was ignored: $out"
+  assert_contains "$out" 'live processes still have cwd in the recorded worktree' \
+    'the refusal did not name the name-only process'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${loose}([^0-9]|$)" \
+    || fail "the refusal did not name the name-only process: $out"
+  pass 'a same-named script, another FM_HOME, or a bare name still blocks restart'
+}
+
+test_secondmate_relaunch_refuses_an_argv_lookalike_of_the_procevent_runner() {
+  local dir home_real script standin out rc=0 spoof
+  [ "$(uname -s)" = Linux ] || { echo 'skip - process-event runner proof needs Linux /proc'; return 0; }
+  dir=$(new_case procevent-lookalike sm-procevent-lookalike)
+  setup_dead_secondmate_home "$dir" sm-procevent-lookalike
+  home_real=$(cd "$dir/smhome" && pwd -P)
+  script="$home_real/bin/fm-procevent.sh"
+  write_procevent_standin "$script"
+  standin=$(fm_agent_standin "$dir/standin-src") || {
+    echo 'skip - no argv-stable executable for the process-event lookalike'
+    return 0
+  }
+  spoof=$(launch_procevent_lookalike "$home_real" "$script" "$standin")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a process whose argv0 is the home runner path was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the absolute-path lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the absolute-path lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  spoof=$(launch_procevent_lookalike "$home_real" bash "$standin" "$script")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a process claiming to be bash running the home runner was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the interpreter lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the interpreter lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  cp "$standin" "$dir/bash"
+  spoof=$(launch_procevent_lookalike "$home_real" bash "$dir/bash" "$script")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a non-shell binary named bash and claiming to run the home runner was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the renamed-binary lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the renamed-binary lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  mkdir -p "$dir/pathbin"
+  cp "$standin" "$dir/pathbin/bash"
+  spoof=$(launch_procevent_lookalike "$home_real" bash "$dir/pathbin/bash" "$script")
+  remember_rooted_pids "$spoof"
+  # The checker's own PATH must not add that copy to the trusted interpreters.
+  # Keep the poisoned PATH on the proof only: a bash-named sleeper earlier on
+  # PATH would replace the shell the relaunch command itself runs.
+  PATH="$dir/pathbin:$PATH" python3 "$ROOT/bin/fm-agent-process.py" home-procevent "$home_real" "$spoof" \
+    && fail 'a PATH entry named bash was trusted as the home runner'
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a non-shell binary found as bash on PATH was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the PATH lookalike'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the PATH lookalike: $out"
+  kill "$spoof" 2>/dev/null || true
+  rc=0
+  mkdir -p "$dir/outside/subdir"
+  cat > "$dir/outside/fm-procevent.sh" <<'SH'
+#!/usr/bin/env bash
+sleep 180
+SH
+  chmod +x "$dir/outside/fm-procevent.sh"
+  ln -s "$dir/outside/subdir" "$home_real/bin/link"
+  spoof=$(launch_procevent_lookalike "$home_real" bash /usr/bin/bash \
+    "$home_real/bin/link/../fm-procevent.sh")
+  remember_rooted_pids "$spoof"
+  record_home_pids "$dir"
+  out=$(run_control "$dir" sm-procevent-lookalike relaunch) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a symlink escape to another fm-procevent.sh was ignored: $out"
+  assert_contains "$out" 'not safe to relaunch' 'the restart did not refuse the symlink escape'
+  printf '%s\n' "$out" | grep -Eq "(^|[^0-9])${spoof}([^0-9]|$)" \
+    || fail "the refusal did not name the symlink escape: $out"
+  pass 'an argv lookalike of the home process-event runner still blocks restart'
+}
+
 # A detached chrome-devtools-axi bridge keeps the cwd of the mate that launched
 # it and is reparented to the user session manager when that mate exits. It is
 # not the agent. A harness-named process, and a bridge that is still parented
@@ -4268,6 +4600,11 @@ test_secondmate_relaunch_refuses_unmarked_process_in_crew_copy
 test_secondmate_relaunch_refuses_borrowed_pane_for_absent_crew_window
 test_secondmate_relaunch_refuses_pane_on_wrong_crew_socket
 test_secondmate_relaunch_refuses_a_live_home_process
+test_secondmate_relaunch_ignores_its_own_procevent_runner
+test_secondmate_relaunch_refuses_a_different_home_process_beside_procevent
+test_secondmate_relaunch_refuses_a_harness_descendant_of_procevent
+test_secondmate_relaunch_refuses_a_procevent_name_that_is_not_the_home_runner
+test_secondmate_relaunch_refuses_an_argv_lookalike_of_the_procevent_runner
 test_secondmate_relaunch_ignores_orphaned_browser_bridge
 test_secondmate_relaunch_refuses_harness_descendant_of_browser_bridge
 test_secondmate_relaunch_refuses_bridge_still_parented

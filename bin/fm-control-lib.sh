@@ -407,6 +407,18 @@ fm_control_pid_descends_from() {  # <pid> <ancestor-pid>
   [ "$pid" = "$ancestor" ]
 }
 
+# fm_control_home_procevent_listener: a process that is this home's own
+# fm-procevent.sh runner, or a non-harness descendant of that runner.
+# bin/fm-agent-process.py owns the match: the exact script path under the
+# home (its code root) and FM_HOME resolving to that home. Anything else,
+# including a same-named script, returns nonzero so the caller keeps refusing.
+# Linux only; other kernels cannot prove it and therefore do not exempt.
+fm_control_home_procevent_listener() {  # <worktree> <pid>
+  [ "$(uname -s)" = Linux ] || return 1
+  case "$2" in ''|*[!0-9]*) return 1 ;; esac
+  fm_agent_process_proof home-procevent "$1" "$2"
+}
+
 # fm_control_rooted_processes: fm_agent_worktree_processes with the second
 # mate crew attribution above applied. Prints pids; nonzero means absence
 # could not be proven, exactly as the unfiltered inventory means it.
@@ -447,6 +459,12 @@ EOF
           [ "$task_id" != "$id" ] || { keep=0; break; }
         done
       fi
+    fi
+    # The home's own fm-procevent.sh listeners keep cwd in the home. They are
+    # not the agent. The watcher's automatic restart does not consult this
+    # scan, so the exemption lives once, here, and both relaunch callers use it.
+    if [ "$keep" = 1 ] && fm_control_home_procevent_listener "$worktree" "$pid"; then
+      keep=0
     fi
     [ "$keep" = 0 ] || printf '%s\n' "$pid"
   done <<EOF
