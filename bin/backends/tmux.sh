@@ -36,7 +36,8 @@ fm_backend_tmux_bind_record() {  # <meta-file>
   grep -q '^tmux_socket=' "$meta" || return 0
   socket=$(fm_backend_meta_exact_value "$meta" tmux_socket) || return 1
   case "$socket" in /*) ;; *) return 1 ;; esac
-  case "$socket" in *[$'\n\r\t']*) return 1 ;; esac
+  # A comma is the TMUX selector delimiter and would address a different server.
+  case "$socket" in *[$'\n\r\t,']*) return 1 ;; esac
   TMUX="$socket,0,0"
   export TMUX
   unset TMUX_PANE

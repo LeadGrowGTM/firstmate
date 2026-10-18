@@ -316,6 +316,16 @@ fi
 TASK_BACKEND=$(fm_backend_of_meta "$META")
 BACKEND_TARGET=$(fm_backend_target_of_meta "$META")
 TMUX_SOCKET=$(fm_meta_get "$META" tmux_socket)
+# Later tmux reads in this process, including pane capture, must use the same
+# server as the existence check. A record with no socket keeps the ambient
+# server. A socket this binder refuses must not fall through to another one.
+if [ "$TASK_BACKEND" = tmux ]; then
+  if ! { fm_backend_source tmux && fm_backend_tmux_bind_record "$META"; }; then
+    TMUX=/fm-refused-tmux-socket,0,0
+    export TMUX
+    unset TMUX_PANE
+  fi
+fi
 EXPECTED_LABEL="fm-$ID"
 pane_readable() {  # <target>
   case "$TASK_BACKEND" in

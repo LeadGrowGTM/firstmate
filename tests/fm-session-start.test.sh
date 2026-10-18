@@ -1470,6 +1470,13 @@ SH
     fm_backend_target_exists tmux "@99999" "" "$2" && exit 1
     fm_backend_target_exists tmux "firstmate:0" "" "$3" || exit 1
     fm_backend_target_exists tmux "firstmate:fm-live" "" "$3" && exit 1
+    meta=$(mktemp)
+    printf "window=firstmate:fm-live\ntmux_socket=%s\n" "$2" > "$meta"
+    fm_backend_source tmux || exit 1
+    fm_backend_tmux_bind_record "$meta" || exit 1
+    got=$(tmux display-message -p -t "=firstmate:fm-live" "#{window_name}") || exit 1
+    [ "$got" = fm-live ] || exit 1
+    rm -f "$meta"
     exit 0
   ' _ "$ROOT/bin/fm-backend.sh" "$recorded" "$dir/space dir/sock" || status=$?
   [ "$status" -eq 0 ] || { "$real" -S "$recorded" kill-server >/dev/null 2>&1 || true; "$real" -S "$decoy" kill-server >/dev/null 2>&1 || true; "$real" -S "$dir/space dir/sock" kill-server >/dev/null 2>&1 || true; fail "recorded-socket existence check did not keep a live window and reject a missing or prefix-matched one"; }
