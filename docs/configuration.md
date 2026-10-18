@@ -8,7 +8,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | What you want to configure | Start here |
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
-| Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend), [crew names](#crew-names-configmate-short-name), and [harness support](#harness-support) |
+| Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend), [captain tmux session](#captain-tmux-session-configcaptain-tmux-session), [crew names](#crew-names-configmate-short-name), and [harness support](#harness-support) |
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Grok permission mode](#grok-permission-mode), [Muse permission mode](#muse-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
@@ -632,6 +632,31 @@ The caller-facing label remains `fm-<id>`, but the actual cmux workspace title i
 
 Test cleanup must use the guarded path in [`docs/cmux-backend.md`](cmux-backend.md#current-operation-and-safety), never enumerate-and-close every workspace.
 `config/backend` is inherited into secondmate homes under the primary-authoritative contract owned by [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md).
+
+## Captain tmux session (config/captain-tmux-session)
+
+The optional local, gitignored `config/captain-tmux-session` file names the tmux session that receives every new mate window and crew window created on the tmux backend.
+
+The file holds one session name on one line, with an optional final newline.
+A name is 1 to 64 characters: a letter or digit, then letters, digits, underscores, or dashes.
+An absent file, or a file that is empty or only a newline, keeps today's placement.
+Today, a launcher that is already inside tmux uses that pane's session, and a grouped session resolves to its base session when the base still exists.
+A launcher outside tmux creates or reuses a detached session named `firstmate`.
+
+When the file names a session, the new window is created in that exact session on the tmux server the launcher is already using.
+Firstmate creates the named session when it is missing, without attaching, switching the current client, or changing any existing window.
+An unreadable file, a directory, more than one line, or a name tmux would reject stops the launch and names the file.
+It does not choose a different session.
+
+A local secondmate home with no file of its own reads `config/captain-tmux-session` from the absolute `parent_home` in its `.fm-secondmate-parent` record.
+A secondmate home that sets its own file uses that name.
+A remote secondmate record has no local parent home, so an unset file keeps today's placement on that remote server.
+Herdr, zellij, cmux, Orca, and Boat launches do not read this file.
+
+The recorded endpoint is the session and window that were created, plus the socket path that tmux server reports.
+A relaunch that finds the recorded window still present adopts that window where it is.
+A relaunch that has to create a window, because the recorded one is gone, uses this same rule.
+Existing live windows are never moved or killed by this setting.
 
 ## Away-mode supervisor backend (FM_SUPERVISOR_BACKEND / FM_SUPERVISOR_TARGET)
 
