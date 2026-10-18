@@ -1,0 +1,52 @@
+{
+  "backlog": {
+    "path": "BACKLOG_PATH",
+    "present": true,
+    "records": [
+      {
+        "blocked_by": null,
+        "blocked_by_ids": [],
+        "blocked_reason": null,
+        "body_excerpt": "One line of body.",
+        "body_lines": [
+          "One line of body."
+        ],
+        "captain_actionable": false,
+        "checked": false,
+        "completion": {
+          "date": null,
+          "verb": null
+        },
+        "current_role": "queued",
+        "decision": null,
+        "done": null,
+        "hold_age_days": null,
+        "hold_bucket": null,
+        "hold_kind": null,
+        "hold_origin": null,
+        "hold_reason": null,
+        "hold_set": null,
+        "hold_until": null,
+        "id": "small",
+        "kind": null,
+        "links": [],
+        "local_note": null,
+        "merged": null,
+        "order": 1,
+        "pr_url": null,
+        "priority": null,
+        "raw": "- [ ] small - Small fixture (repo: example)",
+        "repo": "example",
+        "report_path": null,
+        "reported": null,
+        "requires_child_metadata": false,
+        "since": null,
+        "state": "queued",
+        "structured": true,
+        "title": "Small fixture",
+        "unresolved_blocker_ids": []
+      }
+    ]
+  },
+  "tasks": []
+}
