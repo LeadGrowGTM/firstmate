@@ -185,6 +185,58 @@ fm_backend_tmux_send_literal() {  # <target> <text>
   tmux send-keys -t "$1" -l "$2"
 }
 
+# fm_backend_tmux_with_socket <socket> <command...>: run <command> so its tmux
+# clients address <socket>, without changing the caller's TMUX or TMUX_PANE.
+# An empty, relative, or otherwise unusable socket is refused before any client
+# starts, so a bad record cannot fall through to some other server and look live.
+fm_backend_tmux_with_socket() {  # <socket> <command...>
+  local socket=$1
+  shift
+  case "$socket" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$socket" in
+    *[$'\n\r\t, ']*) return 1 ;;
+  esac
+  (
+    unset TMUX_PANE
+    # shellcheck disable=SC2030 # This export is the bound client environment, not the caller's TMUX.
+    export TMUX="$socket,0,0"
+    "$@"
+  )
+}
+
+# fm_backend_tmux_target_exists <target>: the recorded endpoint is present.
+# `tmux display-message -t session:window` returns success for the session's
+# active window when that window is gone, and a session name without a leading
+# '=' can select a different, longer session by unique prefix. Neither is
+# existence. A session:window target must be an exact window name in the
+# exact session's inventory. A bare target must be an exact session. This
+# function uses the ambient server; fm_backend_tmux_with_socket binds a
+# recorded socket around it. A missing window and an inventory that cannot be
+# read both fail. A hung client is the caller's timeout, not success.
+fm_backend_tmux_target_exists() {  # <target>
+  local target=$1 session window windows status
+  case "$target" in
+    *:*:*) return 1 ;;
+    *:*)
+      session=${target%%:*}
+      window=${target#*:}
+      [ -n "$session" ] && [ -n "$window" ] || return 1
+      windows=$(fm_backend_tmux_window_inventory "=$session")
+      status=$?
+      [ "$status" -eq 0 ] || return 1
+      if printf '%s\n' "$windows" | grep -qxF -- "$window"; then
+        return 0
+      fi
+      return 1
+      ;;
+    '') return 1 ;;
+    *) tmux has-session -t "=$target" >/dev/null 2>&1 ;;
+  esac
+}
+
 # fm_backend_tmux_window_inventory: <session-target>'s window names, one per
 # line on stdout, together with a verdict on the READ ITSELF, which is what
 # every caller that must not guess depends on:
@@ -250,6 +302,7 @@ fm_backend_tmux_server_on_socket() {  # <socket>
 fm_backend_tmux_socket_candidates() {
   local uid dir sock seen=
   uid=$(id -u) || return 1
+  # shellcheck disable=SC2031 # Ambient TMUX here is the caller's server, not the probe subshell's bind.
   for dir in "${TMUX_TMPDIR:-/tmp}/tmux-$uid" ${TMUX:+"$(dirname -- "${TMUX%%,*}")"}; do
     case "$seen" in *"|$dir|"*) continue ;; esac
     seen="$seen|$dir|"
@@ -450,7 +503,9 @@ fm_backend_tmux_agent_state() {  # <target>
   esac
   session=${target%%:*}
   window=${target#*:}
-  windows=$(fm_backend_tmux_window_inventory "$session")
+  # Exact session: a unique prefix would inventory a different, longer session
+  # and could report that session's window as this target.
+  windows=$(fm_backend_tmux_window_inventory "=$session")
   inventory_status=$?
   if [ "$inventory_status" -ne 0 ]; then
     if [ "$inventory_status" -eq 2 ]; then

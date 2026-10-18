@@ -971,12 +971,22 @@ fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pe
 # Mirrors fm-crew-state.sh's pane_readable check; exists here as one shared
 # primitive so callers that only need a fast alive/dead read (recovery
 # digests, the session-start fleet digest) do not re-derive it inline.
-fm_backend_target_exists() {  # <backend> <target> [expected-label]
-  local backend=$1 target=$2 expected_label=${3:-} session pane
+# The optional tmux socket is the task record's tmux_socket. When it is set,
+# the tmux client addresses that server and no other. Tmux existence itself
+# is owned by fm_backend_tmux_target_exists: exact window membership, not
+# display-message, which reports the session's active window when the named
+# window is gone.
+fm_backend_target_exists() {  # <backend> <target> [expected-label] [tmux-socket]
+  local backend=$1 target=$2 expected_label=${3:-} socket=${4:-} session pane
   case "$backend" in
     tmux)
       fm_backend_tmux_lab_check || return 1
-      tmux display-message -p -t "$target" '#{pane_id}' >/dev/null 2>&1
+      fm_backend_source tmux || return 1
+      if [ -n "$socket" ]; then
+        fm_backend_tmux_with_socket "$socket" fm_backend_tmux_target_exists "$target"
+      else
+        fm_backend_tmux_target_exists "$target"
+      fi
       ;;
     herdr)
       fm_backend_source herdr || return 1
@@ -1031,11 +1041,17 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # `missing` only in this recovery-grade view. Zellij remains unverified because
 # its secondmate ghost-tab and agent-process recovery path has not been
 # empirically validated. Orca and cmux do not support secondmate spawns.
-fm_backend_agent_state() {  # <backend> <target>
-  local backend=$1 target=$2
+fm_backend_agent_state() {  # <backend> <target> [tmux-socket]
+  local backend=$1 target=$2 socket=${3:-}
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }
   case "$backend" in
-    tmux) fm_backend_tmux_agent_state "$target" ;;
+    tmux)
+      if [ -n "$socket" ]; then
+        fm_backend_tmux_with_socket "$socket" fm_backend_tmux_agent_state "$target"
+      else
+        fm_backend_tmux_agent_state "$target"
+      fi
+      ;;
     herdr) fm_backend_herdr_agent_state "$target" ;;
     *) printf 'unverified' ;;
   esac
@@ -1044,8 +1060,8 @@ fm_backend_agent_state() {  # <backend> <target>
 # Backward-compatible three-state view for existing callers. An
 # authoritatively missing endpoint is confidently not a live agent, while every
 # ambiguous, unreadable, or unverified result stays unknown.
-fm_backend_agent_alive() {  # <backend> <target>
-  case "$(fm_backend_agent_state "$1" "$2")" in
+fm_backend_agent_alive() {  # <backend> <target> [tmux-socket]
+  case "$(fm_backend_agent_state "$1" "$2" "${3:-}")" in
     alive) printf 'alive' ;;
     dead|missing) printf 'dead' ;;
     *) printf 'unknown' ;;
