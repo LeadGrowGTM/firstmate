@@ -231,30 +231,84 @@ def fm_home_is(pid, root):
 
 
 def script_arg(arg, script):
-    if not arg.startswith('/'):
+    """True when this absolute argv path is exactly ``script``.
+
+    ``normpath`` collapses ``..`` without looking at symlinks, so
+    ``<home>/bin/link/../fm-procevent.sh`` can name a file outside the home
+    while comparing equal to the home script. The kernel opens the resolved
+    file, so the comparison has to resolve it too.
+    """
+    if not isinstance(arg, str) or not arg.startswith('/'):
         return False
-    return os.path.normpath(arg) == script
+    try:
+        if not os.path.exists(arg):
+            return False
+        return os.path.realpath(arg) == script
+    except OSError:
+        return False
+
+
+def trusted_interpreter_ids():
+    """Device and inode of the shell interpreters this host actually has.
+
+    A basename is not identity: a copy of another program named ``bash``
+    has a different inode from ``/usr/bin/bash``. ``stat`` follows a
+    symlink, so a path that points at the real interpreter counts as that
+    interpreter. The result is cached for this process.
+    """
+    cached = getattr(trusted_interpreter_ids, 'ids', None)
+    if cached is not None:
+        return cached
+    ids = set()
+    for name in SHELL_INTERPRETERS:
+        # Fixed prefixes only. A PATH entry can name a different program
+        # bash, and that program must not become a trusted interpreter.
+        for directory in ('/bin', '/usr/bin', '/usr/local/bin'):
+            path = os.path.join(directory, name)
+            try:
+                info = os.stat(path)
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                ids.add((info.st_dev, info.st_ino))
+    trusted_interpreter_ids.ids = ids
+    return ids
+
+
+def is_trusted_interpreter(pid):
+    """True when ``/proc/<pid>/exe`` is one of this host's shell interpreters."""
+    try:
+        info = os.stat(f'/proc/{int(pid)}/exe')
+    except (OSError, TypeError, ValueError):
+        return False
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    return (info.st_dev, info.st_ino) in trusted_interpreter_ids()
 
 
 def is_home_procevent_runner(pid, script, root):
-    """The process is executing this home's fm-procevent.sh for this home.
+    """The process is a shell interpreter executing this home's script.
 
-    The live argv is either the script itself or a shell interpreter whose
-    next argument is that exact path (the ``#!/usr/bin/env bash`` shape).
-    A basename, a copy of the script outside the home, or the path buried
-    later in the argument list is not this runner. FM_HOME must resolve to
-    the same home.
+    ``/proc/<pid>/exe`` has to be a shell interpreter installed on this
+    host, not a renamed copy, and the live argv has to name an interpreter
+    with this exact script path as the next argument. That is what the
+    kernel leaves after ``#!/usr/bin/env bash``. An argv that only names
+    the script, or that names a shell while the executable is something
+    else, is not this runner. A basename, a copy of the script outside the
+    home, or the path buried later in the argument list is not this runner
+    either. FM_HOME must resolve to the same home.
     """
     try:
         argv = cmdline(pid)
     except OSError:
         return False
-    if not argv:
+    if len(argv) < 2:
         return False
-    direct = script_arg(argv[0], script)
-    interpreted = (len(argv) >= 2 and script_arg(argv[1], script)
-                   and os.path.basename(argv[0]).lstrip('-') in SHELL_INTERPRETERS)
-    if not direct and not interpreted:
+    if not is_trusted_interpreter(pid):
+        return False
+    if os.path.basename(argv[0]).lstrip('-') not in SHELL_INTERPRETERS:
+        return False
+    if not script_arg(argv[1], script):
         return False
     return fm_home_is(pid, root)
 
