@@ -982,7 +982,10 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label] [tmux-socket
     tmux)
       fm_backend_tmux_lab_check || return 1
       fm_backend_source tmux || return 1
-      if [ -n "$socket" ]; then
+      # A fourth argument means the task record has a tmux_socket key, even
+      # when the value is empty. An empty or unusable value must not fall
+      # through to the ambient server. No fourth argument is a legacy record.
+      if [ "$#" -ge 4 ]; then
         fm_backend_tmux_with_socket "$socket" fm_backend_tmux_target_exists "$target"
       else
         fm_backend_tmux_target_exists "$target"
@@ -1046,8 +1049,11 @@ fm_backend_agent_state() {  # <backend> <target> [tmux-socket]
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }
   case "$backend" in
     tmux)
-      if [ -n "$socket" ]; then
-        fm_backend_tmux_with_socket "$socket" fm_backend_tmux_agent_state "$target"
+      # A third argument means the record has a tmux_socket key. Empty is not
+      # a legacy record and must not query the ambient server.
+      if [ "$#" -ge 3 ]; then
+        fm_backend_tmux_with_socket "$socket" fm_backend_tmux_agent_state "$target" \
+          || printf 'unreadable'
       else
         fm_backend_tmux_agent_state "$target"
       fi
@@ -1061,7 +1067,13 @@ fm_backend_agent_state() {  # <backend> <target> [tmux-socket]
 # authoritatively missing endpoint is confidently not a live agent, while every
 # ambiguous, unreadable, or unverified result stays unknown.
 fm_backend_agent_alive() {  # <backend> <target> [tmux-socket]
-  case "$(fm_backend_agent_state "$1" "$2" "${3:-}")" in
+  local state
+  if [ "$#" -ge 3 ]; then
+    state=$(fm_backend_agent_state "$1" "$2" "$3") || state=
+  else
+    state=$(fm_backend_agent_state "$1" "$2") || state=
+  fi
+  case "$state" in
     alive) printf 'alive' ;;
     dead|missing) printf 'dead' ;;
     *) printf 'unknown' ;;

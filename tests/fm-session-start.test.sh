@@ -1450,6 +1450,7 @@ SH
   printf 'window=firstmate:fm-live\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-live.meta"
   printf 'window=firstmate:fm-gone\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-gone.meta"
   printf 'window=fmpre:fm-prefix\nkind=ship\ntmux_socket=%s\n' "$recorded" > "$home/state/task-prefix.meta"
+  printf 'window=firstmate:fm-gone\nkind=ship\ntmux_socket=\n' > "$home/state/task-blank.meta"
 
   status=0
   # shellcheck disable=SC2016 # The single-quoted script is the child bash's source, not this shell's.
@@ -1461,6 +1462,9 @@ SH
     fm_backend_target_exists tmux "firstmate:fm-gone" || exit 1
     fm_backend_target_exists tmux "firstmate:0" "" "$2" || exit 1
     fm_backend_target_exists tmux "firstmate:9" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:0.0" "" "$2" || exit 1
+    fm_backend_target_exists tmux "firstmate:0.9" "" "$2" && exit 1
+    fm_backend_target_exists tmux "firstmate:fm-gone" "" "" && exit 1
     pane=$(tmux -S "$2" display-message -p -t "=firstmate:fm-live" "#{pane_id}")
     wid=$(tmux -S "$2" display-message -p -t "=firstmate:fm-live" "#{window_id}")
     [ -n "$pane" ] && [ -n "$wid" ] || exit 1

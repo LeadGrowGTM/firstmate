@@ -580,13 +580,20 @@ print_status_tail() {
 # surprise in one task's read into that task's own endpoint line - never a
 # silently missing rest of digest. The inner bash re-sources fm-backend.sh
 # per read; that cost is a few milliseconds per task and buys the isolation.
-fm_session_start_endpoint_read() {  # <backend> <target> [expected-label] [tmux-socket]
-  local backend=$1 target=$2 label=${3:-} socket=${4:-}
+fm_session_start_endpoint_read() {  # <backend> <target> [expected-label] [tmux-socket] [socket-key]
+  local backend=$1 target=$2 label=${3:-} socket=${4:-} socket_key=${5:-}
   # shellcheck disable=SC2016  # Positional parameters expand inside the child bash, not here.
+  # socket-key "recorded" means the meta has a tmux_socket line. The value may
+  # be empty, and an empty value must not query the ambient server. Any other
+  # key is a legacy record with no socket line.
   fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
     . "$1"
-    fm_backend_target_exists "$2" "$3" "$4" "$5"
-  ' _ "$SCRIPT_DIR/fm-backend.sh" "$backend" "$target" "$label" "$socket"
+    if [ "$6" = recorded ]; then
+      fm_backend_target_exists "$2" "$3" "$4" "$5"
+    else
+      fm_backend_target_exists "$2" "$3" "$4"
+    fi
+  ' _ "$SCRIPT_DIR/fm-backend.sh" "$backend" "$target" "$label" "$socket" "$socket_key"
 }
 
 hash_file_sha256() {
@@ -947,8 +954,12 @@ for meta in "$STATE"/*.meta; do
   if [ -n "$window" ]; then
     backend=$(fm_backend_of_meta "$meta")
     endpoint_rc=0
+    socket_key=
+    if grep -q '^tmux_socket=' "$meta"; then
+      socket_key=recorded
+    fi
     fm_session_start_endpoint_read "$backend" "${target:-$window}" "fm-$id" \
-      "$(fm_meta_get "$meta" tmux_socket)" || endpoint_rc=$?
+      "$(fm_meta_get "$meta" tmux_socket)" "$socket_key" || endpoint_rc=$?
     # Only the timeout owner's own statuses mean the read itself failed: 124 is
     # the bound firing and >=128 is a signal death. Every other nonzero status
     # is the probe's own verdict that the endpoint is gone.

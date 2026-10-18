@@ -697,13 +697,24 @@ prefetch_task_observations() {  # <meta> <id>
     target=$(fm_backend_target_of_meta "$meta")
     socket=$(meta_value "$meta" tmux_socket)
     if [ -n "$target" ]; then
-      if fm_backend_target_exists "$backend" "$target" "fm-$id" "$socket" >/dev/null 2>&1; then
-        endpoint_exists=true
+      if grep -q '^tmux_socket=' "$meta"; then
+        if fm_backend_target_exists "$backend" "$target" "fm-$id" "$socket" >/dev/null 2>&1; then
+          endpoint_exists=true
+        else
+          endpoint_exists=false
+        fi
+        if [ "$kind" = secondmate ]; then
+          agent_alive=$(fm_backend_agent_alive "$backend" "$target" "$socket" 2>/dev/null || printf unknown)
+        fi
       else
-        endpoint_exists=false
-      fi
-      if [ "$kind" = secondmate ]; then
-        agent_alive=$(fm_backend_agent_alive "$backend" "$target" "$socket" 2>/dev/null || printf unknown)
+        if fm_backend_target_exists "$backend" "$target" "fm-$id" >/dev/null 2>&1; then
+          endpoint_exists=true
+        else
+          endpoint_exists=false
+        fi
+        if [ "$kind" = secondmate ]; then
+          agent_alive=$(fm_backend_agent_alive "$backend" "$target" 2>/dev/null || printf unknown)
+        fi
       fi
     fi
   else

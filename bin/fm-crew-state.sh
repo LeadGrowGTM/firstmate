@@ -329,7 +329,13 @@ fi
 EXPECTED_LABEL="fm-$ID"
 pane_readable() {  # <target>
   case "$TASK_BACKEND" in
-    tmux) fm_backend_target_exists tmux "$1" "" "$TMUX_SOCKET" >/dev/null 2>&1 ;;
+    tmux)
+      if grep -q '^tmux_socket=' "$META"; then
+        fm_backend_target_exists tmux "$1" "" "$TMUX_SOCKET" >/dev/null 2>&1
+      else
+        fm_backend_target_exists tmux "$1" "" >/dev/null 2>&1
+      fi
+      ;;
     *) fm_backend_capture "$TASK_BACKEND" "$1" 1 "$EXPECTED_LABEL" >/dev/null 2>&1 ;;
   esac
 }
@@ -1273,7 +1279,13 @@ if ! pane_readable "$BACKEND_TARGET"; then
   # Backends with no classifier (orca, zellij, and cmux all report unverified)
   # keep their historical capture-failure-means-gone reading.
   case "$TASK_BACKEND" in
-    tmux|herdr) AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET" "$TMUX_SOCKET") ;;
+    tmux|herdr)
+      if [ "$TASK_BACKEND" = tmux ] && grep -q '^tmux_socket=' "$META"; then
+        AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET" "$TMUX_SOCKET")
+      else
+        AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET")
+      fi
+      ;;
     *) AGENT_STATE=none ;;
   esac
   case "$TASK_BACKEND:$AGENT_STATE" in

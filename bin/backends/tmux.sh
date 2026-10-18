@@ -240,6 +240,24 @@ fm_backend_tmux_target_exists() {  # <target>
       window=${target#*:}
       [ -n "$session" ] && [ -n "$window" ] || return 1
       case "$window" in
+        [0-9]*.[0-9]*)
+          format='#{window_index}.#{pane_index}'
+          windows=${window%%.*}
+          status=${window#*.}
+          case "$windows$status" in
+            *[!0-9]*) format='#{window_name}' ;;
+          esac
+          case "$status" in
+            *.*) format='#{window_name}' ;;
+          esac
+          if [ "$format" = '#{window_index}.#{pane_index}' ]; then
+            windows=$(LC_ALL=C tmux list-panes -s -t "=$session" -F "$format" 2>/dev/null) || return 1
+            printf '%s\n' "$windows" | grep -qxF -- "$window"
+            return $?
+          fi
+          ;;
+      esac
+      case "$window" in
         *[!0-9]*) format='#{window_name}' ;;
         *) format='#{window_index}' ;;
       esac

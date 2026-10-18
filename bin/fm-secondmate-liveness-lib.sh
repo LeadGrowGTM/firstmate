@@ -280,10 +280,12 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   backend=$(fm_backend_of_meta "$meta")
   target=$(fm_backend_target_of_meta "$meta")
   [ -n "$target" ] || target="$window"
-  if [ "$backend" = tmux ]; then
+  if [ "$backend" = tmux ] && grep -q '^tmux_socket=' "$meta"; then
     socket=$(fm_meta_get "$meta" tmux_socket)
+    agent_state=$(fm_backend_agent_state "$backend" "$target" "$socket" 2>/dev/null) || agent_state=unreadable
+  else
+    agent_state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || agent_state=unreadable
   fi
-  agent_state=$(fm_backend_agent_state "$backend" "$target" "$socket" 2>/dev/null) || agent_state=unreadable
   case "$harness" in
     claude|codex|opencode|pi|pi-signed|grok|kimi|omp) ;;
     *)
