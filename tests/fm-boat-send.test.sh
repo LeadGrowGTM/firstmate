@@ -1276,10 +1276,10 @@ test_budget_caps() {
   new_case budget-third-box-allowed
   printf '%s\n' '{"expected_running":3}' > "$LOCAL_HOME/config/boat-spend.json"
   printf '%s\n' 'bx_ahnbu3qr' 'bx_bbbbbbbb' 'bx_cccccccc' > "$LOCAL_HOME/config/boat-box-id"
-  jq -n '{pageInfo:{hasMore:false},sandboxes:[
-      {id:"bx_ahnbu3qr",state:"running"},
-      {id:"bx_bbbbbbbb",state:"running"},
-      {id:"bx_cccccccc",state:"running"}]}' > "$FIXTURES/list.json"
+  jq -n --argjson end "$((NOW + 14390))" '{pageInfo:{hasMore:false},sandboxes:[
+      {id:"bx_ahnbu3qr",state:"running",archiveAfter:($end|todateiso8601)},
+      {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)},
+      {id:"bx_cccccccc",state:"running",archiveAfter:($end|todateiso8601)}]}' > "$FIXTURES/list.json"
   cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
   seed_receipt
   send_task
@@ -1323,9 +1323,9 @@ test_budget_caps() {
   prime_multi_box bx_aaaaaaaa stopped 1000 66666666-6666-4666-8666-666666666666 22222222-2222-4222-8222-222222222222
   printf '%s\n' 'bx_bbbbbbbb 11111111-1111-4111-8111-111111111111 fm-code' > "$LOCAL_HOME/state/.boat-environment"
   printf '%s\n' 75 > "$FIXTURES/transport.code.11111111-1111-4111-8111-111111111111"
-  jq -n '{pageInfo:{hasMore:false},sandboxes:[
+  jq -n --argjson end "$((NOW + 14390))" '{pageInfo:{hasMore:false},sandboxes:[
       {id:"bx_aaaaaaaa",state:"stopped"},
-      {id:"bx_bbbbbbbb",state:"running"}]}' > "$FIXTURES/list.json"
+      {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)}]}' > "$FIXTURES/list.json"
   send_task
   expect_code 0 "$CODE" "a full running box yields to a stopped box with room: $OUT"
   assert_grep 'spawn 11111111-1111-4111-8111-111111111111' "$FIXTURES/calls" 'the full box was not tried'
@@ -1334,6 +1334,82 @@ test_budget_caps() {
   assert_grep 'spawn 22222222-2222-4222-8222-222222222222' "$FIXTURES/calls" 'the box with room did not receive the worker'
   assert_no_grep 'boat --no-update resume bx_bbbbbbbb' "$FIXTURES/calls" 'the full running box was resumed'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'moving to another box stopped the full one'
+
+  new_case budget-account-counts-other-timers
+  printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_aaaaaaaa' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
+  prime_multi_box bx_aaaaaaaa stopped 1000 66666666-6666-4666-8666-666666666666 22222222-2222-4222-8222-222222222222
+  prime_multi_box bx_bbbbbbbb running 3000 11111111-1111-4111-8111-111111111111 55555555-5555-4555-8555-555555555555
+  set_json limits '.last24hUsageSeconds = 45000'
+  jq -n --argjson end "$((NOW + 14390))" '{pageInfo:{hasMore:false},sandboxes:[
+      {id:"bx_aaaaaaaa",state:"stopped"},
+      {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)}]}' > "$FIXTURES/list.json"
+  send_task
+  expect_code 1 "$CODE" 'another active box timer counts against the account day'
+  assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'a second box resumed past the account day'
+
+  new_case budget-keeps-task-box
+  printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_aaaaaaaa' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
+  prime_multi_box bx_aaaaaaaa stopped 1000 66666666-6666-4666-8666-666666666666 22222222-2222-4222-8222-222222222222
+  prime_multi_box bx_bbbbbbbb running 3000 11111111-1111-4111-8111-111111111111 55555555-5555-4555-8555-555555555555
+  printf '%s\n' 'bx_bbbbbbbb 11111111-1111-4111-8111-111111111111 fm-code' > "$LOCAL_HOME/state/.boat-environment"
+  printf '%s\n' 'task-one bx_aaaaaaaa' > "$LOCAL_HOME/state/.boat-task-box"
+  jq -n --argjson end "$((NOW + 14390))" '{pageInfo:{hasMore:false},sandboxes:[
+      {id:"bx_aaaaaaaa",state:"stopped"},
+      {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)}]}' > "$FIXTURES/list.json"
+  send_task
+  expect_code 0 "$CODE" "a recorded task stays on its box: $OUT"
+  assert_grep 'boat --no-update resume bx_aaaaaaaa --environment fm-code --ttl 14400 --json' \
+    "$FIXTURES/calls" 'the recorded box was not resumed'
+  assert_no_grep 'spawn 11111111-1111-4111-8111-111111111111' "$FIXTURES/calls" 'the task moved to another running box'
+  assert_equals 'task-one bx_aaaaaaaa' "$(cat "$LOCAL_HOME/state/.boat-task-box")" 'the task record changed boxes'
+
+  new_case budget-full-assigned-box-stays
+  printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_aaaaaaaa' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
+  prime_multi_box bx_aaaaaaaa stopped 1000 66666666-6666-4666-8666-666666666666 22222222-2222-4222-8222-222222222222
+  prime_multi_box bx_bbbbbbbb running 3000 11111111-1111-4111-8111-111111111111 55555555-5555-4555-8555-555555555555
+  printf '%s\n' 'bx_bbbbbbbb 11111111-1111-4111-8111-111111111111 fm-code' > "$LOCAL_HOME/state/.boat-environment"
+  printf '%s\n' 'task-one bx_bbbbbbbb' > "$LOCAL_HOME/state/.boat-task-box"
+  printf '%s\n' 75 > "$FIXTURES/transport.code.11111111-1111-4111-8111-111111111111"
+  jq -n --argjson end "$((NOW + 14390))" '{pageInfo:{hasMore:false},sandboxes:[
+      {id:"bx_aaaaaaaa",state:"stopped"},
+      {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)}]}' > "$FIXTURES/list.json"
+  send_task
+  expect_code 1 "$CODE" 'a full assigned box is not replaced'
+  assert_grep 'spawn 11111111-1111-4111-8111-111111111111' "$FIXTURES/calls" 'the assigned box was not tried'
+  assert_no_grep 'boat --no-update resume bx_aaaaaaaa' "$FIXTURES/calls" 'the task moved off its full box'
+
+  new_case budget-record-survives-second-box
+  send_task
+  expect_code 0 "$CODE" "single-box dispatch records its box: $OUT"
+  assert_equals 'task-one bx_ahnbu3qr' "$(cat "$LOCAL_HOME/state/.boat-task-box")" 'single-box dispatch wrote no task box'
+  printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_ahnbu3qr' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
+  seed_worker task-one ship firstmate 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" "teardown after a second box is listed: $OUT"
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'the recorded box was not stopped'
+
+  new_case budget-teardown-sole-receipt
+  printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_ahnbu3qr' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
+  seed_receipt
+  seed_worker task-one ship firstmate 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" "an unrecorded task uses the only receipt box: $OUT"
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'the sole receipt box was not stopped'
+
+  new_case budget-teardown-ambiguous-receipt
+  printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_ahnbu3qr' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
+  printf '%s\n' 'bx_ahnbu3qr 11111111-1111-4111-8111-111111111111 fm-code' \
+    'bx_bbbbbbbb 22222222-2222-4222-8222-222222222222 fm-code' > "$LOCAL_HOME/state/.boat-environment"
+  seed_worker task-one ship firstmate 'state: done complete'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 1 "$CODE" 'two receipt boxes do not identify a task'
+  assert_no_grep 'boat --no-update' "$FIXTURES/calls" 'an ambiguous task contacted Boat'
   pass 'Boat caps follow config, keep historical defaults, and spread workers across listed boxes'
 }
 

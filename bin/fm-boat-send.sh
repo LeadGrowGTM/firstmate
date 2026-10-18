@@ -24,10 +24,16 @@
 # 100000 credit seconds per dollar), below 60000 account seconds per rolling
 # 24h, and below a 43000 box-second sum (usage + timer reaching it is refused).
 # ceiling_usd and account_seconds_per_24h use that same sum: used + timer
-# reaching the ceiling is refused. When box_seconds_per_24h is set, the per-box
-# rule refuses only when rolling usage is already above it (usage >
-# box_seconds_per_24h), so usage + the one reserved timer may reach that
-# ceiling plus that timer, including the equal sum.
+# reaching the ceiling is refused. Those two checks, and the balance check,
+# also add the remaining timers of the other active listed boxes. An active
+# listed box with no readable timer refuses the reservation. When
+# box_seconds_per_24h is set, the per-box rule refuses only when rolling
+# usage is already above it (usage > box_seconds_per_24h), so usage + the
+# one reserved timer may reach that ceiling plus that timer, including the
+# equal sum. A task recorded in state/.boat-task-box is dispatched only to
+# that box. Dispatch writes that record for one listed box too. Teardown
+# with more than one listed box uses the record, or the receipt when the
+# receipt names exactly one listed box.
 # An active sandbox that is not listed, or more active sandboxes than the cap,
 # refuses dispatch. Listed active sandboxes do not. With more than one listed
 # box, dispatch tries a listed box that can take another worker, preferring one
@@ -151,7 +157,6 @@ publish_route_box() {
 }
 record_task_box() {
   local id file tmp
-  [ "$MULTI" -eq 1 ] || return 0
   id=$(jq -r .id "$TMP/request")
   file="$FM_HOME/state/.boat-task-box"
   [ ! -L "$file" ] || die 'unsafe task box record'
@@ -185,8 +190,22 @@ if [ "$PREPARE" -eq 0 ]; then
 fi
 if [ -n "$TEARDOWN_ID" ]; then
   if [ "$MULTI" -eq 1 ]; then
-    [ -f "$FM_HOME/state/.boat-task-box" ] && [ ! -L "$FM_HOME/state/.boat-task-box" ] || die 'task box is not recorded'
-    BOX=$(awk -v id="$TEARDOWN_ID" '$1 == id { print $2; exit }' "$FM_HOME/state/.boat-task-box" 2>/dev/null || true)
+    BOX=
+    if [ -L "$FM_HOME/state/.boat-task-box" ]; then
+      die 'unsafe task box record'
+    elif [ -f "$FM_HOME/state/.boat-task-box" ]; then
+      BOX=$(awk -v id="$TEARDOWN_ID" '$1 == id { print $2; exit }' "$FM_HOME/state/.boat-task-box" 2>/dev/null || true)
+    fi
+    if [ -z "$BOX" ]; then
+      [ ! -L "$ENV_RECEIPT" ] || die 'unsafe environment receipt path'
+      if [ -f "$ENV_RECEIPT" ]; then
+        BOX=$(awk 'NF { print $1 }' "$ENV_RECEIPT" | sort -u)
+      fi
+      case "$BOX" in
+        *$'\n'*) die 'task box is not recorded' ;;
+      esac
+    fi
+    [ -n "$BOX" ] || die 'task box is not recorded'
     printf '%s\n' "${BOX_IDS[@]}" | grep -Fxq -- "$BOX" || die 'task box is not an approved box'
     publish_route_box
   fi
@@ -237,6 +256,11 @@ reserve_ttl() {
     (if ($b.sandboxes | type) == "array" and ($l.activeStates | type) == "array" then
        [ $b.sandboxes[] | select(.state as $s | ($l.activeStates | index($s)) != null) ]
      else [] end) as $live |
+    ([ $live[] | select(.id != $box) |
+       if (.archiveAfter | type) != "string" then error("unreadable Boat timer")
+       else (.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now
+       end | if . > 0 then . else 0 end
+     ] | add // 0) as $others |
     if $ttl <= 0 or $ttl > $max_ttl or ($i.state == "stopped" and $l.canStart != true) or $l.creditSecondsPerDollar != 100000 or
        ($l.creditUsedSeconds | nonneg | not) or ($l.last24hUsageSeconds | nonneg | not) or
        ($l.creditBalanceSeconds | nonneg | not) or
@@ -248,10 +272,10 @@ reserve_ttl() {
        $u.sandboxId != $box or $u.sandboxType != "default" or $u.secondsPerDollar != 100000 or
        $u.billingMultiplier != 1 or ($u.seconds | nonneg | not)
     then error("unreadable or unsafe Boat state")
-    elif $l.creditUsedSeconds + $ttl >= ($monthly_usd * $l.creditSecondsPerDollar) or
-         $l.last24hUsageSeconds + $ttl >= $account or
+    elif $l.creditUsedSeconds + $ttl + $others >= ($monthly_usd * $l.creditSecondsPerDollar) or
+         $l.last24hUsageSeconds + $ttl + $others >= $account or
          (if $box_legacy == 1 then $u.seconds + $ttl >= $box_seconds else $u.seconds > $box_seconds end) or
-         $l.creditBalanceSeconds < $ttl
+         $l.creditBalanceSeconds < ($ttl + $others)
     then error("spend cap would be exceeded")
     else $ttl end'
 }
@@ -331,6 +355,16 @@ if [ "$MULTI" -eq 1 ]; then
          rank: (if $s != null and ($s.state | type) == "string" and live($s.state) then 0 else 1 end)}
       ] | sort_by(.rank, .ord) | .[].id
     ' 2>/dev/null) || stop_refuse 'Boat safety or spend reservation failed'
+  PINNED=
+  if [ -L "$FM_HOME/state/.boat-task-box" ]; then
+    die 'unsafe task box record'
+  elif [ -f "$FM_HOME/state/.boat-task-box" ]; then
+    PINNED=$(awk -v id="$(jq -r .id "$TMP/request")" '$1 == id { print $2; exit }' "$FM_HOME/state/.boat-task-box")
+  fi
+  if [ -n "$PINNED" ]; then
+    printf '%s\n' "${BOX_IDS[@]}" | grep -Fxq -- "$PINNED" || die 'task box is not an approved box'
+    order=$PINNED
+  fi
   while IFS= read -r BOX; do
     [ -n "$BOX" ] || continue
     STOP_ON_REFUSAL=0
@@ -346,6 +380,9 @@ if [ "$MULTI" -eq 1 ]; then
     fi
     dispatch_prepared_box
   done <<< "$order"
+  if [ -n "${PINNED:-}" ]; then
+    die "assigned box $PINNED cannot take this task; dispatch refused"
+  fi
   die 'no listed box has spend room and worker capacity; dispatch refused'
 fi
 read_boat info "$BOX"

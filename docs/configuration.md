@@ -2201,6 +2201,8 @@ This section is the single owner of the schema.
 - `expected_running` is also the sender's cap on how many box ids `config/boat-box-id` may list and how many sandboxes may be active together.
   A fleet that runs up to three default boxes all day sets `ceiling_usd` to 100, `expected_running` to 3, `account_seconds_per_24h` to 259200 (3 times 86400), and `box_seconds_per_24h` to 86400.
   With `box_seconds_per_24h` set, a box whose rolling usage is still within that value may reserve one more timer, so usage plus that timer may reach the value plus the timer.
+  The account, monthly, and balance checks also add the remaining timers of the other active listed boxes.
+  An active listed box with no readable timer refuses the reservation.
 - An unknown key, a value of the wrong type, or a file that is not exactly one JSON object (an empty file included) is refused, and the check reports the file as invalid rather than falling back to defaults.
 - `boat_bin` exists because the watcher runs the check with its own environment, where `boat` is usually not on `PATH` and no `FM_BOAT_BIN` persists, so the file is the one durable place to name the CLI.
   It must be an absolute path to an existing executable file; anything else makes the file invalid, and an invalid file runs nothing.

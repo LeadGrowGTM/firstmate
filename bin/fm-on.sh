@@ -32,8 +32,11 @@
 # connecting, so a stopped or moved sandbox reads as unavailable transport. It
 # never resumes a sandbox. That helper's header owns the check.
 # A single id in config/boat-box-id is that sandbox. A longer list is the
-# approved set from fm-boat-budget-lib.sh; the connection verifies the one id
+# approved set from fm-boat-budget-lib.sh. The connection verifies the one id
 # in state/.boat-route-box, which fm-boat-send.sh writes when it selects a box.
+# A command argument that is a task id in state/.boat-task-box uses that
+# task's box instead, and the route record is updated to it. When that box
+# is not the alias's current sandbox, the alias is refreshed to it first.
 #
 # ServerAliveInterval/ServerAliveCountMax arm dead-peer detection so a vanished
 # peer (a reboot, a dropped link) becomes a bounded ssh failure (exit 255)
@@ -139,6 +142,30 @@ if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
     [ -f "$ROUTE_BOX" ] && [ ! -L "$ROUTE_BOX" ] || die "selected Boat box is not recorded for $ROUTE"
     BOX=$(jq -Rser 'select(test("\\Abx_[23456789abcdefghjkmnpqrstuvwxyz]{8}\\n?\\z")) | rtrimstr("\n")' "$ROUTE_BOX") || die "invalid selected Boat box for $ROUTE"
     fm_boat_read_box_ids "$BOX_CONFIG" | grep -Fxq -- "$BOX" || die "selected Boat box is not an approved box for $ROUTE"
+    TASK_MAP="$FM_HOME/state/.boat-task-box"
+    if [ -L "$TASK_MAP" ]; then
+      die "unsafe task box record for $ROUTE"
+    elif [ -f "$TASK_MAP" ]; then
+      TASK_BOX=$(awk 'NF >= 2 { print $1, $2 }' "$TASK_MAP" | while read -r tid tbox; do
+        for arg in "$@"; do
+          [ "$arg" = "$tid" ] && printf '%s\n' "$tbox"
+        done
+      done | sort -u)
+      case "$TASK_BOX" in
+        *$'\n'*) die "command names tasks on different Boat boxes for $ROUTE" ;;
+        '') ;;
+        *)
+          fm_boat_read_box_ids "$BOX_CONFIG" | grep -Fxq -- "$TASK_BOX" || die "selected Boat box is not an approved box for $ROUTE"
+          if [ "$TASK_BOX" != "$BOX" ]; then
+            BOX=$TASK_BOX
+            [ ! -L "$ROUTE_BOX" ] || die "unsafe route box record for $ROUTE"
+            printf '%s\n' "$BOX" > "$ROUTE_BOX"
+            FM_BOAT_HYDRATE_WAIT=0 "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" "$HOST" >/dev/null ||
+              die "Boat alias does not follow the task box for $ROUTE"
+          fi
+          ;;
+      esac
+    fi
   fi
   VERIFY_ARGS+=("$BOX")
 fi

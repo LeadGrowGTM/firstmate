@@ -606,6 +606,8 @@ Without a fresh worker status declaration, dispatch refuses success and leaves t
 Running boxes reserve only their existing timer's remaining duration against the configured spend caps; dispatch never extends the timer.
 With more than one listed box, dispatch prefers a listed box that is already running and still has room under the three-worker cap, and it does not create boxes.
 An active sandbox that is not listed, or more active sandboxes than `expected_running`, is refused.
+A task stays on the box recorded for it, and a later command that names that task uses that box.
+The account and monthly ceilings include the remaining timers of the other active listed boxes.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
 
