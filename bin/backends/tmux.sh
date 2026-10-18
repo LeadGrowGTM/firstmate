@@ -88,8 +88,10 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
 }
 
 # docs/configuration.md "Captain tmux session" owns config/captain-tmux-session.
-# The effective config directory follows the same override as fm-backend.sh,
-# read at call time so a caller can point one launch at one home.
+# docs/configuration.md "Crew tmux session" owns config/crew-tmux-session.
+# Both files share the reader below. The effective config directory follows
+# the same override as fm-backend.sh, read at call time so a caller can point
+# one launch at one home.
 fm_backend_tmux_config_dir() {
   if [ -n "${FM_CONFIG_OVERRIDE:-}" ]; then
     printf '%s\n' "$FM_CONFIG_OVERRIDE"
@@ -104,6 +106,7 @@ fm_backend_tmux_config_dir() {
 
 # Prints the session name, or nothing when the file is absent or empty.
 # Returns 1 when a declaration is present but cannot be used.
+# config/captain-tmux-session and config/crew-tmux-session both use this.
 fm_backend_tmux_read_captain_session_file() {  # <file>
   local file=$1 value='' extra=''
   [ -e "$file" ] || [ -L "$file" ] || return 0
@@ -144,10 +147,19 @@ fm_backend_tmux_local_parent_home() {
 }
 
 # Prints the configured session, or nothing when unset. Returns 1 on a bad file.
-fm_backend_tmux_captain_session() {
-  local dir file name parent
+# <file-name> is captain-tmux-session or crew-tmux-session. A local secondmate
+# with no file of its own uses that same file in its parent's config directory.
+fm_backend_tmux_configured_session() {  # <file-name>
+  local base=$1 dir file name parent
+  case "$base" in
+    captain-tmux-session|crew-tmux-session) ;;
+    *)
+      echo "error: unknown tmux session file '$base'" >&2
+      return 1
+      ;;
+  esac
   dir=$(fm_backend_tmux_config_dir) || return 1
-  file=$dir/captain-tmux-session
+  file=$dir/$base
   name=$(fm_backend_tmux_read_captain_session_file "$file") || return 1
   if [ -n "$name" ]; then
     printf '%s\n' "$name"
@@ -155,9 +167,17 @@ fm_backend_tmux_captain_session() {
   fi
   parent=$(fm_backend_tmux_local_parent_home) || return 1
   [ -n "$parent" ] || return 0
-  file=$parent/config/captain-tmux-session
+  file=$parent/config/$base
   name=$(fm_backend_tmux_read_captain_session_file "$file") || return 1
   printf '%s\n' "$name"
+}
+
+fm_backend_tmux_captain_session() {
+  fm_backend_tmux_configured_session captain-tmux-session
+}
+
+fm_backend_tmux_crew_session() {
+  fm_backend_tmux_configured_session crew-tmux-session
 }
 
 # Create <name> on the server this client is already addressing when it is
@@ -182,12 +202,20 @@ fm_backend_tmux_ensure_named_session() {  # <session-name>
   printf '%s\n' "$name"
 }
 
-# fm_backend_tmux_container_ensure: the session that receives a new task window.
-# Prints the resolved session name.
+# fm_backend_tmux_container_ensure [kind]: the session that receives a new
+# task window. Prints the resolved session name.
 #
-# When config/captain-tmux-session names a session, that exact session is the
-# container, whether or not this process is inside another session. The file's
-# contract is docs/configuration.md "Captain tmux session".
+# kind ship or scout uses config/crew-tmux-session when that file names a
+# session. When it does not, those windows use the placement below.
+# kind secondmate, and an empty kind, use that placement directly. An empty
+# kind keeps callers that predate the crew split on it. Any other kind refuses.
+# The kind is the ship, scout, or secondmate charter fm-spawn.sh already
+# resolved. The window name is not consulted.
+#
+# Placement: when config/captain-tmux-session names a session, that exact
+# session is the container, whether or not this process is inside another
+# session. The file contracts are docs/configuration.md "Captain tmux session"
+# and "Crew tmux session".
 #
 # Otherwise reuse the current tmux session when firstmate itself runs inside
 # tmux, else ensure a dedicated detached "firstmate" session exists.
@@ -198,8 +226,23 @@ fm_backend_tmux_ensure_named_session() {  # <session-name>
 # the shape bin/fm-orca-view.sh opens) would become the recorded container of
 # every later task. A group whose base session is gone keeps the pane's own.
 # A detached caller ensures exact firstmate; a near-named session cannot stand in.
-fm_backend_tmux_container_ensure() {
-  local fmt info ses grouped group live configured
+fm_backend_tmux_container_ensure() {  # [kind]
+  local kind=${1:-} fmt info ses grouped group live configured
+  case "$kind" in
+    ship|scout)
+      configured=$(fm_backend_tmux_crew_session) || return 1
+      if [ -n "$configured" ]; then
+        fm_backend_tmux_ensure_named_session "$configured"
+        return
+      fi
+      ;;
+    secondmate|'')
+      ;;
+    *)
+      echo "error: tmux container kind '$kind' is neither a second mate nor a ship or scout" >&2
+      return 1
+      ;;
+  esac
   configured=$(fm_backend_tmux_captain_session) || return 1
   if [ -n "$configured" ]; then
     fm_backend_tmux_ensure_named_session "$configured"
