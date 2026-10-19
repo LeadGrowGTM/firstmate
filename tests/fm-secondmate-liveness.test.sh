@@ -410,6 +410,23 @@ test_sweep_skips_relaunch_while_retirement_marker_stands() {
   pass "sweep: a retiring marker stands relaunch down before any probe"
 }
 
+test_sweep_skips_relaunch_for_on_demand_mate() {
+  local w fb tmuxfb log out
+  w=$(new_world sweep-on-demand)
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+  mkdir -p "$w/home/data"
+  printf 'health\nsm1\n' > "$w/home/data/secondmate-on-demand"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log")
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: on demand; automatic relaunch left it stopped" \
+    "an on-demand secondmate must be skipped by the session-start sweep"
+  [ ! -s "$log" ] || fail "an on-demand secondmate was probed or relaunched: $(cat "$log")"
+  pass "sweep: an on-demand mate stays stopped before any probe"
+}
+
 test_sweep_skips_mate_whose_liveness_lock_is_held() {
   local w fb tmuxfb log out holder i=0
   w=$(new_world sweep-lock-held)
@@ -753,6 +770,7 @@ test_sweep_skipped_under_detect_only
 test_sweep_noop_with_no_secondmate_meta
 test_sweep_skips_mate_whose_liveness_lock_is_held
 test_sweep_skips_relaunch_while_retirement_marker_stands
+test_sweep_skips_relaunch_for_on_demand_mate
 test_sweep_refuses_relaunch_on_ledger_errors
 test_remote_poll_probe_maps_states
 test_remote_poll_probe_unreachable_preserves_route

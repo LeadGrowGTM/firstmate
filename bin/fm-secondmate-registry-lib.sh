@@ -9,6 +9,14 @@
 # Summary text and scope text are natural language and may contain parentheses
 # and semicolons, so field boundaries are anchored to the suffix markers rather
 # than to the first incidental punctuation.
+#
+# data/secondmate-on-demand, beside that registry, names mates that stay down
+# until work is routed to them. One id per line. A blank line or a line whose
+# first character is # is ignored. A missing file names nobody. A symlink, a
+# non-file, or an unreadable file is not an empty list: secondmate_on_demand
+# returns 2 so a caller can leave the mate stopped instead of guessing.
+# secondmate_on_demand_data_dir prints the data directory from FM_DATA_OVERRIDE,
+# otherwise $FM_HOME/data, otherwise the data directory beside $STATE.
 
 SECONDMATE_REGISTRY_ID=
 SECONDMATE_REGISTRY_SUMMARY=
@@ -27,6 +35,51 @@ SECONDMATE_REGISTRY_MATCH_HOME_KEY=
 SECONDMATE_REGISTRY_MATCH_PROJECTS=
 SECONDMATE_REGISTRY_MATCH_REMOTE=0
 SECONDMATE_REGISTRY_ERROR=
+
+secondmate_on_demand_data_dir() {
+  if [ -n "${FM_DATA_OVERRIDE:-}" ]; then
+    printf '%s\n' "$FM_DATA_OVERRIDE"
+    return 0
+  fi
+  if [ -n "${FM_HOME:-}" ]; then
+    printf '%s/data\n' "$FM_HOME"
+    return 0
+  fi
+  if [ -n "${STATE:-}" ]; then
+    printf '%s/data\n' "$(dirname "$STATE")"
+    return 0
+  fi
+  return 1
+}
+
+# 0 when <id> is listed, 1 when it is not or the id is unusable, 2 when the
+# list exists but cannot be trusted.
+secondmate_on_demand() {  # <data-dir> <id>
+  local data=$1 id=$2 file line
+  case "$id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  file=$data/secondmate-on-demand
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    return 1
+  fi
+  if [ -L "$file" ] || [ ! -f "$file" ] || [ ! -r "$file" ]; then
+    return 2
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|\#*) continue ;;
+    esac
+    [ "$line" = "$id" ] && return 0
+  done <"$file"
+  return 1
+}
+
+secondmate_on_demand_unreadable() {  # <data-dir>
+  local file=$1/secondmate-on-demand
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    return 1
+  fi
+  [ -L "$file" ] || [ ! -f "$file" ] || [ ! -r "$file" ]
+}
 
 secondmate_registry_lock_path() { printf '%s/.secondmate-registry.lock\n' "$1"; }
 secondmate_reply_lifecycle_lock_path() { printf '%s/.remote-reply-lifecycle-%s.lock\n' "$1" "$2"; }

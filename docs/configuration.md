@@ -862,6 +862,29 @@ The skill text owns the marker spelling, the tick order, and the reinforcement r
 Persistent secondmate routes live locally in `data/secondmates.md`.
 The concise single-line route contract is owned by the [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md#routing-table), including the parser-compatible fields, one-sentence summary requirement, `home:` pointer to the seeded charter, and limit on extra registry prose.
 
+### On-demand mates
+
+`data/secondmate-on-demand` sits beside the registry and selects mates that stay down until work is routed to them.
+[`bin/fm-secondmate-registry-lib.sh`](../bin/fm-secondmate-registry-lib.sh) owns the file format and read rules.
+Session-start recovery, the liveness check, and secondmate restart leave a listed mate stopped.
+The Claude status line omits a listed mate.
+When routing work to a stopped local mate, start its recorded home with `bin/fm-spawn.sh <id> --secondmate` before handoff, which needs a live receiver endpoint.
+This example is documentation only:
+
+```
+health
+lead-haven
+```
+
+### Claude status line
+
+When Claude uses `bin/fm-statusbar.sh claude-line --task <id>` as its `statusLine` command, the line keeps the model and `Ctx %` readout and places a compact live-secondmate summary beside it.
+Visible local mate entries show an id and latest active task state, while remote mate entries say remote.
+The summary counts open captain decisions in the primary and eligible live local mate homes, and reads durable records through a short background cache so rendering does not wait for fleet probes.
+Firstmate adds the command to spawned Claude workers when neither their account nor project already defines a `statusLine`; the main Claude session needs its own `statusLine` setting pointing to this command to show the summary.
+The command's [header](../bin/fm-statusbar.sh) owns the exact fields, truncation, and refresh behavior.
+This Claude line is separate from the [primary tmux session bar](tmux-backend.md#watching-the-crew), which continues to show live crew and secondmate counts.
+
 ### Remote routes and validation
 
 A remote route adds `host:` and `root:` before the existing fields and places the whole secondmate home on that SSH host; the bounded [Boat overflow sender](remote-secondmates.md#code-only-boat-overflow) can dispatch code-only workers through its purpose-built route.
@@ -3353,7 +3376,7 @@ FM_STALE_ESCALATE_SECS=240         # idle seconds before a provably-working stal
 FM_BUSY_TURN_MAX_SECS=3600         # maximum age without a completed turn or explicit native-harness progress (bin/fm-watch.sh owns marker selection), before the same wedge escalation used for a provably-working non-busy stale takes over; inspection-only, never an automatic interrupt or restart; a declared external wait, an attended verified captain-held transfer, or - where config/wedge-defer-parked-gate arms it - a validation gate of the crew's own awaiting the supervisor's still-unanswered decision takes the FM_PAUSE_RESURFACE_SECS recheck below instead
 FM_PAUSE_RESURFACE_SECS=14400      # four hours between bounded rechecks of a declared external wait or verified captain-held transfer, and between repeated new-hash stale alarms for an ordinary crew task with an open backlog captain call; a structured until time can make an external-wait recheck occur sooner but cannot extend this bound; this includes a live idle pane after its first inconclusive stale wake, a provably-working pane whose own unelapsed declared wait or, where config/wedge-defer-parked-gate arms it, unanswered supervisor-owed validation gate defers its FM_STALE_ESCALATE_SECS escalation, and a live busy pane past FM_BUSY_TURN_MAX_SECS, while the away-mode daemon uses the same setting and ages its window against the crew's own latest status line rather than pane busy state; a captain-held transfer is never rechecked while the away-posture record exists, while an armed validation gate awaiting the supervisor's decision keeps this recheck in either posture
 FM_SECONDMATE_WAKE_STALL_SECS=180  # minimum interval with no change of the oldest actionable foreign wake-queue row (it advances as the mate drains, and a queue reprovisioned under the same task id starts a fresh interval at whatever sequence it restarts) before an endpoint-recorded local secondmate produces one durable parent wake-loop-stall notification for that no-progress episode; a mate that is provably inside an active turn (an exact busy verdict) does not escalate until that same no-progress interval reaches FM_BUSY_TURN_MAX_SECS above; a mate whose busy class is exactly idle, whose agent is alive, and whose composer is not pending is rung once so its own home can drain, and the parent notification is withheld until that same row stays frozen for another stall interval; unknown or ring-unsafe panes keep the parent alarm; declared external-wait pause rows are excluded, and zero or invalid values use 180
-FM_SECONDMATE_LIVENESS_SECS=60   # seconds between watcher probes of each registered secondmate's recorded endpoint through bin/fm-secondmate-liveness-lib.sh, which relaunches only a positively `dead` or `missing` endpoint through the ordinary guarded fm-spawn.sh --secondmate path and emits exactly one check wake per relaunch; zero or invalid values use 60
+FM_SECONDMATE_LIVENESS_SECS=60   # seconds between watcher checks of each registered secondmate through bin/fm-secondmate-liveness-lib.sh; mates in data/secondmate-on-demand are skipped before an endpoint probe, while eligible mates relaunch only from a positively `dead` or `missing` endpoint through the ordinary guarded fm-spawn.sh --secondmate path and emit exactly one check wake per relaunch; zero or invalid values use 60
 FM_SECONDMATE_LIVENESS_TIMEOUT=120   # seconds bounding one watcher-driven relaunch, so a wedged spawn cannot stall the poll; zero or invalid values use 120
 FM_SECONDMATE_LIVENESS_MAX_ATTEMPTS=3   # automatic relaunch attempts allowed per mate inside the window before the watcher parks auto-relaunch behind state/.secondmate-relaunch-bound-<id> and escalates once; a later live probe clears the marker and restores the full attempt budget (the ledger keeps its history behind a `rearmed` row); zero or invalid values use 3
 FM_SECONDMATE_LIVENESS_WINDOW_SECS=3600   # window the relaunch bound counts state/.secondmate-relaunch-<id> attempt lines over; the file is also the durable per-mate relaunch record; zero or invalid values use 3600

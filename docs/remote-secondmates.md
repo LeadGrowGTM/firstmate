@@ -796,12 +796,12 @@ A relaunch refuses on the same prompts, and [Relaunch a live remote second mate]
 
 ### Liveness recovery
 
-Startup liveness recovery relaunches a dead or missing remote second mate through this same command.
+Startup liveness recovery relaunches an eligible dead or missing remote second mate through this same command; the [on-demand setting](configuration.md#on-demand-mates) leaves listed mates stopped.
 So recovery passes the same readiness gate rather than a weaker one.
 
 The watcher's liveness tick applies the identical rule during ordinary supervision through the shared `bin/fm-secondmate-liveness-lib.sh`:
 
-- The remote endpoint is probed read-only once per cadence.
+- An eligible remote endpoint is probed read-only once per cadence.
 - Only a positive `dead` or `missing` reply relaunches through that command.
 - An unreachable transport or inconclusive state is left untouched rather than replaced locally.
 

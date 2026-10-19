@@ -260,6 +260,30 @@ run_restart() {  # <case-dir> <args...>
 }
 
 # --- T1: the persist request is the task subset of /stow, and it gates --------
+test_on_demand_mate_is_not_restarted() {
+  local dir out rc
+  dir=$(new_case on-demand)
+  add_local_mate "$dir" sm1
+  add_local_mate "$dir" sm2
+  printf '# stay down until routed\nsm1\n\n' > "$dir/home/data/secondmate-on-demand"
+  arm_answer "$dir" sm1
+  arm_answer "$dir" sm2
+
+  out=$(run_restart "$dir" sm1 sm2); rc=$?
+
+  expect_code 0 "$rc" "an on-demand skip is not a failed restart"$'\n'"$out"
+  assert_contains "$out" "skipped: sm1: on demand; automatic restart left it stopped" \
+    "the on-demand mate must be reported as left stopped"
+  assert_not_contains "$out" "restarted: sm1" "an on-demand mate must not be reported as restarted"
+  assert_contains "$out" "restarted: sm2 (claude)" "a mate that is not on demand must still restart"
+  assert_contains "$out" "summary: 1 of 2 restarted, 0 nudged, 0 unreached, 1 skipped" \
+    "the summary must count the skip separately"
+  assert_absent "$dir/home/state/sm1.control-relaunch" \
+    "an on-demand mate was relaunched"
+  [ ! -e "$dir/home/state/sm1.inbox" ] || fail "an on-demand mate was asked to persist"
+  pass "an on-demand mate is skipped and its neighbor still restarts"
+}
+
 test_persist_gates_and_asks_only_for_open_records() {
   local dir out rc request
   dir=$(new_case gate)
@@ -858,6 +882,7 @@ test_already_current_unprovable_mate_stays_on_the_nudge_path() {
   pass "T16 an already-current mate with an unprovable runtime keeps the honest nudge path"
 }
 
+test_on_demand_mate_is_not_restarted
 test_persist_gates_and_asks_only_for_open_records
 test_persist_precedes_restart
 test_arrived_answer_precedes_deadline_check
