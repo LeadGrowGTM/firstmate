@@ -434,6 +434,10 @@ fm_crew_migrate_classify() {  # <meta>
       return 0
       ;;
   esac
+  if [ -z "$backend" ]; then
+    fm_crew_migrate_unresolvable "$id" "recorded backend is empty"
+    return 0
+  fi
   if [ "$backend" != tmux ]; then
     printf 'skip other-backend %s %s\n' "$id" "$backend" >>"$SKIP_FILE"
     return 0

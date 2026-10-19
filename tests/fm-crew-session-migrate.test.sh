@@ -99,6 +99,23 @@ test_ambiguous_backend_skips_with_a_warning() {
   pass "an ambiguous backend skips that task and migrates the rest"
 }
 
+test_empty_backend_skips_with_a_warning() {
+  local home
+  home=$(make_world empty-backend)
+  write_meta "$home" empty "holding:fm-empty" 'backend='
+  run_migrate "$home" --apply
+  [ "$RC" -eq 0 ] || fail "an empty backend aborted the home (rc=$RC): $ERR"
+  assert_contains "$ERR" 'warning: task empty: recorded backend is empty' \
+    "the empty backend was not warned about"
+  [ "$(printf '%s\n' "$ERR" | grep -c '^warning: task empty:')" -eq 1 ] \
+    || fail "the empty backend printed more than one warning"
+  assert_contains "$OUT" 'skip unresolvable empty recorded backend is empty' \
+    "the summary did not list the empty backend"
+  assert_contains "$OUT" 'moved healthy holding:fm-healthy -> firstmate-crew:fm-healthy' \
+    "the healthy task was not migrated after the empty backend"
+  pass "an empty backend skips that task and migrates the rest"
+}
+
 test_other_unresolvable_endpoint_records_skip() {
   local home
   home=$(make_world other-records)
@@ -136,5 +153,6 @@ test_a_resolvable_task_that_disagrees_still_fails() {
 test_missing_socket_skips_with_a_warning
 test_ambiguous_socket_skips_with_a_warning
 test_ambiguous_backend_skips_with_a_warning
+test_empty_backend_skips_with_a_warning
 test_other_unresolvable_endpoint_records_skip
 test_a_resolvable_task_that_disagrees_still_fails
