@@ -2683,6 +2683,43 @@ resurface_after_downtime() {
   wake "check: rearm-resurface"
 }
 
+# Read the refusal line fm-idle-sweep.sh appended during this sweep.
+# The line format is owned by that script's header.
+idle_sweep_refusal_since() { # <status-file> <previous-byte-count>
+  local file=$1 previous=$2 line reason
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  case "$previous" in ''|*[!0-9]*) previous=0 ;; esac
+  line=$(tail -c +"$((previous + 1))" "$file" 2>/dev/null | grep 'idle sweep refused: ' | tail -n 1) || true
+  [ -n "$line" ] || return 1
+  reason=${line##*idle sweep refused: }
+  reason=$(printf '%s' "$reason" | tr '\t\r\n' '   ' | cut -c1-160)
+  reason=${reason#"${reason%%[![:space:]]*}"}
+  reason=${reason%"${reason##*[![:space:]]}"}
+  [ -n "$reason" ] || return 1
+  printf '%s' "$reason"
+}
+
+# The queued check wake is this refusal's notification. Mark the status log
+# through its current end so the next cycle does not report those bytes again.
+# The signal scan for this cycle already ran, so the new bytes are the sweep
+# append just queued. A symlink is left unmarked.
+idle_sweep_mark_refusal_surfaced() { # <status-file>
+  local file=$1 record='' endpoint ident rest rc=0
+  [ -f "$file" ] && [ ! -L "$file" ] || return 0
+  record=$(status_span_first_actionable_record "$file" 0) || rc=$?
+  case "$rc" in
+    0|1) ;;
+    *) return 1 ;;
+  esac
+  endpoint=${record%%$'\t'*}
+  rest=${record#*$'\t'}
+  ident=${rest%%$'\t'*}
+  case "$endpoint" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$ident" ] || return 1
+  fm_wake_status_seen_commit "$STATE" "$file" "$endpoint" "$ident" || return 1
+  mark_surfaced "$file" "$endpoint" "$ident"
+}
+
 while :; do
   # Home-gone exit: a deleted home, state directory, or code root means this
   # watcher's world is gone (a torn-down temporary home or a discarded
@@ -3290,9 +3327,18 @@ EOF
   if [ "$(age_of "$STATE/.last-heartbeat")" -ge "$hb" ]; then
     # The sweep shares this heartbeat across primary harnesses and
     # runtime backends; its own evidence gates fail closed without a new daemon.
+    idle_sweep_status="$STATE/idle-sweep.status"
+    idle_sweep_before=0
+    if [ -f "$idle_sweep_status" ] && [ ! -L "$idle_sweep_status" ]; then
+      idle_sweep_before=$(wc -c < "$idle_sweep_status" | tr -d '[:space:]')
+      case "$idle_sweep_before" in ''|*[!0-9]*) idle_sweep_before=0 ;; esac
+    fi
     if ! bash "$SCRIPT_DIR/fm-idle-sweep.sh" > /dev/null; then
-      triage_log "idle sweep refused; inspect its configuration or evidence"
-      fm_wake_append check idle-sweep "check: idle-sweep refused; inspect configuration or dispatch evidence" || exit 1
+      idle_sweep_reason=$(idle_sweep_refusal_since "$idle_sweep_status" "$idle_sweep_before") \
+        || idle_sweep_reason='inspect configuration or dispatch evidence'
+      triage_log "idle sweep refused: $idle_sweep_reason"
+      fm_wake_append check idle-sweep "check: idle-sweep refused: $idle_sweep_reason" || exit 1
+      idle_sweep_mark_refusal_surfaced "$idle_sweep_status" || true
       touch "$STATE/.last-heartbeat"
       wake "check: idle-sweep"
     fi

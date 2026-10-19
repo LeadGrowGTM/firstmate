@@ -372,6 +372,8 @@ TEST_QUOTA_HOOK="$TMP_ROOT/dangle-idle-config"
 rm -f "$TEST_QUOTA_CALLS"
 if sweep 2> "$TMP_ROOT/error"; then fail 'configuration withdrawn during quota read was accepted'; fi
 [ ! -s "$TEST_SPAWN_LOG" ] || fail 'withdrawn configuration dispatched work'
+grep -F -q 'fm-idle-sweep: invalid configuration' "$TMP_ROOT/error" || fail 'withdrawn configuration omitted its reason'
+grep -F -q 'idle sweep refused: invalid configuration' "$home/state/idle-sweep.status" || fail 'withdrawn configuration omitted its record'
 rm "$home/config/idle-sweep.json"
 cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 unset TEST_QUOTA_HOOK TEST_QUOTA_CALLS
@@ -379,11 +381,15 @@ rm "$home/config/idle-sweep.json"
 ln -s missing-idle-config "$home/config/idle-sweep.json"
 if sweep 2> "$TMP_ROOT/error"; then fail 'dangling idle configuration enabled the sweep'; fi
 [ ! -s "$TEST_SPAWN_LOG" ] || fail 'dangling idle configuration dispatched work'
+grep -F -q 'fm-idle-sweep: invalid configuration' "$TMP_ROOT/error" || fail 'dangling idle configuration omitted its reason'
+grep -F -q 'idle sweep refused: invalid configuration' "$home/state/idle-sweep.status" || fail 'dangling idle configuration omitted its record'
 rm "$home/config/idle-sweep.json"
 cp "$TMP_ROOT/enrollment.json" "$home/config/idle-sweep.json"
 ln -s missing-target-config "$home/config/targets.json"
 if sweep 2> "$TMP_ROOT/error"; then fail 'dangling target configuration used default limits'; fi
 [ ! -s "$TEST_SPAWN_LOG" ] || fail 'dangling target configuration dispatched work'
+grep -F -q 'fm-idle-sweep: invalid configuration' "$TMP_ROOT/error" || fail 'dangling target configuration omitted its reason'
+grep -F -q 'idle sweep refused: invalid configuration' "$home/state/idle-sweep.status" || fail 'dangling target configuration omitted its record'
 rm "$home/config/targets.json"
 pass 'dangling idle and target configuration paths refuse dispatch'
 rm -f "$home/state/red.meta" "$home/state/extra3.meta"
@@ -498,4 +504,86 @@ printf 'check: idle-sweep\n' > "$TMP_ROOT/expected-wake"
 cmp -s "$watch_home/watch.out" "$TMP_ROOT/expected-wake" || fail 'partial sweep failure contaminated check wake reason'
 grep -Fxq 'working [at=1]: idle sweep started fixture' "$watch_home/state/idle-sweep.status" || fail 'partial sweep lost its status record'
 pass 'partial sweep preserves status and check wake protocol'
+# A sweep that exits without recording a reason keeps the wake key and a generic payload.
+grep -F "check: idle-sweep refused: inspect configuration or dispatch evidence" "$watch_home/state/.wake-queue" >/dev/null \
+  || fail 'unrecorded sweep refusal dropped the wake reason'
+awk -F '\t' '$3 == "check" && $4 == "idle-sweep" { n++ } END { exit !(n == 1) }' "$watch_home/state/.wake-queue" \
+  || fail 'unrecorded sweep refusal changed the wake key or cadence'
+cp "$ROOT/bin/fm-idle-sweep.sh" "$watch_code/bin/fm-idle-sweep.sh"
+invalid_home=$(make_case idle-sweep-invalid-config)
+mkdir -p "$invalid_home/data" "$invalid_home/config"
+ln -s missing-idle-config "$invalid_home/config/idle-sweep.json"
+printf 'away\n' > "$invalid_home/state/.afk"
+PATH="$invalid_home/fakebin:$TMP_ROOT/fakebin:$PATH" FM_HOME="$invalid_home" FM_ROOT_OVERRIDE="$watch_code" \
+  FM_STATE_OVERRIDE="$invalid_home/state" FM_CONFIG_OVERRIDE="$invalid_home/config" \
+  FM_DATA_OVERRIDE="$invalid_home/data" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+  FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=1 \
+  bash "$watch_code/bin/fm-watch.sh" > "$invalid_home/watch.out" 2> "$invalid_home/watch.err" &
+watch_pid=$!
+wait_for_exit "$watch_pid" 200 || fail "watcher failed to surface invalid configuration: $(cat "$invalid_home/watch.err")"
+printf 'check: idle-sweep\n' > "$TMP_ROOT/expected-wake"
+cmp -s "$invalid_home/watch.out" "$TMP_ROOT/expected-wake" || fail 'invalid configuration changed the wake key'
+grep -F -q 'idle sweep refused: invalid configuration' "$invalid_home/state/idle-sweep.status" \
+  || fail 'invalid configuration omitted its record'
+grep -F "check: idle-sweep refused: invalid configuration" "$invalid_home/state/.wake-queue" >/dev/null \
+  || fail 'invalid configuration wake omitted its reason'
+awk -F '\t' '$3 == "check" && $4 == "idle-sweep" { n++ } END { exit !(n == 1) }' "$invalid_home/state/.wake-queue" \
+  || fail 'invalid configuration changed the wake cadence'
+pass 'invalid configuration names itself in the record and the wake'
+PATH="$invalid_home/fakebin:$TMP_ROOT/fakebin:$PATH" FM_HOME="$invalid_home" FM_ROOT_OVERRIDE="$watch_code" \
+  FM_STATE_OVERRIDE="$invalid_home/state" FM_CONFIG_OVERRIDE="$invalid_home/config" \
+  FM_DATA_OVERRIDE="$invalid_home/data" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+  FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=1 FM_WATCH_HANDLING_SUCCESSOR=1 \
+  bash "$watch_code/bin/fm-watch.sh" > "$invalid_home/watch-again.out" 2>> "$invalid_home/watch.err" &
+watch_pid=$!
+wait_for_exit "$watch_pid" 200 || fail "successor did not finish the next refusal: $(cat "$invalid_home/watch.err" "$invalid_home/watch-again.out" 2>/dev/null)"
+cmp -s "$invalid_home/watch-again.out" "$TMP_ROOT/expected-wake" \
+  || fail "the next cycle reported the same refusal again: $(cat "$invalid_home/watch-again.out")"
+awk -F '\t' '$3 == "signal" && $4 == "idle-sweep.status" { n++ } END { exit !(n == 0) }' \
+  "$invalid_home/state/.wake-queue" \
+  || fail "refusal record was queued again as a status signal: $(cat "$invalid_home/state/.wake-queue")"
+awk -F '\t' '$3 == "check" && $4 == "idle-sweep" { n++ } END { exit !(n == 2) }' \
+  "$invalid_home/state/.wake-queue" \
+  || fail "each new refusal did not keep its own check wake: $(cat "$invalid_home/state/.wake-queue")"
+pass 'a recorded refusal stays on its check wake'
+printf 'failed: later event\n' >> "$invalid_home/state/idle-sweep.status"
+rm "$invalid_home/config/idle-sweep.json"
+printf '{"enabled":false}\n' > "$invalid_home/config/idle-sweep.json"
+PATH="$invalid_home/fakebin:$TMP_ROOT/fakebin:$PATH" FM_HOME="$invalid_home" FM_ROOT_OVERRIDE="$watch_code" \
+  FM_STATE_OVERRIDE="$invalid_home/state" FM_CONFIG_OVERRIDE="$invalid_home/config" \
+  FM_DATA_OVERRIDE="$invalid_home/data" FM_POLL=1 FM_SIGNAL_GRACE=1 \
+  FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=99999 FM_WATCH_HANDLING_SUCCESSOR=1 \
+  bash "$watch_code/bin/fm-watch.sh" > "$invalid_home/watch-later.out" 2>> "$invalid_home/watch.err" &
+watch_pid=$!
+wait_for_exit "$watch_pid" 200 || fail "successor hid a later status event: $(cat "$invalid_home/watch.err" "$invalid_home/watch-later.out" 2>/dev/null)"
+grep -F "signal: $invalid_home/state/idle-sweep.status" "$invalid_home/watch-later.out" >/dev/null \
+  || fail "a later status event stayed hidden: $(cat "$invalid_home/watch-later.out")"
+pass 'marking a refusal surfaced leaves a later status event visible'
+cat > "$watch_code/bin/fm-targets.sh" <<'SH'
+#!/usr/bin/env bash
+sleep 30
+SH
+chmod +x "$watch_code/bin/fm-targets.sh"
+cp "$TMP_ROOT/fakebin/quota-axi" "$TMP_ROOT/timeout-quota"
+timeout_home=$(make_case idle-sweep-collection-timeout)
+mkdir -p "$timeout_home/data" "$timeout_home/config" "$timeout_home/projects" "$timeout_home/fakebin"
+cp "$TMP_ROOT/fakebin/quota-axi" "$timeout_home/fakebin/quota-axi"
+chmod +x "$timeout_home/fakebin/quota-axi"
+printf 'away\n' > "$timeout_home/state/.afk"
+PATH="$timeout_home/fakebin:$PATH" FM_HOME="$timeout_home" FM_ROOT_OVERRIDE="$watch_code" \
+  FM_STATE_OVERRIDE="$timeout_home/state" FM_CONFIG_OVERRIDE="$timeout_home/config" \
+  FM_DATA_OVERRIDE="$timeout_home/data" FM_PROJECTS_OVERRIDE="$timeout_home/projects" \
+  FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=1 \
+  FM_IDLE_SWEEP_COLLECTION_BUDGET=1 \
+  bash "$watch_code/bin/fm-watch.sh" > "$timeout_home/watch.out" 2> "$timeout_home/watch.err" &
+watch_pid=$!
+wait_for_exit "$watch_pid" 200 || fail "watcher failed to surface collection timeout: $(cat "$timeout_home/watch.err" "$timeout_home/state/idle-sweep.status" 2>/dev/null)"
+cmp -s "$timeout_home/watch.out" "$TMP_ROOT/expected-wake" || fail "collection timeout changed the wake key: $(cat "$timeout_home/watch.out")"
+grep -F -q 'idle sweep refused: targets collection timed out after 1 s' "$timeout_home/state/idle-sweep.status" \
+  || fail "collection timeout omitted its record: $(cat "$timeout_home/state/idle-sweep.status" 2>/dev/null)"
+grep -F "check: idle-sweep refused: targets collection timed out after 1 s" "$timeout_home/state/.wake-queue" >/dev/null \
+  || fail "collection timeout wake omitted its reason: $(cat "$timeout_home/state/.wake-queue" 2>/dev/null)"
+awk -F '\t' '$3 == "check" && $4 == "idle-sweep" { n++ } END { exit !(n == 1) }' "$timeout_home/state/.wake-queue" \
+  || fail 'collection timeout changed the wake cadence'
+pass 'target collection timeout names its budget in the record and the wake'
 echo '# fm-idle-sweep.test.sh: all assertions passed'
