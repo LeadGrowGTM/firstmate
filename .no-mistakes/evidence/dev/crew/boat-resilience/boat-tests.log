@@ -1,0 +1,25 @@
+== tests/fm-boat-send.test.sh
+ok - Boat caps follow config, keep historical defaults, and spread workers across listed boxes
+ok - configured box and current fm-code environment are required for dispatch
+ok - Boat brief rewrite fills every scaffold placeholder before spawn
+ok - pre-resume safety refusals preserve an independently resumed box
+ok - instance changes refuse remote work and later Boat stops
+ok - same-ID orphan retry refuses before either worker brief can change
+ok - existing backlog rows must be dispatchable and match task kind and project
+ok - confirmed prelaunch refusal stops only a newly resumed empty box
+ok - native refusals stop only newly resumed boxes with empty locked inventories
+ok - running dispatch reserves remaining timer and sender requires start proof
+ok - worker confirms fresh progress, refuses ambiguous trust text, and preserves unreviewed scouts
+ok - ships and scouts derive box GitHub noreply identity without PC Git configuration
+ok - Boat request validation refuses unsupported or oversized envelopes before contact
+ok - Boat reserves only the short resume timer against every spend ceiling and balance
+ok - Boat unreadable, incomplete, or unsafe readings refuse before resume
+ok - Boat resumes only the approved box with fm-code, preserves timers, and sends once through fm-on
+ok - running work survives start quota and cap refusals; route validation follows transport registry
+ok - prepare establishes access before route registration while dispatch still requires the route
+ok - last-task teardown stops only the approved box after ordinary cleanup succeeds
+ok - remote capacity spans projects until teardown, excludes secondmates, and merge authority is off
+ok - stale Boat records stop counting by name, fresh and live records count, and retire-claim archives only stale records
+ok - fm-boat-send
+== tests/fm-boat-spend-check.test.sh
+ok - fm-boat-spend-check
