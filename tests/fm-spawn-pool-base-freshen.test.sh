@@ -1192,6 +1192,66 @@ SH
   pass 'provider pool markers from sibling clones block both allocation preflights'
 }
 
+# The preflight screens the copy `treehouse get` would hand out next, not every
+# idle copy: a task record parked on one idle copy must not block a spawn that
+# the provider would serve from another, while the copy it would serve stays
+# protected.
+test_pool_preflight_screens_only_the_copy_to_be_allocated() {
+  local rec provider copy variant out status n
+  rec=$(make_case next-copy pool-next-copy-r1)
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/user-home/.config/treehouse"
+  printf 'root = "%s"\n' "$CASE_DIR" > "$HOME_DIR/user-home/.config/treehouse/config.toml"
+  provider=$(FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" bash -c \
+    '. "$1"; fm_treehouse_pool_check "$2" "$3" "$4"; printf "%s" "$FM_TREEHOUSE_POOL_RESOLVED"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home") \
+    || fail 'the private provider pool could not be resolved'
+  for n in 1 2 3; do
+    mkdir -p "$provider/$n"
+    git -C "$PROJECT_DIR" worktree add --quiet --detach "$provider/$n/project" "$INITIAL_SHA"
+  done
+  printf '{"worktrees":[{"name":"1","path":"%s","leased":%s},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+    "$provider/1/project" false "$provider/2/project" "$provider/3/project" \
+    > "$provider/treehouse-state.json"
+  for variant in meta-later meta-next marker-later marker-next leased-first unreadable-state; do
+    rm -f "$HOME_DIR"/state/*.meta "$provider"/*/.fm-slot-owner
+    printf '{"worktrees":[{"name":"1","path":"%s","leased":%s},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+      "$provider/1/project" false "$provider/2/project" "$provider/3/project" \
+      > "$provider/treehouse-state.json"
+    case "$variant" in
+      meta-later|marker-later) copy=$provider/3/project ;;
+      leased-first) copy=$provider/2/project ;;
+      *) copy=$provider/1/project ;;
+    esac
+    case "$variant" in
+      meta-*|leased-first|unreadable-state)
+        fm_write_meta "$HOME_DIR/state/parked.meta" "window=firstmate:fm-parked" \
+          "endpoint_task_id=parked" "worktree=$copy" "project=$PROJECT_DIR" "kind=scout" ;;
+      marker-*)
+        printf 'task=parked\nhome=%s\n' "$CASE_DIR/other-home" > "${copy%/project}/.fm-slot-owner" ;;
+    esac
+    case "$variant" in
+      leased-first)
+        printf '{"worktrees":[{"name":"1","path":"%s","leased":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      unreadable-state)
+        printf 'not json\n' > "$provider/treehouse-state.json" ;;
+    esac
+    out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
+      bash "$ROOT/bin/fm-treehouse-pool-check.sh" "$HOME_DIR" "$PROJECT_DIR" "$CASE_DIR/refusal" 2>&1)
+    status=$?
+    case "$variant" in
+      meta-later|marker-later)
+        [ "$status" -eq 0 ] || fail "$variant: preflight refused a copy the provider would not allocate: $out" ;;
+      *)
+        [ "$status" -ne 0 ] || fail "$variant: preflight let the provider reset the reserved copy it would allocate"
+        assert_contains "$out" "${copy%/project}" "$variant: refusal did not name the reserved copy" ;;
+    esac
+  done
+  pass 'pool preflight refuses only the reserved copy the provider would allocate next'
+}
+
 test_state_override_pane_preflight_blocks_retained_claim() {
   local rec id=pool-override-new-r1 old=pool-override-old-r1 state provider out status survivor
   local before_head before_reflog before_status
@@ -1574,6 +1634,7 @@ test_returned_pool_copy_rechecks_process_evidence
 test_returned_pool_copy_accepts_unreadable_cwd_process
 test_returned_pool_copy_accepts_its_foreground_task_shell
 test_provider_pool_marker_from_sibling_clone_blocks_allocation
+test_pool_preflight_screens_only_the_copy_to_be_allocated
 test_state_override_pane_preflight_blocks_retained_claim
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching

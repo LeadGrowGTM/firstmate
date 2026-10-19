@@ -1524,7 +1524,7 @@ The optional pool sweep's extra per-home prune and size checks use the pool path
 
 ### Pool-selection limits
 
-Before asking Treehouse for a copy, Firstmate refuses an idle pooled copy still reserved by a reachable local task record or slot claim.
+Before asking Treehouse for a copy, Firstmate refuses when the idle pooled copy Treehouse would hand out next (the first listed copy that is not leased and has no process inside it) is still reserved by a reachable local task record or slot claim; a reservation on any other idle copy does not block the spawn, and an unprovable choice refuses.
 Unreadable custody or process evidence also refuses allocation; reconcile the reservation or use guarded `--retire-claim` teardown for a proven-stopped worker.
 Before the initial `treehouse get`, Firstmate resolves the pool inside the pane using that pane's HOME and configuration.
 Before a fallback lease, it resolves the pool using the lease HOME.

@@ -1946,6 +1946,52 @@ fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
   done
 }
 
+# Predict the pooled copy `treehouse get` hands out next: the first listed copy
+# that is not leased and has no process inside it, which is how the provider
+# chooses among idle copies. Sets FM_TREEHOUSE_NEXT_COPY to its real path, or to
+# empty when every copy is taken and the provider would create a new one.
+# Returns 1 when the choice cannot be proven, so callers keep refusing.
+fm_treehouse_next_copy() {  # <pool>
+  local pool=$1 state="$1/treehouse-state.json" path processes listing
+  FM_TREEHOUSE_NEXT_COPY=
+  [ -f "$state" ] && [ ! -L "$state" ] && command -v python3 >/dev/null 2>&1 || return 1
+  listing=$(python3 - "$state" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        trees = json.load(f).get("worktrees") or []
+    for tree in trees:
+        if not tree.get("leased"):
+            print(tree["path"])
+except Exception:
+    sys.exit(1)
+PY
+  ) || return 1
+  while IFS= read -r path; do
+    [ -n "$path" ] && [ -d "$path" ] || continue
+    path=$(CDPATH='' cd -- "$path" && pwd -P) || return 1
+    processes=$(fm_agent_worktree_processes "$path") || return 1
+    [ -z "$processes" ] || continue
+    FM_TREEHOUSE_NEXT_COPY=$path
+    return 0
+  done <<EOF
+$listing
+EOF
+  return 0
+}
+
+# Refuse allocation for a reserved idle copy only when the provider would hand
+# that very copy out; a reservation on any other idle copy cannot be reset by
+# this spawn. An unprovable choice refuses, as the copy might be the one.
+fm_treehouse_reserved_blocks() {  # <reserved-copy> <message>
+  local reserved=$1 message=$2 pool
+  pool=$(dirname "$(dirname "$reserved")")
+  if fm_treehouse_next_copy "$pool" && ! _fm_treehouse_path_inside "$FM_TREEHOUSE_NEXT_COPY" "$reserved"; then
+    return 1
+  fi
+  printf '%s\n' "$message" >&2
+}
+
 # Stop before Treehouse can reset an idle copy whose durable reservation still
 # exists. Busy copies remain unavailable to Treehouse's process lease; the
 # selected copy is screened again by fm_worktree_custody_check before refresh.
@@ -2003,7 +2049,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
           return 1
         }
         [ -z "$processes" ] || continue
-        printf 'REFUSED: idle pool copy %s is still reserved by %s; relaunch that task or use guarded --retire-claim teardown before allocation.\n' "$path" "$meta" >&2
+        fm_treehouse_reserved_blocks "$path" "REFUSED: idle pool copy $path is still reserved by $meta; relaunch that task or use guarded --retire-claim teardown before allocation." || continue
         return 1
       done
     done
@@ -2036,7 +2082,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
         return 1
       }
       [ -n "$processes" ] && continue
-      printf 'REFUSED: idle pool slot %s still carries a slot claim; reconcile it before allocation\n' "$slot" >&2
+      fm_treehouse_reserved_blocks "$path" "REFUSED: idle pool slot $slot still carries a slot claim; reconcile it before allocation" || continue
       return 1
     done
     return 0
@@ -2059,8 +2105,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
       return 1
     }
     [ -z "$processes" ] || continue
-    printf 'REFUSED: idle pool copy %s still carries task %s\047s slot claim; reconcile it before allocation\n' \
-      "$path" "$FM_TREEHOUSE_SLOT_OWNER_ID" >&2
+    fm_treehouse_reserved_blocks "$path" "REFUSED: idle pool copy $path still carries task $FM_TREEHOUSE_SLOT_OWNER_ID's slot claim; reconcile it before allocation" || continue
     return 1
   done <<EOF
 $inventory
