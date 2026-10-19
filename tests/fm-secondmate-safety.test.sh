@@ -2500,8 +2500,8 @@ task_set_lock_path() {  # <state-dir>
 # The holder must stay ALIVE: fm_lock_try_acquire reclaims a lock whose owning
 # pid is gone, so a lock taken in a subshell that then exits would be stolen and
 # the contention under test would never happen.
-hold_task_set_lock() {  # <state-dir> -> echoes "<holder-pid> <lock-path>"
-  local state=$1 lock holder i=0
+hold_task_set_lock() {  # <state-dir> [hold-seconds] -> echoes "<holder-pid> <lock-path>"
+  local state=$1 hold=${2:-30} lock holder i=0
   lock=$(task_set_lock_path "$state") || return 1
   [ -n "$lock" ] || return 1
   # stdout/stderr are redirected so the long-lived holder does not inherit this
@@ -2512,7 +2512,8 @@ hold_task_set_lock() {  # <state-dir> -> echoes "<holder-pid> <lock-path>"
     # shellcheck source=/dev/null
     . "$ROOT/bin/fm-wake-lib.sh"
     fm_lock_try_acquire "$lock" || exit 1
-    sleep 30
+    sleep "$hold"
+    fm_lock_release "$lock"
   ) >/dev/null 2>&1 &
   # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
   holder=$!
@@ -2727,11 +2728,15 @@ test_fresh_remote_secondmate_spawn_refuses_while_task_set_is_owned() {
     || fail "could not stage a held remote-spawn task-set lock"
   holder=${held%% *}
   lock=${held#* }
-  if FM_HOME="$home" FM_SPAWN_NO_GUARD=1 \
+  # A secondmate spawn waits briefly for a sibling relaunch's hold; a holder
+  # that outlasts the wait, like a forced teardown, still makes it refuse.
+  if FM_HOME="$home" FM_SPAWN_NO_GUARD=1 FM_SPAWN_TASK_SET_WAIT=1 \
     "$ROOT/bin/fm-spawn.sh" remote-new --secondmate >/dev/null 2>"$err"; then
     kill "$holder" 2>/dev/null || true
     fail "a fresh remote secondmate spawn published while the task set was owned"
   fi
+  [ ! -e "$home/state/.task-set-publisher-remote-new.lock" ] \
+    || fail "a refused remote secondmate spawn left a task-set publisher lock behind"
   [ ! -e "$home/state/remote-new.meta" ] \
     || fail "a refused remote secondmate spawn still published a durable record"
   [ -e "$lock" ] || fail "a refused remote secondmate spawn removed the owner's task-set lock"
@@ -2742,6 +2747,115 @@ test_fresh_remote_secondmate_spawn_refuses_while_task_set_is_owned() {
   kill "$holder" 2>/dev/null || true
   wait "$holder" 2>/dev/null || true
   pass "a fresh remote secondmate spawn refuses while the task set is owned"
+}
+
+# A secondmate spawn releases the task-set lock early and holds a per-task
+# publisher lock through publication instead, so sibling relaunches from one
+# session start do not refuse each other (evidence 2026-10-19). Forced teardown
+# must still refuse while such a publisher is live.
+hold_publisher_lock() {  # <state-dir> <task-id> -> echoes "<holder-pid> <lock-path>"
+  local state=$1 id=$2 lock holder i=0
+  # shellcheck source=/dev/null
+  lock=$( . "$ROOT/bin/fm-wake-lib.sh"; fm_task_set_publisher_lock_path "$state" "$id" ) || return 1
+  [ -n "$lock" ] || return 1
+  (
+    # shellcheck source=/dev/null
+    . "$ROOT/bin/fm-wake-lib.sh"
+    fm_lock_try_acquire "$lock" || exit 1
+    sleep 30
+  ) >/dev/null 2>&1 &
+  # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
+  holder=$!
+  while [ ! -e "$lock" ] && [ "$i" -lt 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -e "$lock" ] || {
+    kill "$holder" 2>/dev/null || true
+    wait "$holder" 2>/dev/null || true
+    return 1
+  }
+  printf '%s %s\n' "$holder" "$lock"
+}
+
+test_secondmate_spawn_waits_out_a_sibling_spawns_brief_hold() {
+  local home err held holder lock
+  home="$TMP_ROOT/taskset-sibling-wait-home"
+  err="$TMP_ROOT/taskset-sibling-wait.err"
+  mkdir -p "$home/state" "$home/data"
+  printf '%s\n' '- remote-new - remote domain (host: remote-mac; root: /remote/root; home: /remote/home; scope: remote work; projects: alpha; added 2026-08-02)' \
+    > "$home/data/secondmates.md"
+  # Stand in for a sibling relaunch from the same session start that releases
+  # the set lock well inside the wait.
+  held=$(hold_task_set_lock "$home/state" 2) \
+    || fail "could not stage a briefly held task-set lock"
+  holder=${held%% *}
+  lock=${held#* }
+  FM_HOME="$home" FM_SPAWN_NO_GUARD=1 FM_SPAWN_TASK_SET_WAIT=20 FM_SSH_BIN=false \
+    "$ROOT/bin/fm-spawn.sh" remote-new --secondmate >/dev/null 2>"$err" || true
+  wait "$holder" 2>/dev/null || true
+  grep -F "task set is locked" "$err" >/dev/null \
+    && fail "a secondmate spawn refused on a sibling's brief task-set hold instead of waiting: $(cat "$err")"
+  [ ! -e "$lock" ] || fail "the secondmate spawn left the task-set lock behind"
+  [ ! -e "$home/state/.task-set-publisher-remote-new.lock" ] \
+    || fail "the secondmate spawn left its task-set publisher lock behind"
+  pass "a secondmate spawn waits out a sibling spawn's brief task-set hold"
+}
+
+test_force_teardown_refuses_while_a_secondmate_publisher_is_live() {
+  local home subhome fakebin err log rec held holder lock
+  rec=$(seed_task_set_lock_home taskset-publisher)
+  IFS='|' read -r home subhome <<EOF
+$rec
+EOF
+  err="$TMP_ROOT/taskset-publisher.err"
+  # Stand in for a secondmate spawn mid-publication in the secondmate's home.
+  held=$(hold_publisher_lock "$subhome/state" grandchild) \
+    || fail "could not stage a held task-set publisher lock"
+  holder=${held%% *}
+  lock=${held#* }
+  fakebin=$(make_fake_tmux "$TMP_ROOT/taskset-publisher-fake")
+  log="$TMP_ROOT/taskset-publisher-fake/tmux.log"
+  if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" \
+    FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/taskset-publisher-fake/pane.txt" \
+    "$ROOT/bin/fm-teardown.sh" domain --force >/dev/null 2>"$err"; then
+    kill "$holder" 2>/dev/null || true
+    fail "forced teardown proceeded while a secondmate was being published"
+  fi
+  [ -d "$subhome" ] || fail "forced teardown removed the home despite refusing"
+  [ -e "$subhome/state/child.meta" ] || fail "forced teardown removed child metadata despite refusing"
+  [ -e "$home/state/domain.meta" ] || fail "forced teardown cleared parent metadata despite refusing"
+  grep -F 'kill-window' "$log" >/dev/null && fail "forced teardown killed a window despite refusing"
+  [ -e "$lock" ] || fail "forced teardown removed a live publisher's lock"
+  [ ! -e "$(task_set_lock_path "$subhome/state")" ] \
+    || fail "the refused teardown left the task-set lock behind"
+  grep -F 'publishing task grandchild' "$err" >/dev/null \
+    || fail "the refusal did not name the publishing secondmate: $(cat "$err")"
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  pass "forced teardown refuses while a secondmate spawn holds its publisher lock"
+}
+
+test_task_set_publisher_check_reclaims_a_dead_publisher() {
+  local state lock holder out
+  state="$TMP_ROOT/taskset-dead-publisher/state"
+  mkdir -p "$state"
+  # shellcheck source=/dev/null
+  lock=$( . "$ROOT/bin/fm-wake-lib.sh"; fm_task_set_publisher_lock_path "$state" crashed )
+  (
+    # shellcheck source=/dev/null
+    . "$ROOT/bin/fm-wake-lib.sh"
+    fm_lock_try_acquire "$lock"
+  ) >/dev/null 2>&1 &
+  holder=$!
+  wait "$holder" || fail "could not stage a publisher lock whose owner then exits"
+  [ -e "$lock" ] || fail "the staged dead publisher lock does not exist"
+  # shellcheck source=/dev/null
+  if out=$( . "$ROOT/bin/fm-wake-lib.sh"; fm_task_set_live_publisher "$state" && printf '%s\n' "$FM_TASK_SET_PUBLISHER" ); then
+    fail "a publisher lock whose owner exited still counted as live: $out"
+  fi
+  [ ! -e "$lock" ] || fail "the dead publisher's lock was not reclaimed"
+  pass "the task-set publisher check reclaims a lock whose spawn has exited"
 }
 
 test_secondmate_force_teardown_refuses_child_active_home_descendant() {
@@ -3133,6 +3247,9 @@ test_force_teardown_locks_descendant_with_absent_state
 test_force_teardown_refuses_while_a_task_is_being_published
 test_fresh_spawn_refuses_while_a_forced_teardown_owns_the_task_set
 test_fresh_remote_secondmate_spawn_refuses_while_task_set_is_owned
+test_secondmate_spawn_waits_out_a_sibling_spawns_brief_hold
+test_force_teardown_refuses_while_a_secondmate_publisher_is_live
+test_task_set_publisher_check_reclaims_a_dead_publisher
 test_secondmate_force_teardown_refuses_child_active_home_descendant
 test_secondmate_force_teardown_refuses_child_repo_descendant
 test_secondmate_force_teardown_refuses_unregistered_child_worktree

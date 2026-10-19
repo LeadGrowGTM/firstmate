@@ -307,6 +307,7 @@ case "${1:-}" in
     printf '%s\n' "$*" >> "${FM_TMUX_CALL_LOG:?}"
     [ "${1:-}" = kill-window ] && : > "${FM_TMUX_CALL_LOG}.killed"
     [ "${FM_TEST_FAIL_NEW_WINDOW:-0}" = 1 ] && [ "${1:-}" = new-window ] && exit 1
+    [ "${1:-}" = new-window ] && [ -n "${FM_TEST_NEW_WINDOW_SLEEP:-}" ] && sleep "$FM_TEST_NEW_WINDOW_SLEEP"
     [ "${1:-}" = new-window ] && rm -f "${FM_TMUX_CALL_LOG}.killed"
     exit 0
     ;;
@@ -581,6 +582,34 @@ test_sweep_reports_missing_endpoint_relaunch_failure() {
   pass "sweep: failed relaunch diagnostics distinguish a confidently missing endpoint"
 }
 
+# Evidence 2026-10-19: after a WSL restart the session-start sweep relaunched
+# every missing mate concurrently, and each relaunch's fresh spawn took the
+# home's task-set lock for its whole launch, so one sibling won and every other
+# relaunch in the same sweep refused as if a forced teardown owned the home.
+# The slowed window creation makes the siblings overlap deterministically.
+test_sweep_relaunches_every_missing_secondmate_concurrently() {
+  local w fb tmuxfb log out id
+  w=$(new_world sweep-missing-many)
+  for id in sm1 sm2 sm3; do
+    add_sm_home "$w" "$id" "firstmate:fm-$id" pi
+  done
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" missing "$log" FM_TEST_NEW_WINDOW_SLEEP=2)
+
+  assert_not_contains "$out" "task set is locked" \
+    "one sweep's sibling relaunches must not refuse each other on the task-set lock"
+  assert_not_contains "$out" "SECONDMATE_LIVENESS:" \
+    "every concurrent missing-window recovery should succeed silently"
+  for id in sm1 sm2 sm3; do
+    assert_contains "$(cat "$log")" "fm-$id" "secondmate $id was not relaunched by the sweep"
+    assert_grep 'relaunched' "$w/home/state/.secondmate-relaunch-$id" \
+      "secondmate $id has no relaunched row in its durable relaunch record"
+  done
+  pass "sweep: every missing secondmate is relaunched when the relaunches overlap"
+}
+
 test_sweep_never_acts_on_unverified_harness_dead_reading() {
   local w fb tmuxfb log out
   w=$(new_world sweep-unverified-harness)
@@ -764,6 +793,7 @@ test_sweep_respawns_authoritatively_missing_pi_signed_secondmate
 test_sweep_never_acts_on_ambiguous_existing_process
 test_sweep_never_acts_on_transient_unreadability
 test_sweep_reports_missing_endpoint_relaunch_failure
+test_sweep_relaunches_every_missing_secondmate_concurrently
 test_sweep_never_acts_on_unverified_harness_dead_reading
 test_sweep_converges_no_retouch_once_alive
 test_sweep_skipped_under_detect_only

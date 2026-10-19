@@ -1427,6 +1427,45 @@ fm_task_set_lock_path() {  # <state-dir>
   printf '%s/.task-set.lock\n' "$state"
 }
 
+# fm_task_set_publisher_lock_path: a secondmate spawn's stand-in for holding the
+# task-set lock through publication. Several mates relaunched by one session
+# start publish at once; holding the shared set lock for a whole launch made
+# every sibling refuse as if a forced teardown owned the home, so only one dead
+# mate came back per session start. A secondmate spawn therefore
+# takes the set lock only to take this per-task lock, releases the set lock,
+# and holds this one until its record is published. Forced teardown, holding
+# the set lock, refuses while any of these is live (fm_task_set_live_publisher),
+# so the serialization with teardown is unchanged in both directions.
+fm_task_set_publisher_lock_path() {  # <state-dir> <task-id>
+  local state=$1 id=$2
+  [ -n "$state" ] && [ -n "$id" ] || return 1
+  case "$state$id" in *[$'\n\r\t']*) return 1 ;; esac
+  case "$id" in */*) return 1 ;; esac
+  printf '%s/.task-set-publisher-%s.lock\n' "$state" "$id"
+}
+
+# fm_task_set_live_publisher <state-dir>: succeeds, naming the task in
+# FM_TASK_SET_PUBLISHER, when a live spawn holds a publisher lock in that home.
+# The caller must hold the home's task-set lock so no new publisher can appear.
+# A lock whose owner is gone is reclaimed and released, so a crashed spawn never
+# blocks teardown; one that cannot be acquired for any reason counts as live.
+fm_task_set_live_publisher() {  # <state-dir>
+  local state=$1 lock
+  FM_TASK_SET_PUBLISHER=
+  for lock in "$state"/.task-set-publisher-*.lock; do
+    [ -e "$lock" ] || [ -L "$lock" ] || continue
+    if fm_lock_try_acquire "$lock"; then
+      fm_lock_release "$lock" || true
+      continue
+    fi
+    FM_TASK_SET_PUBLISHER=${lock##*/.task-set-publisher-}
+    # shellcheck disable=SC2034 # Read by callers after the function returns.
+    FM_TASK_SET_PUBLISHER=${FM_TASK_SET_PUBLISHER%.lock}
+    return 0
+  done
+  return 1
+}
+
 # The top-most firstmate home reachable from this one on THIS machine, used as
 # the single anchor every local home agrees on for machine-local shared state.
 #
