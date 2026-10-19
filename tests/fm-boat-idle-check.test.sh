@@ -378,14 +378,42 @@ test_configured_resume_timer() {
     "$FIXTURES/calls" 'the configured timer was not used for the extend'
 }
 
-test_half_timer_renews() {
-  new_case half-timer '{"resume_ttl_seconds":1800}'
-  make_info running 900
+test_revisit_window_renews() {
+  new_case revisit-window '{"resume_ttl_seconds":1800}'
+  make_info running 659
   set_idle 'boat-tasks-remaining: yes'
   run_at "$NOW"
-  expect_code 0 "$CODE" "half timer check: $OUT"
+  expect_code 0 "$CODE" "revisit window check: $OUT"
   assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 1800 --json" \
-    "$FIXTURES/calls" 'a half-expired timer was not renewed'
+    "$FIXTURES/calls" 'a timer inside its revisit window was not renewed'
+}
+
+test_three_box_renewal_window() {
+  local second=bx_cccccccc third=bx_dddddddd
+  new_case short-fleet-timer '{"expected_running":3,"resume_ttl_seconds":1800}'
+  printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "short three-box timer: $OUT"
+  assert_contains "$OUT" 'resume_ttl_seconds 1800 is shorter than 2760s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'unsafe fleet timer was accepted'
+  assert_equals 0 "$(boat_calls)" 'unsafe fleet timer contacted Boat'
+
+  new_case safe-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
+  printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
+  printf '%s\n' '{"sandbox":{"id":"'"$second"'","type":"default","state":"stopped"}}' > "$FIXTURES/$second.info.json"
+  printf '%s\n' '{"sandbox":{"id":"'"$third"'","type":"default","state":"stopped"}}' > "$FIXTURES/$third.info.json"
+  make_info running 1859
+  set_idle 'boat-tasks-remaining: yes'
+  : > "$FIXTURES/resume.fail"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "first three-box renewal: $OUT"
+  assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 3600 --json" \
+    "$FIXTURES/calls" 'the three-box timer was not renewed early'
+  rm "$FIXTURES/resume.fail"
+  run_at "$((NOW + 900))"
+  expect_code 0 "$CODE" "three-box renewal retry: $OUT"
+  assert_equals 2 "$(grep -c "boat --no-update resume $BOX " "$FIXTURES/calls")" 'a failed renewal was not retried before expiry'
+  assert_equals ok "$(cat "$HOME_DIR/state/.boat-idle-renew-$BOX/result")" 'the renewal retry did not succeed'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'the live box was stopped during renewal'
 }
 
 test_configured_grace() {
@@ -523,7 +551,7 @@ test_retained_record_counts_as_busy() {
 test_extend_caps_at_plan_timer() {
   new_case trial-cap '{"resume_ttl_seconds":14400}'
   printf '%s\n' '{"billingStatus":"trialing"}' > "$FIXTURES/limits.json"
-  make_info running 6000
+  make_info running 600
   set_idle 'boat-tasks-remaining: yes'
   run_at "$NOW"
   expect_code 0 "$CODE" "trial extend: $OUT"
@@ -681,7 +709,8 @@ test_unreadable_instance_renews
 test_renewal_rechecks_state_and_liveness
 test_instance_rotation_skips_stop
 test_configured_resume_timer
-test_half_timer_renews
+test_revisit_window_renews
+test_three_box_renewal_window
 test_configured_grace
 test_extend_failure_is_reported
 test_stop_failure_is_reported_throttled

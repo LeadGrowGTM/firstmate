@@ -101,7 +101,7 @@ fi
 for tool in jq "$BOAT_BIN"; do command -v "$tool" >/dev/null || die "$tool is required"; done
 fm_boat_load_reservation || die "invalid config/boat-spend.json${FM_BOAT_SPEND_PROBLEM:+: $FM_BOAT_SPEND_PROBLEM}"
 BOX_CONFIG="$FM_HOME/config/boat-box-id"
-BOX_ID_TEXT=$(fm_boat_read_box_ids "$BOX_CONFIG") || die "${FM_BOAT_BOX_PROBLEM:-invalid config/boat-box-id}"
+BOX_ID_TEXT=$(fm_boat_read_box_ids "$BOX_CONFIG" 2>&1) || die "${BOX_ID_TEXT:-invalid config/boat-box-id}"
 mapfile -t BOX_IDS <<< "$BOX_ID_TEXT"
 if [ "${#BOX_IDS[@]}" -eq 1 ]; then
   MULTI=0

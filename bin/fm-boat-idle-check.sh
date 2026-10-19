@@ -90,6 +90,7 @@ LOCK_WAIT=4
 CONFIG_INTERVAL=86400
 ACTION_INTERVAL=3600
 CHECK_DEADLINE=0
+RENEW_THRESHOLD=0
 EXTEND_RESERVE=1
 MIN_BOX_BUDGET=24
 
@@ -316,11 +317,13 @@ renew_result() {
 }
 
 renew_run() {
-  local box=$1 ttl multi ids state remaining instance probe
+  local box=$1 ttl multi ids state remaining instance probe revisit
   valid_box "$box" || return 1
   fm_boat_load_reservation || return 1
   ids=$(fm_boat_read_box_ids "$BOX_CONFIG") || return 1
   printf '%s\n' "$ids" | grep -Fxq -- "$box" || return 1
+  revisit=$(fm_boat_revisit_seconds "$(printf '%s\n' "$ids" | wc -l)") || return 1
+  RENEW_THRESHOLD=$((2 * revisit + RESUME_SECS))
   ttl=$FM_BOAT_RESUME_TTL
   multi=0
   [ "$(printf '%s\n' "$ids" | wc -l)" -le 1 ] || multi=1
@@ -348,7 +351,7 @@ renew_run() {
       return 0
     fi
   fi
-  if [ "$remaining" -gt "$((ttl / 2))" ]; then
+  if [ "$remaining" -ge "$RENEW_THRESHOLD" ]; then
     release_idle_lock
     return 0
   fi
@@ -486,7 +489,7 @@ check_box_locked() {
   esac
   if ! instance=$(boat_instance "$box" 2>/dev/null) || [ -z "$instance" ]; then
     record_drop "$SINCE_FILE" "$box" || true
-    [ "$remaining" -gt "$((ttl / 2))" ] || RENEW_QUEUE+=("$box")
+    [ "$remaining" -ge "$RENEW_THRESHOLD" ] || RENEW_QUEUE+=("$box")
     return 0
   fi
   probe=$(idle_probe "$box" "$instance" "$multi" 2>/dev/null)
@@ -500,12 +503,12 @@ check_box_locked() {
   # Retained worker records without endpoints count as busy; only no starts grace.
   if [ "$probe_rc" -ne 0 ]; then
     record_drop "$SINCE_FILE" "$box" || true
-    [ "$remaining" -gt "$((ttl / 2))" ] || RENEW_QUEUE+=("$box")
+    [ "$remaining" -ge "$RENEW_THRESHOLD" ] || RENEW_QUEUE+=("$box")
     return 0
   fi
   if [ "$probe" = yes ]; then
     record_drop "$SINCE_FILE" "$box" || true
-    [ "$remaining" -gt "$((ttl / 2))" ] || RENEW_QUEUE+=("$box")
+    [ "$remaining" -ge "$RENEW_THRESHOLD" ] || RENEW_QUEUE+=("$box")
     return 0
   fi
   renew_clear "$box"
@@ -537,9 +540,10 @@ check_box_locked() {
 }
 
 run_check() {
-  local now problem bin ids multi box pos count i timeout renewal ORDER
+  local now problem bin ids multi box pos count i timeout renewal revisit ORDER
   PARTS=
   RENEW_QUEUE=()
+  RENEW_THRESHOLD=0
   [ -f "$CONFIG" ] || return 0
   timeout=${FM_CHECK_TIMEOUT:-30}
   case "$timeout" in ''|*[!0-9]*) timeout=30 ;; esac
@@ -565,8 +569,12 @@ run_check() {
       [ -n "$BOAT_BIN" ] || BOAT_BIN=boat
       if ! command -v "$BOAT_BIN" >/dev/null 2>&1; then
         problem='the Boat CLI is missing'
-      elif ! ids=$(fm_boat_read_box_ids "$BOX_CONFIG" 2>/dev/null) || [ -z "$ids" ]; then
-        problem='config/boat-box-id is missing or invalid'
+      elif ! ids=$(fm_boat_read_box_ids "$BOX_CONFIG" 2>&1) || [ -z "$ids" ]; then
+        problem="config/boat-box-id is missing or invalid${ids:+: $ids}"
+      elif ! revisit=$(fm_boat_revisit_seconds "$(printf '%s\n' "$ids" | wc -l)"); then
+        problem='FM_CHECK_INTERVAL is invalid'
+      else
+        RENEW_THRESHOLD=$((2 * revisit + RESUME_SECS))
       fi
     fi
   fi
@@ -683,7 +691,7 @@ arm() {
   local state_device home want
   [ -f "$CONFIG" ] || fail "no Boat spend config at $CONFIG"
   fm_boat_load_reservation >/dev/null || fail "${FM_BOAT_SPEND_PROBLEM:-invalid config} ($CONFIG)"
-  fm_boat_read_box_ids "$BOX_CONFIG" >/dev/null || fail "${FM_BOAT_BOX_PROBLEM:-invalid config} ($BOX_CONFIG)"
+  fm_boat_read_box_ids "$BOX_CONFIG" >/dev/null 2>&1 || fail "${FM_BOAT_BOX_PROBLEM:-invalid config} ($BOX_CONFIG)"
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || fail "state directory is unavailable"
   case "$FM_HOME" in
     /*) home=$FM_HOME ;;

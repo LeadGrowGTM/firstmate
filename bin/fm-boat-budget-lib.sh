@@ -112,11 +112,17 @@ fm_boat_load_reservation() {
   fi
 }
 
+fm_boat_revisit_seconds() {
+  local count=$1 interval=${FM_CHECK_INTERVAL:-300}
+  case "$interval" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$((10#$interval * count))"
+}
+
 # fm_boat_read_box_ids <path>
 # Prints one approved id per line. On refusal sets FM_BOAT_BOX_PROBLEM and
 # returns 1. Requires fm_boat_load_reservation to have set FM_BOAT_MAX_BOXES.
 fm_boat_read_box_ids() {
-  local path=$1 bytes_cap ids
+  local path=$1 bytes_cap ids count revisit minimum
   FM_BOAT_BOX_PROBLEM=
   [ -d "$(dirname "$path")" ] && [ ! -L "$(dirname "$path")" ] &&
     [ -f "$path" ] && [ ! -L "$path" ] || {
@@ -140,5 +146,17 @@ fm_boat_read_box_ids() {
     FM_BOAT_BOX_PROBLEM='invalid config/boat-box-id'
     return 1
   }
+  count=$(printf '%s\n' "$ids" | wc -l)
+  revisit=$(fm_boat_revisit_seconds "$count") || {
+    FM_BOAT_BOX_PROBLEM='FM_CHECK_INTERVAL must be a whole number of seconds'
+    printf '%s\n' "$FM_BOAT_BOX_PROBLEM" >&2
+    return 1
+  }
+  minimum=$((3 * revisit + 60))
+  if [ "$FM_BOAT_RESUME_TTL" -lt "$minimum" ]; then
+    FM_BOAT_BOX_PROBLEM="resume_ttl_seconds $FM_BOAT_RESUME_TTL is shorter than ${minimum}s required for $count listed boxes at FM_CHECK_INTERVAL ${FM_CHECK_INTERVAL:-300}"
+    printf '%s\n' "$FM_BOAT_BOX_PROBLEM" >&2
+    return 1
+  fi
   printf '%s\n' "$ids"
 }
