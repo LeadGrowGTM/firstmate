@@ -15,14 +15,14 @@
 # A record whose kind is secondmate is listed and left in place, window and
 # record alike. A ship or scout record whose window is not on its recorded
 # tmux server is listed as not live and left in place. A non-tmux record is
-# listed and left in place. Any other disagreement between the record and the
-# live window refuses the whole command before the first move.
+# listed and left in place. A resolvable record that disagrees with its live
+# window refuses the whole command before the first move.
 #
-# A ship or scout record whose own endpoint fields cannot be resolved (window
-# or tmux socket missing, ambiguous, malformed, or not an absolute path) is
-# one dead task, not a broken home: it prints one warning naming the task and
-# the reason, is listed as skip unresolvable, and the rest of the home still
-# migrates. The command fails only when a task it could resolve fails to move.
+# For a ship or scout record whose backend, window, or tmux socket cannot be
+# resolved (missing, ambiguous, empty, malformed, or not an absolute path),
+# the command prints one warning naming the task and reason, lists it as skip
+# unresolvable, and continues migrating the home. Home preconditions,
+# resolvable-task preflight, and moves can still fail the command.
 #
 # A planned move that would empty its source session is refused. tmux closes a
 # session when its last window leaves, so the source session has to keep a

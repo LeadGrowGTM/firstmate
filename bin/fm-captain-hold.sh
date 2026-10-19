@@ -929,12 +929,8 @@ refuse_self_inventory() {
 
 # --- aged-out answered calls ------------------------------------------------
 #
-# The markdown backend keeps only `done_keep` closed rows in the active backlog
-# and moves older ones, with their bodies, to the Done retention archive. An
-# answered captain call that has aged out there is closed work, not a missing
-# task, so an inventory entry absent from the active backlog is accepted when the
-# archive holds a row for that exact id carrying a recorded captain answer. An id
-# the archive does not hold, or holds without a recorded answer, stays refused.
+# The archive is consulted only after active backlog absence is confirmed.
+# docs/captain-hold-lifecycle.md owns the inventory contract.
 
 # The configured Done retention archive of the markdown backend; empty on any
 # other backend or when no archive file exists.
