@@ -976,7 +976,7 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
           emit unknown run-step "selected run unavailable or mismatched; run ids: $candidate_ids"
         fi
         case "$(strip_quotes "$(nm_field status)")" in
-          pending|running|fixing|ci|awaiting_approval|fix_review|completed|failed|cancelled) ;;
+          pending|running|fixing|ci|awaiting_approval|fix_review|completed|failed|cancelled|ci_monitor_interrupted) ;;
           *) emit unknown run-step "selected run status unverified; run ids: $candidate_ids" ;;
         esac
         if fm_nm_run_is_active "$RUN_OUT"; then current_class=live; else current_class=terminal; fi
@@ -1091,6 +1091,7 @@ if [ "$HAVE_RUN" = 1 ]; then
           RUN_STATE=failed; RUN_DETAIL="run failed"
         fi ;;
       cancelled) RUN_STATE=unknown; RUN_DETAIL="run cancelled: no verdict" ;;
+      ci_monitor_interrupted) RUN_STATE=unknown; RUN_DETAIL="run ci monitor interrupted: no verdict" ;;
       *)         RUN_STATE=unknown; RUN_DETAIL="runs list status: $COARSE_STATUS" ;;
     esac
   else
@@ -1148,6 +1149,7 @@ if [ "$HAVE_RUN" = 1 ]; then
           if nm_reclassify_failed_run_as_held_green; then :; else
             RUN_STATE=unknown; RUN_DETAIL="run cancelled: no verdict"
           fi ;;
+        ci_monitor_interrupted) RUN_STATE=unknown; RUN_DETAIL="run ci monitor interrupted: no verdict" ;;
         "")             RUN_STATE=working; RUN_DETAIL="run active" ;;
         *)              RUN_STATE=working; RUN_DETAIL="run active ($status)" ;;
       esac
