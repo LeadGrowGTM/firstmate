@@ -37,6 +37,7 @@ make_settle_fakebin() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+[ -z "${FM_FAKE_TMUX_LOG:-}" ] || printf '%s\n' "$*" >> "$FM_FAKE_TMUX_LOG"
 case "$*" in
   *"#{pane_current_path}"*)
     countfile="${FM_FAKE_PANE_COUNTFILE:?FM_FAKE_PANE_COUNTFILE unset}"
@@ -54,7 +55,7 @@ case "$*" in
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
-  list-windows) exit 0 ;;
+  list-windows) [ -z "${FM_FAKE_EXISTING_WINDOW:-}" ] || printf '%s\n' "$FM_FAKE_EXISTING_WINDOW"; exit 0 ;;
   has-session|new-session|new-window|kill-window) exit 0 ;;
   send-keys) exit 0 ;;
 esac
@@ -116,6 +117,7 @@ run_settle_spawn() {
     FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
     FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_PANE_STALE="$STALE_DIR" \
     FM_FAKE_PANE_STALE_READS="$STALE_READS" FM_FAKE_PANE_COUNTFILE="$COUNTFILE" \
+    FM_FAKE_TMUX_LOG="${FM_FAKE_TMUX_LOG:-}" FM_FAKE_EXISTING_WINDOW="${FM_FAKE_EXISTING_WINDOW:-}" \
     PATH="$FAKEBIN_DIR:$PATH" \
     "$SPAWN" "$id" "$PROJ_DIR" "${kind_args[@]}" "$@" 2>&1
 }
@@ -273,6 +275,61 @@ test_reused_slot_identity_scope() {
 # A single stale first read (the exact incident) must not be accepted: the
 # loop should keep polling until two consecutive reads agree, landing on the
 # real settled worktree instead.
+# A refused spawn that already created its tmux window must close that window,
+# or the same-id retry dies on "window already exists". The window a spawn did
+# not create, and the window of a spawn that launched a worker, stay untouched.
+test_refused_spawn_closes_its_own_window() {
+  local rec id out status log
+  id=settle-refused-window-z11
+  rec=$(make_primary_case settle-refused-window "$id" 100000)
+  read_settle_record "$rec"
+  fm_test_fake_sleep_noop "$FAKEBIN_DIR"
+  log="$TMP_ROOT/settle-refused-window/tmux.log"
+  : > "$log"
+
+  out=$(FM_FAKE_TMUX_LOG="$log" run_settle_spawn "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn accepted a pane that never left the primary checkout"$'\n'"$out"
+  grep -q '^new-window ' "$log" || fail "the refused spawn never created a window"$'\n'"$(cat "$log")"
+  grep -q "^kill-window .*fm-$id" "$log" || fail "refused spawn left its window behind"$'\n'"$(cat "$log")"
+  pass "a refused spawn closes the window it created"
+}
+
+test_refused_before_window_leaves_foreign_window() {
+  local rec id out status log
+  id=settle-foreign-window-z12
+  rec=$(make_primary_case settle-foreign-window "$id" 0)
+  read_settle_record "$rec"
+  log="$TMP_ROOT/settle-foreign-window/tmux.log"
+  : > "$log"
+
+  out=$(FM_FAKE_TMUX_LOG="$log" FM_FAKE_EXISTING_WINDOW="fm-$id" run_settle_spawn "$id")
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn reused a window it did not create"$'\n'"$out"
+  assert_contains "$out" "already exists" "the refusal did not name the existing window"
+  if grep -q '^kill-window' "$log"; then
+    fail "spawn closed a window it did not create"$'\n'"$(cat "$log")"
+  fi
+  pass "a spawn refused on an existing window leaves that window alone"
+}
+
+test_successful_spawn_keeps_its_window() {
+  local rec id out status log
+  id=settle-kept-window-z13
+  rec=$(make_primary_case settle-kept-window "$id" 3)
+  read_settle_record "$rec"
+  log="$TMP_ROOT/settle-kept-window/tmux.log"
+  : > "$log"
+
+  out=$(FM_FAKE_TMUX_LOG="$log" run_settle_spawn "$id")
+  status=$?
+  expect_code 0 "$status" "spawn should succeed"$'\n'"$out"
+  if grep -q '^kill-window' "$log"; then
+    fail "successful spawn closed its window"$'\n'"$(cat "$log")"
+  fi
+  pass "a successful spawn keeps its window"
+}
+
 test_single_stale_first_read_is_not_accepted() {
   local rec id out status
   id=settle-single-stale-z1
@@ -377,6 +434,9 @@ test_primary_checkout_that_never_settles_fails_at_the_deadline() {
   pass "a pane stuck on the primary checkout fails loudly at the deadline"
 }
 
+test_refused_spawn_closes_its_own_window
+test_refused_before_window_leaves_foreign_window
+test_successful_spawn_keeps_its_window
 test_single_stale_first_read_is_not_accepted
 test_already_settled_pane_costs_one_confirm_read
 test_transient_primary_checkout_is_not_accepted

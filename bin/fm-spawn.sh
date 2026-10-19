@@ -1547,7 +1547,7 @@ spawn_abort_cleanup() {
       fi
     fi
   fi
-  # A tmux window re-created for a relaunch whose record was never published is
+  # A tmux window this spawn or relaunch created, whose record was never published, is
   # this launch's own: close it so a retry can re-create it. Once a launch was
   # attempted into it, an agent may be running there, so it is left in place.
   if [ -n "$TMUX_REBIND_ABORT_TARGET" ]; then
@@ -4388,6 +4388,10 @@ else
     # rename-critical worktree-detection steps below; the persisted window= handle
     # stays $T (the name form), which is safe now that rename is disabled.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
+    # This spawn created the window: a refusal or failure before a worker is
+    # launched into it closes it again (spawn_abort_cleanup), so a same-id retry
+    # does not die on "window already exists".
+    TMUX_REBIND_ABORT_TARGET=$T
     WT_TARGET="$WID"
     # Only the displayed label changes; every script still addresses $T by
     # its fm-<id> window name. Cosmetic, so a failure only warns.
@@ -6542,6 +6546,8 @@ if [ -n "$ORCA_VIEW_EXPORT" ]; then
   ORCA_VIEW_IDENTITY_SENT=1
 fi
 sleep 0.3
+# From here a worker may be running in the window, so it is never closed.
+TMUX_REBIND_ABORT_TARGET=
 SPAWN_LAUNCH_ATTEMPTED=1
 spawn_send_literal "$T" ". $(shell_quote "$LAUNCH_FILE")"
 SPAWN_LAUNCH_SENT=1
