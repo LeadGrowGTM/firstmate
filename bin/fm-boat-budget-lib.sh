@@ -66,7 +66,7 @@ fm_boat_load_reservation() {
       elif has("boat_bin") and (.boat_bin | (type == "string" and startswith("/")) | not) then error("boat_bin must be an absolute path")
       elif has("account_seconds_per_24h") and (.account_seconds_per_24h | wholepos | not) then error("account_seconds_per_24h must be a whole number, 1 or more")
       elif has("box_seconds_per_24h") and (.box_seconds_per_24h | wholepos | not) then error("box_seconds_per_24h must be a whole number, 1 or more")
-      elif has("resume_ttl_seconds") and (.resume_ttl_seconds | (type == "number" and . >= 60 and . <= 14400 and . == floor) | not) then error("resume_ttl_seconds must be a whole number of seconds, 60 to 14400")
+      elif has("resume_ttl_seconds") and (.resume_ttl_seconds | (type == "number" and . >= 1800 and . <= 14400 and . == floor) | not) then error("resume_ttl_seconds must be a whole number of seconds, 1800 to 14400")
       elif has("idle_grace_seconds") and (.idle_grace_seconds | (type == "number" and . >= 0 and . <= 86400 and . == floor) | not) then error("idle_grace_seconds must be a whole number of seconds, 0 to 86400")
       else {
         ceiling_usd: (if has("ceiling_usd") then .ceiling_usd else null end),

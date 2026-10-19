@@ -100,7 +100,10 @@ if [ -d "$FIXTURES/multi" ]; then
       cat "$FIXTURES/multi/$bid.usage.json"
       exit 0 ;;
     resume)
-      [ "$*" = "resume $bid --environment fm-code --ttl 3600 --json" ] || [ "$*" = "resume $bid --environment fm-code --ttl 7200 --json" ] || [ "$*" = "resume $bid --environment fm-code --ttl 14400 --json" ] || exit 97
+      [ "${3:-}" = --environment ] && [ "${4:-}" = fm-code ] || exit 97
+      [ "${5:-}" = --ttl ] || exit 97
+      case "${6:-}" in ''|*[!0-9]*) exit 97 ;; esac
+      [ "${7:-}" = --json ] && [ "$#" -eq 7 ] || exit 97
       : > "$FIXTURES/multi/$bid.resumed"
       cp "$FIXTURES/multi/$bid.ready-boot" "$FIXTURES/multi/$bid.boot"
       printf '{}\n'
@@ -132,7 +135,12 @@ case "$*" in
     exit 0
     ;;
   "usage $box --since $((BOAT_NOW - 86400)) --json") file=usage ;;
-  "resume $box --environment fm-code --ttl 3600 --json"|"resume $box --environment fm-code --ttl 7200 --json"|"resume $box --environment fm-code --ttl 14400 --json")
+  "resume $box --environment fm-code --ttl "*)
+    args="$*"
+    ttl=${args##*--ttl }
+    ttl=${ttl% --json}
+    case "$ttl" in ''|*[!0-9]*) printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97 ;; esac
+    [ "$*" = "resume $box --environment fm-code --ttl $ttl --json" ] || { printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97; }
     : > "$FIXTURES/resumed"
     printf '%s\n' '22222222-2222-4222-8222-222222222222' > "$FIXTURES/boot-id"
     printf '{}\n'
@@ -1281,6 +1289,22 @@ test_budget_caps() {
   send_task
   expect_code 1 "$CODE" 'a too-short resume timer is refused'
   [ ! -s "$FIXTURES/calls" ] || fail 'an invalid resume timer contacted Boat'
+
+  new_case budget-below-minimum-timer-refused
+  printf '%s\n' '{"resume_ttl_seconds":1799}' > "$LOCAL_HOME/config/boat-spend.json"
+  send_task
+  expect_code 1 "$CODE" 'a below-minimum resume timer is refused'
+  [ ! -s "$FIXTURES/calls" ] || fail 'a below-minimum resume timer contacted Boat'
+
+  new_case budget-minimum-resume-timer
+  printf '%s\n' '{"resume_ttl_seconds":1800}' > "$LOCAL_HOME/config/boat-spend.json"
+  jq --argjson end "$((NOW + 1790))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/ready.json" > "$FIXTURES/ready.new"
+  mv "$FIXTURES/ready.new" "$FIXTURES/ready.json"
+  send_task
+  expect_code 0 "$CODE" "the minimum resume timer is usable: $OUT"
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 1800 --json' \
+    "$FIXTURES/calls" 'the minimum resume timer was not used'
 
   new_case budget-invalid-grace-refused
   printf '%s\n' '{"idle_grace_seconds":-1}' > "$LOCAL_HOME/config/boat-spend.json"

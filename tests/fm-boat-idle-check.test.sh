@@ -11,17 +11,23 @@
 #   1. A stopped box is silent and untouched, and a busy box whose timer is
 #      still full is silent without an extend.
 #   2. A busy box with a short timer is re-armed with the configured short
-#      timer (3600 by default), silently.
+#      timer (3600 by default), silently, capped at the plan timer.
 #   3. An idle box is recorded on first sight and stopped only after the
 #      grace (900 by default) with no workers, dropping its receipt line and
 #      parking the alias, with one boat-idle: line.
-#   4. A box with a live worker is never stopped, even past the grace; an
-#      unreadable idle report, state, timer, or instance is treated as busy.
+#   4. A box with a live worker is never stopped, even past the grace; a
+#      worker that arrives between the first probe and the locked final check
+#      is seen and skips the stop. An unreadable idle report, state, timer,
+#      or instance is treated as busy.
 #   5. A box not listed in config/boat-box-id is never touched.
 #   6. A changed boot instance between probe and stop skips the stop.
-#   7. Extend and stop failures, and config problems, are reported throttled.
+#   7. Extend, stop, and refresh failures, and config problems, are reported
+#      throttled.
 #   8. A home with no spend config is silent and never calls Boat, and arm
 #      refuses without a spend config or a readable box list.
+#   9. With several boxes, each probe refreshes the shared alias to the
+#      probed box (the transport stub refuses a route/alias mismatch), and
+#      sweeps rotate from the durable position.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -66,6 +72,11 @@ case "${1:-}" in
     if [ -e "$FIXTURES/rotate" ] && [ "$n" -ge 2 ]; then id=$(cat "$FIXTURES/$box.boot2"); fi
     jq -n --arg id "$id" '{exitCode:0,stdout:($id+"\n")}'
     ;;
+  limits)
+    [ "${2:-}" = --json ] && [ "$#" -eq 2 ] || exit 97
+    [ ! -e "$FIXTURES/limits.fail" ] || exit 1
+    cat "$FIXTURES/limits.json"
+    ;;
   resume)
     box=${2:-}
     [ "${3:-}" = --environment ] && [ "${4:-}" = fm-code ] || exit 97
@@ -92,6 +103,19 @@ set -eu
 printf 'on %s\n' "$*" >> "$FIXTURES/calls"
 [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = idle ] || exit 97
 [ ! -e "$FIXTURES/idle.fail" ] || exit 1
+# Like the real --verify, the probe reaches only the box the route record and
+# the alias agree on; a mismatch, or a missing alias, refuses the probe.
+if [ -f "$FM_HOME/state/.boat-route-box" ] && [ ! -L "$FM_HOME/state/.boat-route-box" ]; then
+  route=$(cat "$FM_HOME/state/.boat-route-box")
+  [ -f "$FIXTURES/alias.box" ] || exit 1
+  [ "$(cat "$FIXTURES/alias.box")" = "$route" ] || exit 1
+fi
+n=$(cat "$FIXTURES/idle.count" 2>/dev/null || printf 0); n=$((n + 1))
+printf '%s' "$n" > "$FIXTURES/idle.count"
+if [ -e "$FIXTURES/idle-rerace" ] && [ "$n" -ge 2 ]; then
+  printf 'boat-tasks-remaining: yes\n'
+  exit 0
+fi
 found=$(grep -l -F -- "${4:-}" "$FIXTURES/"*.boot 2>/dev/null | head -n 1 || true)
 [ -n "$found" ] || exit 1
 box=$(basename "$found")
@@ -103,9 +127,15 @@ cat > "$BIN/fm-boat-alias-refresh.sh" <<'FAKE'
 #!/usr/bin/env bash
 set -eu
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
-[ "${1:-}" = --park ] || exit 97
-[ ! -e "$FIXTURES/park.fail" ] || exit 1
-exit 0
+if [ "${1:-}" = --park ]; then
+  [ ! -e "$FIXTURES/park.fail" ] || exit 1
+  exit 0
+fi
+[ "$#" -eq 2 ] && [ "${2:-}" = boat-prove ] || exit 97
+case "${1:-}" in bx_*) ;; *) exit 97 ;; esac
+[ ! -e "$FIXTURES/refresh.fail" ] || exit 1
+printf '%s\n' "$1" > "$FIXTURES/alias.box"
+printf 'sandbox=%s state=running\n' "$1"
 FAKE
 chmod +x "$BIN/"*.sh "$FAKEBIN/"*
 
@@ -121,6 +151,7 @@ new_case() {
   printf '%s\n' "$BOX" > "$HOME_DIR/config/boat-box-id"
   printf '%s\n' '{"sandbox":{"id":"'"$BOX"'","type":"default","state":"stopped"}}' > "$FIXTURES/$BOX.info.json"
   printf '%s\n' '11111111-1111-4111-8111-111111111111' > "$FIXTURES/$BOX.boot"
+  printf '%s\n' '{"billingStatus":"active"}' > "$FIXTURES/limits.json"
   : > "$FIXTURES/calls"
 }
 
@@ -361,6 +392,62 @@ test_two_boxes_extend_and_stop_on_one_line() {
   assert_no_grep "boat --no-update stop $BOX " "$FIXTURES/calls" 'the busy box was stopped'
   assert_no_grep 'bx_zzzzzzzz' "$FIXTURES/calls" 'an unlisted box was touched'
   assert_equals "$other" "$(cat "$HOME_DIR/state/.boat-route-box")" 'the route record did not follow the probed box'
+  assert_grep "alias $BOX boat-prove" "$FIXTURES/calls" 'the alias was not refreshed to the first probed box'
+  assert_grep "alias $other boat-prove" "$FIXTURES/calls" 'the alias was not refreshed to the second probed box'
+}
+
+test_late_worker_skips_stop() {
+  new_case late-worker
+  make_info running 600
+  set_idle 'boat-tasks-remaining: no'
+  seed_since "$((NOW - 900))"
+  : > "$FIXTURES/idle-rerace"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "late worker check: $OUT"
+  [ -z "$OUT" ] || fail "a box with a newly arrived worker should be silent: $OUT"
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a box with a live worker was stopped'
+  assert_grep 'boat --no-update resume' "$FIXTURES/calls" 'the newly busy box was not extended'
+  assert_absent "$HOME_DIR/state/.boat-idle-since" 'the busy box kept its idle record'
+}
+
+test_extend_caps_at_plan_timer() {
+  new_case trial-cap '{"resume_ttl_seconds":14400}'
+  printf '%s\n' '{"billingStatus":"trialing"}' > "$FIXTURES/limits.json"
+  make_info running 6000
+  set_idle 'boat-tasks-remaining: yes'
+  run_at "$NOW"
+  expect_code 0 "$CODE" "trial extend: $OUT"
+  [ -z "$OUT" ] || fail "a capped extend should be silent: $OUT"
+  assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 7200 --json" \
+    "$FIXTURES/calls" 'the extend did not cap at the trial plan timer'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a busy box was stopped'
+}
+
+test_sweep_rotates_across_boxes() {
+  local other=bx_cccccccc
+  new_case rotate '{"expected_running":2}'
+  printf '%s\n' "$BOX" "$other" > "$HOME_DIR/config/boat-box-id"
+  BOX=$other
+  printf '%s\n' '{"sandbox":{"id":"'"$BOX"'","type":"default","state":"stopped"}}' > "$FIXTURES/$BOX.info.json"
+  BOX=bx_aaaaaaaa
+  printf '%s\n' 'pos 1' > "$HOME_DIR/state/.boat-idle-pos"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "rotated sweep: $OUT"
+  [ -z "$OUT" ] || fail "stopped boxes should be silent: $OUT"
+  assert_equals "boat --no-update info $other --json" "$(head -n 1 "$FIXTURES/calls")" \
+    'the sweep did not resume at the recorded position'
+  assert_equals 'pos 1' "$(cat "$HOME_DIR/state/.boat-idle-pos")" 'the position did not advance through the full sweep'
+  new_case rotate-bad-pos '{"expected_running":2}'
+  printf '%s\n' "$BOX" "$other" > "$HOME_DIR/config/boat-box-id"
+  BOX=$other
+  printf '%s\n' '{"sandbox":{"id":"'"$BOX"'","type":"default","state":"stopped"}}' > "$FIXTURES/$BOX.info.json"
+  BOX=bx_aaaaaaaa
+  printf '%s\n' 'pos stale' > "$HOME_DIR/state/.boat-idle-pos"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "bad position sweep: $OUT"
+  [ -z "$OUT" ] || fail "stopped boxes should be silent: $OUT"
+  assert_equals "boat --no-update info $BOX --json" "$(head -n 1 "$FIXTURES/calls")" \
+    'an unreadable position did not restart the sweep at the first box'
 }
 
 test_arm_and_disarm() {
@@ -376,11 +463,13 @@ test_arm_and_disarm() {
   [ -z "$out" ] || fail "the shim did not run the check in the pinned home: $out"
   printf '%s %s\n' "$BOX" "$NOW" > "$HOME_DIR/state/.boat-idle-since"
   printf '%s %s\n' config "$NOW" > "$HOME_DIR/state/.boat-idle-report"
+  printf '%s\n' 'pos 0' > "$HOME_DIR/state/.boat-idle-pos"
   env FM_HOME="$HOME_DIR" "$BIN/fm-boat-idle-check.sh" disarm >/dev/null
   assert_absent "$HOME_DIR/state/boat-idle.check.sh" 'disarm left the shim'
   assert_absent "$HOME_DIR/state/boat-idle.check-trust" 'disarm left the trust binding'
   assert_absent "$HOME_DIR/state/.boat-idle-since" 'disarm left the idle record'
   assert_absent "$HOME_DIR/state/.boat-idle-report" 'disarm left the report record'
+  assert_absent "$HOME_DIR/state/.boat-idle-pos" 'disarm left the sweep position'
   rm "$HOME_DIR/config/boat-box-id"
   env FM_HOME="$HOME_DIR" "$BIN/fm-boat-idle-check.sh" arm >/dev/null 2>&1 \
     && fail 'arm without a box list should refuse' || true
@@ -407,6 +496,9 @@ test_stop_failure_is_reported_throttled
 test_invalid_config_is_reported_once_a_day
 test_absent_config_is_off
 test_two_boxes_extend_and_stop_on_one_line
+test_late_worker_skips_stop
+test_extend_caps_at_plan_timer
+test_sweep_rotates_across_boxes
 test_arm_and_disarm
 pass "fm-boat-idle-check"
 

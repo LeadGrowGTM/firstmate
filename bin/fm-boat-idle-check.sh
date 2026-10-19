@@ -27,31 +27,38 @@
 # Safety, in priority order: a box with a live worker is never stopped; a
 # box not listed in config/boat-box-id is never touched; an unreadable idle
 # report, state, timer, or instance is treated as busy, so blindness keeps a
-# box up rather than stopping work. A stop re-reads the boot instance under
-# the send lock and skips when it changed, so a fresh resume between the
-# probe and the stop is never stopped. Stopped boxes are left alone, and
+# box up rather than stopping work. Before a stop, the boot instance and the
+# worker check run again under the send lock, held through the stop, so a
+# dispatch or resume that lands after the first probe is never stopped.
+# Stopped boxes are left alone, and
 # scheduled work still resumes only through fm-boat-send.sh when a
 # Boat-eligible task is actually queued; nothing here is always-on.
 #
 # Exactly these Boat commands are run, each with the CLI's global --no-update
-# flag: info and exec of the boot id (reads), resume --environment fm-code
-# --ttl (extend only, with the sender's flags, because Boat restarts the
-# timer at every resume), and stop (idle stop only). It never creates,
+# flag: info, exec of the boot id, and limits (reads), resume --environment
+# fm-code --ttl (extend only, with the sender's flags, because Boat restarts
+# the timer at every resume), and stop (idle stop only). It never creates,
 # deletes, shares, or reconfigures a sandbox and never touches billing. The
 # idle probe runs fm-on.sh boat-eng fm-boat-worker.sh idle <instance>, which
 # is the worker's own live record and endpoint count; with more than one
-# listed box the check points state/.boat-route-box at the probed box under
-# the send lock, because fm-on.sh follows that record, and the lock keeps a
-# concurrent dispatch from crossing it. Extend skips its spend reservation on
-# purpose: a live worker must not lose its box to a ceiling, and
-# fm-boat-spend-check.sh stays the ceiling watchdog. A running box whose
-# timer cannot be read is left alone; the spend check reports timerless boxes.
+# listed box the check points state/.boat-route-box at the probed box and
+# refreshes the alias to it under the send lock, because fm-on.sh follows
+# the record and verifies the alias names it, and the lock keeps a concurrent
+# dispatch from crossing either. The final worker and instance checks before
+# a stop run under that same lock, held through the stop, so a dispatch that
+# lands after the first probe cannot put a live worker on a stopped box.
+# Extend caps the timer at the plan limit the same way the sender does.
+# Extend skips its spend reservation on purpose: a live worker must not lose
+# its box to a ceiling, and fm-boat-spend-check.sh stays the ceiling
+# watchdog. A running box whose timer cannot be read is left alone; the spend
+# check reports timerless boxes.
 #
 # The CLI comes from FM_BOAT_BIN, else "boat_bin" in the config, else `boat`
 # on PATH. docs/configuration.md owns the config schema. Each Boat read is
-# bounded to 6 seconds, the idle probe to 12, extend to 60, and stop to 30;
-# a watcher poll killed at FM_CHECK_TIMEOUT simply resumes next cadence from
-# the durable idle-since records. Extend and stop failures are reported at
+# bounded to 6 seconds, the idle probe to 12, extend to 60, and stop to 30.
+# Sweeps rotate across listed boxes from a durable position, so a poll killed
+# at FM_CHECK_TIMEOUT resumes with the next box instead of starving every box
+# behind one slow extend. Extend, stop, and refresh failures are reported at
 # most once per hour per box, config problems at most once per 24 hours, and
 # every completed stop is reported at once.
 set -u
@@ -68,6 +75,7 @@ CHECK_SHIM="$STATE/$CHECK_ID.check.sh"
 CHECK_TRUST="$STATE/$CHECK_ID.check-trust"
 SINCE_FILE="$STATE/.boat-idle-since"
 REPORT_FILE="$STATE/.boat-idle-report"
+POS_FILE="$STATE/.boat-idle-pos"
 REGISTER_BIN="$SCRIPT_DIR/fm-check-register.sh"
 MAX_LINE=1000
 INFO_SECS=6
@@ -93,7 +101,7 @@ ACTION_INTERVAL=3600
 . "$SCRIPT_DIR/fm-boat-budget-lib.sh"
 
 usage() {
-  sed -n '2,56{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
+  sed -n '2,63{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
 }
 
 fail() {
@@ -195,32 +203,40 @@ boat_instance() {  # <box>: prints the boot id, or fails.
     rtrimstr("\n")' 2>/dev/null
 }
 
-# idle_probe <box> <instance>: prints yes when workers remain, no when none.
-# Anything else (transport failure, unexpected text) is not no, so the caller
-# treats it as busy. With more than one listed box the route record is
-# pointed at this box under the send lock, because fm-on.sh follows it.
+# idle_probe <box> <instance> <multi> <held>: prints yes when workers
+# remain, no when none. Anything else (transport failure, unexpected text)
+# is not no, so the caller treats it as busy. With more than one listed box
+# the route record is pointed at this box and the alias refreshed to it under
+# the send lock, because fm-on.sh follows the record and verifies the alias
+# names it; held=1 skips the lock steps because the caller already holds the
+# lock. Exit 2 when the refresh fails.
 IDLE_LOCK=
 release_idle_lock() {
   [ -z "$IDLE_LOCK" ] || fm_lock_release "$IDLE_LOCK" || true
   IDLE_LOCK=
 }
 idle_probe() {
-  local box=$1 instance=$2 out rc=0 multi=$3
+  local box=$1 instance=$2 multi=$3 held=$4 out rc=0
   if [ "$multi" -eq 1 ]; then
-    fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT" || return 1
-    IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
+    if [ "$held" -eq 0 ]; then
+      fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT" || return 1
+      IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
+    fi
     if [ ! -d "$FM_HOME/state" ] || [ -L "$FM_HOME/state" ] \
-      || { [ -e "$FM_HOME/state/.boat-route-box" ] && { [ -L "$FM_HOME/state/.boat-route-box" ] || [ ! -f "$FM_HOME/state/.boat-route-box" ]; }; }; then
-      release_idle_lock
+      || { [ -e "$FM_HOME/state/.boat-route-box" ] && { [ -L "$FM_HOME/state/.boat-route-box" ] || [ ! -f "$FM_HOME/state/.boat-route-box" ]; }; } \
+      || ! printf '%s\n' "$box" > "$FM_HOME/state/.boat-route-box"; then
+      [ "$held" -eq 1 ] || release_idle_lock
       return 1
     fi
-    printf '%s\n' "$box" > "$FM_HOME/state/.boat-route-box" || {
-      release_idle_lock
-      return 1
-    }
+    if ! FM_BOAT_HYDRATE_WAIT=0 "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$box" boat-prove >/dev/null 2>&1; then
+      [ "$held" -eq 1 ] || release_idle_lock
+      return 2
+    fi
   fi
   out=$(fm_run_timed "$IDLE_SECS" "$SCRIPT_DIR/fm-on.sh" boat-eng fm-boat-worker.sh idle "$instance" 2>/dev/null) || rc=$?
-  [ "$multi" -eq 0 ] || release_idle_lock
+  if [ "$multi" -eq 1 ] && [ "$held" -eq 0 ]; then
+    release_idle_lock
+  fi
   [ "$rc" -eq 0 ] || return 1
   case "$out" in
     'boat-tasks-remaining: no') printf 'no\n' ;;
@@ -229,36 +245,57 @@ idle_probe() {
   esac
 }
 
-# box_extend <box> <ttl>: re-arms the timer, for a live worker only.
-box_extend() {
-  fm_run_timed "$RESUME_SECS" "$BOAT_BIN" --no-update resume "$box" \
-    --environment fm-code --ttl "$2" --json >/dev/null 2>&1
+# boat_plan_max: prints the plan timer (14400 paid, 7200 trial), or fails.
+boat_plan_max() {
+  local out
+  out=$(fm_run_timed "$INFO_SECS" "$BOAT_BIN" --no-update limits --json 2>/dev/null) || return 1
+  printf '%s' "$out" | jq -er '
+    if .billingStatus == "active" then 14400
+    elif .billingStatus == "trialing" then 7200
+    else error("plan is off") end' 2>/dev/null
 }
 
-# box_stop <box>: stops the box, drops its environment receipt line, and
-# parks the alias, all under the send lock. Reports through STOP_DETAIL on a
-# partial failure; the box itself is already stopped then.
+# box_extend <box> <ttl>: re-arms the timer for a live worker only, capped by
+# the plan timer the same way the sender caps a new resume. An unreadable
+# plan falls back to the configured timer and reports a failure only if the
+# resume itself fails.
+box_extend() {
+  local box=$1 ttl=$2 max
+  if max=$(boat_plan_max 2>/dev/null) && [ -n "$max" ] && [ "$max" -lt "$ttl" ]; then
+    ttl=$max
+  fi
+  fm_run_timed "$RESUME_SECS" "$BOAT_BIN" --no-update resume "$box" \
+    --environment fm-code --ttl "$ttl" --json >/dev/null 2>&1
+}
+
+# box_stop <box> <held>: stops the box, drops its environment receipt line,
+# and parks the alias. held=1 skips the lock steps because the caller already
+# holds the send lock across its final worker check and the stop. Reports
+# through STOP_DETAIL on a partial failure; the box itself is already stopped
+# then.
 STOP_DETAIL=
 box_stop() {
-  local box=$1 receipt kept
+  local box=$1 held=$2 receipt kept
   STOP_DETAIL=
-  fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT" || return 1
-  IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
+  if [ "$held" -eq 0 ]; then
+    fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT" || return 1
+    IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
+  fi
   fm_run_timed "$STOP_SECS" "$BOAT_BIN" --no-update stop "$box" --json >/dev/null 2>&1 || {
-    release_idle_lock
+    [ "$held" -eq 1 ] || release_idle_lock
     return 1
   }
   receipt="$FM_HOME/state/.boat-environment"
   if [ -f "$receipt" ] && [ ! -L "$receipt" ]; then
     kept=$(awk -v id="$box" '$1 != id' "$receipt") || {
       STOP_DETAIL='environment receipt is unreadable'
-      release_idle_lock
+      [ "$held" -eq 1 ] || release_idle_lock
       return 2
     }
     if [ -n "$kept" ]; then
       printf '%s\n' "$kept" > "$receipt" || {
         STOP_DETAIL='environment receipt cannot be updated'
-        release_idle_lock
+        [ "$held" -eq 1 ] || release_idle_lock
         return 2
       }
     else
@@ -266,15 +303,15 @@ box_stop() {
     fi
   elif [ -L "$receipt" ]; then
     STOP_DETAIL='environment receipt path is unsafe'
-    release_idle_lock
+    [ "$held" -eq 1 ] || release_idle_lock
     return 2
   fi
   FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" --park "$box" boat-prove >/dev/null 2>&1 || {
     STOP_DETAIL='alias park failed after stop'
-    release_idle_lock
+    [ "$held" -eq 1 ] || release_idle_lock
     return 2
   }
-  release_idle_lock
+  [ "$held" -eq 1 ] || release_idle_lock
   return 0
 }
 
@@ -291,7 +328,7 @@ part() {  # <text>: appends one finding to the one line.
 # the grace has passed with no workers, and otherwise stay silent.
 check_box() {
   local box=$1 now=$2 ttl=$3 grace=$4 multi=$5
-  local state remaining instance probe probe_instance since idle_for stop_rc
+  local state remaining instance probe probe_instance probe_rc since idle_for stop_rc
   valid_box "$box" || return 0
   if ! read -r state remaining <<< "$(boat_info "$box" 2>/dev/null)" \
     || [ -z "$state" ] || [ -z "$remaining" ]; then
@@ -307,7 +344,15 @@ check_box() {
     return 0
   fi
   probe_instance=$instance
-  if ! probe=$(idle_probe "$box" "$instance" "$multi" 2>/dev/null); then
+  probe=$(idle_probe "$box" "$instance" "$multi" 0 2>/dev/null)
+  probe_rc=$?
+  if [ "$probe_rc" -eq 2 ]; then
+    if report_due "refresh-$box" "$now" "$ACTION_INTERVAL"; then
+      part "cannot point the worker route at $box; keeping it up"
+      report_note "refresh-$box" "$now"
+    fi
+  fi
+  if [ "$probe_rc" -ne 0 ]; then
     record_drop "$SINCE_FILE" "$box" || true
     if [ "$remaining" -lt "$ttl" ] && ! box_extend "$box" "$ttl" \
       && report_due "extend-$box" "$now" "$ACTION_INTERVAL"; then
@@ -336,12 +381,41 @@ check_box() {
   if [ "$idle_for" -lt "$grace" ]; then
     return 0
   fi
-  if ! instance=$(boat_instance "$box" 2>/dev/null) || [ "$instance" != "$probe_instance" ]; then
+  # The final worker and instance checks run under the send lock, held
+  # through the stop, so a dispatch that lands after the first probe cannot
+  # put a live worker on a box this poll stops. A contended lock means a send
+  # is active, which is liveness itself: restart the grace and stay silent.
+  if ! fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT"; then
     record_write "$SINCE_FILE" "$box" "$now" || true
     return 0
   fi
+  IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
+  if ! instance=$(boat_instance "$box" 2>/dev/null) || [ "$instance" != "$probe_instance" ]; then
+    record_write "$SINCE_FILE" "$box" "$now" || true
+    release_idle_lock
+    return 0
+  fi
+  probe=$(idle_probe "$box" "$instance" "$multi" 1 2>/dev/null)
+  probe_rc=$?
+  if [ "$probe_rc" -eq 2 ]; then
+    if report_due "refresh-$box" "$now" "$ACTION_INTERVAL"; then
+      part "cannot point the worker route at $box; keeping it up"
+      report_note "refresh-$box" "$now"
+    fi
+  fi
+  if [ "$probe_rc" -ne 0 ] || [ "$probe" = yes ]; then
+    record_drop "$SINCE_FILE" "$box" || true
+    if [ "$remaining" -lt "$ttl" ] && ! box_extend "$box" "$ttl" \
+      && report_due "extend-$box" "$now" "$ACTION_INTERVAL"; then
+      part "extend $box failed with live workers"
+      report_note "extend-$box" "$now"
+    fi
+    release_idle_lock
+    return 0
+  fi
   stop_rc=0
-  box_stop "$box" || stop_rc=$?
+  box_stop "$box" 1 || stop_rc=$?
+  release_idle_lock
   if [ "$stop_rc" -eq 0 ]; then
     record_drop "$SINCE_FILE" "$box" || true
     part "stopped $box after ${idle_for}s with no workers reported"
@@ -361,7 +435,7 @@ check_box() {
 }
 
 run_check() {
-  local now problem bin ids multi box
+  local now problem bin ids multi box pos count i ORDER
   PARTS=
   [ -f "$CONFIG" ] || return 0
   now=$(now_epoch)
@@ -390,10 +464,28 @@ run_check() {
   else
     multi=0
     [ "$(printf '%s\n' "$ids" | wc -l)" -le 1 ] || multi=1
-    while IFS= read -r box; do
-      [ -n "$box" ] || continue
-      check_box "$box" "$now" "$FM_BOAT_RESUME_TTL" "$FM_BOAT_IDLE_GRACE" "$multi"
-    done <<< "$ids"
+    if [ "$multi" -eq 0 ]; then
+      while IFS= read -r box; do
+        [ -n "$box" ] || continue
+        check_box "$box" "$now" "$FM_BOAT_RESUME_TTL" "$FM_BOAT_IDLE_GRACE" "$multi"
+      done <<< "$ids"
+    else
+      # Start each sweep where the last one left off, advancing past each box
+      # as it starts, so a poll killed at FM_CHECK_TIMEOUT resumes with the
+      # next box instead of starving every box behind one slow extend.
+      mapfile -t ORDER <<< "$ids"
+      count=${#ORDER[@]}
+      pos=$(record_read "$POS_FILE" pos)
+      case "$pos" in ''|*[!0-9]*) pos=0 ;; esac
+      pos=$((pos % count))
+      for ((i = 0; i < count; i++)); do
+        box=${ORDER[$pos]}
+        pos=$(((pos + 1) % count))
+        record_write "$POS_FILE" pos "$pos" || true
+        [ -n "$box" ] || continue
+        check_box "$box" "$now" "$FM_BOAT_RESUME_TTL" "$FM_BOAT_IDLE_GRACE" "$multi"
+      done
+    fi
   fi
   [ -z "$PARTS" ] || fm_cap_line "boat-idle: $PARTS" "$MAX_LINE"
 }
@@ -484,7 +576,7 @@ arm() {
 }
 
 disarm() {
-  rm -f -- "$CHECK_SHIM" "$CHECK_TRUST" "$SINCE_FILE" "$REPORT_FILE"
+  rm -f -- "$CHECK_SHIM" "$CHECK_TRUST" "$SINCE_FILE" "$REPORT_FILE" "$POS_FILE"
   printf 'disarmed: state/%s.check.sh\n' "$CHECK_ID"
 }
 
