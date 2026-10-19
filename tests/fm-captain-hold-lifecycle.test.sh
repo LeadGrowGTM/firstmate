@@ -857,6 +857,93 @@ EOF2
   assert_grep 'was held for origin some-other-origin' "$home/recorded.err" \
     "the recorded origin after an answer was not checked"
 
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] sample-aged-scout-decision-route - Legacy routed answer (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: route
+  Routed identities: sample-routed-work
+  Resolution mode: routed
+
+  Captain decision:
+  Use the approved route.
+
+  Routed work:
+  - sample-routed-work
+- [x] sample-aged-scout-decision-decline - Legacy declined answer (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: decline
+  Routed identities: none
+  Resolution mode: declined
+
+  Captain decision:
+  Keep the current route.
+- [x] sample-aged-scout-decision-old - Legacy answer without mode (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: old
+  Routed identities: none
+
+  Captain decision:
+  Keep the prior choice.
+- [x] sample-aged-scout-decision-bare - Legacy row without an answer (kind: captain) (done 2026-10-13)
+- [x] shadow - Exact row without an answer (kind: captain) (done 2026-10-13)
+- [x] sample-aged-scout-decision-shadow - Legacy answer behind an exact row (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: shadow
+  Routed identities: none
+  Resolution mode: answered
+
+  Captain decision:
+  Choose the legacy row.
+EOF2
+  write_origin_meta "$home" "$id"
+  run_captain "$home" complete "$id" route > "$home/legacy-complete.out" 2> "$home/legacy-complete.err" \
+    || fail "a short legacy key did not complete from the archive: $(cat "$home/legacy-complete.err")"
+  run_captain "$home" verify "$id" > "$home/legacy-verify.out" 2> "$home/legacy-verify.err" \
+    || fail "a short legacy key did not verify from the archive: $(cat "$home/legacy-verify.err")"
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = show ] && [ "${2:-}" = sample-aged-scout-decision-route ]; then
+  printf 'error: temporary legacy backlog read failure\n' >&2
+  exit 75
+fi
+exec "${REAL_TASKS_AXI:?}" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  set +e
+  run_captain "$home" verify "$id" > "$home/legacy-read.out" 2> "$home/legacy-read.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a legacy archive answer masked an active backlog read failure"
+  assert_grep 'could not read active backlog entry sample-aged-scout-decision-route' "$home/legacy-read.err" \
+    "the legacy read failure was treated as confirmed absence"
+  rm "$home/fakebin/tasks-axi"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=sample-aged-scout-decision-route\n' >> "$home/state/$id.meta"
+  run_captain "$home" verify "$id" >/dev/null \
+    || fail "the full archived legacy task id was refused"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=decline,old\n' >> "$home/state/$id.meta"
+  run_captain "$home" verify "$id" >/dev/null \
+    || fail "legacy declined or mode-less archived answers were refused"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=bare\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/legacy-bare.out" 2> "$home/legacy-bare.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a legacy archived row without an answer passed the gate"
+  assert_grep 'sample-aged-scout-decision-bare' "$home/legacy-bare.err" \
+    "the legacy refusal did not name the derived archived task"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=shadow\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/shadow.out" 2> "$home/shadow.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a legacy answer overrode an exact archived row without an answer"
+  assert_grep 'shadow is archived in the Done retention archive without a recorded captain answer' "$home/shadow.err" \
+    "the exact archived row did not take priority over the legacy answer"
+
   # Still refusing: archived under a different origin.
   cat >> "$home/data/done-archive.md" <<'EOF2'
 - [x] aged-call-other - Another origin's question (kind: captain) (done 2026-10-13) (hold-kind: captain)
