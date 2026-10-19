@@ -724,7 +724,7 @@ EOF
 # the completion gate; an id found nowhere, or archived without a recorded
 # answer, still refuses and the refusal names what was looked up.
 test_aged_out_answered_calls_do_not_block_cleanup() {
-  local home id rc
+  local home id rc digest
   home=$(make_home aged-out-calls)
   id=sample-aged-scout
   mkdir -p "$home/data/$id"
@@ -803,6 +803,8 @@ SH
 
   Reconciliation evidence:
   The call was closed without a captain answer.
+  Captain decision:
+  Captain hold origin: sample-aged-scout
 EOF2
   write_origin_meta "$home" "$id"
   printf 'decisions_reviewed=1\ndecision_keys=aged-call-reconciled\n' >> "$home/state/$id.meta"
@@ -813,6 +815,47 @@ EOF2
   [ "$rc" -ne 0 ] || fail "a reconciled archive row without a captain decision passed the gate"
   assert_grep 'without a recorded captain answer' "$home/reconciled.err" \
     "the reconciled archive row was treated as a captain answer"
+
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] aged-call-quoted - Answer quoting an origin (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: quoted
+  Resolution mode: answered
+
+  Captain decision:
+  The text quotes a line from another record:
+  Captain hold origin: some-other-origin
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-quoted\n' >> "$home/state/$id.meta"
+  run_captain "$home" verify "$id" > "$home/quoted.out" 2> "$home/quoted.err" \
+    || fail "quoted origin text was treated as recorded provenance: $(cat "$home/quoted.err")"
+
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(printf Go | shasum -a 256 | awk '{print $1}')
+  else
+    digest=$(printf Go | sha256sum | awk '{print $1}')
+  fi
+  cat >> "$home/data/done-archive.md" <<EOF2
+- [x] aged-call-recorded - Answer with a recorded origin (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: $digest
+  Resolution mode: answered
+
+  Captain decision:
+  Go
+
+  Captain hold origin: some-other-origin
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-recorded\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/recorded.out" 2> "$home/recorded.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a recorded origin after an answer was ignored"
+  assert_grep 'was held for origin some-other-origin' "$home/recorded.err" \
+    "the recorded origin after an answer was not checked"
 
   # Still refusing: archived under a different origin.
   cat >> "$home/data/done-archive.md" <<'EOF2'
@@ -851,9 +894,8 @@ EOF2
   fi
   assert_present "$home/state/$id.meta" "refused cleanup removed the task metadata"
 
-  # A trailing space after the configured archive path still resolves it.
-  sed -i 's|^\(archive = ".*"\)$|\1   |' "$home/.tasks.toml"
-  grep -q '^archive = ".*"   $' "$home/.tasks.toml" || fail "the fixture did not pad the archive setting"
+  mv "$home/data/done-archive.md" "$home/data/decisions#2026.md"
+  sed -i 's|archive = "data/done-archive.md"|archive = "data/decisions#2026.md"   |' "$home/.tasks.toml"
   # Cleanup of the finished task proceeds once its calls are all archived answers.
   write_origin_meta "$home" "$id"
   printf 'decisions_reviewed=1\ndecision_keys=aged-call-a,aged-call-b\n' >> "$home/state/$id.meta"

@@ -947,8 +947,15 @@ done_archive_file() {
   configured=$(LC_ALL=C awk '
     /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec); next }
     sec == "[markdown]" && /^[[:space:]]*archive[[:space:]]*=/ {
-      v = $0; sub(/[[:space:]]*#.*/, "", v); sub(/^[^=]*=[[:space:]]*/, "", v)
-      sub(/[[:space:]]+$/, "", v); gsub(/^"|"$/, "", v); gsub(/^'\''|'\''$/, "", v)
+      v = $0; sub(/^[^=]*=[[:space:]]*/, "", v)
+      q = substr(v, 1, 1)
+      if (q == "\"" || q == "'\''") {
+        v = substr(v, 2); n = index(v, q)
+        if (!n) next
+        v = substr(v, 1, n - 1)
+      } else {
+        sub(/[[:space:]]*#.*/, "", v); sub(/[[:space:]]+$/, "", v)
+      }
       print v; exit
     }
   ' "$root/.tasks.toml" 2>/dev/null) || configured=
@@ -969,7 +976,8 @@ done_archive_file() {
 # archived without one, and nothing when the archive does not hold it. An
 # answered row appends the origin its body recorded, when it recorded one.
 archived_call_state() {  # <task-id>
-  local archive block
+  local archive block line state=before mode='' digest='' stored='' answer='' started=0
+  local prefix='' remaining segment first=1
   archive=$(done_archive_file)
   [ -n "$archive" ] || return 0
   block=$(LC_ALL=C awk -v id="$1" '
@@ -981,12 +989,72 @@ archived_call_state() {  # <task-id>
     take { print }
     END { exit !found }
   ' "$archive") || return 0
-  case "$block" in
-    *"Resolution recorded by fm-captain-hold."*"Captain decision:"*)
-      printf 'answered %s' "$(body_hold_origin "$(printf '%s\n' "$block" | sed 's/^[[:space:]]*//')")"
-      ;;
-    *) printf 'unanswered' ;;
+  while IFS= read -r line; do
+    case "$line" in
+      '') ;;
+      '  '*) line=${line#'  '} ;;
+      *) continue ;;
+    esac
+    case "$state" in
+      before)
+        case "$line" in
+          'Captain hold origin: '*) stored=${line#'Captain hold origin: '} ;;
+          'Resolution recorded by fm-captain-hold.') state=digest ;;
+        esac
+        ;;
+      digest)
+        case "$line" in
+          'Decision digest: '*) digest=${line#'Decision digest: '}; state=mode ;;
+          *) state=invalid ;;
+        esac
+        ;;
+      mode)
+        case "$line" in
+          'Resolution mode: '*) mode=${line#'Resolution mode: '}; state=gap ;;
+          *) state=invalid ;;
+        esac
+        ;;
+      gap)
+        if [ -z "$line" ]; then state=label; else state=invalid; fi
+        ;;
+      label)
+        if [ "$line" = 'Captain decision:' ]; then state=answer; else state=invalid; fi
+        ;;
+      answer)
+        if [ "$started" -eq 0 ]; then
+          answer=$line
+          started=1
+        else
+          answer+=$'\n'"$line"
+        fi
+        ;;
+    esac
+  done <<< "$block"
+  case "$mode:$state" in
+    answered:answer|released:answer|repaired:answer|routed:answer) ;;
+    *) printf 'unanswered'; return 0 ;;
   esac
+  remaining=$answer
+  while [[ "$remaining" == *$'\n\n'* ]]; do
+    segment=${remaining%%$'\n\n'*}
+    if [ "$first" -eq 1 ]; then
+      prefix=$segment
+      first=0
+    else
+      prefix+=$'\n\n'"$segment"
+    fi
+    remaining=${remaining#"$segment"$'\n\n'}
+    if [ "$(sha256_text "$prefix")" = "$digest" ]; then
+      case "$remaining" in
+        'Captain hold origin: '*)
+          stored=${remaining%%$'\n'*}
+          stored=${stored#'Captain hold origin: '}
+          ;;
+      esac
+      break
+    fi
+  done
+  printf 'answered %s' "$stored"
 }
 
 # Resolve one entry and verify the row it names is durably captain-held. A
