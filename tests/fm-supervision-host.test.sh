@@ -485,11 +485,26 @@ test_dispatch_offer_takes_a_routine_recovery_resurface_on_the_attended_host() {
   assert_contains "$out" "eligible=0" "a resurface beside a decision-owned stale row must stay main's"
   rm -f "$state/other.meta" "$state/other.status"
 
+  # A needs-decision: payload is main-owned on the signal path itself. A routine
+  # sibling makes the case discriminating: without that push the resurface would
+  # be offered for the routine row alone.
   : > "$state/.wake-queue"
-  printf 'needs-decision [at=%s]: which export format?\n' "$(date +%s)" >> "$state/demo.status"
-  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  printf 'working [at=%s]: step one\n' "$(date +%s)" > "$state/demo.status"
+  printf 'project=demo\nwindow=fm-other\n' > "$state/other.meta"
+  printf 'working [at=%s]: step one\n' "$(date +%s)" > "$state/other.status"
+  append_wake "$state" signal demo.status "needs-decision: which export format?"
+  append_wake "$state" signal other.status "signal: $state/other.status"
   out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
-  assert_contains "$out" "eligible=0" "a resurface beside a decision-owned row must stay main's"
+  assert_contains "$out" "eligible=0" "a resurface beside a decision-signal payload and a routine row must stay main's"
+  rm -f "$state/other.meta" "$state/other.status"
+
+  # An unsafe scan leaves mainOnlySeqs empty, so the resurface exemption alone
+  # would offer it; eligible stays 0 only because the scan itself is ineligible.
+  : > "$state/.wake-queue"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  printf 'not a queue row\n' >> "$state/.wake-queue"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface beside a malformed queue row must stay main's"
   pass "dispatch entry: the attended host offers a recovery resurface to the branch only when no unread row is main's"
 }
 
