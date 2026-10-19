@@ -149,9 +149,9 @@ EOF
 # off) and FM_OUTCOME_DIGEST_PR_READY (urgent or digest; default digest) from
 # config/outcome-digest. A file that cannot be read or holds anything but
 # blank lines, # comments, window=<minutes 0-1440>, and pr-ready=urgent|digest
-# turns the digest off (window 0, every captain outcome wakes main at once, as
-# without the digest) and sets FM_OUTCOME_DIGEST_PROBLEM to one plain sentence
-# naming why; otherwise that problem is empty.
+# turns the digest off (window 0, so pending captain outcomes are due at once,
+# except repeats main already holds) and sets FM_OUTCOME_DIGEST_PROBLEM to one
+# plain sentence naming why; otherwise that problem is empty.
 # shellcheck disable=SC2034 # Output globals, read by the sourcing caller.
 fm_supervision_host_digest_config() {
   local file=$1/outcome-digest line key value window=60 pr=digest

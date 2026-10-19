@@ -205,7 +205,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
 // outcomes"). The branch cannot answer it (bin/fm-lease-lib.sh refuses its
 // decision answer while attended), and main's drain folds the decision from
 // the status log whoever read the row. A decision-owned stale row stays
-// main's, and so does every later trigger for its task.
+// main's.
 //
 // That applies to a heartbeat review too, and it is the whole point: a
 // heartbeat used to be deferred to main merely because some unrelated check

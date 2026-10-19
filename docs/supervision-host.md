@@ -11,7 +11,7 @@ It is one architecture with Pi's, not a second one.
 These parts are shared with Pi and decide what the branch may do:
 
 - The same branch prompt.
-- The same row eligibility.
+- The same row eligibility, with the attended digest exception under [Postures](#postures).
 - The same records.
 - The same guarded scripts.
 
@@ -26,7 +26,7 @@ Today it runs beside a Claude, Cursor, OpenCode, omp, Grok, or Codex primary: aw
 
 ### Behavior by posture and harness
 
-- Attended (no away record: no `state/.afk-contract`, or quiet mode's) on Claude and Cursor, the engine takes the wakes the Pi branch would take plus eligible recovery resurfaces, and never wakes main for a routine outcome; see [Postures](#postures).
+- Attended (no away record: no `state/.afk-contract`, or quiet mode's) on Claude and Cursor, the engine takes eligible wakes, including recovery resurfaces and decision signals when the digest is on, and never wakes main for a routine outcome; see [Postures](#postures).
   Every other close reaches main exactly as the plain watcher arm delivers it.
 - Attended on OpenCode, omp, Grok, and Codex, the host is a pass-through: every close reaches main as without the host.
 - Away (an away record exists), the host hands each close to the engine.
@@ -207,7 +207,7 @@ A captain outcome the attended engine records while the captain remains attended
 ### The digest
 
 The engine tags each attended captain outcome `urgent`, `pr-ready`, or `digest` (`bin/fm-branch-prompt.sh` "Verdict: routine or captain" owns the criteria), and the store keeps the tag with the row.
-After every handled turn that recorded a captain outcome, the host asks the store whether its unread captain outcomes are due (`bin/fm-branch-outcome.sh digest` owns the rule and `config/outcome-digest` the window and pr-ready policy, [configuration](configuration.md#captain-outcome-digest-configoutcome-digest)):
+At startup, after every handled turn that recorded a captain outcome, and when a held outcome reaches its deadline, the host asks the store whether its unread captain outcomes are due (`bin/fm-branch-outcome.sh digest` owns the rule and `config/outcome-digest` the window and pr-ready policy, [configuration](configuration.md#captain-outcome-digest-configoutcome-digest)):
 
 - An urgent outcome, a ready PR when the policy makes it urgent, and an outcome without a tag are due at once, and the wake carries every waiting outcome with it.
 - Otherwise the outcomes wait, and the host parks until the oldest one's window closes, then wakes main once for all of them.
@@ -346,10 +346,11 @@ A captain message typed during the park waits for the checkpoint to return, at m
 
 The engine keeps one conversation across wakes so the byte-stable prompt stays cached.
 That conversation is keyed to the current main session.
-A new one opens in two cases:
+A new one opens:
 
 - At every main session start.
 - Every `FM_SUPERVISION_HOST_ROTATE_TURNS` turns, because each wake adds history and the per-wake cost grows with it.
+- When the generated branch prompt changes, so the next turn receives its current instructions.
 
 Nothing captain-facing rides on that conversation, because the outcome store carries every result.
 The captain context it acts on is the [dialog mirror](#the-dialog-mirror) at the head of every attended wake and the away record's read-back at the tail of every away wake.
