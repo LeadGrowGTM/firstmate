@@ -117,14 +117,14 @@ fm_boat_load_reservation() {
 fm_boat_revisit_seconds() {
   local count=$1 interval=${FM_CHECK_INTERVAL:-300}
   case "$interval" in ''|*[!0-9]*) return 1 ;; esac
-  printf '%s\n' "$((10#$interval * count))"
+  printf '%s\n' "$(( (10#$interval + FM_BOAT_RENEW_TIMEOUT) * count ))"
 }
 
 # fm_boat_read_box_ids <path>
 # Prints one approved id per line. On refusal sets FM_BOAT_BOX_PROBLEM and
 # returns 1. Requires fm_boat_load_reservation to have set FM_BOAT_MAX_BOXES.
 fm_boat_read_box_ids() {
-  local path=$1 bytes_cap ids count revisit minimum effective_ttl
+  local path=$1 bytes_cap ids
   FM_BOAT_BOX_PROBLEM=
   [ -d "$(dirname "$path")" ] && [ ! -L "$(dirname "$path")" ] &&
     [ -f "$path" ] && [ ! -L "$path" ] || {
@@ -148,6 +148,11 @@ fm_boat_read_box_ids() {
     FM_BOAT_BOX_PROBLEM='invalid config/boat-box-id'
     return 1
   }
+  printf '%s\n' "$ids"
+}
+
+fm_boat_validate_cadence() {
+  local ids=$1 count revisit minimum effective_ttl
   count=$(printf '%s\n' "$ids" | wc -l)
   revisit=$(fm_boat_revisit_seconds "$count") || {
     FM_BOAT_BOX_PROBLEM='FM_CHECK_INTERVAL must be a whole number of seconds'
@@ -162,5 +167,4 @@ fm_boat_read_box_ids() {
     printf '%s\n' "$FM_BOAT_BOX_PROBLEM" >&2
     return 1
   fi
-  printf '%s\n' "$ids"
 }

@@ -324,7 +324,7 @@ run_entry() {
     FM_HOME="$home" HOME="$CASE/user-home" GIT_CONFIG_GLOBAL="$CASE/user-home/.gitconfig" GIT_CONFIG_NOSYSTEM=1 PATH="$FAKEBIN:$PATH" \
     FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
     TMUX="${BOAT_TEST_TMUX:-}" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 \
-    FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
+    FM_BOAT_BIN="$FAKEBIN/boat" FM_CHECK_INTERVAL=240 FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
     BIN="$BIN" REAL_BRIEF="$ROOT/bin/fm-brief.sh" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
     "$BIN/$entry" "$@" < "$input" 2>&1)
   CODE=$?
@@ -724,8 +724,10 @@ test_running_quota_and_route() {
 test_prepare_before_route() {
   new_case prepare-before-route
   rm "$LOCAL_HOME/data/secondmates.md"
+  printf '%s %s:%s\n' 'bx_ahnbu3qr' "$((NOW - 900))" "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-idle-since"
   run_entry "$LOCAL_HOME" fm-boat-send.sh --prepare --code-only
   expect_code 0 "$CODE" "prepare before route registration: $OUT"
+  assert_absent "$LOCAL_HOME/state/.boat-idle-since" 'prepare kept the prior instance idle record'
   assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code' "$FIXTURES/calls" 'prepare did not safely resume'
   assert_grep 'alias bx_ahnbu3qr boat-prove' "$FIXTURES/calls" 'prepare did not refresh alias'
   assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'prepare dispatched without route'

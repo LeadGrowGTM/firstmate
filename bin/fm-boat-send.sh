@@ -102,6 +102,9 @@ for tool in jq "$BOAT_BIN"; do command -v "$tool" >/dev/null || die "$tool is re
 fm_boat_load_reservation || die "invalid config/boat-spend.json${FM_BOAT_SPEND_PROBLEM:+: $FM_BOAT_SPEND_PROBLEM}"
 BOX_CONFIG="$FM_HOME/config/boat-box-id"
 BOX_ID_TEXT=$(fm_boat_read_box_ids "$BOX_CONFIG" 2>&1) || die "${BOX_ID_TEXT:-invalid config/boat-box-id}"
+if [ -z "$TEARDOWN_ID" ]; then
+  fm_boat_validate_cadence "$BOX_ID_TEXT" || die "${FM_BOAT_BOX_PROBLEM:-invalid Boat cadence}"
+fi
 mapfile -t BOX_IDS <<< "$BOX_ID_TEXT"
 if [ "${#BOX_IDS[@]}" -eq 1 ]; then
   MULTI=0
@@ -325,6 +328,18 @@ dispatch_prepared_box() {
   publish_route_box
   FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" boat-prove || stop_refuse 'SSH refresh or hydration failed'
   if [ "$PREPARE" -eq 1 ]; then
+    if [ "$STATE" = stopped ]; then
+      idle_since="$FM_HOME/state/.boat-idle-since"
+      [ ! -L "$idle_since" ] || stop_refuse 'unsafe idle record path'
+      if [ -f "$idle_since" ]; then
+        awk -v id="$BOX" '$1 != id' "$idle_since" > "$TMP/idle-since" || stop_refuse 'idle record cleanup failed'
+        if [ -s "$TMP/idle-since" ]; then
+          mv -f -- "$TMP/idle-since" "$idle_since" || stop_refuse 'idle record cleanup failed'
+        else
+          rm -f -- "$idle_since" || stop_refuse 'idle record cleanup failed'
+        fi
+      fi
+    fi
     printf 'prepared: %s route=%s (no worker dispatched)\n' "$BOX" "$ROUTE"
     exit 0
   fi

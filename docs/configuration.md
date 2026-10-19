@@ -2218,7 +2218,7 @@ This section is the single owner of the schema.
   The check's defaults are the values above, with an empty `always_on` and no `boat_bin`.
   `account_seconds_per_24h` and `box_seconds_per_24h` are optional whole numbers of seconds, 1 or more, and are omitted by default.
   `resume_ttl_seconds` is an optional whole number of seconds from 1800 to 14400, and `idle_grace_seconds` is an optional whole number of seconds from 0 to 86400 that must be shorter than both the configured resume timer and the 3600-second renewal fallback, including when either uses its default.
-  The effective timer, `min(resume_ttl_seconds, 3600)`, must also be at least three times the watcher poll interval times the number of listed boxes, plus the 112-second total renewal timeout.
+  The effective timer, `min(resume_ttl_seconds, 3600)`, must also be at least three times the worst-case revisit interval plus the 112-second total renewal timeout. Revisit is the number of listed boxes times (`FM_CHECK_INTERVAL` plus the 112-second per-box visit cap).
 - `account_seconds_per_24h` and `box_seconds_per_24h` are for dispatch, not for this check.
   The check accepts them and does not report on them.
   [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) owns how they reserve spend, including the historical ceilings it keeps when the file or a key is absent.
@@ -2279,7 +2279,8 @@ This section owns the behavior; the script's header owns the exact commands, bou
 - An unreadable idle report or instance is treated as busy when the box's running state and timer are known, and can trigger renewal. An unreadable state or timer prevents an explicit stop but cannot guarantee renewal.
 - The send lock covers each state read, worker probe, timer extension, and stop, so a concurrent dispatch or teardown cannot change a box between its liveness report and action.
 - With several boxes, each sweep starts where the last one left off, so a slow box cannot starve the rest of extends and stops.
-- The supported fleet has at most three listed boxes. The revisit interval is `FM_CHECK_INTERVAL` (300 seconds by default) times the number of listed boxes. An effective timer of `min(resume_ttl_seconds, 3600)` shorter than three revisit intervals plus the total renewal timeout is refused. With three boxes at the default cadence, 1800 seconds is refused and the 3600-second default is accepted; a 1200-second poll interval is refused even with a configured 12000-second timer.
+- The supported fleet has at most three listed boxes. The worst-case revisit interval is the number of listed boxes times (`FM_CHECK_INTERVAL`, 300 seconds by default, plus the 112-second per-box visit cap). An effective timer of `min(resume_ttl_seconds, 3600)` shorter than three revisit intervals plus the total renewal timeout is refused. With three boxes, the default 300-second poll is refused even at a configured 3600-second timer; a 240-second poll is accepted. Recovery reads of the box allowlist remain available if the cadence becomes unsafe.
+- Idle grace belongs to the current box instance. A new boot instance starts a fresh grace, and a successful `--prepare` resume clears that box's old idle record.
 - `FM_CHECK_TIMEOUT` must be at least 30 seconds for this check to run, which is also the default.
 - Extend skips its spend reservation on purpose, because a live worker must not lose its box to a ceiling; the spend check stays the ceiling watchdog.
 

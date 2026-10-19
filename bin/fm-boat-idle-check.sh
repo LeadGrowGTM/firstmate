@@ -321,6 +321,7 @@ renew_run() {
   valid_box "$box" || return 1
   fm_boat_load_reservation || return 1
   ids=$(fm_boat_read_box_ids "$BOX_CONFIG") || return 1
+  fm_boat_validate_cadence "$ids" || return 1
   printf '%s\n' "$ids" | grep -Fxq -- "$box" || return 1
   revisit=$(fm_boat_revisit_seconds "$(printf '%s\n' "$ids" | wc -l)") || return 1
   RENEW_THRESHOLD=$((2 * revisit + FM_BOAT_RENEW_TIMEOUT))
@@ -513,9 +514,10 @@ check_box_locked() {
   fi
   renew_clear "$box"
   since=$(record_read "$SINCE_FILE" "$box")
-  case "$since" in ''|*[!0-9]*) since=$now; record_write "$SINCE_FILE" "$box" "$since" || true ;; esac
+  case "$since" in *:"$instance") since=${since%%:*} ;; *) since= ;; esac
+  case "$since" in ''|*[!0-9]*) since=$now; record_write "$SINCE_FILE" "$box" "$since:$instance" || true ;; esac
   idle_for=$((now - since))
-  [ "$idle_for" -ge 0 ] || { record_write "$SINCE_FILE" "$box" "$now" || true; return 0; }
+  [ "$idle_for" -ge 0 ] || { record_write "$SINCE_FILE" "$box" "$now:$instance" || true; return 0; }
   if [ "$idle_for" -lt "$grace" ]; then
     return 0
   fi
@@ -531,7 +533,7 @@ check_box_locked() {
       report_note "stop-$box" "$now"
     fi
   else
-    record_write "$SINCE_FILE" "$box" "$now" || true
+    record_write "$SINCE_FILE" "$box" "$now:$instance" || true
     if report_due "stop-$box" "$now" "$ACTION_INTERVAL"; then
       part "stop $box failed after ${idle_for}s with no workers reported"
       report_note "stop-$box" "$now"
@@ -540,7 +542,7 @@ check_box_locked() {
 }
 
 run_check() {
-  local now problem bin ids multi box pos count i timeout renewal revisit ORDER
+  local now problem bin ids cadence multi box pos count i timeout renewal revisit ORDER
   PARTS=
   RENEW_QUEUE=()
   RENEW_THRESHOLD=0
@@ -571,6 +573,8 @@ run_check() {
         problem='the Boat CLI is missing'
       elif ! ids=$(fm_boat_read_box_ids "$BOX_CONFIG" 2>&1) || [ -z "$ids" ]; then
         problem="config/boat-box-id is missing or invalid${ids:+: $ids}"
+      elif ! cadence=$(fm_boat_validate_cadence "$ids" 2>&1); then
+        problem="config/boat-box-id is missing or invalid${cadence:+: $cadence}"
       elif ! revisit=$(fm_boat_revisit_seconds "$(printf '%s\n' "$ids" | wc -l)"); then
         problem='FM_CHECK_INTERVAL is invalid'
       else
@@ -688,10 +692,11 @@ arm_failed() {  # <message>
 }
 
 arm() {
-  local state_device home want
+  local state_device home want ids
   [ -f "$CONFIG" ] || fail "no Boat spend config at $CONFIG"
   fm_boat_load_reservation >/dev/null || fail "${FM_BOAT_SPEND_PROBLEM:-invalid config} ($CONFIG)"
-  fm_boat_read_box_ids "$BOX_CONFIG" >/dev/null 2>&1 || fail "${FM_BOAT_BOX_PROBLEM:-invalid config} ($BOX_CONFIG)"
+  ids=$(fm_boat_read_box_ids "$BOX_CONFIG") || fail "${FM_BOAT_BOX_PROBLEM:-invalid config} ($BOX_CONFIG)"
+  fm_boat_validate_cadence "$ids" >/dev/null 2>&1 || fail "${FM_BOAT_BOX_PROBLEM:-invalid config} ($BOX_CONFIG)"
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || fail "state directory is unavailable"
   case "$FM_HOME" in
     /*) home=$FM_HOME ;;

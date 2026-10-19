@@ -130,10 +130,15 @@ if [ -e "$FIXTURES/retained.meta" ]; then
   printf 'boat-tasks-remaining: yes\n'
   exit 0
 fi
-found=$(grep -l -F -- "${4:-}" "$FIXTURES/"*.boot 2>/dev/null | head -n 1 || true)
+if [ -e "$FIXTURES/rotate" ]; then
+  found=$(grep -l -F -- "${4:-}" "$FIXTURES/"*.boot2 2>/dev/null | head -n 1 || true)
+else
+  found=$(grep -l -F -- "${4:-}" "$FIXTURES/"*.boot 2>/dev/null | head -n 1 || true)
+fi
 [ -n "$found" ] || exit 1
 box=$(basename "$found")
 box=${box%.boot}
+box=${box%.boot2}
 [ -f "$FIXTURES/idle.$box" ] || exit 1
 if [ -e "$FIXTURES/idle.clears-on-renew" ]; then
   count=$(cat "$FIXTURES/idle.count" 2>/dev/null || printf '0')
@@ -168,6 +173,7 @@ chmod +x "$BIN/fm-on.sh" "$BIN/fm-boat-alias-refresh.sh" "$FAKEBIN/"*
 # info fixture, and a boot id. Prints the home path in HOME_DIR.
 new_case() {
   local name=$1 cfg=${2-'{}'}
+  CASE_INTERVAL=300
   CASE="$TMP_ROOT/$name"
   FIXTURES="$CASE/fixtures"
   HOME_DIR="$CASE/home"
@@ -191,7 +197,7 @@ make_info() { # <state> <offset-secs>: running info with a timer, or stopped.
 }
 
 set_idle() { printf '%s\n' "$1" > "$FIXTURES/idle.$BOX"; }
-seed_since() { printf '%s %s\n' "$BOX" "$1" > "$HOME_DIR/state/.boat-idle-since"; }
+seed_since() { printf '%s %s:%s\n' "$BOX" "$1" "$(cat "$FIXTURES/$BOX.boot")" > "$HOME_DIR/state/.boat-idle-since"; }
 seed_receipt() { printf '%s %s fm-code\n' "$BOX" "$(cat "$FIXTURES/$BOX.boot")" > "$HOME_DIR/state/.boat-environment"; }
 
 # run_at <epoch>: runs the complete executable in the case home at a clock.
@@ -199,7 +205,7 @@ run_at() {
   OUT=$(env -u FM_ROOT -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u STATE \
     -u FM_WAKE_QUEUE -u FM_WAKE_QUEUE_LOCK -u TMUX \
     FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" \
-    FM_BOAT_BIN="$FAKEBIN/boat" FM_BOAT_IDLE_NOW="$1" FIXTURES="$FIXTURES" \
+    FM_BOAT_BIN="$FAKEBIN/boat" FM_BOAT_IDLE_NOW="$1" FM_CHECK_INTERVAL="$CASE_INTERVAL" FIXTURES="$FIXTURES" \
     "$BIN/fm-boat-idle-check.sh" check 2>&1)
   CODE=$?
   wait_renewal
@@ -268,7 +274,7 @@ test_idle_box_records_first_sight() {
   [ -z "$OUT" ] || fail "an idle box inside its grace should be silent: $OUT"
   assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'an idle box was extended'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'an idle box was stopped inside its grace'
-  assert_equals "$BOX $NOW" "$(cat "$HOME_DIR/state/.boat-idle-since")" 'first idle sighting was not recorded'
+  assert_equals "$BOX $NOW:$(cat "$FIXTURES/$BOX.boot")" "$(cat "$HOME_DIR/state/.boat-idle-since")" 'first idle sighting was not recorded'
 }
 
 test_idle_box_stops_after_grace() {
@@ -366,7 +372,25 @@ test_instance_rotation_skips_stop() {
   expect_code 0 "$CODE" "rotated check: $OUT"
   [ -z "$OUT" ] || fail "a resumed box should be silent: $OUT"
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a freshly resumed box was stopped'
-  assert_absent "$HOME_DIR/state/.boat-idle-since" 'an unreadable instance kept the old grace'
+  assert_equals "$BOX $NOW:$(cat "$FIXTURES/$BOX.boot2")" "$(cat "$HOME_DIR/state/.boat-idle-since")" 'a new instance inherited the old idle grace'
+}
+
+test_resumed_instance_gets_full_grace() {
+  new_case resumed-instance
+  make_info running 600
+  set_idle 'boat-tasks-remaining: no'
+  run_at "$NOW"
+  expect_code 0 "$CODE" "first idle instance: $OUT"
+  printf '%s\n' '22222222-2222-4222-8222-222222222222' > "$FIXTURES/$BOX.boot2"
+  : > "$FIXTURES/rotate"
+  make_info running 4300
+  run_at "$((NOW + 900))"
+  expect_code 0 "$CODE" "resumed idle instance: $OUT"
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a resumed idle box was stopped before its grace'
+  assert_equals "$BOX $((NOW + 900)):$(cat "$FIXTURES/$BOX.boot2")" "$(cat "$HOME_DIR/state/.boat-idle-since")" 'the new instance did not start a fresh grace'
+  run_at "$((NOW + 1800))"
+  expect_code 0 "$CODE" "new instance after grace: $OUT"
+  assert_grep "boat --no-update stop $BOX --json" "$FIXTURES/calls" 'the resumed box stayed up past its own grace'
 }
 
 test_configured_resume_timer() {
@@ -382,7 +406,7 @@ test_configured_resume_timer() {
 
 test_revisit_window_renews() {
   new_case revisit-window '{"resume_ttl_seconds":1800}'
-  make_info running 711
+  make_info running 935
   set_idle 'boat-tasks-remaining: yes'
   run_at "$NOW"
   expect_code 0 "$CODE" "revisit window check: $OUT"
@@ -396,8 +420,15 @@ test_three_box_renewal_window() {
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
   run_at "$NOW"
   expect_code 0 "$CODE" "short three-box timer: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 1800 with fallback 3600 gives an effective timer shorter than 2812s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'unsafe fleet timer was accepted'
+  assert_contains "$OUT" 'resume_ttl_seconds 1800 with fallback 3600 gives an effective timer shorter than 3820s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'unsafe fleet timer was accepted'
   assert_equals 0 "$(boat_calls)" 'unsafe fleet timer contacted Boat'
+
+  new_case default-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
+  printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "default three-box timer: $OUT"
+  assert_contains "$OUT" 'resume_ttl_seconds 3600 with fallback 3600 gives an effective timer shorter than 3820s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'three-box 300-second cadence omitted sweep time'
+  assert_equals 0 "$(boat_calls)" 'unsafe default fleet cadence contacted Boat'
 
   new_case slow-fleet-poll '{"expected_running":3,"resume_ttl_seconds":12000}'
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
@@ -406,14 +437,15 @@ test_three_box_renewal_window() {
     "$BIN/fm-boat-idle-check.sh" check 2>&1)
   CODE=$?
   expect_code 0 "$CODE" "slow three-box poll: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 12000 with fallback 3600 gives an effective timer shorter than 10912s required for 3 listed boxes at FM_CHECK_INTERVAL 1200' 'fallback timer below the fleet cadence was accepted'
+  assert_contains "$OUT" 'resume_ttl_seconds 12000 with fallback 3600 gives an effective timer shorter than 11920s required for 3 listed boxes at FM_CHECK_INTERVAL 1200' 'fallback timer below the fleet cadence was accepted'
   assert_equals 0 "$(boat_calls)" 'unsafe fleet cadence contacted Boat'
 
   new_case safe-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
+  CASE_INTERVAL=240
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
   printf '%s\n' '{"sandbox":{"id":"'"$second"'","type":"default","state":"stopped"}}' > "$FIXTURES/$second.info.json"
   printf '%s\n' '{"sandbox":{"id":"'"$third"'","type":"default","state":"stopped"}}' > "$FIXTURES/$third.info.json"
-  make_info running 1911
+  make_info running 2223
   set_idle 'boat-tasks-remaining: yes'
   : > "$FIXTURES/resume.fail"
   run_at "$NOW"
@@ -425,7 +457,7 @@ test_three_box_renewal_window() {
   : > "$FIXTURES/exec.slow"
   : > "$FIXTURES/limits.near-bound"
   : > "$FIXTURES/resume.long"
-  run_at "$((NOW + 900))"
+  run_at "$((NOW + 1056))"
   expect_code 0 "$CODE" "three-box renewal retry: $OUT"
   assert_equals 2 "$(grep -c "boat --no-update resume $BOX " "$FIXTURES/calls")" 'a failed renewal was not retried before expiry'
   assert_equals ok "$(cat "$HOME_DIR/state/.boat-idle-renew-$BOX/result")" 'the renewal retry did not succeed'
@@ -536,7 +568,7 @@ test_two_boxes_extend_and_stop_on_one_line() {
   printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/$BOX.boot"
   make_info running 3600
   set_idle 'boat-tasks-remaining: no'
-  printf '%s %s\n' "$BOX" "$((NOW - 900))" > "$HOME_DIR/state/.boat-idle-since"
+  seed_since "$((NOW - 900))"
   BOX=bx_aaaaaaaa
   run_at "$NOW"
   expect_code 0 "$CODE" "two-box check: $OUT"
@@ -724,6 +756,7 @@ test_unreadable_info_is_silent
 test_unreadable_instance_renews
 test_renewal_rechecks_state_and_liveness
 test_instance_rotation_skips_stop
+test_resumed_instance_gets_full_grace
 test_configured_resume_timer
 test_revisit_window_renews
 test_three_box_renewal_window
