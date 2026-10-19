@@ -22,6 +22,8 @@
 # 65536 bytes, and the id file to at most 4096 bytes or expected_running
 # times 12, whichever is smaller.
 
+FM_BOAT_RENEW_TIMEOUT=$((25 + 6 + 6 + 4 + 5 + 6 + 60))
+
 fm_boat_spend_config_path() {
   printf '%s\n' "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/boat-spend.json"
 }
@@ -122,7 +124,7 @@ fm_boat_revisit_seconds() {
 # Prints one approved id per line. On refusal sets FM_BOAT_BOX_PROBLEM and
 # returns 1. Requires fm_boat_load_reservation to have set FM_BOAT_MAX_BOXES.
 fm_boat_read_box_ids() {
-  local path=$1 bytes_cap ids count revisit minimum
+  local path=$1 bytes_cap ids count revisit minimum effective_ttl
   FM_BOAT_BOX_PROBLEM=
   [ -d "$(dirname "$path")" ] && [ ! -L "$(dirname "$path")" ] &&
     [ -f "$path" ] && [ ! -L "$path" ] || {
@@ -152,9 +154,11 @@ fm_boat_read_box_ids() {
     printf '%s\n' "$FM_BOAT_BOX_PROBLEM" >&2
     return 1
   }
-  minimum=$((3 * revisit + 60))
-  if [ "$FM_BOAT_RESUME_TTL" -lt "$minimum" ]; then
-    FM_BOAT_BOX_PROBLEM="resume_ttl_seconds $FM_BOAT_RESUME_TTL is shorter than ${minimum}s required for $count listed boxes at FM_CHECK_INTERVAL ${FM_CHECK_INTERVAL:-300}"
+  minimum=$((3 * revisit + FM_BOAT_RENEW_TIMEOUT))
+  effective_ttl=$FM_BOAT_RESUME_TTL
+  [ "$effective_ttl" -le 3600 ] || effective_ttl=3600
+  if [ "$effective_ttl" -lt "$minimum" ]; then
+    FM_BOAT_BOX_PROBLEM="resume_ttl_seconds $FM_BOAT_RESUME_TTL with fallback 3600 gives an effective timer shorter than ${minimum}s required for $count listed boxes at FM_CHECK_INTERVAL ${FM_CHECK_INTERVAL:-300}"
     printf '%s\n' "$FM_BOAT_BOX_PROBLEM" >&2
     return 1
   fi

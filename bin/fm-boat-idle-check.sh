@@ -56,7 +56,7 @@
 # on PATH. docs/configuration.md owns the config schema. Each Boat read is
 # bounded to 6 seconds, the idle probe to 5, and the alias refresh to 4.
 # The poll ends before FM_CHECK_TIMEOUT. A needed renewal runs in a detached
-# 60-second job, with one job per box and a recorded start time. The configured
+# bounded renewal job, with one job per box and a recorded start time. The configured
 # fleet supports at most three listed boxes. Sweeps rotate across them from a durable position, so a slow
 # box does not starve those behind it. Two consecutive renewal failures emit
 # one wake line. Stop and refresh failures are reported at most once per hour
@@ -290,7 +290,7 @@ box_extend() {
   else
     [ "$ttl" -le 3600 ] || ttl=3600
   fi
-  poll_timed "$RESUME_SECS" 1 "$BOAT_BIN" --no-update resume "$box" \
+  poll_timed "$RESUME_SECS" 0 "$BOAT_BIN" --no-update resume "$box" \
     --environment fm-code --ttl "$ttl" --json >/dev/null 2>&1
 }
 
@@ -323,15 +323,15 @@ renew_run() {
   ids=$(fm_boat_read_box_ids "$BOX_CONFIG") || return 1
   printf '%s\n' "$ids" | grep -Fxq -- "$box" || return 1
   revisit=$(fm_boat_revisit_seconds "$(printf '%s\n' "$ids" | wc -l)") || return 1
-  RENEW_THRESHOLD=$((2 * revisit + RESUME_SECS))
+  RENEW_THRESHOLD=$((2 * revisit + FM_BOAT_RENEW_TIMEOUT))
   ttl=$FM_BOAT_RESUME_TTL
   multi=0
   [ "$(printf '%s\n' "$ids" | wc -l)" -le 1 ] || multi=1
   BOAT_BIN=${FM_BOAT_BIN:-$(jq -r '.boat_bin // ""' "$CONFIG" 2>/dev/null)}
   [ -n "$BOAT_BIN" ] || BOAT_BIN=boat
   command -v "$BOAT_BIN" >/dev/null 2>&1 || return 1
-  CHECK_DEADLINE=$(($(date +%s) + 58))
-  EXTEND_RESERVE=20
+  CHECK_DEADLINE=$(($(date +%s) + FM_BOAT_RENEW_TIMEOUT))
+  EXTEND_RESERVE=$RESUME_SECS
   fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" 25 || return 1
   IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
   if ! read -r state remaining <<< "$(boat_info "$box" 2>/dev/null)" \
@@ -371,7 +371,7 @@ renew_job() {
   local box=$1 marker rc=0
   valid_box "$box" || return 1
   marker=$(renew_marker "$box")
-  fm_run_timed 60 "$0" renew-run "$box" || rc=$?
+  fm_run_timed "$FM_BOAT_RENEW_TIMEOUT" "$0" renew-run "$box" || rc=$?
   if [ "$rc" -eq 0 ]; then
     renew_result "$marker" ok
   else
@@ -390,7 +390,7 @@ renew_start() {
     if [ -z "$result" ]; then
       start=$(cat "$marker/start" 2>/dev/null || true)
       case "$start" in ''|*[!0-9]*) start=0 ;; esac
-      [ "$(date +%s)" -gt "$((start + 65))" ] || return 0
+      [ "$(date +%s)" -gt "$((start + FM_BOAT_RENEW_TIMEOUT + 5))" ] || return 0
     fi
     attempts=$(cat "$marker/attempts" 2>/dev/null || true)
     case "$attempts" in ''|*[!0-9]*) attempts=0 ;; esac
@@ -574,7 +574,7 @@ run_check() {
       elif ! revisit=$(fm_boat_revisit_seconds "$(printf '%s\n' "$ids" | wc -l)"); then
         problem='FM_CHECK_INTERVAL is invalid'
       else
-        RENEW_THRESHOLD=$((2 * revisit + RESUME_SECS))
+        RENEW_THRESHOLD=$((2 * revisit + FM_BOAT_RENEW_TIMEOUT))
       fi
     fi
   fi
