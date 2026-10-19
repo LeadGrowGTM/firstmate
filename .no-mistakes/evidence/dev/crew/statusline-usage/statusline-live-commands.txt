@@ -1,0 +1,9 @@
+Isolated lab, sample cached balances; public command output:
+Wide Claude status line: Opus 5.5 high | Ctx 31% | lab-primary | 5h 24% 7d 60% | mu n/a, gk 47% 2d, cl-gmail 15% 2d, cl-second 91% 4h30m, cx 43% 6d
+Narrow Claude status line: Opus 5.5 high | Ctx 31% | lab-primary | 5h 24% 7d 60% | mu n/a, gk 47%, cl-gmail 15%, cl-second 91%, cx 43%
+Boundary percentages: mu <1%, gk >99%, cl-gmail <1%, cl-second >99%, cx <1%
+Unavailable gmail account: mu n/a, gk 47%, cl-gmail ?, cl-second 91%, cx 43%
+Stale cache: mu n/a, gk 47%, cl-gmail ?, cl-second 91%, cx 43% (stale)
+Expired cache (empty expected): <>
+Cold isolated real quota-axi refresh: <>
+After isolated real quota-axi refresh: mu ?, gk ?, cl-gmail ?, cl-second ?, cx ?
