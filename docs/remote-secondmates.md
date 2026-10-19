@@ -607,7 +607,7 @@ Dispatch success requires a fresh worker status declaration after spawn, rather 
 The worker does not auto-answer Codex directory-trust text because a rendered transcript cannot prove an active modal.
 Without a fresh worker status declaration, dispatch refuses success and leaves the task intact for same-task reconciliation.
 A new resume uses the short on-demand timer (`resume_ttl_seconds`, 3600 seconds when absent, capped by the plan timer) and reserves only that timer; running boxes reserve only their existing timer's remaining duration against the configured spend caps.
-Dispatch itself never extends the timer; the idle check re-arms it by the same amount while workers are live and stops the box after the idle grace.
+After SSH hydration, dispatch rechecks the timer and extends it within the plan cap before worker spawn if it falls below the renewal threshold; a failed extend refuses the spawn. The PC-side idle check re-arms the timer while workers are live and stops the box after the idle grace.
 With more than one listed box, dispatch prefers a listed box that is already running and still has room under the three-worker cap, and it does not create boxes.
 An active sandbox that is not listed, or more active sandboxes than `expected_running`, is refused.
 A task stays on the box recorded for it, and a later command that names that task uses that box.

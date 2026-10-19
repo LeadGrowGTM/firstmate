@@ -453,6 +453,14 @@ test_three_box_renewal_window() {
   assert_contains "$OUT" 'resume_ttl_seconds 12000 with fallback 3600 gives an effective timer shorter than 11192s required for 3 listed boxes at FM_CHECK_INTERVAL 1200' 'fallback timer below the fleet cadence was accepted'
   assert_equals 0 "$(boat_calls)" 'unsafe fleet cadence contacted Boat'
 
+  new_case overflowing-fleet-poll '{"expected_running":3,"resume_ttl_seconds":3600}'
+  printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
+  CASE_INTERVAL=9223372036854775807
+  run_at "$NOW"
+  expect_code 0 "$CODE" "overflowing three-box poll: $OUT"
+  assert_contains "$OUT" 'FM_CHECK_INTERVAL must be a whole number from 0 to 3600 seconds for 1 to 3 listed boxes' 'overflowing interval was accepted'
+  assert_equals 0 "$(boat_calls)" 'overflowing interval contacted Boat'
+
   new_case safe-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
   CASE_INTERVAL=240
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"

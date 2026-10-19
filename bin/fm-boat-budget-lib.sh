@@ -117,8 +117,11 @@ fm_boat_load_reservation() {
 
 fm_boat_revisit_seconds() {
   local count=$1 interval=${FM_CHECK_INTERVAL:-300}
-  case "$interval" in ''|*[!0-9]*) return 1 ;; esac
-  printf '%s\n' "$(( (10#$interval + FM_BOAT_CHECK_BUDGET) * count ))"
+  case "$count" in 1|2|3) ;; *) return 1 ;; esac
+  [[ $interval =~ ^0*([1-9][0-9]{0,3})?$ ]] || return 1
+  interval=${BASH_REMATCH[1]:-0}
+  [ "$interval" -le 3600 ] || return 1
+  printf '%s\n' "$(( (interval + FM_BOAT_CHECK_BUDGET) * count ))"
 }
 
 fm_boat_renew_threshold_seconds() {
@@ -162,7 +165,7 @@ fm_boat_validate_cadence() {
   local ids=$1 count revisit minimum effective_ttl
   count=$(printf '%s\n' "$ids" | wc -l)
   revisit=$(fm_boat_revisit_seconds "$count") || {
-    FM_BOAT_BOX_PROBLEM='FM_CHECK_INTERVAL must be a whole number of seconds'
+    FM_BOAT_BOX_PROBLEM='FM_CHECK_INTERVAL must be a whole number from 0 to 3600 seconds for 1 to 3 listed boxes'
     printf '%s\n' "$FM_BOAT_BOX_PROBLEM" >&2
     return 1
   }
