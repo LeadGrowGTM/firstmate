@@ -54,12 +54,14 @@
 #       statusLine wrapper can append them without calling claude-line.
 #       The usage segment lists Muse (mu), Grok (gk), each Claude account
 #       (cl-gmail and cl-second) and Codex (cx) as remaining percent and, when
-#       the available width permits, time to reset. A
-#       provider quota-axi reports no quota for shows "n/a" and one it could
-#       not read shows "?". Claude accounts are the two config directories listed
-#       in order in $FM_HOME/config/statusline-claude-accounts, or the gmail and
-#       second directories under $HOME/.claude-accounts; quota-axi runs once
-#       per available directory. The segment only reads a cache that a
+#       COLUMNS indicates enough room, time to reset. An unmeasurable quota
+#       shows "n/a"; Muse also shows "n/a" when no quota row is reported.
+#       A failed read or unavailable account shows "?". Claude accounts use
+#       the two directories listed in order in
+#       ${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/statusline-claude-accounts,
+#       or the gmail and second directories under $HOME/.claude-accounts;
+#       quota-axi reads each available directory using only that profile.
+#       The segment only reads a cache that a
 #       background quota-axi job rebuilds at most every five minutes. A cache
 #       over ten minutes old is marked "(stale)" and one over an hour old is
 #       dropped. The cache holds only labels, percentages and reset times.
