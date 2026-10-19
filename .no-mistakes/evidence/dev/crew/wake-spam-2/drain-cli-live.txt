@@ -1,0 +1,10 @@
+First main drain while digest window is open:
+BRANCH OUTCOMES (captain outcomes the supervision session recorded for you, one line per task, oldest first; each says what was true when it was recorded, so check the task's current state first, including its still-open decisions listed above under OPEN DECISIONS, and sort them into still open and already settled, such as a decision since answered, a PR since merged, or a task since finished - process the still-open ones as firstmate: tell the captain, land or merge what is ready, answer or escalate a decision, or act on a blocker; your reply to the captain covers only those, as if the settled ones had never been listed, and a settled one needs only the acknowledgement):
+[seq 1, recorded 0m ago] demo: captain decision held for digest
+BRANCH OUTCOMES: after processing them run bin/fm-branch-outcome.sh mark-processed --through 1; until then every drain presents them again
+BRANCH OUTCOMES, ROUTINE (handled by the supervision session since your last drain; for your awareness, nothing to acknowledge):
+[seq 2] demo: routine progress
+Second main drain before captain acknowledgement:
+BRANCH OUTCOMES (captain outcomes the supervision session recorded for you, one line per task, oldest first; each says what was true when it was recorded, so check the task's current state first, including its still-open decisions listed above under OPEN DECISIONS, and sort them into still open and already settled, such as a decision since answered, a PR since merged, or a task since finished - process the still-open ones as firstmate: tell the captain, land or merge what is ready, answer or escalate a decision, or act on a blocker; your reply to the captain covers only those, as if the settled ones had never been listed, and a settled one needs only the acknowledgement):
+[seq 1, recorded 0m ago] demo: captain decision held for digest
+BRANCH OUTCOMES: after processing them run bin/fm-branch-outcome.sh mark-processed --through 1; until then every drain presents them again

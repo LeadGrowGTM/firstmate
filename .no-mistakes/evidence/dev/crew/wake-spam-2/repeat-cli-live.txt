@@ -1,0 +1,14 @@
+Live outcome CLI, unchanged presented decision versus changed status
+1
+Unchanged situation reported again:
+2
+due=none
+at=
+pending=
+repeats=2
+Status advances and is reported:
+3
+due=now
+at=
+pending=3
+repeats=2

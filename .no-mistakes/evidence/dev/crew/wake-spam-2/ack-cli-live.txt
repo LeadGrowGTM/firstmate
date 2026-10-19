@@ -1,0 +1,6 @@
+Before acknowledgement:
+[seq 1, recorded 0m ago] demo: held decision
+BRANCH OUTCOMES: after processing them run bin/fm-branch-outcome.sh mark-processed --through 1; until then every drain presents them again
+After acknowledgement:
+(no outcomes)
+Persisted markers: read=1 processed=1

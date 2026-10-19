@@ -1,0 +1,21 @@
+Decision signal with digest enabled:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+Decision-owned stale close with digest enabled:
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+Later signal on stale-owned task:
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0

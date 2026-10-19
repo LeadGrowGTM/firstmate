@@ -1,0 +1,51 @@
+Live product CLI, disposable marked lab home
+1
+2
+Fresh digest:
+due=later
+at=1792457051
+pending=1,2
+repeats=
+At window close:
+due=now
+at=
+pending=1,2
+repeats=
+Presented rows:
+{"seq":1,"summary":"report A ready","unread":true}
+{"seq":2,"summary":"report B ready","unread":true}
+After presentation:
+due=none
+at=
+pending=
+repeats=
+Still awaiting captain acknowledgement:
+{"seq":1,"summary":"report A ready"}
+{"seq":2,"summary":"report B ready"}
+3
+Urgent outcome:
+due=now
+at=
+pending=3
+repeats=
+4
+PR urgent policy:
+due=now
+at=
+pending=3,4
+repeats=
+Decision signal before and after digest opt-in:
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+Malformed store diagnostic:
+error: refusing the digest decision because the outcome store is malformed or non-sequential
