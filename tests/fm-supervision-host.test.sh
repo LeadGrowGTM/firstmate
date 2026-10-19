@@ -34,7 +34,8 @@ FAKE_CLAUDE="$FAKEBIN/claude"
 # branch turn through the real scripts according to $FM_HOME/stub-mode:
 #   handle      drain, claim the task's lease, report, acknowledge, release
 #   captain     the same as handle, but report verdict captain naming the rows
-#               the drain presented
+#               the drain presented, with the urgency $FM_HOME/stub-urgency
+#               names when that file exists
 #   hold-lease  the same, but leave the lease held (the host must release it)
 #   return      handle, but the captain returns (the record is archived) before
 #               the turn ends
@@ -99,7 +100,8 @@ case "$mode" in
     "$FM_REPO/bin/fm-lease.sh" claim "$task" >> "$FM_HOME/engine-lease.log" 2>&1
     if [ "$mode" = captain ] || [ "$mode" = captain-held ] \
       || [ "$mode" = captain-close-before-return ]; then
-      "$FM_REPO/bin/fm-branch-report.sh" --task "$task" --verdict captain \
+      urgency=$(cat "$FM_HOME/stub-urgency" 2>/dev/null || true)
+      "$FM_REPO/bin/fm-branch-report.sh" --task "$task" --verdict captain ${urgency:+--urgency "$urgency"} \
         --summary "stub escalated: $(printf '%s\n' "$drain" | grep -v '^WAKE_' | tr '\n' ' ' | cut -c1-400)" \
         >> "$FM_HOME/engine-report.log" 2>&1
     else
@@ -295,6 +297,14 @@ handled_count() { local n; n=$(grep -c '	handled	' "$1/state/.supervision-host.l
 handled_at_least() { [ "$(handled_count "$1")" -ge "$2" ]; }
 append_status() {  # <home> <text>
   printf '%s [at=%s]: %s\n' "${3:-working}" "$(date +%s)" "$2" >> "$1/state/demo.status"
+}
+# Turn the captain-outcome digest off (config/outcome-digest window=0), which
+# keeps every captain outcome and every decision close on main as before it.
+digest_off() {  # <home>
+  printf 'window=0\n' > "$1/config/outcome-digest"
+}
+host_logged() {  # <home> <regex>
+  grep -E -- "$2" "$1/state/.supervision-host.log" >/dev/null 2>&1
 }
 
 # --- report surface -----------------------------------------------------------
@@ -1008,6 +1018,238 @@ test_attended_captain_outcome_reaches_main_through_branch_outcomes() {
   pass "host: an attended captain outcome wakes main once and stays in its drain until main acknowledges it"
 }
 
+# The captain-outcome digest lets the attended host's branch claim a
+# decision-owned signal row, so main hears it in the digest; a decision-owned
+# stale row, and every later trigger for its task, stays main's.
+test_dispatch_entry_lets_the_digest_claim_decision_signals() {
+  local home state out
+  home="$TMP_ROOT/dispatch-digest"
+  state="$home/state"
+  mkdir -p "$state"
+  printf 'project=demo\nwindow=fm-demo\n' > "$state/demo.meta"
+  printf 'project=demo\nwindow=fm-beta\n' > "$state/beta.meta"
+  printf 'needs-decision [at=1]: which export format?\n' > "$state/demo.status"
+  printf 'needs-decision [at=1]: which region?\n' > "$state/beta.status"
+  append_wake "$state" signal demo.status "needs-decision:$state/demo.status"
+  append_wake "$state" stale fm-beta "stale: fm-beta"
+
+  out=$(printf 'signal: %s\n' "$state/demo.status" | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "without the digest an attended decision signal must stay main's"
+  out=$(printf 'signal: %s\n' "$state/demo.status" | FM_HOME="$home" node "$DISPATCH" offer --decision-digest)
+  assert_contains "$out" "eligible=1" "with the digest an attended decision signal must be the branch's to report"
+  assert_contains "$out" "rows=1"$'\n' "the digest claim must take the decision signal row and leave the stale decision row"
+  assert_contains "$out" "tasks=demo"$'\n' "the digest claim must be scoped to the decision's task"
+  out=$(printf 'stale: fm-beta\n' | FM_HOME="$home" node "$DISPATCH" offer --decision-digest)
+  assert_contains "$out" "eligible=0" "a decision-owned stale trigger must stay main's under the digest"
+  out=$(printf 'signal: %s\n' "$state/beta.status" | FM_HOME="$home" node "$DISPATCH" offer --decision-digest)
+  assert_contains "$out" "eligible=0" "a signal for a task whose unread stale decision stays main's must stay main's too"
+  : > "$state/.wake-queue"
+  append_wake "$state" signal demo.status "needs-decision:$state/demo.status"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a decision resurface stays main's while the digest is off"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer --decision-digest)
+  assert_contains "$out" "eligible=1" "a decision resurface reaches the engine to report while the digest is on"
+  pass "dispatch entry: the digest lets the attended branch report decision signals while decision stale rows stay main's"
+}
+
+# The store's digest decision (bin/fm-branch-outcome.sh digest): urgency, the
+# window, the pr-ready policy, a legacy row, and a repeat of an unchanged
+# situation main already holds.
+test_branch_outcome_digest_judges_urgency_window_and_repeats() {
+  local home out now
+  home=$(make_home digest-judge attended)
+  judge() { FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" digest --window "${1:-3600}" --pr-ready "${2:-digest}"; }
+  add() {  # <verdict> <summary> [urgency]
+    FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict "$1" --summary "$2" ${3:+--urgency "$3"} >/dev/null \
+      || fail "fixture: could not append $2"
+  }
+  append_status "$home" 'started'
+  out=$(judge)
+  assert_contains "$out" "due=none" "an empty store holds nothing"
+  now=$(date +%s)
+  add captain 'the requested report is finished' digest
+  out=$(judge)
+  assert_contains "$out" "due=later" "a fresh digest outcome must wait for its window"
+  assert_contains "$out" "pending=1"$'\n' "the waiting outcome must be named"
+  at=$(printf '%s\n' "$out" | sed -n 's/^at=//p')
+  [ "$at" -ge $((now + 3600)) ] && [ "$at" -le $(( $(date +%s) + 3600 )) ] \
+    || fail "the window must close one window after the outcome was recorded, got at=$at"
+  assert_contains "$(judge 0)" "due=now" "a window of 0 must make every outcome due at once"
+  add captain 'PR ready for review' pr-ready
+  assert_contains "$(judge)" "due=later" "a ready PR must wait for the window by default"
+  assert_contains "$(judge 3600 urgent)" "due=now" "pr-ready=urgent must make a ready PR due at once"
+  add routine 'still working'
+  assert_contains "$(judge)" "pending=1,2"$'\n' "a routine outcome must never join the digest"
+  add captain 'the worker is blocked on a credential' urgent
+  out=$(judge)
+  assert_contains "$out" "due=now" "an urgent outcome must be due at once"
+  assert_contains "$out" "pending=1,2,4"$'\n' "an urgent outcome must carry every waiting outcome with it"
+  append_status "$home" 'asked for a login'
+  add captain 'escalated with no urgency'
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-read --through 4 >/dev/null || fail "fixture: presentation refused"
+  assert_contains "$(judge)" "due=now" "a captain outcome without urgency must read as urgent"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-read --through 5 >/dev/null || fail "fixture: presentation refused"
+
+  # Main holds rows 1, 2, 4, and 5 presented and unprocessed, and the status
+  # log has not moved since row 5, so the same situation reported again is a
+  # repeat, while another urgency is a situation of its own.
+  add captain 'the worker is still waiting on that login' urgent
+  out=$(judge)
+  assert_contains "$out" "due=none" "a repeat of a situation main already holds must not wake it"
+  assert_contains "$out" "repeats=6" "the repeat must be named"
+  add captain 'PR ready for review' pr-ready
+  out=$(judge)
+  assert_contains "$out" "due=later" "a new urgency on an unchanged log must be a situation of its own"
+  assert_contains "$out" "pending=7"$'\n' "only the new situation must be pending"
+  append_status "$home" 'the worker answered something new'
+  add captain 'the worker is blocked again on a new credential' urgent
+  out=$(judge)
+  assert_contains "$out" "due=now" "a report after the status log moved must not be a repeat"
+  assert_contains "$out" "pending=7,8"$'\n' "the new situation must carry the waiting one"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-read --through 8 >/dev/null || fail "fixture: presentation refused"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-processed --through 8 >/dev/null || fail "fixture: acknowledgement refused"
+  add captain 'the worker is still blocked on the new credential' urgent
+  assert_contains "$(judge)" "due=now" "once main processed the situation a re-report must wake it again"
+
+  # A row whose window already closed is due now; an urgency off a captain row is refused.
+  home=$(make_home digest-judge-old attended)
+  printf '{"seq":1,"epoch":%s,"task":"demo","wake":"signal: demo.status","verdict":"captain","urgency":"digest","summary":"an old report","silent":false,"statusEndpoint":0,"statusIdent":"-"}\n' \
+    $(( $(date +%s) - 7200 )) > "$home/state/branch-outcomes.jsonl"
+  assert_contains "$(judge)" "due=now" "an outcome older than its window must be due"
+  expect_code 2 "$(FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict routine --summary x --urgency digest >/dev/null 2>&1; echo $?)" \
+    "a routine outcome must refuse an urgency"
+  printf '{"seq":2,"epoch":1,"task":"demo","wake":"w","verdict":"routine","urgency":"digest","summary":"bad","silent":false,"statusEndpoint":0,"statusIdent":"-"}\n' \
+    >> "$home/state/branch-outcomes.jsonl"
+  expect_code 1 "$(judge >/dev/null 2>&1; echo $?)" "a stored routine row carrying an urgency must fail the store closed"
+  pass "outcome store: the digest decision follows urgency, the window, the pr-ready policy, and repeats of held situations"
+}
+
+test_attended_digest_holds_captain_outcomes_until_their_window() {
+  local home drained
+  home=$(make_home attended-digest attended)
+  echo captain > "$home/stub-mode"
+  echo digest > "$home/stub-urgency"
+  printf '# one-minute window\nwindow=1\n' > "$home/config/outcome-digest"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "digest: the host never started a watcher cycle"
+  append_status "$home" 'the requested report is finished'
+  wait_until 250 host_logged "$home" '	digest	due=later	pending=1	' \
+    || fail "digest: the first captain outcome was not held: $(cat "$home/state/.supervision-host.log")"
+  append_status "$home" 'a second finished result'
+  wait_until 250 host_logged "$home" '	digest	due=later	pending=1,2	' \
+    || fail "digest: the second captain outcome did not join the window: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "digest: a held captain outcome woke main before its window: $(cat "$home/host.out")"
+  watcher_live "$home" || fail "digest: the host stopped supervising while outcomes waited"
+  echo 600 > "$home/park-clock"
+  wait_until 150 host_exited "$home" || fail "digest: the window closed but main was not woken: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "a digest exit must exit 0 for the owner to deliver"
+  assert_re '^supervision-host: branch-outcome: captain outcomes the supervision session recorded for you are due \(store rows 1,2\); run bin/fm-wake-drain.sh' \
+    "$home/host.out" "the digest exit must name every held outcome and send main to its drain"
+  assert_no_re '^(signal:|stale:|check:|heartbeat)' "$home/host.out" "the digest exit must carry no close of its own"
+  watcher_live "$home" && fail "the digest exit left the watcher running"
+  [ "$(marker_kind "$home")" = downtime ] \
+    || fail "the digest exit must publish downtime for the owner's rewake: $(cat "$home/state/.watcher-down")"
+  drained=$(FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
+  assert_contains "$drained" "[seq 2, newest of 2 for this task, recorded " "main's drain must present both held outcomes"
+  assert_contains "$drained" "run bin/fm-branch-outcome.sh mark-processed --through 2" "the drain must acknowledge both"
+  pass "host: attended captain outcomes the digest holds wake main once, at their window's close"
+}
+
+test_attended_digest_lets_an_urgent_outcome_carry_the_held_ones() {
+  local home
+  home=$(make_home attended-digest-urgent attended)
+  echo captain > "$home/stub-mode"
+  echo digest > "$home/stub-urgency"
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "digest urgent: the host never started a watcher cycle"
+  append_status "$home" 'the requested report is finished'
+  wait_until 250 host_logged "$home" '	digest	due=later	pending=1	' \
+    || fail "digest urgent: the first captain outcome was not held: $(cat "$home/state/.supervision-host.log")"
+  echo urgent > "$home/stub-urgency"
+  append_status "$home" 'blocked on a login' blocked
+  wait_until 250 host_exited "$home" || fail "digest urgent: the urgent outcome did not wake main: $(cat "$home/state/.supervision-host.log")"
+  assert_re '^supervision-host: branch-outcome: the supervision session handled this wake and recorded captain outcomes for you \(store rows 1,2\); ' \
+    "$home/host.out" "the urgent exit must carry the held outcome with it"
+  assert_no_re '^signal:' "$home/host.out" "the handled close must not reach main"
+  pass "host: an urgent captain outcome wakes main at once and carries the held ones"
+}
+
+test_attended_digest_stays_quiet_once_main_drained_the_held_outcome() {
+  local home
+  home=$(make_home attended-digest-drained attended)
+  echo captain > "$home/stub-mode"
+  echo digest > "$home/stub-urgency"
+  printf 'window=1\n' > "$home/config/outcome-digest"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "digest drained: the host never started a watcher cycle"
+  append_status "$home" 'the requested report is finished'
+  wait_until 250 host_logged "$home" '	digest	due=later	pending=1	' \
+    || fail "digest drained: the captain outcome was not held: $(cat "$home/state/.supervision-host.log")"
+  FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" >/dev/null 2>&1' "$ROOT/bin/fm-wake-drain.sh"
+  echo 600 > "$home/park-clock"
+  wait_until 150 host_logged "$home" '	digest	due=none	pending=none	' \
+    || fail "digest drained: the host did not re-judge at the window's close: $(cat "$home/state/.supervision-host.log")"
+  sleep 2
+  host_exited "$home" && fail "digest drained: main was woken for outcomes its own drain already presented: $(cat "$home/host.out")"
+  watcher_live "$home" || fail "digest drained: the host stopped supervising"
+  stop_home_processes "$home"
+  pass "host: outcomes a main drain already presented never wake main at their window's close"
+}
+
+test_attended_digest_takes_decision_closes_and_a_bad_config_restores_main() {
+  local home drained
+  home=$(make_home attended-digest-decision attended)
+  echo captain > "$home/stub-mode"
+  echo digest > "$home/stub-urgency"
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "digest decision: the host never started a watcher cycle"
+  append_status "$home" 'which export format?' needs-decision
+  wait_until 250 host_logged "$home" '	digest	due=later	pending=1	' \
+    || fail "digest decision: the decision close was not reported into the digest: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "digest decision: a decision the digest holds woke main: $(cat "$home/host.out")"
+  assert_grep 'needs-decision' "$home/engine-drain.1" "the engine must have read the decision it reported"
+  drained=$(FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
+  assert_contains "$drained" "OPEN DECISIONS" "the decision must stay open for main after the engine read it"
+  assert_contains "$drained" "which export format?" "main's drain must still name the open decision"
+  stop_home_processes "$home"
+
+  home=$(make_home attended-digest-bad-config attended)
+  echo captain > "$home/stub-mode"
+  echo digest > "$home/stub-urgency"
+  printf 'window=soon\n' > "$home/config/outcome-digest"
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "digest bad config: the host never started a watcher cycle"
+  append_status "$home" 'which export format?' needs-decision
+  wait_until 250 host_exited "$home" || fail "digest bad config: the decision close did not reach main: $(cat "$home/state/.supervision-host.log")"
+  assert_re '^signal: .*demo.status' "$home/host.out" "with the digest off a decision close must reach main as the arm printed it"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "digest bad config: the engine took a decision close"
+  home=$(make_home attended-digest-bad-config-captain attended)
+  echo captain > "$home/stub-mode"
+  echo digest > "$home/stub-urgency"
+  printf 'window=soon\n' > "$home/config/outcome-digest"
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "digest bad config captain: the host never started a watcher cycle"
+  append_status "$home" 'the requested report is finished'
+  wait_until 250 host_exited "$home" || fail "digest bad config captain: the captain outcome did not wake main: $(cat "$home/state/.supervision-host.log")"
+  assert_re "^supervision-host: branch-outcome: .*\(store rows 1\); .*; config/outcome-digest holds 'window=soon', which is not window=" \
+    "$home/host.out" "a malformed digest config must wake main per outcome and name the problem"
+  pass "host: the digest takes attended decision closes into the digest, and a malformed config restores main's per-outcome wakes"
+}
+
+test_attended_digest_overdue_at_park_start_wakes_main() {
+  local home
+  home=$(make_home attended-digest-overdue attended)
+  printf '{"seq":1,"epoch":%s,"task":"demo","wake":"signal: demo.status","verdict":"captain","urgency":"digest","summary":"held by a host that died","silent":false,"statusEndpoint":0,"statusIdent":"-"}\n' \
+    $(( $(date +%s) - 7200 )) > "$home/state/branch-outcomes.jsonl"
+  start_host "$home"
+  wait_until 250 host_exited "$home" || fail "digest overdue: an overdue held outcome did not wake main: $(cat "$home/state/.supervision-host.log")"
+  assert_re '^supervision-host: branch-outcome: captain outcomes the supervision session recorded for you are due \(store rows 1\); ' \
+    "$home/host.out" "an overdue outcome must reach main from the first park pass"
+  pass "host: captain outcomes already due when a park starts wake main at once"
+}
+
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return() {
   local home drained
   home=$(make_home attended-go-away attended)
@@ -1051,6 +1293,7 @@ test_quiet_record_without_its_daemon_is_a_present_captain() {
   [ -f "$home/state/.afk-contract" ] || fail "the host must leave quiet mode's record in place"
 
   home=$(make_home quiet-main-only quiet)
+  digest_off "$home"
   start_host "$home"
   wait_until 150 watcher_live "$home" || fail "quiet main-only: the host never started a watcher cycle"
   append_status "$home" 'which export format?' needs-decision
@@ -1064,6 +1307,7 @@ test_quiet_record_without_its_daemon_is_a_present_captain() {
 test_attended_main_only_close_passes_straight_to_main() {
   local home
   home=$(make_home attended-main-only attended)
+  digest_off "$home"
   start_host "$home"
   wait_until 150 watcher_live "$home" || fail "main-only: the host never started a watcher cycle"
   append_status "$home" 'which export format?' needs-decision
@@ -1105,6 +1349,7 @@ test_off_written_while_parked_passes_the_next_attended_close_to_main() {
 test_main_only_pass_through_leaves_the_successor_watcher_running() {
   local home pid
   home=$(make_home main-only-successor attended)
+  digest_off "$home"
   start_host "$home"
   wait_until 150 watcher_live "$home" || fail "successor: the host never started a watcher cycle"
   append_status "$home" 'which export format?' needs-decision
@@ -1186,6 +1431,7 @@ SH
 test_attended_close_that_turns_main_only_before_its_turn_passes_to_main() {
   local home
   home=$(make_home attended-turns-main-only attended)
+  digest_off "$home"
   turn_main_only_at_second_offer "$home"
   start_host "$home"
   wait_until 150 watcher_live "$home" || fail "turns-main-only: the host never started a watcher cycle"
@@ -1283,6 +1529,7 @@ assert_rewoke_main() {  # <home> <label>
 test_claude_stop_hook_delivers_a_main_only_pass_through() {
   local home
   home=$(make_primary_home hook-main-only)
+  digest_off "$home"
   start_hook_session "$home"
   turn_end "$home"
   wait_until 150 watcher_live "$home" || fail "hook main-only: the Stop hook never started a watcher cycle: $(cat "$home/hook.err" 2>/dev/null)"
@@ -1471,6 +1718,7 @@ test_claude_stop_hook_runs_the_host_without_the_file_and_off_opts_out() {
 test_claude_stop_hook_delivers_a_close_that_turns_main_only_at_its_turn() {
   local home
   home=$(make_primary_home hook-turns-main-only)
+  digest_off "$home"
   turn_main_only_at_second_offer "$home"
   start_hook_session "$home"
   turn_end "$home"
@@ -1511,6 +1759,7 @@ test_successor_left_at_the_turn_survives_the_hook_process_group_teardown() {
 test_claude_stop_hook_notifies_when_at_turn_downtime_write_fails() {
   local home real_mktemp
   home=$(make_primary_home hook-turns-main-only-write-fails)
+  digest_off "$home"
   turn_main_only_at_second_offer "$home"
   real_mktemp=$(command -v mktemp)
   cat > "$home/fakebin/mktemp" <<SH
@@ -1542,6 +1791,7 @@ SH
 test_successor_close_during_main_turn_is_delivered_at_the_next_turn_end() {
   local home successor drained
   home=$(make_primary_home hook-successor-close)
+  digest_off "$home"
   start_hook_session "$home"
   turn_end "$home"
   wait_until 150 watcher_live "$home" || fail "successor close: the Stop hook never started a watcher cycle: $(cat "$home/hook.err" 2>/dev/null)"
@@ -1630,6 +1880,7 @@ test_routine_turn_end_resurface_stays_off_main() {
 test_pass_through_successor_survives_the_hook_process_group_teardown() {
   local home pgid watcher
   home=$(make_primary_home hook-group-teardown)
+  digest_off "$home"
   : > "$home/hook.own-group"
   start_hook_session "$home"
   turn_end "$home"
@@ -1713,6 +1964,7 @@ leave_a_cycle_for_main_and_restart() {  # <home>
 test_next_park_takes_over_the_cycle_a_pass_through_left_for_main() {
   local home left_watcher left_arm
   home=$(make_primary_home hook-takeover)
+  digest_off "$home"
   leave_a_cycle_for_main_and_restart "$home"
   left_watcher=$LEFT_WATCHER
   left_arm=$LEFT_ARM
@@ -1740,6 +1992,7 @@ test_next_park_takes_over_the_cycle_a_pass_through_left_for_main() {
 test_a_park_stopped_mid_take_over_leaves_the_take_over_to_the_next_park() {
   local home holder host
   home=$(make_primary_home hook-takeover-interrupted)
+  digest_off "$home"
   leave_a_cycle_for_main_and_restart "$home"
   FM_STATE_OVERRIDE="$home/state" bash -c '
     . "$1"
@@ -1776,6 +2029,7 @@ no_home_arms() { [ -z "$(home_arms "$1")" ]; }
 test_unrecorded_successor_is_stopped_rather_than_left_for_main() {
   local home
   home=$(make_primary_home hook-successor-unrecorded)
+  digest_off "$home"
   mkdir "$home/state/.supervision-host-left"
   start_hook_session "$home"
   turn_end "$home"
@@ -1805,6 +2059,7 @@ test_unrecorded_successor_is_stopped_rather_than_left_for_main() {
 test_close_accepted_away_that_turns_attended_passes_to_main() {
   local home real_mktemp
   home=$(make_home away-then-attended away)
+  digest_off "$home"
   printf '{"hook_event_name":"UserPromptSubmit","prompt_id":"p0","prompt":"watch the fleet for me"}' > "$home/mirror-seed.0"
   real_mktemp=$(command -v mktemp)
   # Starting the successor arm is the first step after the loop's away check;
@@ -3114,6 +3369,13 @@ test_branch_outcomes_keep_a_drain_presented_outcome_across_a_switch_to_pi
 test_branch_outcomes_keep_a_drain_presented_outcome_across_an_index_repair
 test_attended_routine_wake_is_handled_on_the_engine_and_stays_off_main
 test_attended_captain_outcome_reaches_main_through_branch_outcomes
+test_dispatch_entry_lets_the_digest_claim_decision_signals
+test_branch_outcome_digest_judges_urgency_window_and_repeats
+test_attended_digest_holds_captain_outcomes_until_their_window
+test_attended_digest_lets_an_urgent_outcome_carry_the_held_ones
+test_attended_digest_stays_quiet_once_main_drained_the_held_outcome
+test_attended_digest_takes_decision_closes_and_a_bad_config_restores_main
+test_attended_digest_overdue_at_park_start_wakes_main
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return
 test_quiet_record_without_its_daemon_is_a_present_captain
 test_attended_main_only_close_passes_straight_to_main

@@ -79,11 +79,21 @@
 # queue. A handled wake with only routine outcomes never wakes
 # main, and neither does any handled wake while away: captain outcomes wait in
 # the outcome store for the return drain's BRANCH OUTCOMES section. A handled
-# attended wake that recorded a captain outcome exits with one "supervision-host: branch-outcome:"
-# line naming its store rows, without the close it handled; main drains, where
-# the BRANCH OUTCOMES section (bin/fm-wake-drain.sh) presents every
-# unprocessed captain outcome until main acknowledges it. Otherwise the host
-# parks on the successor.
+# attended wake that recorded a captain outcome asks the store whether its
+# unread captain outcomes are due (bin/fm-branch-outcome.sh digest, with the
+# window and pr-ready policy of config/outcome-digest read through
+# fm_supervision_host_digest_config): due now, the host exits with one
+# "supervision-host: branch-outcome:" line naming the rows, without the close
+# it handled; otherwise it parks on the successor, and while rows wait for
+# their window the park also ends at the window's close, when the host asks
+# again and exits the same way if they are still due. Main drains, where the
+# BRANCH OUTCOMES section (bin/fm-wake-drain.sh) presents every unread and
+# unprocessed captain outcome until main acknowledges it, so any drain main
+# runs in the meantime carries the waiting rows and an outcome is never held
+# from a drain. A judgment that cannot be computed reads as due now. While
+# that digest is on, the attended offer passes --decision-digest
+# (bin/fm-branch-dispatch.mjs), so a decision-owned signal close reaches the
+# engine, which reports it, rather than main.
 # Every other outcome exits with the close's own reason line plus one
 # "supervision-host:" line saying why main has this wake, after stopping the
 # successor cycle so main's next turn end starts from the same state as
@@ -275,6 +285,11 @@ TURN_ERRORS=
 # (header, OUTPUT) and left out of that cycle's close.
 READY_PENDING=1
 READY_LINE=
+# The park second (park_elapsed) at which captain outcomes held for the digest
+# window are due, or empty when none wait.
+DIGEST_DUE_ELAPSED=
+DIGEST_DUE=
+DIGEST_PENDING=
 
 log_line() {  # <text>
   local tmp
@@ -529,14 +544,17 @@ stream_ready_line() {
   READY_PENDING=0
 }
 
-# Wait for the current arm to close. Returns 0 with ARM_TEXT set,
-# or 1 when the park boundary arrives first.
+# Wait for the current arm to close. Returns 0 with ARM_TEXT set, 1 when the
+# park boundary arrives first, or 2 when held captain outcomes come due first.
 await_close() {
   local i
   while fm_pid_alive "$ARM_PID"; do
     refresh_process "$ARM_PID"
     [ "$READY_PENDING" -eq 0 ] || stream_ready_line
     boundary_reached && return 1
+    if [ -n "$DIGEST_DUE_ELAPSED" ] && [ "$PARK_ELAPSED" -ge "$DIGEST_DUE_ELAPSED" ]; then
+      return 2
+    fi
     # Probe the arm's exit twice a second between POLL-cadence checks, without
     # changing the outer identity refresh, readiness, or boundary cadence.
     i=$((POLL * 2))
@@ -642,6 +660,60 @@ turn_outcome_lines() {
 turn_outcome_lookup_warning() {
   printf 'supervision-host: outcome lookup failed for turn receipt rows %s; visible outcomes may require manual review' \
     "${TURN_RECEIPT_SEQS:-unknown}"
+}
+
+# Ask the outcome store whether its unread captain outcomes are due
+# (bin/fm-branch-outcome.sh digest owns the rule). Sets DIGEST_DUE
+# (now|later|none), DIGEST_PENDING, and DIGEST_DUE_ELAPSED; a decision that
+# cannot be computed reads as due now, so a fault wakes main rather than
+# holding an outcome. The store judges as of the park's own clock (the host's
+# start epoch plus park_elapsed), so the window closes on the same clock the
+# park boundary uses.
+digest_judge() {
+  local out at
+  DIGEST_DUE=now
+  DIGEST_PENDING=
+  DIGEST_DUE_ELAPSED=
+  fm_supervision_host_digest_config "$CONFIG"
+  park_elapsed
+  if ! out=$("$SCRIPT_DIR/fm-branch-outcome.sh" digest --window "$FM_OUTCOME_DIGEST_WINDOW" \
+      --pr-ready "$FM_OUTCOME_DIGEST_PR_READY" --now $((HOST_STARTED + PARK_ELAPSED)) 2>/dev/null); then
+    log_line "digest	undecidable"
+    return 0
+  fi
+  DIGEST_DUE=$(printf '%s\n' "$out" | sed -n 's/^due=//p')
+  DIGEST_PENDING=$(printf '%s\n' "$out" | sed -n 's/^pending=//p')
+  case "$DIGEST_DUE" in
+    now|none) ;;
+    later)
+      at=$(printf '%s\n' "$out" | sed -n 's/^at=//p')
+      case "$at" in
+        ''|*[!0-9]*) DIGEST_DUE=now ;;
+        *) DIGEST_DUE_ELAPSED=$((at - HOST_STARTED)) ;;
+      esac
+      ;;
+    *) DIGEST_DUE=now ;;
+  esac
+  log_line "digest	due=$DIGEST_DUE	pending=${DIGEST_PENDING:-none}	repeats=$(printf '%s\n' "$out" | sed -n 's/^repeats=//p')"
+}
+
+# The branch-outcome line for rows the digest judged due now.
+digest_line() {  # <lead>
+  printf 'branch-outcome: %s (store rows %s); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints' \
+    "$1" "${DIGEST_PENDING:-$CAPTAIN_SEQS}"
+  [ -z "$FM_OUTCOME_DIGEST_PROBLEM" ] \
+    || printf '; %s, so each captain outcome wakes you as it is recorded until it is fixed' "$FM_OUTCOME_DIGEST_PROBLEM"
+}
+
+# From the park, when held outcomes came due: hand main the parked cycle's
+# state exactly as a handled close's branch-outcome exit does.
+digest_exit() {
+  SUCCESSOR_PID=$ARM_PID
+  SUCCESSOR_OUT=$ARM_OUT
+  ARM_PID=
+  ARM_OUT=
+  ARM_TEXT=
+  exit_to_main "$(digest_line "captain outcomes the supervision session recorded for you are due")" "$HEALTH_NOTE"
 }
 
 stand_down() {  # <why>
@@ -1028,7 +1100,9 @@ turn_captain_seqs() {  # <turn>
 # or nothing when the supervision session may take it. Sets ATTENDED_WHY, and
 # ATTENDED_OFFER to the offer's verdict and the scope it judged.
 attended_acceptor() {  # <first-reason-line>
-  local offer=
+  local offer='' digest=''
+  fm_supervision_host_digest_config "$CONFIG"
+  [ "$FM_OUTCOME_DIGEST_WINDOW" -eq 0 ] || digest=--decision-digest
   ATTENDED_WHY=
   ATTENDED_OFFER=
   if ! fm_supervision_host_attended_ready "$CONFIG" "$PRIMARY"; then
@@ -1037,7 +1111,7 @@ attended_acceptor() {  # <first-reason-line>
     ATTENDED_WHY="the main session could not be identified"
   elif health_cooling; then
     ATTENDED_WHY="the supervision session is cooling down after engine errors"
-  elif ! offer=$(printf '%s\n' "$1" | node "$SCRIPT_DIR/fm-branch-dispatch.mjs" offer 2>/dev/null); then
+  elif ! offer=$(printf '%s\n' "$1" | node "$SCRIPT_DIR/fm-branch-dispatch.mjs" offer ${digest:+"$digest"} 2>/dev/null); then
     ATTENDED_WHY="branch eligibility could not be computed"
   elif [ "$(printf '%s\n' "$offer" | sed -n 's/^eligible=//p')" != 1 ]; then
     ATTENDED_WHY="main-only"
@@ -1069,10 +1143,34 @@ else
 fi || { echo "watcher: FAILED - the supervision host could not start a watcher cycle"; exit 1; }
 ARM_PID=$STARTED_ARM_PID
 ARM_OUT=$STARTED_ARM_OUT
+# Captain outcomes an earlier park held for the digest window keep their
+# deadline, which the store's epochs carry across hosts; rows already due go
+# out on the first pass, but a judgment that could not be computed holds
+# nothing here, since no turn of this host recorded an outcome yet.
+if ! fm_afk_contract_away_present "$STATE"; then
+  digest_judge
+  if [ "$DIGEST_DUE" = now ] && [ -n "$DIGEST_PENDING" ]; then
+    park_elapsed
+    DIGEST_DUE_ELAPSED=$PARK_ELAPSED
+  fi
+fi
 
 while :; do
   boundary_reached && boundary_exit
-  await_close || boundary_exit
+  AWAIT_RC=0
+  await_close || AWAIT_RC=$?
+  if [ "$AWAIT_RC" -eq 2 ]; then
+    # Held outcomes came due: main hears them now unless a drain already
+    # presented them, a newer urgent one already woke it, or the captain left,
+    # in which case they wait for the return like every away outcome.
+    DIGEST_DUE_ELAPSED=
+    if ! fm_afk_contract_away_present "$STATE"; then
+      digest_judge
+      [ "$DIGEST_DUE" != now ] || digest_exit
+    fi
+    continue
+  fi
+  [ "$AWAIT_RC" -eq 0 ] || boundary_exit
   REASON=$(printf '%s\n' "$ARM_TEXT" | grep -E '^(signal:|stale:|check:|heartbeat($|:))' || true)
 
   # The away daemon owns triage while its flag exists; the owner stands down.
@@ -1172,13 +1270,18 @@ while :; do
   fi
   # Attended captain outcomes are main's to process; away they wait for the
   # return, including when the captain left while this turn ran. The close
-  # itself was handled, so only the host's lines reach main.
+  # itself was handled, so only the host's lines reach main, and only once
+  # the digest says the unread captain outcomes are due; until then the park
+  # ends at their window's close.
   if [ -n "$LAST_TURN" ] && ! fm_afk_contract_away_present "$STATE"; then
     CAPTAIN_SEQS=$(turn_captain_seqs "$LAST_TURN")
     if [ -n "$CAPTAIN_SEQS" ]; then
-      ARM_TEXT=
-      exit_to_main "branch-outcome: the supervision session handled this wake and recorded captain outcomes for you (store rows $CAPTAIN_SEQS); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints" \
-        "$HEALTH_NOTE"
+      digest_judge
+      if [ "$DIGEST_DUE" = now ]; then
+        ARM_TEXT=
+        exit_to_main "$(digest_line "the supervision session handled this wake and recorded captain outcomes for you")" \
+          "$HEALTH_NOTE"
+      fi
     fi
   fi
 

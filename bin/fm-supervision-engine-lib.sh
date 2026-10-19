@@ -5,8 +5,11 @@
 # Sourced, and executed only for the home-gate query below.
 # docs/supervision-host.md owns the host design and
 # bin/fm-supervision-host.sh the loop; this file owns two contracts, plus the
-# main-session key (fm_supervision_host_main_key) and the attended readiness
-# check (fm_supervision_host_attended_ready) the host's parts share.
+# main-session key (fm_supervision_host_main_key), the attended readiness
+# check (fm_supervision_host_attended_ready), and the captain-outcome digest
+# settings (fm_supervision_host_digest_config, config/outcome-digest, whose
+# schema docs/configuration.md "Captain-outcome digest" owns) the host's parts
+# share.
 #
 # THE HOME GATE (config/supervision-host-off, config/supervision-host).
 # docs/configuration.md "Supervision host" owns both files: the inherited
@@ -139,6 +142,46 @@ EOF
   FM_SUPERVISION_ENGINE=$engine
   FM_SUPERVISION_ENGINE_MODEL=$model
   return 0
+}
+
+# fm_supervision_host_digest_config <config-dir>
+# Sets FM_OUTCOME_DIGEST_WINDOW (seconds; default 3600, 0 turns the digest
+# off) and FM_OUTCOME_DIGEST_PR_READY (urgent or digest; default digest) from
+# config/outcome-digest. A file that cannot be read or holds anything but
+# blank lines, # comments, window=<minutes 0-1440>, and pr-ready=urgent|digest
+# turns the digest off (window 0, every captain outcome wakes main at once, as
+# without the digest) and sets FM_OUTCOME_DIGEST_PROBLEM to one plain sentence
+# naming why; otherwise that problem is empty.
+# shellcheck disable=SC2034 # Output globals, read by the sourcing caller.
+fm_supervision_host_digest_config() {
+  local file=$1/outcome-digest line key value window=60 pr=digest
+  FM_OUTCOME_DIGEST_WINDOW=3600
+  FM_OUTCOME_DIGEST_PR_READY=digest
+  FM_OUTCOME_DIGEST_PROBLEM=''
+  [ -e "$file" ] || [ -L "$file" ] || return 0
+  if [ ! -f "$file" ] || [ ! -r "$file" ]; then
+    FM_OUTCOME_DIGEST_PROBLEM="config/outcome-digest is not a readable file"
+  else
+    while IFS= read -r line || [ -n "$line" ]; do
+      line=${line%$'\r'}
+      case "$line" in ''|'#'*) continue ;; esac
+      key=${line%%=*}
+      value=${line#*=}
+      case "$key=$value" in
+        window=0|window=[1-9]|window=[1-9][0-9]|window=[1-9][0-9][0-9]|window=[1-9][0-9][0-9][0-9])
+          [ "$value" -gt 1440 ] || { window=$value; continue; } ;;
+        pr-ready=urgent|pr-ready=digest) pr=$value; continue ;;
+      esac
+      FM_OUTCOME_DIGEST_PROBLEM="config/outcome-digest holds '$line', which is not window=<minutes 0-1440> or pr-ready=urgent|digest"
+      break
+    done < "$file"
+  fi
+  if [ -n "$FM_OUTCOME_DIGEST_PROBLEM" ]; then
+    FM_OUTCOME_DIGEST_WINDOW=0
+    return 0
+  fi
+  FM_OUTCOME_DIGEST_WINDOW=$((window * 60))
+  FM_OUTCOME_DIGEST_PR_READY=$pr
 }
 
 # fm_supervision_host_attended_ready <config-dir> <primary-harness>

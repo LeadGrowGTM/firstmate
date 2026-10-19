@@ -135,6 +135,7 @@ The cross-reference then applies two rules:
 
 Other tasks remain independently eligible.
 The wake message itself retains its existing shape, so other harness-arm scripts remain unchanged.
+The attended supervision host lifts this exclusion for decision-owned signal rows alone while its captain-outcome digest is on, so its branch reports them into the digest ([Captain outcomes](supervision-host.md#captain-outcomes)); Pi is unchanged.
 
 #### Heartbeats during dispatch
 

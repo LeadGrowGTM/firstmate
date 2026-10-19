@@ -106,7 +106,7 @@ Only an away record is away: no record, or the record daemon-backed quiet mode w
 ### Attended
 
 The host asks the Pi branch's offer rule (`branchOfferForWake`, through `bin/fm-branch-dispatch.mjs offer`) whether the branch may take the close.
-Except for the recovery resurface below, a check trigger reaches main off Pi, as do a decision-owned signal or stale trigger and a scan that is unsafe or holds nothing for the branch.
+Except for the recovery resurface below, a check trigger reaches main off Pi, as do a decision-owned stale trigger, a decision-owned signal trigger while the digest is off, and a scan that is unsafe or holds nothing for the branch.
 On that main-only pass-through the host starts the successor watcher cycle and leaves it running, then prints the close unchanged.
 That successor, like one a turn hands back at its start (see [Away](#away)), runs in a process group of its own, so the harness tearing down the hook's group after the rewake does not stop it.
 The host leaves the watcher's recovery marker reading downtime, confirming no handling handoff, because the re-arm owner delivers a close to main only while that marker reads downtime.
@@ -125,9 +125,10 @@ It also passes the close through unchanged, with no added line, when any of thes
 
 A close the engine takes is handled as in [One wake](#one-wake), with the dialog mirror at the head of the wake message.
 A handled wake with only routine outcomes never reaches main.
-A handled wake that recorded a captain outcome while the captain is still attended exits with one `supervision-host: branch-outcome:` line naming its store rows, without the close it handled; see [Captain outcomes](#captain-outcomes).
+A handled wake that recorded a captain outcome while the captain is still attended exits with one `supervision-host: branch-outcome:` line naming its store rows, without the close it handled, when the digest says they are due, and otherwise parks; see [Captain outcomes](#captain-outcomes).
 A turn that fails hands its close to main with one `supervision-host:` line, as away.
 Main-only rows that share the queue with the branch's rows stay queued for main, which is woken for each on its own triggering close, as on Pi.
+The captain-outcome digest is the one routing difference from Pi: while it is on, the host passes `--decision-digest`, so a decision-owned signal close goes to the engine, which reports it as a captain outcome and cannot answer it, and main hears it with the digest; a decision-owned stale close stays main's.
 The engine turn runs beside a captain who is present, so its guarded actions take the task leases that keep it and main off the same task.
 
 ### Away
@@ -201,7 +202,24 @@ One example is a Cursor park superseded by the return turn's own end, which stop
 
 ## Captain outcomes
 
-A captain outcome the attended engine records while the captain remains attended wakes main once, through the owner's ordinary wake path, with one `supervision-host: branch-outcome:` line naming its store rows.
+A captain outcome the attended engine records while the captain remains attended wakes main through the owner's ordinary wake path, with one `supervision-host: branch-outcome:` line naming its store rows, once the digest says it is due.
+
+### The digest
+
+The engine tags each attended captain outcome `urgent`, `pr-ready`, or `digest` (`bin/fm-branch-prompt.sh` "Verdict: routine or captain" owns the criteria), and the store keeps the tag with the row.
+After every handled turn that recorded a captain outcome, the host asks the store whether its unread captain outcomes are due (`bin/fm-branch-outcome.sh digest` owns the rule and `config/outcome-digest` the window and pr-ready policy, [configuration](configuration.md#captain-outcome-digest-configoutcome-digest)):
+
+- An urgent outcome, a ready PR when the policy makes it urgent, and an outcome without a tag are due at once, and the wake carries every waiting outcome with it.
+- Otherwise the outcomes wait, and the host parks until the oldest one's window closes, then wakes main once for all of them.
+- A report of a situation main already holds, presented and not yet acknowledged, with the task's status log unchanged since and the same urgency, wakes nothing; the store decides this from the rows' recorded status provenance, never from their prose.
+
+Nothing waits outside the store: every outcome is durable before the host judges it, the window's deadline comes from the rows' own timestamps so it survives a host restart, and any drain main runs for another reason presents the waiting outcomes too, which retires them from the next digest.
+A judgment that cannot be computed reads as due, so a fault wakes main rather than holding an outcome.
+The digest exit stops the parked cycle and hands main the same state as a handled close's exit.
+While the digest is on, decision-owned signal closes join it ([Attended](#attended)); the decision stays open in the task's status log, so every main drain still lists it under `OPEN DECISIONS`.
+
+### Presentation and acknowledgement
+
 Main drains, and `bin/fm-wake-drain.sh` presents it in its `BRANCH OUTCOMES` section with the exact `bin/fm-branch-outcome.sh mark-processed --through <seq>` acknowledgement.
 That presentation is what the Pi branch's visible entry is, so it advances the store's read cursor through the rows it presents.
 Every later drain, including the session-start digest, presents unprocessed captain outcomes again until main acknowledges them, so an ignored outcome costs no extra turn and is never lost.

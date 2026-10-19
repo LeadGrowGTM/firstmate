@@ -11,7 +11,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend), [captain tmux session](#captain-tmux-session-configcaptain-tmux-session), [crew tmux session](#crew-tmux-session-configcrew-tmux-session), [crew names](#crew-names-configmate-short-name), and [harness support](#harness-support) |
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Grok permission mode](#grok-permission-mode), [Muse permission mode](#muse-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
-| Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
+| Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), [captain-outcome digest](#captain-outcome-digest-configoutcome-digest), and [Calm preference](#calm-preference-configcalm) |
 | Automatic reversible work and numeric goals | [Idle sweep and standing targets](#idle-sweep-and-standing-targets) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd), [Claude Remote Control](#claude-remote-control-configclaude-remote-control), and [Orca view tabs](#orca-view-tabs-configorca-view-tabs) |
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity), [worktree pool guard](#worktree-pool-guard), [data management](#data-management-configdata-management), and [disk guard](#disk-guard-configdisk-guard) |
@@ -415,6 +415,18 @@ The opt-out is inherited into secondmate homes: a primary that opts out also opt
 The primary-authoritative propagation contract, including removal of a mate's local opt-out when the primary has none, is owned by [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md).
 `config/supervision-host` is local to each home and not inherited, because each home's engine and model are its own choice.
 While the home runs the host, main's lease-checked commands also take the per-task lease lock, so a claim by the host's engine cannot race a mutation main already started (`bin/fm-lease-lib.sh`).
+
+## Captain-outcome digest (config/outcome-digest)
+
+The optional local, gitignored `config/outcome-digest` sets how the attended supervision host batches the captain outcomes its engine records; [Captain outcomes](supervision-host.md#captain-outcomes) owns the behavior.
+It is read at every wake, and it is local to each home and not inherited.
+The file holds blank lines, `#` comments, and at most these settings, one per line:
+
+- `window=<minutes>`, from 0 to 1440, default 60: how long a non-urgent captain outcome may wait before it wakes main; `window=0` turns the digest off, so every captain outcome wakes main as it is recorded and decision closes stay main's.
+- `pr-ready=urgent|digest`, default `digest`: whether a captain outcome reporting work ready for review, merge, or landing wakes main at once or waits for the window.
+
+A file that cannot be read or holds anything else turns the digest off, and each captain-outcome wake names the problem until it is fixed.
+`fm_supervision_host_digest_config` in `bin/fm-supervision-engine-lib.sh` implements this schema.
 
 ## Backlog backend (.tasks.toml / config/backlog-backend)
 
