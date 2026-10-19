@@ -31,7 +31,9 @@
 #   refill   auto-refill is enabled
 #   period   the trial or plan end is within 3 days
 # account_seconds_per_24h and box_seconds_per_24h are accepted and ignored.
-# fm-boat-send.sh owns those reservation ceilings.
+# fm-boat-send.sh owns those reservation ceilings. resume_ttl_seconds and
+# idle_grace_seconds are accepted and ignored here; fm-boat-send.sh owns the
+# short resume timer and fm-boat-idle-check.sh owns the idle grace.
 #   read     the check could not see everything (missing jq or CLI, timeout,
 #            malformed JSON, an invalid config, an unreadable field, a sandbox
 #            list with more pages), because a check that cannot see is not
@@ -118,7 +120,7 @@ config_normalized() {
     if length != 1 or (.[0] | type) != "object" then error("must be one JSON object")
     else
       .[0] |
-      (keys - ["ceiling_usd", "expected_running", "allowed_sizes", "always_on", "boat_bin", "account_seconds_per_24h", "box_seconds_per_24h"]) as $extra |
+      (keys - ["ceiling_usd", "expected_running", "allowed_sizes", "always_on", "boat_bin", "account_seconds_per_24h", "box_seconds_per_24h", "resume_ttl_seconds", "idle_grace_seconds"]) as $extra |
       if ($extra | length) > 0 then error("unknown key " + ($extra[0] | tojson))
       elif has("ceiling_usd") and (.ceiling_usd | numpos | not) then error("ceiling_usd must be a number above 0")
       elif has("expected_running") and (.expected_running | (type == "number" and . >= 0 and . == floor) | not) then error("expected_running must be a whole number, 0 or more")

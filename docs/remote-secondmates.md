@@ -550,6 +550,8 @@ Arm the spend check so a drift is reported instead of discovered on a bill:
 
 The check reads Boat and reports; it never stops a sandbox.
 
+Arm the PC-side idle check in the live home with `bin/fm-boat-idle-check.sh arm`; [Boat idle check](configuration.md#boat-idle-check) owns its timer, grace, and safety behavior.
+
 ### Known limits
 
 - The readiness check does not know the units exist, and its repair starts the worker and the server as plain processes outside systemd.
@@ -606,7 +608,7 @@ The separate live delivery check must prove GitHub authentication, repository ac
 Dispatch success requires a fresh worker status declaration after spawn, rather than merely a launched pane.
 The worker does not auto-answer Codex directory-trust text because a rendered transcript cannot prove an active modal.
 Without a fresh worker status declaration, dispatch refuses success and leaves the task intact for same-task reconciliation.
-Running boxes reserve only their existing timer's remaining duration against the configured spend caps; dispatch never extends the timer.
+New resumes and pre-spawn timer extensions follow the [Boat timer and idle check rules](configuration.md#boat-idle-check).
 With more than one listed box, dispatch prefers a listed box that is already running and still has room under the three-worker cap, and it does not create boxes.
 An active sandbox that is not listed, or more active sandboxes than `expected_running`, is refused.
 A task stays on the box recorded for it, and a later command that names that task uses that box.
@@ -638,7 +640,8 @@ Use `--none` only after confirming there are no unresolved calls; otherwise pass
 Teardown requires a completed `fm-captain-hold.sh` inventory for the origin task id under the same trust model as local scouts; it does not verify who recorded the inventory.
 When the inventory is incomplete, teardown refuses and prints the controller command, preserving both the scout and the box.
 It stops the approved box when both Boat task records and worker endpoints are gone.
-There is no twenty-minute idle monitor: if teardown does not complete, the box runs until its auto-stop timer expires.
+When teardown cannot complete, the armed [idle check](configuration.md#boat-idle-check) may stop the box after its grace if no workers are reported.
+Without the idle check armed, the current auto-stop timer remains the fallback.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.
 After a definite spawn refusal, it stops a box resumed by this send only when a locked remote inventory confirms both records and worker windows are absent.
 The sender leaves an uncertain remote launch untouched for same-task reconciliation.

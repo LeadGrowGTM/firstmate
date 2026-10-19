@@ -100,7 +100,18 @@ if [ -d "$FIXTURES/multi" ]; then
       cat "$FIXTURES/multi/$bid.usage.json"
       exit 0 ;;
     resume)
-      [ "$*" = "resume $bid --environment fm-code --ttl 14400 --json" ] || [ "$*" = "resume $bid --environment fm-code --ttl 7200 --json" ] || exit 97
+      [ "${3:-}" = --environment ] && [ "${4:-}" = fm-code ] || exit 97
+      [ "${5:-}" = --ttl ] || exit 97
+      case "${6:-}" in ''|*[!0-9]*) exit 97 ;; esac
+      [ "${7:-}" = --json ] && [ "$#" -eq 7 ] || exit 97
+      [ ! -e "$FIXTURES/resume.fail" ] || exit 1
+      if jq -e '.sandbox.state | IN("ready", "idle", "running")' "$FIXTURES/multi/$bid.info.json" >/dev/null; then
+        jq --argjson end "$((BOAT_NOW + ${6}))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+          "$FIXTURES/multi/$bid.info.json" > "$FIXTURES/multi/$bid.info.new"
+        mv "$FIXTURES/multi/$bid.info.new" "$FIXTURES/multi/$bid.info.json"
+        printf '{}\n'
+        exit 0
+      fi
       : > "$FIXTURES/multi/$bid.resumed"
       cp "$FIXTURES/multi/$bid.ready-boot" "$FIXTURES/multi/$bid.boot"
       printf '{}\n'
@@ -132,7 +143,20 @@ case "$*" in
     exit 0
     ;;
   "usage $box --since $((BOAT_NOW - 86400)) --json") file=usage ;;
-  "resume $box --environment fm-code --ttl 14400 --json"|"resume $box --environment fm-code --ttl 7200 --json")
+  "resume $box --environment fm-code --ttl "*)
+    args="$*"
+    ttl=${args##*--ttl }
+    ttl=${ttl% --json}
+    case "$ttl" in ''|*[!0-9]*) printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97 ;; esac
+    [ "$*" = "resume $box --environment fm-code --ttl $ttl --json" ] || { printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97; }
+    [ ! -e "$FIXTURES/resume.fail" ] || exit 1
+    if jq -e '.sandbox.state | IN("ready", "idle", "running")' "$FIXTURES/info.json" >/dev/null; then
+      jq --argjson end "$((BOAT_NOW + ttl))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+        "$FIXTURES/info.json" > "$FIXTURES/info.new"
+      mv "$FIXTURES/info.new" "$FIXTURES/info.json"
+      printf '{}\n'
+      exit 0
+    fi
     : > "$FIXTURES/resumed"
     printf '%s\n' '22222222-2222-4222-8222-222222222222' > "$FIXTURES/boot-id"
     printf '{}\n'
@@ -154,13 +178,28 @@ cat > "$BIN/fm-boat-alias-refresh.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
 if [ -d "$FIXTURES/multi" ] && [ "$1" != --park ]; then
-  case "$1" in bx_*) [ "$2" = boat-prove ] || exit 97; exit 0 ;; esac
+  case "$1" in bx_*)
+    [ "$2" = boat-prove ] || exit 97
+    if [ -f "$FIXTURES/late-timer-seconds" ]; then
+      seconds=$(cat "$FIXTURES/late-timer-seconds")
+      jq --argjson end "$((BOAT_NOW + seconds))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+        "$FIXTURES/multi/$1.info.json" > "$FIXTURES/multi/$1.info.new"
+      mv "$FIXTURES/multi/$1.info.new" "$FIXTURES/multi/$1.info.json"
+    fi
+    exit 0 ;;
+  esac
 fi
 if [ "$*" = "--park $(cat "$FIXTURES/box-id") boat-prove" ]; then
   [ ! -e "$FIXTURES/park.fail" ] || { printf 'error: boat info failed after stop\n' >&2; exit 1; }
   exit 0
 fi
 [ "$*" = "$(cat "$FIXTURES/box-id") boat-prove" ] || exit 97
+[ ! -f "$FIXTURES/late-timer-seconds" ] || {
+  seconds=$(cat "$FIXTURES/late-timer-seconds")
+  jq --argjson end "$((BOAT_NOW + seconds))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/info.json" > "$FIXTURES/info.new"
+  mv "$FIXTURES/info.new" "$FIXTURES/info.json"
+}
 [ ! -e "$FIXTURES/rotate-on-alias" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
 [ ! -e "$FIXTURES/alias.fail" ]
 SH
@@ -282,7 +321,7 @@ new_case() {
     > "$FIXTURES/list.json"
   printf '%s\n' '{"sandbox":{"id":"bx_ahnbu3qr","type":"default","state":"stopped"}}' \
     > "$FIXTURES/info.json"
-  jq -n --argjson end "$((NOW + 14390))" \
+  jq -n --argjson end "$((NOW + 3590))" \
     '{sandbox:{id:"bx_ahnbu3qr",type:"default",state:"ready",environment:"fm-code",archiveAfter:($end|todateiso8601)}}' \
     > "$FIXTURES/ready.json"
   printf '%s\n' '{"sandboxId":"bx_ahnbu3qr","sandboxType":"default","secondsPerDollar":100000,"billingMultiplier":1,"seconds":3000}' \
@@ -316,7 +355,7 @@ run_entry() {
     FM_HOME="$home" HOME="$CASE/user-home" GIT_CONFIG_GLOBAL="$CASE/user-home/.gitconfig" GIT_CONFIG_NOSYSTEM=1 PATH="$FAKEBIN:$PATH" \
     FM_DATA_OVERRIDE="${OVERRIDE_DATA:-}" \
     TMUX="${BOAT_TEST_TMUX:-}" FM_BOAT_START_POLLS=2 FM_BOAT_START_INTERVAL=0 \
-    FM_BOAT_BIN="$FAKEBIN/boat" FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
+    FM_BOAT_BIN="$FAKEBIN/boat" FM_CHECK_INTERVAL=240 FIXTURES="$FIXTURES" BOAT_NOW="$NOW" \
     BIN="$BIN" REAL_BRIEF="$ROOT/bin/fm-brief.sh" FIXTURE_REMOTE_HOME="$REMOTE_HOME" \
     "$BIN/$entry" "$@" < "$input" 2>&1)
   CODE=$?
@@ -406,6 +445,69 @@ test_running_reservation_and_start() {
   assert_contains "$OUT" 'start unconfirmed' 'bare success diagnostic'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'unconfirmed worker stopped'
   pass 'running dispatch reserves remaining timer and sender requires start proof'
+}
+
+test_running_timer_covers_next_renewal() {
+  new_case running-renewal-window
+  jq --argjson end "$((NOW + 661))" '.sandbox.archiveAfter = ($end|todateiso8601)' "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  seed_receipt
+  send_task
+  assert_pre_resume_refusal 'running timer below renewal window'
+  assert_contains "$OUT" '661s remaining, below renewal threshold 662s' 'running dispatch did not name the renewal window'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --prepare --code-only
+  assert_pre_resume_refusal 'running prepare below renewal window'
+  assert_contains "$OUT" '661s remaining, below renewal threshold 662s' 'running prepare did not name the renewal window'
+}
+
+test_late_timer_extend() {
+  new_case late-running-timer
+  printf '%s\n' '{"resume_ttl_seconds":12000}' > "$LOCAL_HOME/config/boat-spend.json"
+  set_json limits '.billingStatus = "trialing"'
+  jq --argjson end "$((NOW + 1300))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  seed_receipt
+  printf '%s\n' 661 > "$FIXTURES/late-timer-seconds"
+  send_task
+  expect_code 0 "$CODE" "late running timer: $OUT"
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 7200 --json' \
+    "$FIXTURES/calls" 'late running timer was not extended within the trial plan cap'
+  assert_grep 'on --stdin boat-eng fm-boat-worker.sh spawn 11111111-1111-4111-8111-111111111111' \
+    "$FIXTURES/calls" 'late timer extension did not allow worker spawn'
+
+  new_case late-running-timer-failure
+  printf '%s\n' '{"resume_ttl_seconds":12000}' > "$LOCAL_HOME/config/boat-spend.json"
+  set_json limits '.billingStatus = "trialing"'
+  jq --argjson end "$((NOW + 1300))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  seed_receipt
+  printf '%s\n' 661 > "$FIXTURES/late-timer-seconds"
+  : > "$FIXTURES/resume.fail"
+  send_task
+  expect_code 1 "$CODE" 'failed late timer extension refuses dispatch'
+  assert_contains "$OUT" 'Boat timer extend failed before worker spawn' 'failed late extension had no clear reason'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'failed late extension spawned a worker'
+  [ ! -e "$LOCAL_HOME/state/.boat-task-box" ] || fail 'failed late extension recorded a dispatched task'
+
+  new_case late-multi-timer
+  printf '%s\n' '{"expected_running":2,"resume_ttl_seconds":12000}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_bbbbbbbb' 'bx_aaaaaaaa' > "$LOCAL_HOME/config/boat-box-id"
+  prime_multi_box bx_bbbbbbbb running 3000 11111111-1111-4111-8111-111111111111 55555555-5555-4555-8555-555555555555
+  prime_multi_box bx_aaaaaaaa stopped 1000 66666666-6666-4666-8666-666666666666 22222222-2222-4222-8222-222222222222
+  jq --argjson end "$((NOW + 1300))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/multi/bx_bbbbbbbb.info.json" > "$FIXTURES/multi/bx_bbbbbbbb.info.new"
+  mv "$FIXTURES/multi/bx_bbbbbbbb.info.new" "$FIXTURES/multi/bx_bbbbbbbb.info.json"
+  printf '%s\n' 'bx_bbbbbbbb 11111111-1111-4111-8111-111111111111 fm-code' > "$LOCAL_HOME/state/.boat-environment"
+  jq -n --argjson end "$((NOW + 1300))" '{pageInfo:{hasMore:false},sandboxes:[
+    {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)},
+    {id:"bx_aaaaaaaa",state:"stopped"}]}' > "$FIXTURES/list.json"
+  printf '%s\n' 1201 > "$FIXTURES/late-timer-seconds"
+  set_json limits '.billingStatus = "trialing"'
+  send_task
+  expect_code 0 "$CODE" "late multi-box timer: $OUT"
+  assert_grep 'boat --no-update resume bx_bbbbbbbb --environment fm-code --ttl 7200 --json' \
+    "$FIXTURES/calls" 'multi-box timer was not extended within the trial plan cap'
+  assert_grep 'on --stdin boat-eng fm-boat-worker.sh spawn 11111111-1111-4111-8111-111111111111' \
+    "$FIXTURES/calls" 'multi-box timer extension did not allow worker spawn'
 }
 
 test_worker_start() {
@@ -549,24 +651,26 @@ test_ship_prerequisites_and_identity() {
   pass 'ships and scouts derive box GitHub noreply identity without PC Git configuration'
 }
 
-test_whole_timer_reservation() {
+test_short_timer_reservation() {
   local row file filter name
-  for row in 'limits|.creditUsedSeconds = 1985600|monthly' \
-    'limits|.last24hUsageSeconds = 45600|account-day' \
-    'usage|.seconds = 28600|box-day' \
-    'limits|.creditBalanceSeconds = 14399|credit-balance'; do
+  for row in 'limits|.creditUsedSeconds = 1996400|monthly' \
+    'limits|.last24hUsageSeconds = 56400|account-day' \
+    'usage|.seconds = 39400|box-day' \
+    'limits|.creditBalanceSeconds = 3599|credit-balance'; do
     IFS='|' read -r file filter name <<< "$row"
     new_case "$name"
     set_json "$file" "$filter"
     send_task
-    assert_pre_resume_refusal "$name whole-timer reservation"
+    assert_pre_resume_refusal "$name short-timer reservation"
   done
   new_case just-under-caps
-  set_json limits '.creditUsedSeconds = 1985599 | .last24hUsageSeconds = 45599 | .creditBalanceSeconds = 14400'
-  set_json usage '.seconds = 28599'
+  set_json limits '.creditUsedSeconds = 1996399 | .last24hUsageSeconds = 56399 | .creditBalanceSeconds = 3600'
+  set_json usage '.seconds = 39399'
   send_task
   expect_code 0 "$CODE" "one second under caps with exact timer balance: $OUT"
-  pass 'Boat reserves the entire timer against every spend ceiling and balance'
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 3600 --json' \
+    "$FIXTURES/calls" 'a new resume uses the short on-demand timer'
+  pass 'Boat reserves only the short resume timer against every spend ceiling and balance'
 }
 
 test_unreadable_caps() {
@@ -615,7 +719,7 @@ test_sender_success_and_timer() {
   local plan ttl
   for plan in active trialing; do
     new_case "success-$plan"
-    ttl=14400; [ "$plan" != trialing ] || ttl=7200
+    ttl=3600
     set_json limits ".billingStatus = \"$plan\""
     jq --argjson end "$((NOW + ttl - 10))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
       "$FIXTURES/ready.json" > "$FIXTURES/ready.new"
@@ -628,8 +732,9 @@ test_sender_success_and_timer() {
       grep -Fx 120 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan resume was not bounded"
       grep -Fx 45 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan instance read was not bounded"
     fi
-    assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
-      "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
+    assert_grep 'alias bx_ahnbu3qr boat-prove' "$FIXTURES/calls" 'alias refresh did not run'
+    assert_equals 'on --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
+      "$(tail -n 1 "$FIXTURES/calls")" 'alias refresh did not precede existing remote lane'
     assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc . "$FIXTURES/transport.request")" 'transport changed task fields'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
     assert_equals 'bx_ahnbu3qr 22222222-2222-4222-8222-222222222222 fm-code' "$(cat "$LOCAL_HOME/state/.boat-environment")" 'successful environment resume receipt'
@@ -714,8 +819,10 @@ test_running_quota_and_route() {
 test_prepare_before_route() {
   new_case prepare-before-route
   rm "$LOCAL_HOME/data/secondmates.md"
+  printf '%s %s:%s\n' 'bx_ahnbu3qr' "$((NOW - 900))" "$(cat "$FIXTURES/boot-id")" > "$LOCAL_HOME/state/.boat-idle-since"
   run_entry "$LOCAL_HOME" fm-boat-send.sh --prepare --code-only
   expect_code 0 "$CODE" "prepare before route registration: $OUT"
+  assert_absent "$LOCAL_HOME/state/.boat-idle-since" 'prepare kept the prior instance idle record'
   assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code' "$FIXTURES/calls" 'prepare did not safely resume'
   assert_grep 'alias bx_ahnbu3qr boat-prove' "$FIXTURES/calls" 'prepare did not refresh alias'
   assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'prepare dispatched without route'
@@ -1104,7 +1211,7 @@ test_instance_changes_at_action_boundary() {
   : > "$FIXTURES/use-real-worker"
   send_task
   expect_code 1 "$CODE" 'changed instance refuses remote spawn'
-  assert_contains "$OUT" 'Boat instance changed; action refused' 'remote instance refusal was not returned'
+  assert_contains "$OUT" 'Boat instance changed before worker spawn' 'remote instance refusal was not returned'
   assert_no_grep '^spawn ' "$FIXTURES/calls" 'changed instance launched a worker'
   assert_absent "$REMOTE_HOME/data/task-one/brief.md" 'changed instance wrote a worker brief'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'changed running instance was stopped'
@@ -1153,7 +1260,7 @@ test_box_config_and_environment() {
   set_json usage '.sandboxId = "bx_23456789"'
   send_task
   expect_code 0 "$CODE" "approved replacement box dispatch: $OUT"
-  assert_grep 'boat --no-update resume bx_23456789 --environment fm-code --ttl 14400 --json' "$FIXTURES/calls" 'configured replacement did not resume'
+  assert_grep 'boat --no-update resume bx_23456789 --environment fm-code --ttl 3600 --json' "$FIXTURES/calls" 'configured replacement did not resume'
   assert_no_grep 'bx_ahnbu3qr' "$FIXTURES/calls" 'sender still used previous box id'
   assert_equals 'bx_23456789 22222222-2222-4222-8222-222222222222 fm-code' "$(cat "$LOCAL_HOME/state/.boat-environment")" 'replacement receipt not bound to new box'
   for variant in missing wrong protected; do
@@ -1192,11 +1299,12 @@ test_box_config_and_environment() {
 }
 
 prime_multi_box() { # id state usage-seconds boot ready-boot
-  local id=$1 state=$2 usage=$3 boot=$4 ready_boot=$5 end
+  local id=$1 state=$2 usage=$3 boot=$4 ready_boot=$5 end ready_end
   mkdir -p "$FIXTURES/multi"
   printf '%s\n' "$boot" > "$FIXTURES/multi/$id.boot"
   printf '%s\n' "$ready_boot" > "$FIXTURES/multi/$id.ready-boot"
   end=$((NOW + 14390))
+  ready_end=$((NOW + 3590))
   if [ "$state" = stopped ]; then
     jq -n --arg id "$id" '{sandbox:{id:$id,type:"default",state:"stopped"}}' > "$FIXTURES/multi/$id.info.json"
   else
@@ -1204,7 +1312,7 @@ prime_multi_box() { # id state usage-seconds boot ready-boot
       '{sandbox:{id:$id,type:"default",state:$state,environment:"fm-code",archiveAfter:($end|todateiso8601)}}' \
       > "$FIXTURES/multi/$id.info.json"
   fi
-  jq -n --arg id "$id" --argjson end "$end" \
+  jq -n --arg id "$id" --argjson end "$ready_end" \
     '{sandbox:{id:$id,type:"default",state:"ready",environment:"fm-code",archiveAfter:($end|todateiso8601)}}' \
     > "$FIXTURES/multi/$id.ready.json"
   jq -n --arg id "$id" --argjson seconds "$usage" \
@@ -1228,13 +1336,13 @@ test_budget_caps() {
   printf '%s\n' '{"ceiling_usd":100}' > "$LOCAL_HOME/config/boat-spend.json"
   set_json limits '.creditUsedSeconds = 1985600'
   send_task
-  expect_code 0 "$CODE" "a \$100 ceiling admits the old \$20 whole-timer boundary: $OUT"
-  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 14400 --json' \
+  expect_code 0 "$CODE" "a \$100 ceiling admits the old \$20 boundary with room to spare: $OUT"
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 3600 --json' \
     "$FIXTURES/calls" 'admitted monthly reservation did not resume'
 
   new_case budget-hundred-still-refuses-its-ceiling
   printf '%s\n' '{"ceiling_usd":100}' > "$LOCAL_HOME/config/boat-spend.json"
-  set_json limits '.creditUsedSeconds = 9985600'
+  set_json limits '.creditUsedSeconds = 9996400'
   send_task
   assert_pre_resume_refusal "a \$100 ceiling still refuses used + timer at 10000000"
 
@@ -1246,7 +1354,7 @@ test_budget_caps() {
 
   new_case budget-account-day-refuses-its-ceiling
   printf '%s\n' '{"ceiling_usd":100,"account_seconds_per_24h":259200}' > "$LOCAL_HOME/config/boat-spend.json"
-  set_json limits '.last24hUsageSeconds = 244800'
+  set_json limits '.last24hUsageSeconds = 255600'
   send_task
   assert_pre_resume_refusal 'account usage + timer at 259200 is refused'
 
@@ -1256,7 +1364,7 @@ test_budget_caps() {
   set_json usage '.seconds = 86400'
   send_task
   expect_code 0 "$CODE" "per-box usage of 86400 may still reserve one timer: $OUT"
-  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 14400 --json' \
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 3600 --json' \
     "$FIXTURES/calls" 'a full day of box usage did not keep the box resumable'
 
   new_case budget-box-day-refuses-past-the-ceiling
@@ -1265,6 +1373,41 @@ test_budget_caps() {
   set_json usage '.seconds = 86401'
   send_task
   assert_pre_resume_refusal 'per-box usage above 86400 is refused before resume'
+
+  new_case budget-configured-resume-timer
+  printf '%s\n' '{"resume_ttl_seconds":7200}' > "$LOCAL_HOME/config/boat-spend.json"
+  send_task
+  expect_code 0 "$CODE" "a configured resume timer is used: $OUT"
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 7200 --json' \
+    "$FIXTURES/calls" 'the configured resume timer was not used'
+
+  new_case budget-invalid-timer-refused
+  printf '%s\n' '{"resume_ttl_seconds":30}' > "$LOCAL_HOME/config/boat-spend.json"
+  send_task
+  expect_code 1 "$CODE" 'a too-short resume timer is refused'
+  [ ! -s "$FIXTURES/calls" ] || fail 'an invalid resume timer contacted Boat'
+
+  new_case budget-below-minimum-timer-refused
+  printf '%s\n' '{"resume_ttl_seconds":1799}' > "$LOCAL_HOME/config/boat-spend.json"
+  send_task
+  expect_code 1 "$CODE" 'a below-minimum resume timer is refused'
+  [ ! -s "$FIXTURES/calls" ] || fail 'a below-minimum resume timer contacted Boat'
+
+  new_case budget-minimum-resume-timer
+  printf '%s\n' '{"resume_ttl_seconds":1800}' > "$LOCAL_HOME/config/boat-spend.json"
+  jq --argjson end "$((NOW + 1790))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/ready.json" > "$FIXTURES/ready.new"
+  mv "$FIXTURES/ready.new" "$FIXTURES/ready.json"
+  send_task
+  expect_code 0 "$CODE" "the minimum resume timer is usable: $OUT"
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 1800 --json' \
+    "$FIXTURES/calls" 'the minimum resume timer was not used'
+
+  new_case budget-invalid-grace-refused
+  printf '%s\n' '{"idle_grace_seconds":-1}' > "$LOCAL_HOME/config/boat-spend.json"
+  send_task
+  expect_code 1 "$CODE" 'a negative idle grace is refused'
+  [ ! -s "$FIXTURES/calls" ] || fail 'an invalid idle grace contacted Boat'
 
   new_case budget-fourth-id-refused
   printf '%s\n' '{"expected_running":3}' > "$LOCAL_HOME/config/boat-spend.json"
@@ -1329,7 +1472,7 @@ test_budget_caps() {
   send_task
   expect_code 0 "$CODE" "a full running box yields to a stopped box with room: $OUT"
   assert_grep 'spawn 11111111-1111-4111-8111-111111111111' "$FIXTURES/calls" 'the full box was not tried'
-  assert_grep 'boat --no-update resume bx_aaaaaaaa --environment fm-code --ttl 14400 --json' \
+  assert_grep 'boat --no-update resume bx_aaaaaaaa --environment fm-code --ttl 3600 --json' \
     "$FIXTURES/calls" 'the box with room was not resumed'
   assert_grep 'spawn 22222222-2222-4222-8222-222222222222' "$FIXTURES/calls" 'the box with room did not receive the worker'
   assert_no_grep 'boat --no-update resume bx_bbbbbbbb' "$FIXTURES/calls" 'the full running box was resumed'
@@ -1360,7 +1503,7 @@ test_budget_caps() {
       {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)}]}' > "$FIXTURES/list.json"
   send_task
   expect_code 0 "$CODE" "a recorded task stays on its box: $OUT"
-  assert_grep 'boat --no-update resume bx_aaaaaaaa --environment fm-code --ttl 14400 --json' \
+  assert_grep 'boat --no-update resume bx_aaaaaaaa --environment fm-code --ttl 3600 --json' \
     "$FIXTURES/calls" 'the recorded box was not resumed'
   assert_no_grep 'spawn 11111111-1111-4111-8111-111111111111' "$FIXTURES/calls" 'the task moved to another running box'
   assert_equals 'task-one bx_aaaaaaaa' "$(cat "$LOCAL_HOME/state/.boat-task-box")" 'the task record changed boxes'
@@ -1423,10 +1566,12 @@ test_existing_backlog_row
 test_confirmed_prelaunch_refusal_stop
 test_native_spawn_refusal_stop
 test_running_reservation_and_start
+test_running_timer_covers_next_renewal
+test_late_timer_extend
 test_worker_start
 test_ship_prerequisites_and_identity
 test_validation
-test_whole_timer_reservation
+test_short_timer_reservation
 test_unreadable_caps
 test_sender_success_and_timer
 test_running_quota_and_route

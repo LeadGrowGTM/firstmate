@@ -2233,17 +2233,28 @@ This section is the single owner of the schema.
   "expected_running": 1,
   "allowed_sizes": ["small", "default"],
   "always_on": ["<sandbox id that is meant to run with no auto-stop>"],
-  "boat_bin": "<optional absolute path to the Boat CLI>"
+  "boat_bin": "<optional absolute path to the Boat CLI>",
+  "resume_ttl_seconds": 3600,
+  "idle_grace_seconds": 900
 }
 ```
 
 - Every field is optional.
   The check's defaults are the values above, with an empty `always_on` and no `boat_bin`.
   `account_seconds_per_24h` and `box_seconds_per_24h` are optional whole numbers of seconds, 1 or more, and are omitted by default.
+  `resume_ttl_seconds` is an optional whole number of seconds from 1800 to 14400, and `idle_grace_seconds` is an optional whole number of seconds from 0 to 86400 that must be shorter than both the configured resume timer and the 3600-second renewal fallback, including when either uses its default.
+  [Boat idle check](#boat-idle-check) owns the timer and cadence requirement.
 - `account_seconds_per_24h` and `box_seconds_per_24h` are for dispatch, not for this check.
   The check accepts them and does not report on them.
   [`bin/fm-boat-send.sh`](../bin/fm-boat-send.sh) owns how they reserve spend, including the historical ceilings it keeps when the file or a key is absent.
-- `expected_running` is also the sender's cap on how many box ids `config/boat-box-id` may list and how many sandboxes may be active together.
+- `resume_ttl_seconds` is the short timer a new resume starts with, capped by the plan timer, and the sender reserves only that timer.
+  Extends use the same cap.
+  Dispatch to a running box is refused when its remaining timer is below the [renewal threshold](#boat-idle-check); a stopped box resumes with a fresh timer.
+  After SSH hydration, the sender rechecks the timer and extends it within the plan cap before spawning a worker if it has fallen below that threshold.
+  A failed extend refuses the spawn.
+  `idle_grace_seconds` is how long a listed running box may report no workers before the idle check stops it.
+  The spend check accepts both and does not report on them; [Boat idle check](#boat-idle-check) owns them.
+- `expected_running` is also the sender's cap on how many box ids `config/boat-box-id` may list and how many sandboxes may be active together; the supported range is 0 to 3.
   A fleet that runs up to three default boxes all day sets `ceiling_usd` to 100, `expected_running` to 3, `account_seconds_per_24h` to 259200 (3 times 86400), and `box_seconds_per_24h` to 86400.
   With `box_seconds_per_24h` set, a box whose rolling usage is still within that value may reserve one more timer, so usage plus that timer may reach the value plus the timer.
   The account, monthly, and balance checks also add the remaining timers of the other active listed boxes.
@@ -2281,6 +2292,45 @@ Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
   Its line is printed at most once per 24 hours while the failure lasts, and that limit is lifted as soon as a read succeeds.
 - Each Boat call is bounded to 9 seconds so the three together fit inside `FM_CHECK_TIMEOUT`.
 - Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and both records.
+
+## Boat idle check
+
+With the idle check armed, [`bin/fm-boat-idle-check.sh`](../bin/fm-boat-idle-check.sh) checks listed worker boxes from the PC, so a down box watcher does not matter.
+While `fm-boat-worker.sh idle` reports live workers it starts a detached renewal when the remaining timer is below twice the box revisit interval plus the 122-second total renewal timeout, and once a listed running box reports no worker records or endpoints for `idle_grace_seconds` it stops that box with the Boat CLI's stop command, keeping the snapshot and never deleting.
+Scheduled work still resumes only through the sender when a Boat-eligible task is actually queued; nothing here is always-on, and worker boxes stay off the `always_on` list.
+This section owns the behavior; the script's header owns the exact commands, bounds, and records.
+
+**Safety**
+
+- A box with a live worker is never stopped, and a box not listed in `config/boat-box-id` is never touched.
+- An unreadable idle report or instance is treated as busy when the box's running state and timer are known, and can trigger renewal. An unreadable state or timer prevents an explicit stop but cannot guarantee renewal.
+- The send lock covers each state read, worker probe, timer extension, and stop, so a concurrent dispatch or teardown cannot change a box between its liveness report and action.
+- With several boxes, each sweep starts where the last one left off, so a slow box cannot starve the rest of extends and stops.
+- The supported fleet has at most three listed boxes.
+  `FM_CHECK_INTERVAL` must be a whole number from 0 to 3600 seconds (300 seconds by default).
+  The worst-case revisit interval is the number of listed boxes times (`FM_CHECK_INTERVAL` plus the 30-second per-box check budget).
+  An effective timer of `min(resume_ttl_seconds, 3600)` shorter than three revisit intervals plus the 122-second total renewal timeout is refused.
+  With three boxes, the default 300-second poll and a configured 3600-second timer are accepted.
+  Recovery reads of the box allowlist remain available if the cadence becomes unsafe.
+- Idle grace belongs to the current box instance. A new boot instance starts a fresh grace, and a successful `--prepare` resume clears that box's old idle record.
+- `FM_CHECK_TIMEOUT` must be at least 30 seconds for this check to run, which is also the default.
+- Extend skips its spend reservation on purpose, because a live worker must not lose its box to a ceiling; the spend check stays the ceiling watchdog.
+
+**What is reported**
+
+The check prints one `boat-idle:` line only when firstmate should wake, and prints nothing otherwise.
+
+- Every box it stopped, with how long the box had been idle.
+- A failed extend after two consecutive attempts, once until an extend succeeds, and a failed stop at most once per hour per box.
+- An invalid config, a missing CLI, or a missing box list, at most once per 24 hours.
+- A poll killed at `FM_CHECK_TIMEOUT` prints nothing and resumes next cadence from the durable idle-since records.
+
+**Arm and disarm**
+
+Arm the check once per home with `bin/fm-boat-idle-check.sh arm`, which refuses without a spend config or a readable box list.
+
+- That writes `state/boat-idle.check.sh` and binds its bytes with `bin/fm-check-register.sh`, so the existing watcher polls it and turns its one line into a `check:` wake; no separate schedule is involved.
+- `bin/fm-boat-idle-check.sh disarm` removes the shim, its trust binding, and both records.
 
 ## Idle session exit
 

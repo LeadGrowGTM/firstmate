@@ -907,7 +907,7 @@ SH
   chmod +x "$CASE/fake-ssh"
   boat_route() {
     OUT=$(env HOME="$CASE/home" PATH="$FAKEBIN:$PATH" FAKE_BOAT_DIR="$BOAT" FAKE_BOAT_ID="$ID" \
-      FM_HOME="$fmhome" FM_SSH_BIN="$CASE/fake-ssh" FAKE_SSH_LOG="$ssh_log" \
+      FM_HOME="$fmhome" FM_CHECK_INTERVAL=600 FM_SSH_BIN="$CASE/fake-ssh" FAKE_SSH_LOG="$ssh_log" \
       bash "$ROOT/bin/fm-on.sh" "$@" 2>"$CASE/stderr")
     CODE=$?
     ERR=$(cat "$CASE/stderr")

@@ -23,6 +23,8 @@
 # keep today's reservation: below $20 (2000000 credit seconds at the required
 # 100000 credit seconds per dollar), below 60000 account seconds per rolling
 # 24h, and below a 43000 box-second sum (usage + timer reaching it is refused).
+# A new resume reserves only the short on-demand timer (resume_ttl_seconds,
+# 3600 when absent, capped by the plan timer), never the whole plan timer.
 # ceiling_usd and account_seconds_per_24h use that same sum: used + timer
 # reaching the ceiling is refused. Those two checks, and the balance check,
 # also add the remaining timers of the other active listed boxes. An active
@@ -43,14 +45,18 @@
 # records the box a task was sent to.
 # Reads are fresh, bounded limits, list, info, and rolling-24-hour usage calls.
 # Unavailable readings or exhausted caps refuse dispatch.
-# Resume uses --environment fm-code and an explicit timer (4 hours paid,
-# 2 hours trial). state/.boat-environment binds each selected box id, boot
-# instance, and fm-code. The old .boat-no-env receipt cannot authorize a send.
+# Resume uses --environment fm-code and the short on-demand timer
+# (resume_ttl_seconds, 3600 when absent, capped by the plan timer), so a box
+# runs only long enough for its workers rather than the whole plan timer.
+# state/.boat-environment binds each selected box id, boot instance, and
+# fm-code. The old .boat-no-env receipt cannot authorize a send.
 # Running metadata must name environment fm-code; a present noEnv flag must
 # be false. Permanently no-env boxes refuse dispatch.
-# A running box must already have a readable timer within that budget window;
-# this command never extends it. No box creation/deletion/sharing, billing,
-# plan, credit, environment editing, or merge command exists here.
+# A running box must have a readable timer within that budget window. Before
+# worker spawn, dispatch renews a timer that fell below the renewal window.
+# fm-boat-idle-check.sh owns recurring extends and idle stop. No box
+# creation/deletion/sharing, billing, plan, credit, environment editing, or
+# merge command exists here.
 #
 # Requests never carry Git identity or credentials. The worker derives its
 # identity from the GitHub connection injected on the box by fm-code.
@@ -95,8 +101,14 @@ fi
 for tool in jq "$BOAT_BIN"; do command -v "$tool" >/dev/null || die "$tool is required"; done
 fm_boat_load_reservation || die "invalid config/boat-spend.json${FM_BOAT_SPEND_PROBLEM:+: $FM_BOAT_SPEND_PROBLEM}"
 BOX_CONFIG="$FM_HOME/config/boat-box-id"
-BOX_ID_TEXT=$(fm_boat_read_box_ids "$BOX_CONFIG") || die "${FM_BOAT_BOX_PROBLEM:-invalid config/boat-box-id}"
+BOX_ID_TEXT=$(fm_boat_read_box_ids "$BOX_CONFIG" 2>&1) || die "${BOX_ID_TEXT:-invalid config/boat-box-id}"
+if [ -z "$TEARDOWN_ID" ]; then
+  fm_boat_validate_cadence "$BOX_ID_TEXT" || die "${FM_BOAT_BOX_PROBLEM:-invalid Boat cadence}"
+fi
 mapfile -t BOX_IDS <<< "$BOX_ID_TEXT"
+if [ -z "$TEARDOWN_ID" ]; then
+  RENEW_THRESHOLD=$(fm_boat_renew_threshold_seconds "${#BOX_IDS[@]}") || die 'FM_CHECK_INTERVAL is invalid'
+fi
 if [ "${#BOX_IDS[@]}" -eq 1 ]; then
   MULTI=0
   BOX=${BOX_IDS[0]}
@@ -244,12 +256,13 @@ reserve_ttl() {
     --slurpfile i "$TMP/info" --slurpfile u "$TMP/usage" --arg box "$BOX" --argjson now "$(date +%s)" \
     --argjson monthly_usd "$FM_BOAT_MONTHLY_USD" --argjson account "$FM_BOAT_ACCOUNT_SECONDS" \
     --argjson box_seconds "$FM_BOAT_BOX_SECONDS" --argjson box_legacy "$FM_BOAT_BOX_LEGACY" \
-    --argjson max_boxes "$FM_BOAT_MAX_BOXES" \
+    --argjson max_boxes "$FM_BOAT_MAX_BOXES" --argjson short "$FM_BOAT_RESUME_TTL" \
     --argjson allowed "$(printf '%s\n' "${BOX_IDS[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" '
     def nonneg: type == "number" and . >= 0;
     $l[0] as $l | $b[0] as $b | $i[0].sandbox as $i | $u[0] as $u |
     (if $l.billingStatus == "active" then 14400 elif $l.billingStatus == "trialing" then 7200 else error("plan is off") end) as $max_ttl |
-    (if $i.state == "stopped" then $max_ttl
+    (if $short < $max_ttl then $short else $max_ttl end) as $new_ttl |
+    (if $i.state == "stopped" then $new_ttl
      elif ($i.state | IN("ready", "idle", "running")) and ($i.archiveAfter | type) == "string" then
        ($i.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now
      else error("unreadable Boat timer") end) as $ttl |
@@ -278,6 +291,42 @@ reserve_ttl() {
          $l.creditBalanceSeconds < ($ttl + $others)
     then error("spend cap would be exceeded")
     else $ttl end'
+}
+running_timer_ok() {
+  [ "$STATE" = stopped ] && return 0
+  [ "$TTL" -ge "$RENEW_THRESHOLD" ] && return 0
+  SHORT_TIMER_REASON="running box $BOX has ${TTL}s remaining, below renewal threshold ${RENEW_THRESHOLD}s"
+  return 1
+}
+timer_before_spawn() {
+  local remaining cap extend_ttl current
+  read_boat info "$BOX"
+  remaining=$(jq -er --arg box "$BOX" --argjson now "$(date +%s)" '
+    .sandbox | select(.id == $box and .type == "default" and .environment == "fm-code" and
+      ((has("noEnv") | not) or .noEnv == false) and (.state | IN("ready", "idle", "running"))) |
+    .archiveAfter | select(type == "string") |
+    (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now | select(. > 0)
+  ' "$TMP/info" 2>/dev/null) || stop_refuse 'box auto-stop timer is unavailable before worker spawn'
+  current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable before worker spawn'
+  if [ "$current" != "$instance" ] || ! receipt_matches "$current"; then
+    stop_refuse 'Boat instance changed before worker spawn'
+  fi
+  [ "$remaining" -ge "$RENEW_THRESHOLD" ] && return 0
+  cap=3600
+  if read_boat_soft limits; then
+    case "$(jq -r '.billingStatus // empty' "$TMP/limits")" in
+      active) cap=14400 ;;
+      trialing) cap=7200 ;;
+    esac
+  fi
+  extend_ttl=$FM_BOAT_RESUME_TTL
+  [ "$extend_ttl" -le "$cap" ] || extend_ttl=$cap
+  fm_run_timed 60 "$BOAT_BIN" --no-update resume "$BOX" --environment fm-code --ttl "$extend_ttl" --json > "$TMP/resume" ||
+    stop_refuse "Boat timer extend failed before worker spawn (${remaining}s remaining, below renewal threshold ${RENEW_THRESHOLD}s)"
+  current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable after timer extend'
+  if [ "$current" != "$instance" ] || ! receipt_matches "$current"; then
+    stop_refuse 'Boat instance changed after timer extend'
+  fi
 }
 dispatch_prepared_box() {
   case "$STATE" in
@@ -318,9 +367,22 @@ dispatch_prepared_box() {
   publish_route_box
   FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$BOX" boat-prove || stop_refuse 'SSH refresh or hydration failed'
   if [ "$PREPARE" -eq 1 ]; then
+    if [ "$STATE" = stopped ]; then
+      idle_since="$FM_HOME/state/.boat-idle-since"
+      [ ! -L "$idle_since" ] || stop_refuse 'unsafe idle record path'
+      if [ -f "$idle_since" ]; then
+        awk -v id="$BOX" '$1 != id' "$idle_since" > "$TMP/idle-since" || stop_refuse 'idle record cleanup failed'
+        if [ -s "$TMP/idle-since" ]; then
+          mv -f -- "$TMP/idle-since" "$idle_since" || stop_refuse 'idle record cleanup failed'
+        else
+          rm -f -- "$idle_since" || stop_refuse 'idle record cleanup failed'
+        fi
+      fi
+    fi
     printf 'prepared: %s route=%s (no worker dispatched)\n' "$BOX" "$ROUTE"
     exit 0
   fi
+  timer_before_spawn
   record_task_box
   # Stdin and argv reuse the existing remote job lane, environment scrub, and
   # exit-255 contract. An uncertain launch is deliberately not retried or stopped.
@@ -344,6 +406,7 @@ dispatch_prepared_box() {
   exit "$DISPATCH_STATUS"
 }
 if [ "$MULTI" -eq 1 ]; then
+  SHORT_TIMER_REASON=
   read_boat limits
   read_boat list --all
   order=$(jq -nr --slurpfile b "$TMP/list" --slurpfile l "$TMP/limits" \
@@ -374,6 +437,7 @@ if [ "$MULTI" -eq 1 ]; then
     case "$STATE" in stopped|ready|idle|running) ;; *) continue ;; esac
     read_boat_soft usage "$BOX" --since "$(( $(date +%s) - 86400 ))" || continue
     TTL=$(reserve_ttl 2> "$TMP/reason") || continue
+    running_timer_ok || continue
     if [ "$STATE" != stopped ]; then
       inst=$(boat_instance) || continue
       receipt_matches "$inst" || continue
@@ -381,9 +445,9 @@ if [ "$MULTI" -eq 1 ]; then
     dispatch_prepared_box
   done <<< "$order"
   if [ -n "${PINNED:-}" ]; then
-    die "assigned box $PINNED cannot take this task; dispatch refused"
+    die "assigned box $PINNED cannot take this task${SHORT_TIMER_REASON:+: $SHORT_TIMER_REASON}; dispatch refused"
   fi
-  die 'no listed box has spend room and worker capacity; dispatch refused'
+  die "${SHORT_TIMER_REASON:-no listed box has spend room and worker capacity}; dispatch refused"
 fi
 read_boat info "$BOX"
 STATE=$(jq -r '.sandbox.state // empty' "$TMP/info")
@@ -396,4 +460,5 @@ read_boat list --all
 read_boat usage "$BOX" --since "$(( $(date +%s) - 86400 ))"
 # Reserve the existing remaining timer, or the full timer for a new resume.
 TTL=$(reserve_ttl 2> "$TMP/reason") || stop_refuse 'Boat safety or spend reservation failed'
+running_timer_ok || die "$SHORT_TIMER_REASON; dispatch refused"
 dispatch_prepared_box
