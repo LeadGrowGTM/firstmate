@@ -23,6 +23,8 @@
 # keep today's reservation: below $20 (2000000 credit seconds at the required
 # 100000 credit seconds per dollar), below 60000 account seconds per rolling
 # 24h, and below a 43000 box-second sum (usage + timer reaching it is refused).
+# A new resume reserves only the short on-demand timer (resume_ttl_seconds,
+# 3600 when absent, capped by the plan timer), never the whole plan timer.
 # ceiling_usd and account_seconds_per_24h use that same sum: used + timer
 # reaching the ceiling is refused. Those two checks, and the balance check,
 # also add the remaining timers of the other active listed boxes. An active
@@ -43,14 +45,18 @@
 # records the box a task was sent to.
 # Reads are fresh, bounded limits, list, info, and rolling-24-hour usage calls.
 # Unavailable readings or exhausted caps refuse dispatch.
-# Resume uses --environment fm-code and an explicit timer (4 hours paid,
-# 2 hours trial). state/.boat-environment binds each selected box id, boot
-# instance, and fm-code. The old .boat-no-env receipt cannot authorize a send.
+# Resume uses --environment fm-code and the short on-demand timer
+# (resume_ttl_seconds, 3600 when absent, capped by the plan timer), so a box
+# runs only long enough for its workers rather than the whole plan timer.
+# state/.boat-environment binds each selected box id, boot instance, and
+# fm-code. The old .boat-no-env receipt cannot authorize a send.
 # Running metadata must name environment fm-code; a present noEnv flag must
 # be false. Permanently no-env boxes refuse dispatch.
 # A running box must already have a readable timer within that budget window;
-# this command never extends it. No box creation/deletion/sharing, billing,
-# plan, credit, environment editing, or merge command exists here.
+# this command never extends it. fm-boat-idle-check.sh owns the PC-side
+# extend while workers are live and the idle stop after its grace. No box
+# creation/deletion/sharing, billing, plan, credit, environment editing, or
+# merge command exists here.
 #
 # Requests never carry Git identity or credentials. The worker derives its
 # identity from the GitHub connection injected on the box by fm-code.
@@ -244,12 +250,13 @@ reserve_ttl() {
     --slurpfile i "$TMP/info" --slurpfile u "$TMP/usage" --arg box "$BOX" --argjson now "$(date +%s)" \
     --argjson monthly_usd "$FM_BOAT_MONTHLY_USD" --argjson account "$FM_BOAT_ACCOUNT_SECONDS" \
     --argjson box_seconds "$FM_BOAT_BOX_SECONDS" --argjson box_legacy "$FM_BOAT_BOX_LEGACY" \
-    --argjson max_boxes "$FM_BOAT_MAX_BOXES" \
+    --argjson max_boxes "$FM_BOAT_MAX_BOXES" --argjson short "$FM_BOAT_RESUME_TTL" \
     --argjson allowed "$(printf '%s\n' "${BOX_IDS[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" '
     def nonneg: type == "number" and . >= 0;
     $l[0] as $l | $b[0] as $b | $i[0].sandbox as $i | $u[0] as $u |
     (if $l.billingStatus == "active" then 14400 elif $l.billingStatus == "trialing" then 7200 else error("plan is off") end) as $max_ttl |
-    (if $i.state == "stopped" then $max_ttl
+    (if $short < $max_ttl then $short else $max_ttl end) as $new_ttl |
+    (if $i.state == "stopped" then $new_ttl
      elif ($i.state | IN("ready", "idle", "running")) and ($i.archiveAfter | type) == "string" then
        ($i.archiveAfter | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now
      else error("unreadable Boat timer") end) as $ttl |

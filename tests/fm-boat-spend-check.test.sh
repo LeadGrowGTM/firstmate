@@ -383,7 +383,7 @@ test_missing_active_states_is_not_guessed() {
 
 test_dispatch_reservation_keys_are_accepted() {
   local home out
-  home=$(make_world dispatch-caps '{"ceiling_usd":100,"expected_running":3,"account_seconds_per_24h":259200,"box_seconds_per_24h":86400}')
+  home=$(make_world dispatch-caps '{"ceiling_usd":100,"expected_running":3,"account_seconds_per_24h":259200,"box_seconds_per_24h":86400,"resume_ttl_seconds":7200,"idle_grace_seconds":900}')
   out=$(run_check "$home") || fail "dispatch cap keys should still be a normal check: $out"
   [ -z "$out" ] || fail "dispatch cap keys are not a spend-check condition: $out"
   home=$(make_world dispatch-caps-bad '{"box_seconds_per_24h":0}')
