@@ -59,6 +59,7 @@ shift
 case "${1:-}" in
   info)
     box=${2:-}; [ "${3:-}" = --json ] || exit 97
+    [ ! -e "$FIXTURES/info.slow" ] || sleep 5
     [ ! -e "$FIXTURES/$box.info.fail" ] || exit 1
     [ -f "$FIXTURES/$box.info.json" ] || exit 97
     cat "$FIXTURES/$box.info.json"
@@ -66,6 +67,7 @@ case "${1:-}" in
   exec)
     box=${2:-}
     [ "${3:-} ${4:-} ${5:-} ${6:-}" = "--json -- cat /proc/sys/kernel/random/boot_id" ] || exit 97
+    [ ! -e "$FIXTURES/exec.slow" ] || sleep 5
     [ ! -e "$FIXTURES/$box.exec.fail" ] || exit 1
     n=$(cat "$FIXTURES/exec.count" 2>/dev/null || printf 0); n=$((n + 1))
     printf '%s' "$n" > "$FIXTURES/exec.count"
@@ -102,6 +104,7 @@ cat > "$BIN/fm-on.sh" <<'FAKE'
 #!/usr/bin/env bash
 set -eu
 printf 'on %s\n' "$*" >> "$FIXTURES/calls"
+[ ! -f "$FIXTURES/expected-boat-bin" ] || [ "${FM_BOAT_BIN:-}" = "$(cat "$FIXTURES/expected-boat-bin")" ] || exit 97
 [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = idle ] || exit 97
 [ ! -e "$FIXTURES/idle.fail" ] || exit 1
 # Like the real --verify, the probe reaches only the box the route record and
@@ -128,6 +131,7 @@ cat > "$BIN/fm-boat-alias-refresh.sh" <<'FAKE'
 #!/usr/bin/env bash
 set -eu
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
+[ ! -f "$FIXTURES/expected-boat-bin" ] || [ "${FM_BOAT_BIN:-}" = "$(cat "$FIXTURES/expected-boat-bin")" ] || exit 97
 if [ "${1:-}" = --park ]; then
   [ ! -e "$FIXTURES/park.fail" ] || exit 1
   exit 0
@@ -139,7 +143,7 @@ case "${1:-}" in bx_*) ;; *) exit 97 ;; esac
 printf '%s\n' "$1" > "$FIXTURES/alias.box"
 printf 'sandbox=%s state=running\n' "$1"
 FAKE
-chmod +x "$BIN/"*.sh "$FAKEBIN/"*
+chmod +x "$BIN/fm-on.sh" "$BIN/fm-boat-alias-refresh.sh" "$FAKEBIN/"*
 
 # new_case <name> [spend-json]: fresh home with one listed box, a stopped
 # info fixture, and a boot id. Prints the home path in HOME_DIR.
@@ -443,6 +447,44 @@ test_slow_refresh_still_extends() {
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a busy box was stopped'
 }
 
+test_configured_cli_reaches_probe_children() {
+  local other=bx_cccccccc configured="$FAKEBIN/custom-boat"
+  new_case configured-cli '{"boat_bin":"'"$FAKEBIN"'/custom-boat","expected_running":2}'
+  cp "$FAKEBIN/boat" "$configured"
+  printf '%s\n' "$configured" > "$FIXTURES/expected-boat-bin"
+  printf '%s\n' "$BOX" "$other" > "$HOME_DIR/config/boat-box-id"
+  make_info running 600
+  set_idle 'boat-tasks-remaining: no'
+  seed_since "$((NOW - 900))"
+  OUT=$(env -u FM_BOAT_BIN FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" \
+    FM_BOAT_IDLE_NOW="$NOW" FIXTURES="$FIXTURES" "$BIN/fm-boat-idle-check.sh" check 2>&1)
+  CODE=$?
+  expect_code 0 "$CODE" "configured CLI check: $OUT"
+  assert_equals "boat-idle: stopped $BOX after 900s with no workers reported" "$OUT" 'configured CLI stop line'
+  assert_grep 'alias --park' "$FIXTURES/calls" 'configured CLI did not reach alias park'
+  assert_grep 'on boat-eng fm-boat-worker.sh idle' "$FIXTURES/calls" 'configured CLI did not reach idle probe'
+}
+
+test_slow_poll_extends_within_watcher_budget() {
+  local started elapsed
+  new_case slow-poll '{"expected_running":2}'
+  printf '%s\n' "$BOX" bx_cccccccc > "$HOME_DIR/config/boat-box-id"
+  make_info running 600
+  set_idle 'boat-tasks-remaining: yes'
+  : > "$FIXTURES/refresh.slow"
+  : > "$FIXTURES/info.slow"
+  : > "$FIXTURES/exec.slow"
+  started=$(date +%s)
+  OUT=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_TIMEOUT=22 FIXTURES="$FIXTURES" \
+    "$BIN/fm-boat-idle-check.sh" check 2>&1)
+  CODE=$?
+  elapsed=$(($(date +%s) - started))
+  expect_code 0 "$CODE" "slow poll check: $OUT"
+  [ "$elapsed" -lt 22 ] || fail "slow poll exceeded watcher budget: ${elapsed}s"
+  assert_grep "boat --no-update resume $BOX" "$FIXTURES/calls" 'slow poll did not attempt a timely extend'
+}
+
 test_sweep_rotates_across_boxes() {
   local other=bx_cccccccc
   new_case rotate '{"expected_running":2}'
@@ -519,7 +561,8 @@ test_two_boxes_extend_and_stop_on_one_line
 test_late_worker_skips_stop
 test_extend_caps_at_plan_timer
 test_slow_refresh_still_extends
+test_configured_cli_reaches_probe_children
+test_slow_poll_extends_within_watcher_budget
 test_sweep_rotates_across_boxes
 test_arm_and_disarm
 pass "fm-boat-idle-check"
-

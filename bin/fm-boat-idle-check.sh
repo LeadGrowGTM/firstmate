@@ -55,12 +55,10 @@
 #
 # The CLI comes from FM_BOAT_BIN, else "boat_bin" in the config, else `boat`
 # on PATH. docs/configuration.md owns the config schema. Each Boat read is
-# bounded to 6 seconds, the idle probe to 12, the alias refresh to 10,
-# extend to 60, and stop to 30. The refresh bound sits inside its own reads
-# so a slow route fails into the conservative extend path instead of eating
-# the poll. Sweeps rotate across listed boxes from a durable position, so a
-# poll killed at FM_CHECK_TIMEOUT resumes with the next box instead of
-# starving every box behind one slow extend. Extend, stop, and refresh
+# bounded to 6 seconds, the idle probe to 5, and the alias refresh to 4.
+# Every timed action also fits the remaining poll budget, which ends before
+# FM_CHECK_TIMEOUT. Sweeps rotate across listed boxes from a durable position,
+# so a slow box does not starve every box behind it. Extend, stop, and refresh
 # failures are reported at most once per hour per box, config problems at
 # most once per 24 hours, and every completed stop is reported at once.
 set -u
@@ -82,13 +80,14 @@ REGISTER_BIN="$SCRIPT_DIR/fm-check-register.sh"
 MAX_LINE=1000
 INFO_SECS=6
 EXEC_SECS=6
-IDLE_SECS=12
-REFRESH_SECS=10
+IDLE_SECS=5
+REFRESH_SECS=4
 RESUME_SECS=60
 STOP_SECS=30
 LOCK_WAIT=5
 CONFIG_INTERVAL=86400
 ACTION_INTERVAL=3600
+CHECK_DEADLINE=0
 
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
@@ -122,6 +121,27 @@ now_epoch() {
     ''|*[!0-9]*) date +%s ;;
     *) printf '%s\n' "$FM_BOAT_IDLE_NOW" ;;
   esac
+}
+
+poll_remaining() {
+  printf '%s\n' "$((CHECK_DEADLINE - $(date +%s)))"
+}
+
+poll_timed() {
+  local seconds=$1 remaining
+  shift
+  remaining=$(poll_remaining)
+  [ "$remaining" -gt 1 ] || return 124
+  [ "$seconds" -lt "$((remaining - 1))" ] || seconds=$((remaining - 1))
+  fm_run_timed "$seconds" "$@"
+}
+
+poll_lock() {
+  local remaining seconds=$LOCK_WAIT
+  remaining=$(poll_remaining)
+  [ "$remaining" -gt 1 ] || return 1
+  [ "$seconds" -lt "$((remaining - 1))" ] || seconds=$((remaining - 1))
+  fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$seconds"
 }
 
 valid_box() {
@@ -187,7 +207,7 @@ report_note() {  # <key> <now>
 BOAT_BIN=
 boat_info() {  # <box>: prints "<state> <remaining-seconds>" or fails.
   local box=$1 out
-  out=$(fm_run_timed "$INFO_SECS" "$BOAT_BIN" --no-update info "$box" --json 2>/dev/null) || return 1
+  out=$(poll_timed "$INFO_SECS" "$BOAT_BIN" --no-update info "$box" --json 2>/dev/null) || return 1
   printf '%s' "$out" | jq -er --argjson now "$(now_epoch)" '
     .sandbox |
     if (.state | type) != "string" then error("unreadable state")
@@ -199,7 +219,7 @@ boat_info() {  # <box>: prints "<state> <remaining-seconds>" or fails.
 
 boat_instance() {  # <box>: prints the boot id, or fails.
   local box=$1 out
-  out=$(fm_run_timed "$EXEC_SECS" "$BOAT_BIN" --no-update exec "$box" --json -- cat /proc/sys/kernel/random/boot_id 2>/dev/null) || return 1
+  out=$(poll_timed "$EXEC_SECS" "$BOAT_BIN" --no-update exec "$box" --json -- cat /proc/sys/kernel/random/boot_id 2>/dev/null) || return 1
   printf '%s' "$out" | jq -er '
     select(.exitCode == 0) | .stdout |
     select(type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\n?$")) |
@@ -222,7 +242,7 @@ idle_probe() {
   local box=$1 instance=$2 multi=$3 held=$4 out rc=0
   if [ "$multi" -eq 1 ]; then
     if [ "$held" -eq 0 ]; then
-      fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT" || return 1
+      poll_lock || return 1
       IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
     fi
     if [ ! -d "$FM_HOME/state" ] || [ -L "$FM_HOME/state" ] \
@@ -234,12 +254,16 @@ idle_probe() {
     # The refresh is bounded tighter than its own reads so a slow route
     # fails into the conservative extend path instead of eating the poll;
     # its alias writes are atomic renames, so a kill leaves no half state.
-    if ! FM_BOAT_HYDRATE_WAIT=0 fm_run_timed "$REFRESH_SECS" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$box" boat-prove >/dev/null 2>&1; then
+    if ! FM_BOAT_BIN="$BOAT_BIN" FM_BOAT_HYDRATE_WAIT=0 poll_timed "$REFRESH_SECS" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$box" boat-prove >/dev/null 2>&1; then
       [ "$held" -eq 1 ] || release_idle_lock
       return 2
     fi
   fi
-  out=$(fm_run_timed "$IDLE_SECS" "$SCRIPT_DIR/fm-on.sh" boat-eng fm-boat-worker.sh idle "$instance" 2>/dev/null) || rc=$?
+  if [ "$held" -eq 0 ] && [ "$(poll_remaining)" -le 12 ]; then
+    [ "$multi" -eq 0 ] || [ "$held" -eq 1 ] || release_idle_lock
+    return 1
+  fi
+  out=$(FM_BOAT_BIN="$BOAT_BIN" poll_timed "$IDLE_SECS" "$SCRIPT_DIR/fm-on.sh" boat-eng fm-boat-worker.sh idle "$instance" 2>/dev/null) || rc=$?
   if [ "$multi" -eq 1 ] && [ "$held" -eq 0 ]; then
     release_idle_lock
   fi
@@ -254,7 +278,7 @@ idle_probe() {
 # boat_plan_max: prints the plan timer (14400 paid, 7200 trial), or fails.
 boat_plan_max() {
   local out
-  out=$(fm_run_timed "$INFO_SECS" "$BOAT_BIN" --no-update limits --json 2>/dev/null) || return 1
+  out=$(poll_timed "$INFO_SECS" "$BOAT_BIN" --no-update limits --json 2>/dev/null) || return 1
   printf '%s' "$out" | jq -er '
     if .billingStatus == "active" then 14400
     elif .billingStatus == "trialing" then 7200
@@ -267,10 +291,10 @@ boat_plan_max() {
 # resume itself fails.
 box_extend() {
   local box=$1 ttl=$2 max
-  if max=$(boat_plan_max 2>/dev/null) && [ -n "$max" ] && [ "$max" -lt "$ttl" ]; then
+  if [ "$(poll_remaining)" -gt 12 ] && max=$(boat_plan_max 2>/dev/null) && [ -n "$max" ] && [ "$max" -lt "$ttl" ]; then
     ttl=$max
   fi
-  fm_run_timed "$RESUME_SECS" "$BOAT_BIN" --no-update resume "$box" \
+  poll_timed "$RESUME_SECS" "$BOAT_BIN" --no-update resume "$box" \
     --environment fm-code --ttl "$ttl" --json >/dev/null 2>&1
 }
 
@@ -284,10 +308,10 @@ box_stop() {
   local box=$1 held=$2 receipt kept
   STOP_DETAIL=
   if [ "$held" -eq 0 ]; then
-    fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT" || return 1
+    poll_lock || return 1
     IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
   fi
-  fm_run_timed "$STOP_SECS" "$BOAT_BIN" --no-update stop "$box" --json >/dev/null 2>&1 || {
+  poll_timed "$STOP_SECS" "$BOAT_BIN" --no-update stop "$box" --json >/dev/null 2>&1 || {
     [ "$held" -eq 1 ] || release_idle_lock
     return 1
   }
@@ -312,7 +336,7 @@ box_stop() {
     [ "$held" -eq 1 ] || release_idle_lock
     return 2
   fi
-  FM_BOAT_BIN="$BOAT_BIN" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" --park "$box" boat-prove >/dev/null 2>&1 || {
+  FM_BOAT_BIN="$BOAT_BIN" poll_timed "$REFRESH_SECS" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" --park "$box" boat-prove >/dev/null 2>&1 || {
     STOP_DETAIL='alias park failed after stop'
     [ "$held" -eq 1 ] || release_idle_lock
     return 2
@@ -391,7 +415,7 @@ check_box() {
   # through the stop, so a dispatch that lands after the first probe cannot
   # put a live worker on a box this poll stops. A contended lock means a send
   # is active, which is liveness itself: restart the grace and stay silent.
-  if ! fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" "$LOCK_WAIT"; then
+  if [ "$(poll_remaining)" -le 8 ] || ! poll_lock; then
     record_write "$SINCE_FILE" "$box" "$now" || true
     return 0
   fi
@@ -441,9 +465,14 @@ check_box() {
 }
 
 run_check() {
-  local now problem bin ids multi box pos count i ORDER
+  local now problem bin ids multi box pos count i timeout ORDER
   PARTS=
   [ -f "$CONFIG" ] || return 0
+  timeout=${FM_CHECK_TIMEOUT:-30}
+  case "$timeout" in ''|*[!0-9]*) timeout=30 ;; esac
+  [ "$timeout" -le 30 ] || timeout=30
+  [ "$timeout" -gt 3 ] || return 0
+  CHECK_DEADLINE=$(($(date +%s) + timeout - 3))
   now=$(now_epoch)
   problem=
   if ! command -v jq >/dev/null 2>&1; then
@@ -472,6 +501,7 @@ run_check() {
     [ "$(printf '%s\n' "$ids" | wc -l)" -le 1 ] || multi=1
     if [ "$multi" -eq 0 ]; then
       while IFS= read -r box; do
+        [ "$(poll_remaining)" -gt 2 ] || break
         [ -n "$box" ] || continue
         check_box "$box" "$now" "$FM_BOAT_RESUME_TTL" "$FM_BOAT_IDLE_GRACE" "$multi"
       done <<< "$ids"
@@ -485,6 +515,7 @@ run_check() {
       case "$pos" in ''|*[!0-9]*) pos=0 ;; esac
       pos=$((pos % count))
       for ((i = 0; i < count; i++)); do
+        [ "$(poll_remaining)" -gt 2 ] || break
         box=${ORDER[$pos]}
         pos=$(((pos + 1) % count))
         record_write "$POS_FILE" pos "$pos" || true
