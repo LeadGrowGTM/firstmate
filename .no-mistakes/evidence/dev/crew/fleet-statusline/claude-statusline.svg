@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="185" viewBox="0 0 1680 185">
+<rect width="1680" height="185" fill="#171b23"/>
+<rect x="13" y="12" width="1654" height="161" rx="8" fill="#202734"/>
+<line x1="29" x2="1651" y1="97" y2="97" stroke="#516076"/>
+<text x="36" y="36" xml:space="preserve" fill="#a9b4c3" font-family="DejaVu Sans Mono, monospace" font-size="20">Claude Code - isolated tmux lab</text>
+<text x="36" y="83" xml:space="preserve" fill="#ecf1f7" font-family="DejaVu Sans Mono, monospace" font-size="20">❯</text>
+<text x="36" y="125" xml:space="preserve" fill="#ecf1f7" font-family="DejaVu Sans Mono, monospace" font-size="20">Sonnet 5.5 medium | Ctx 7% | dev:newsletter working, hold 1 | primary | 01M5A3CAJDPW81ADFXF14R1K | 5h 14% 7d 81%</text>
+<text x="36" y="158" xml:space="preserve" fill="#8493a5" font-family="DejaVu Sans Mono, monospace" font-size="20">⏵⏵ auto mode on (shift+tab to cycle)</text>
+</svg>

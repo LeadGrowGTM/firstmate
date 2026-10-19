@@ -1,0 +1,5 @@
+Primary tmux bar remains configured:
+[#S] 
+#(env FM_SB_TRACKER_ROOT=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG FM_SB_TRACKER_MAIN_HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/.fm-lab.AVZTk6 FM_SB_TRACKER_MAIN_STATE=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/.fm-lab.AVZTk6/state FM_SB_TRACKER_MAIN_DATA=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/.fm-lab.AVZTk6/data FM_SB_TRACKER_MAIN_CONFIG=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/.fm-lab.AVZTk6/config FM_SB_TRACKER_MAIN_PROJECTS=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/.fm-lab.AVZTk6/projects FM_SB_TRACKER_CACHE_DIR=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/.fm-lab.AVZTk6/state FM_SB_CREW_STATE_SCRIPT=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/bin/fm-crew-state.sh bash "/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5A3CAJDPW81ADFXF14R1KWG/bin/fm-statusbar.sh" --socket "#{socket_path}" crew-tracker)
+Live counts:
+crew 0 | 2nd 2

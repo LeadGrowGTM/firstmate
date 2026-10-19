@@ -1,0 +1,7 @@
+Session-start liveness output:
+SECONDMATE_LIVENESS: secondmate health: skipped: on demand; automatic relaunch left it stopped
+Ordinary poll probe:
+status=skipped; reason=on demand; automatic relaunch left it stopped
+Stale cache, followed by background refresh:
+Opus 5.5 high | Ctx 12% | stale-value | primary
+Opus 5.5 high | Ctx 12% | dev:newsletter working, hold 1 | primary
