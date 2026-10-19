@@ -981,11 +981,12 @@ archived_call_state() {  # <task-id>
     take { print }
     END { exit !found }
   ' "$archive") || return 0
-  if body_has_resolution_record "$block"; then
-    printf 'answered %s' "$(body_hold_origin "$(printf '%s\n' "$block" | sed 's/^[[:space:]]*//')")"
-  else
-    printf 'unanswered'
-  fi
+  case "$block" in
+    *"Resolution recorded by fm-captain-hold."*"Captain decision:"*)
+      printf 'answered %s' "$(body_hold_origin "$(printf '%s\n' "$block" | sed 's/^[[:space:]]*//')")"
+      ;;
+    *) printf 'unanswered' ;;
+  esac
 }
 
 # Resolve one entry and verify the row it names is durably captain-held. A
@@ -1004,6 +1005,8 @@ verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how> <origi
   # A live row wins; only an id absent from the active backlog consults the
   # Done retention archive, so a task id found nowhere still refuses below.
   if ! task_show "$entry"; then
+    printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$' \
+      || fail "could not read active backlog entry $entry: $TASK_SHOW_OUTPUT"
     archive_state=$(archived_call_state "$entry")
     if [ "${archive_state%% *}" = answered ]; then
       stored=${archive_state#answered}

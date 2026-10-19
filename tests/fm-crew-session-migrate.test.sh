@@ -84,6 +84,21 @@ test_ambiguous_socket_skips_with_a_warning() {
   pass "an ambiguous tmux socket skips that task and the dry run still plans the rest"
 }
 
+test_ambiguous_backend_skips_with_a_warning() {
+  local home
+  home=$(make_world ambiguous-backend)
+  write_meta "$home" twin "holding:fm-twin" 'backend=tmux' 'backend=other'
+  run_migrate "$home" --apply
+  [ "$RC" -eq 0 ] || fail "an ambiguous backend aborted the home (rc=$RC): $ERR"
+  assert_contains "$ERR" 'warning: task twin: recorded backend is ambiguous (2 fields)' \
+    "the ambiguous backend was not named with its reason"
+  assert_contains "$OUT" 'skip unresolvable twin recorded backend is ambiguous (2 fields)' \
+    "the summary did not list the ambiguous backend"
+  assert_contains "$OUT" 'moved healthy holding:fm-healthy -> firstmate-crew:fm-healthy' \
+    "the healthy task was not migrated after the ambiguous backend"
+  pass "an ambiguous backend skips that task and migrates the rest"
+}
+
 test_other_unresolvable_endpoint_records_skip() {
   local home
   home=$(make_world other-records)
@@ -111,6 +126,8 @@ test_a_resolvable_task_that_disagrees_still_fails() {
   [ "$RC" -ne 0 ] || fail "a resolvable task in the wrong session did not fail the command: $OUT / $ERR"
   assert_contains "$ERR" "task wrong: recorded window is elsewhere:fm-wrong but that window is in session mismatch" \
     "the real disagreement was not reported"
+  assert_contains "$OUT" 'skip unresolvable dead recorded tmux socket is missing or ambiguous' \
+    "the skipped task was missing from the summary after a later preflight refusal"
   grep -qx 'window=holding:fm-healthy' "$home/state/healthy.meta" \
     || fail "a refused run moved the healthy task"
   pass "a resolvable task that disagrees with its live window still refuses the home"
@@ -118,5 +135,6 @@ test_a_resolvable_task_that_disagrees_still_fails() {
 
 test_missing_socket_skips_with_a_warning
 test_ambiguous_socket_skips_with_a_warning
+test_ambiguous_backend_skips_with_a_warning
 test_other_unresolvable_endpoint_records_skip
 test_a_resolvable_task_that_disagrees_still_fails

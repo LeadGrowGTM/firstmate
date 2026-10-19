@@ -765,6 +765,24 @@ EOF
   assert_contains "$(cat "$home/verify.out")" "verified: $id captain-call inventory" \
     "verify did not accept the archived answers"
 
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = show ] && [ "${2:-}" = aged-call-a ]; then
+  printf 'error: temporary backlog read failure\n' >&2
+  exit 75
+fi
+exec "${REAL_TASKS_AXI:?}" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  set +e
+  run_captain "$home" verify "$id" > "$home/read-failure.out" 2> "$home/read-failure.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "an archived answer masked an active backlog read failure"
+  assert_grep 'could not read active backlog entry aged-call-a' "$home/read-failure.err" \
+    "the read failure was treated as confirmed absence"
+  rm "$home/fakebin/tasks-axi"
+
   # Still refusing: archived without a recorded answer.
   write_origin_meta "$home" "$id"
   printf 'decisions_reviewed=1\ndecision_keys=aged-call-bare\n' >> "$home/state/$id.meta"
@@ -776,6 +794,25 @@ EOF
   assert_grep "aged-call-bare" "$home/bare.err" "the refusal did not name the archived call"
   assert_grep "without a recorded captain answer" "$home/bare.err" \
     "the refusal did not say the archive holds no answer"
+
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] aged-call-reconciled - Closed by reconciliation (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: ddd
+  Resolution mode: reconciled
+
+  Reconciliation evidence:
+  The call was closed without a captain answer.
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-reconciled\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/reconciled.out" 2> "$home/reconciled.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a reconciled archive row without a captain decision passed the gate"
+  assert_grep 'without a recorded captain answer' "$home/reconciled.err" \
+    "the reconciled archive row was treated as a captain answer"
 
   # Still refusing: archived under a different origin.
   cat >> "$home/data/done-archive.md" <<'EOF2'

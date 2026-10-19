@@ -102,8 +102,12 @@ MIGRATE_LOCK=
 PLAN=
 SKIP_FILE=
 LIST_FILE=
+SKIP_SUMMARY_PRINTED=0
 # shellcheck disable=SC2329  # Registered by the EXIT trap below.
 cleanup() {
+  if [ "$SKIP_SUMMARY_PRINTED" -eq 0 ] && [ -s "${SKIP_FILE:-}" ]; then
+    fm_crew_migrate_summary
+  fi
   if [ -n "${MIGRATE_LOCK:-}" ]; then
     fm_lock_release "$MIGRATE_LOCK" || true
     MIGRATE_LOCK=
@@ -127,6 +131,14 @@ refuse() {
 fm_crew_migrate_unresolvable() {  # <id> <reason>
   echo "warning: task $1: $2; skipping it and migrating the rest of the home" >&2
   printf 'skip unresolvable %s %s\n' "$1" "$2" >>"$SKIP_FILE"
+}
+
+fm_crew_migrate_summary() {
+  printf 'crew-session: %s\n' "$CREW_SESSION"
+  if [ -s "$SKIP_FILE" ]; then
+    cat "$SKIP_FILE"
+  fi
+  SKIP_SUMMARY_PRINTED=1
 }
 
 fm_crew_migrate_absent_listing() {  # <listing>
@@ -418,7 +430,8 @@ fm_crew_migrate_classify() {  # <meta>
     0) backend=tmux ;;
     1) backend=$(grep '^backend=' "$meta" | cut -d= -f2-) ;;
     *)
-      refuse "task $id: has $backend_count backend fields"
+      fm_crew_migrate_unresolvable "$id" "recorded backend is ambiguous ($backend_count fields)"
+      return 0
       ;;
   esac
   if [ "$backend" != tmux ]; then
@@ -499,10 +512,7 @@ fi
 
 fm_crew_migrate_would_close_sessions
 
-printf 'crew-session: %s\n' "$CREW_SESSION"
-if [ -s "$SKIP_FILE" ]; then
-  cat "$SKIP_FILE"
-fi
+fm_crew_migrate_summary
 if [ -s "$PLAN" ]; then
   sockets=$(awk -F '\t' '{ print $1 }' "$PLAN" | LC_ALL=C sort -u)
   while IFS= read -r socket; do
