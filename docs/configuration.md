@@ -879,7 +879,8 @@ lead-haven
 ### Claude status line
 
 When Claude uses `bin/fm-statusbar.sh claude-line --task <id>` as its `statusLine` command, the line keeps the model and `Ctx %` readout and places a compact live-secondmate summary beside it.
-The summary shows each visible mate's id and latest active task state, plus a count of open captain decisions; it reads durable records through a short background cache so rendering does not wait for fleet probes.
+Visible local mate entries show an id and latest active task state, while remote mate entries say remote.
+The summary counts open captain decisions in the primary and eligible live local mate homes, and reads durable records through a short background cache so rendering does not wait for fleet probes.
 Firstmate adds the command to spawned Claude workers when neither their account nor project already defines a `statusLine`; the main Claude session needs its own `statusLine` setting pointing to this command to show the summary.
 The command's [header](../bin/fm-statusbar.sh) owns the exact fields, truncation, and refresh behavior.
 This Claude line is separate from the [primary tmux session bar](tmux-backend.md#watching-the-crew), which continues to show live crew and secondmate counts.

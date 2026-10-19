@@ -83,7 +83,7 @@ The control is scoped to the launched process and never modifies the captain's o
 
 ## Status line
 
-A Claude task worker or secondmate shows one compact status line (model and effort, task, worktree, plan windows) when neither the account it loads nor the project defines a `statusLine` of its own, except for raw Claude launches, which do not receive the fallback.
+A Claude task worker or secondmate shows the [Claude status line](../../../../../docs/configuration.md#claude-status-line) when neither the account it loads nor the project defines a `statusLine` of its own, except for raw Claude launches, which do not receive the fallback.
 The spawn installs it through the firstmate-owned `.claude/settings.local.json`, never the launch line and never the captain's global settings, so a captain-defined `statusLine` always wins.
 `../../../../../bin/fm-statusbar.sh` owns the command, its whitelisted fields, and the tmux detail line that covers every harness.
 
