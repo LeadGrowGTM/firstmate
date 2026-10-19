@@ -777,6 +777,27 @@ EOF
   assert_grep "without a recorded captain answer" "$home/bare.err" \
     "the refusal did not say the archive holds no answer"
 
+  # Still refusing: archived under a different origin.
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] aged-call-other - Another origin's question (kind: captain) (done 2026-10-13) (hold-kind: captain)
+  Captain hold origin: some-other-origin
+  Resolution recorded by fm-captain-hold.
+  Decision digest: ccc
+  Resolution mode: answered
+
+  Captain decision:
+  Go.
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-other\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/other.out" 2> "$home/other.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a call archived for another origin passed the gate"
+  assert_grep "was held for origin some-other-origin" "$home/other.err" \
+    "the refusal did not name the archived call's origin"
+
   # Still refusing: an id found nowhere.
   write_origin_meta "$home" "$id"
   printf 'decisions_reviewed=1\ndecision_keys=aged-call-nowhere\n' >> "$home/state/$id.meta"
@@ -793,6 +814,9 @@ EOF
   fi
   assert_present "$home/state/$id.meta" "refused cleanup removed the task metadata"
 
+  # A trailing space after the configured archive path still resolves it.
+  sed -i 's|^\(archive = ".*"\)$|\1   |' "$home/.tasks.toml"
+  grep -q '^archive = ".*"   $' "$home/.tasks.toml" || fail "the fixture did not pad the archive setting"
   # Cleanup of the finished task proceeds once its calls are all archived answers.
   write_origin_meta "$home" "$id"
   printf 'decisions_reviewed=1\ndecision_keys=aged-call-a,aged-call-b\n' >> "$home/state/$id.meta"

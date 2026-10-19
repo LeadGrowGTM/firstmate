@@ -948,7 +948,7 @@ done_archive_file() {
     /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec); next }
     sec == "[markdown]" && /^[[:space:]]*archive[[:space:]]*=/ {
       v = $0; sub(/[[:space:]]*#.*/, "", v); sub(/^[^=]*=[[:space:]]*/, "", v)
-      gsub(/^"|"$/, "", v); gsub(/^'\''|'\''$/, "", v); sub(/[[:space:]]+$/, "", v)
+      sub(/[[:space:]]+$/, "", v); gsub(/^"|"$/, "", v); gsub(/^'\''|'\''$/, "", v)
       print v; exit
     }
   ' "$root/.tasks.toml" 2>/dev/null) || configured=
@@ -966,7 +966,8 @@ done_archive_file() {
 
 # Print "<state>" for one id in the archive: answered when a closed row for that
 # exact id carries a recorded captain answer, unanswered when the id is
-# archived without one, and nothing when the archive does not hold it.
+# archived without one, and nothing when the archive does not hold it. An
+# answered row appends the origin its body recorded, when it recorded one.
 archived_call_state() {  # <task-id>
   local archive block
   archive=$(done_archive_file)
@@ -981,7 +982,7 @@ archived_call_state() {  # <task-id>
     END { exit !found }
   ' "$archive") || return 0
   if body_has_resolution_record "$block"; then
-    printf 'answered'
+    printf 'answered %s' "$(body_hold_origin "$(printf '%s\n' "$block" | sed 's/^[[:space:]]*//')")"
   else
     printf 'unanswered'
   fi
@@ -1004,7 +1005,15 @@ verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how> <origi
   # Done retention archive, so a task id found nowhere still refuses below.
   if ! task_show "$entry"; then
     archive_state=$(archived_call_state "$entry")
-    if [ "$archive_state" = answered ]; then
+    if [ "${archive_state%% *}" = answered ]; then
+      stored=${archive_state#answered}
+      stored=${stored# }
+      if [ -n "$stored" ] && [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ]; then
+        origin_id=$(task_identity "$origin") || exit $?
+        stored_id=$(task_identity "$stored") || exit $?
+        [ "$stored_id" = "$origin_id" ] \
+          || fail "captain-held task $entry was held for origin $stored, not $origin; hold a task for $origin or list the right one"
+      fi
       printf '%s archived archived\n' "$entry"
       return 0
     fi
