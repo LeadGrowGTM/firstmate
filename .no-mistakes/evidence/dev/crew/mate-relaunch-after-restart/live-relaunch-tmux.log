@@ -1,0 +1,41 @@
+PRIMARY_PANE:
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+
+  ? for shortcuts
+scaffolded: /tmp/fm-lab.Q9dUhJ/primary/data/sm1/brief.md (secondmate charter)
+home=/tmp/fm-lab.Q9dUhJ/sm1
+scaffolded: /tmp/fm-lab.Q9dUhJ/primary/data/sm2/brief.md (secondmate charter)
+home=/tmp/fm-lab.Q9dUhJ/sm2
+scaffolded: /tmp/fm-lab.Q9dUhJ/primary/data/sm3/brief.md (secondmate charter)
+home=/tmp/fm-lab.Q9dUhJ/sm3
+LAB_SEEDED=3
+BOOTSTRAP_INFO: secondmate sm1 relaunched after recorded endpoint confidently missing (backend=tmux)
+BOOTSTRAP_INFO: secondmate sm2 relaunched after recorded endpoint confidently missing (backend=tmux)
+BOOTSTRAP_INFO: secondmate sm3 relaunched after recorded endpoint confidently missing (backend=tmux)
+SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+SECONDMATE_SYNC: secondmate sm2: skipped: primary default-branch commit cannot be resolved
+SECONDMATE_SYNC: secondmate sm3: skipped: primary default-branch commit cannot be resolved
+WINDOWS:
+node:node
+fm-sm1:node
+fm-sm2:node
+fm-sm3:node
+sm1_LEDGER=1792421906	relaunched
+sm1_WINDOW=primary:fm-sm1
+sm2_LEDGER=1792421907	relaunched
+sm2_WINDOW=primary:fm-sm2
+sm3_LEDGER=1792421908	relaunched
+sm3_WINDOW=primary:fm-sm3
+LAB_CLEANED=1

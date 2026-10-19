@@ -1,0 +1,9 @@
+PUBLISHER_TEARDOWN_RC=1
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: secondmate home /tmp/fm-lab.A4J4rD/smguard is publishing task child right now (its task-set publisher lock is held); forced teardown changed nothing
+PUBLISHER_TEARDOWN_REFUSAL=PASS
+LAB_CLEANED=1

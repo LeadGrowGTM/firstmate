@@ -1,0 +1,9 @@
+HELD_SET_SPAWN_RC=1 ELAPSED=30
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.mcVa3h/primary
+error: this home's task set is locked by another operation (a forced teardown is enumerating or removing its tasks); refusing to create task smguard rather than racing it
+HELD_SET_REFUSAL=PASS
+PUBLISHER_TEARDOWN_RC=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.mcVa3h/primary
+REFUSED: task smguard has a missing, empty, or ambiguous project identity; preserving task state.
+PUBLISHER_TEARDOWN_REFUSAL=FAIL
+LAB_CLEANED=1
