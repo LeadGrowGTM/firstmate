@@ -2,7 +2,7 @@
 name: task-slicing
 description: >-
   Agent-only rule for cutting a multi-part ask into tasks.
-  Load before splitting a multi-part ask into tasks, and before planning the build that follows a scout.
+  Load before splitting a multi-part ask into tasks.
 user-invocable: false
 metadata:
   internal: true
