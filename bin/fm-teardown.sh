@@ -3174,6 +3174,12 @@ collect_descendant_task_locks() {
     return 1
   fi
   DESCENDANT_LOCK_PATHS+=("$task_set_lock")
+  # A secondmate spawn holds its own publisher lock, not the set lock, through
+  # publication (fm_task_set_publisher_lock_path owns why).
+  if fm_task_set_live_publisher "$sub_state"; then
+    echo "REFUSED: secondmate home $home is publishing task $FM_TASK_SET_PUBLISHER right now (its task-set publisher lock is held); forced teardown changed nothing" >&2
+    return 1
+  fi
   child_ids=()
   for child_meta in "$sub_state"/*.meta; do
     [ -e "$child_meta" ] || continue

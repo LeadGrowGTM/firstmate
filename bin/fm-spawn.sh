@@ -172,9 +172,12 @@
 #   focus-sensitive presentation mutation.
 #   Every single-task invocation holds one task-id-scoped lock across backend
 #   creation through metadata publication, so concurrent same-id spawns serialize
-#   even when they select different backends. A fresh spawn first takes the
-#   per-home task-set lock and refuses rather than waits when forced teardown owns
+#   even when they select different backends. An ordinary fresh spawn first takes
+#   the per-home task-set lock and refuses rather than waits when forced teardown owns
 #   it; relaunch is exempt because the existing task's control lock covers it.
+#   A fresh secondmate spawn waits up to 30 seconds for that lock, then trades
+#   it for its own per-task publisher lock held through publication, so mates
+#   relaunched together do not refuse each other.
 #   A fresh Treehouse-backed spawn also takes the project-identity lock in the local
 #   root Firstmate home's state directory before slot allocation and holds it through
 #   task metadata publication. Teardown holds that same lock while proving and
@@ -1358,20 +1361,14 @@ spawn_remote_secondmate() {
     [ -z "$remote_recorded_traceparent" ] || echo "traceparent=$remote_recorded_traceparent"
   } >"$tmp"
   if ! fm_backlog_atomic_transition publish "$tmp" "$meta" "task record" "$STATE"; then
-    if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
-      SPAWN_TASK_SET_LOCK_HELD=0
-      fm_lock_release "$SPAWN_TASK_SET_LOCK" || true
-    fi
+    spawn_release_task_set
     fm_lock_release "$remote_lock" || true
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
     echo "error: remote secondmate $id launched, but its task record could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     return 1
   fi
-  if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
-    SPAWN_TASK_SET_LOCK_HELD=0
-    fm_lock_release "$SPAWN_TASK_SET_LOCK"
-  fi
+  spawn_release_task_set
   fm_lock_release "$remote_lock" || true
   fm_lock_release "$registry_lock" || true
   fm_lock_release "$SPAWN_TASK_LOCK" || true
@@ -1411,6 +1408,20 @@ SPAWN_META_PUBLISH_STARTED=0
 SPAWN_FRESH_COMMIT_PENDING=0
 SPAWN_TASK_SET_LOCK=
 SPAWN_TASK_SET_LOCK_HELD=0
+SPAWN_TASK_SET_PUBLISHER=
+SPAWN_TASK_SET_PUBLISHER_HELD=0
+# Releases this spawn's hold on the home's task set: the set lock itself, or the
+# secondmate publisher lock that stands in for it.
+spawn_release_task_set() {
+  if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
+    SPAWN_TASK_SET_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TASK_SET_LOCK" || true
+  fi
+  if [ "$SPAWN_TASK_SET_PUBLISHER_HELD" = 1 ]; then
+    SPAWN_TASK_SET_PUBLISHER_HELD=0
+    fm_lock_release "$SPAWN_TASK_SET_PUBLISHER" || true
+  fi
+}
 SPAWN_TREEHOUSE_PROJECT_LOCK=
 SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
 SPAWN_SLOT_CLAIMED=0
@@ -1665,10 +1676,7 @@ spawn_abort_cleanup() {
     SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
     fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK" || true
   fi
-  if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
-    SPAWN_TASK_SET_LOCK_HELD=0
-    fm_lock_release "$SPAWN_TASK_SET_LOCK" || true
-  fi
+  spawn_release_task_set
   if [ "$SPAWN_CONTROL_LOCK_HELD" = 1 ]; then
     SPAWN_CONTROL_LOCK_HELD=0
     fm_lock_release "$SPAWN_CONTROL_LOCK" || true
@@ -1977,17 +1985,47 @@ if [ "$RELAUNCH" -eq 0 ]; then
   #
   # Refusing rather than waiting is the fail-closed direction: the home may be
   # moments from removal, so there is nothing worth waiting for.
+  #
+  # A secondmate spawn is the one bounded exception. One session start relaunches
+  # every dead mate concurrently, so it waits up to 30 seconds for a sibling's
+  # brief hold, then holds its own publisher lock instead of the set lock
+  # through publication
+  # (bin/fm-wake-lib.sh's fm_task_set_publisher_lock_path owns why). A forced
+  # teardown holds the set lock for its whole run, so this spawn proceeds only
+  # after teardown finishes or refuses on timeout; teardown refuses while this
+  # spawn's publisher lock is live.
   SPAWN_TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || {
     echo "error: could not resolve the task-set lock for $STATE" >&2
     exit 1
   }
-  if ! fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
+  task_set_acquired=0
+  if [ "$KIND" = secondmate ]; then
+    if fm_lock_acquire_wait_bounded "$SPAWN_TASK_SET_LOCK" 30; then
+      task_set_acquired=1
+    fi
+  elif fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
+    task_set_acquired=1
+  fi
+  if [ "$task_set_acquired" -ne 1 ]; then
     echo "error: this home's task set is locked by another operation (a forced teardown is enumerating or removing its tasks); refusing to create task $ID rather than racing it" >&2
     exit 1
   fi
   SPAWN_TASK_SET_LOCK_HELD=1
   spawn_refuse_if_away_spend_cap
   spawn_require_relocated_queued_work
+  if [ "$KIND" = secondmate ]; then
+    SPAWN_TASK_SET_PUBLISHER=$(fm_task_set_publisher_lock_path "$STATE" "$ID") || {
+      echo "error: could not resolve the task-set publisher lock for $ID" >&2
+      exit 1
+    }
+    if ! fm_lock_try_acquire "$SPAWN_TASK_SET_PUBLISHER"; then
+      echo "error: another spawn is already publishing secondmate $ID" >&2
+      exit 1
+    fi
+    SPAWN_TASK_SET_PUBLISHER_HELD=1
+    SPAWN_TASK_SET_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TASK_SET_LOCK"
+  fi
 fi
 if [ "$KIND" = secondmate ]; then
   if spawn_remote_secondmate "$ID"; then
@@ -6061,13 +6099,10 @@ if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
   fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
 fi
-if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
-  # The record is published, so this task is now part of the set a teardown
-  # enumerates and locks per task. The set lock is only needed across that
-  # publication.
-  SPAWN_TASK_SET_LOCK_HELD=0
-  fm_lock_release "$SPAWN_TASK_SET_LOCK"
-fi
+# The record is published, so this task is now part of the set a teardown
+# enumerates and locks per task. The set lock, or a secondmate's publisher lock,
+# is only needed across that publication.
+spawn_release_task_set
 "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 [ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
 
