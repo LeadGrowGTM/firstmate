@@ -18,6 +18,12 @@
 # listed and left in place. Any other disagreement between the record and the
 # live window refuses the whole command before the first move.
 #
+# A ship or scout record whose own endpoint fields cannot be resolved (window
+# or tmux socket missing, ambiguous, malformed, or not an absolute path) is
+# one dead task, not a broken home: it prints one warning naming the task and
+# the reason, is listed as skip unresolvable, and the rest of the home still
+# migrates. The command fails only when a task it could resolve fails to move.
+#
 # A planned move that would empty its source session is refused. tmux closes a
 # session when its last window leaves, so the source session has to keep a
 # window that this command is not moving.
@@ -114,6 +120,13 @@ SKIP_FILE=$(mktemp "${TMPDIR:-/tmp}/fm-crew-session-skip.XXXXXX") || exit 1
 refuse() {
   echo "error: $*" >&2
   exit 1
+}
+
+# One task whose record cannot name its endpoint: warn, list it in the summary,
+# and let the caller return so the rest of the home still migrates.
+fm_crew_migrate_unresolvable() {  # <id> <reason>
+  echo "warning: task $1: $2; skipping it and migrating the rest of the home" >&2
+  printf 'skip unresolvable %s %s\n' "$1" "$2" >>"$SKIP_FILE"
 }
 
 fm_crew_migrate_absent_listing() {  # <listing>
@@ -412,28 +425,45 @@ fm_crew_migrate_classify() {  # <meta>
     printf 'skip other-backend %s %s\n' "$id" "$backend" >>"$SKIP_FILE"
     return 0
   fi
-  window=$(fm_backend_meta_exact_value "$meta" window) || refuse "task $id: recorded window is missing or ambiguous"
+  window=$(fm_backend_meta_exact_value "$meta" window) || {
+    fm_crew_migrate_unresolvable "$id" "recorded window is missing or ambiguous"
+    return 0
+  }
   case "$window" in
     *:*) ;;
-    *) refuse "task $id: recorded window '$window' is not session:window" ;;
+    *)
+      fm_crew_migrate_unresolvable "$id" "recorded window '$window' is not session:window"
+      return 0
+      ;;
   esac
   session=${window%%:*}
   window_name=${window#*:}
   if [ "$window_name" != "fm-$id" ] || [ -z "$session" ]; then
-    refuse "task $id: recorded window '$window' does not belong to fm-$id"
+    fm_crew_migrate_unresolvable "$id" "recorded window '$window' does not belong to fm-$id"
+    return 0
   fi
   case "$session" in
     *[!A-Za-z0-9_-]*|''|[!A-Za-z0-9]*)
-      refuse "task $id: recorded session '$session' is not a tmux session name"
+      fm_crew_migrate_unresolvable "$id" "recorded session '$session' is not a tmux session name"
+      return 0
       ;;
   esac
-  socket=$(fm_backend_meta_exact_value "$meta" tmux_socket) || refuse "task $id: recorded tmux socket is missing or ambiguous"
+  socket=$(fm_backend_meta_exact_value "$meta" tmux_socket) || {
+    fm_crew_migrate_unresolvable "$id" "recorded tmux socket is missing or ambiguous"
+    return 0
+  }
   case "$socket" in
     /*) ;;
-    *) refuse "task $id: recorded tmux socket is not an absolute path" ;;
+    *)
+      fm_crew_migrate_unresolvable "$id" "recorded tmux socket is not an absolute path"
+      return 0
+      ;;
   esac
   case "$socket" in
-    *[$'\n\r\t,']*) refuse "task $id: recorded tmux socket cannot be used as a server address" ;;
+    *[$'\n\r\t,']*)
+      fm_crew_migrate_unresolvable "$id" "recorded tmux socket cannot be used as a server address"
+      return 0
+      ;;
   esac
   probe_status=0
   wid=$(fm_crew_migrate_probe "$socket" "$id" "$session" "$window_name") || probe_status=$?

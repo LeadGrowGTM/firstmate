@@ -719,6 +719,89 @@ EOF
   pass "report-only unresolved captain call is reproduced and completion refuses before loss"
 }
 
+# An answered captain call ages out of the active backlog into the Done
+# retention archive. It is closed work, so an inventory naming it still passes
+# the completion gate; an id found nowhere, or archived without a recorded
+# answer, still refuses and the refusal names what was looked up.
+test_aged_out_answered_calls_do_not_block_cleanup() {
+  local home id rc
+  home=$(make_home aged-out-calls)
+  id=sample-aged-scout
+  mkdir -p "$home/data/$id"
+  cat > "$home/data/backlog.md" <<EOF
+## In flight
+- [ ] $id - Investigate aged calls (repo: sample) (kind: scout) (since 2026-10-10)
+
+## Queued
+
+## Done
+EOF
+  cat > "$home/data/done-archive.md" <<'EOF'
+
+## Archived 2026-10-14
+- [x] aged-call-a - First question (kind: captain) (done 2026-10-13) (hold: captain decision pending) (hold-kind: captain)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: aaa
+  Resolution mode: answered
+
+  Captain decision:
+  Go north.
+- [x] aged-call-b - Second question (kind: captain) (done 2026-10-13) (hold: captain decision pending) (hold-kind: captain)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: bbb
+  Resolution mode: answered
+
+  Captain decision:
+  Go south.
+- [x] aged-call-bare - Closed without an answer (kind: captain) (done 2026-10-13)
+EOF
+  write_origin_meta "$home" "$id"
+  printf 'done: report complete\n' > "$home/state/$id.status"
+  printf '# Aged calls\n\nBoth calls were answered.\n' > "$home/data/$id/report.md"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-a,aged-call-b\n' >> "$home/state/$id.meta"
+
+  run_captain "$home" verify "$id" > "$home/verify.out" 2> "$home/verify.err" \
+    || fail "answered calls aged into the archive were refused: $(cat "$home/verify.err")"
+  assert_contains "$(cat "$home/verify.out")" "verified: $id captain-call inventory" \
+    "verify did not accept the archived answers"
+
+  # Still refusing: archived without a recorded answer.
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-bare\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/bare.out" 2> "$home/bare.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a call archived without an answer passed the gate"
+  assert_grep "aged-call-bare" "$home/bare.err" "the refusal did not name the archived call"
+  assert_grep "without a recorded captain answer" "$home/bare.err" \
+    "the refusal did not say the archive holds no answer"
+
+  # Still refusing: an id found nowhere.
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-nowhere\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/nowhere.out" 2> "$home/nowhere.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "an id found nowhere passed the gate"
+  assert_grep "aged-call-nowhere" "$home/nowhere.err" "the refusal did not name the missing id"
+  assert_grep "Done retention archive" "$home/nowhere.err" \
+    "the refusal did not say the archive was consulted"
+  if run_teardown "$home" "$id" > "$home/refused.out" 2> "$home/refused.err"; then
+    fail "teardown accepted an inventory naming an id found nowhere"
+  fi
+  assert_present "$home/state/$id.meta" "refused cleanup removed the task metadata"
+
+  # Cleanup of the finished task proceeds once its calls are all archived answers.
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-a,aged-call-b\n' >> "$home/state/$id.meta"
+  run_teardown "$home" "$id" > "$home/teardown.out" 2> "$home/teardown.err" \
+    || fail "cleanup was refused by aged-out answered calls: $(cat "$home/teardown.err")"
+  assert_absent "$home/state/$id.meta" "cleanup kept the finished task's metadata"
+  pass "aged-out answered captain calls do not block cleanup, and unproven ones still refuse"
+}
+
 # The completion gate on the collapsed primitive: an origin with open keyed
 # status decisions refuses --none, refuses an inventory naming absent tasks,
 # attests a verified inventory of captain-held task ids, and transfers every
@@ -5436,6 +5519,7 @@ test_complete_refuses_an_entry_held_for_another_origin
 test_uninventoried_report_decision_refuses_completion
 test_hold_decodes_a_bare_scalar_body_without_the_nonref_default
 test_retained_body_keeps_its_utf8_bytes
+test_aged_out_answered_calls_do_not_block_cleanup
 test_completion_gate_attests_and_transfers
 test_answer_records_and_closes
 test_release_frees_held_work

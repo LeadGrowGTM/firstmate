@@ -827,9 +827,9 @@ resolve_entry() {  # <origin-or-empty> <entry>; prints "<id> <how>" or fails
   esac
   if [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ]; then
     legacy=$(legacy_hold_id "$origin" "$entry")
-    fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA); the nearest legacy identity $legacy also resolves to nothing"
+    fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA) or its Done retention archive; the nearest legacy identity $legacy also resolves to nothing"
   fi
-  fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA)"
+  fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA) or its Done retention archive"
 }
 
 body_hold_set_timestamp() {  # <decoded-task-body>
@@ -927,6 +927,66 @@ refuse_self_inventory() {
   fail "origin $origin cannot be its own captain-call inventory entry; hold a separate captain task for the call and list that task"
 }
 
+# --- aged-out answered calls ------------------------------------------------
+#
+# The markdown backend keeps only `done_keep` closed rows in the active backlog
+# and moves older ones, with their bodies, to the Done retention archive. An
+# answered captain call that has aged out there is closed work, not a missing
+# task, so an inventory entry absent from the active backlog is accepted when the
+# archive holds a row for that exact id carrying a recorded captain answer. An id
+# the archive does not hold, or holds without a recorded answer, stays refused.
+
+# The configured Done retention archive of the markdown backend; empty on any
+# other backend or when no archive file exists.
+done_archive_file() {
+  local data root backend configured file
+  data=$(fm_backlog_data_absolute "$DATA") || return 0
+  root=$(fm_backlog_root "$data") || return 0
+  backend=$(fm_tasks_axi_backend "$root") || return 0
+  [ "$backend" = markdown ] || return 0
+  configured=$(LC_ALL=C awk '
+    /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec); next }
+    sec == "[markdown]" && /^[[:space:]]*archive[[:space:]]*=/ {
+      v = $0; sub(/[[:space:]]*#.*/, "", v); sub(/^[^=]*=[[:space:]]*/, "", v)
+      gsub(/^"|"$/, "", v); gsub(/^'\''|'\''$/, "", v); sub(/[[:space:]]+$/, "", v)
+      print v; exit
+    }
+  ' "$root/.tasks.toml" 2>/dev/null) || configured=
+  if [ -n "$configured" ]; then
+    case "$configured" in
+      /*) file=$configured ;;
+      *) file="$root/$configured" ;;
+    esac
+  else
+    file="$data/done-archive.md"
+  fi
+  [ -f "$file" ] && printf '%s\n' "$file"
+  return 0
+}
+
+# Print "<state>" for one id in the archive: answered when a closed row for that
+# exact id carries a recorded captain answer, unanswered when the id is
+# archived without one, and nothing when the archive does not hold it.
+archived_call_state() {  # <task-id>
+  local archive block
+  archive=$(done_archive_file)
+  [ -n "$archive" ] || return 0
+  block=$(LC_ALL=C awk -v id="$1" '
+    /^- \[x\] / {
+      take = (index($0, "- [x] " id " - ") == 1)
+      if (take) found = 1
+    }
+    /./ && !/^[[:space:]]/ && !/^- \[x\] / { take = 0 }
+    take { print }
+    END { exit !found }
+  ' "$archive") || return 0
+  if body_has_resolution_record "$block"; then
+    printf 'answered'
+  else
+    printf 'unanswered'
+  fi
+}
+
 # Resolve one entry and verify the row it names is durably captain-held. A
 # resolution failure that is not the read bound keeps resolve_entry's own
 # status - its stderr already named the entry; 124 means the backend never
@@ -934,16 +994,28 @@ refuse_self_inventory() {
 # as absence. The result carries the attestation evidence and whether an
 # origin was recorded, so completion can disclose the legacy fallback.
 verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how> <origin-state>"
-  local origin=$1 entry=$2 resolved resolve_status=0 id how stored origin_state=unrecorded origin_id stored_id
+  local origin=$1 entry=$2 resolved resolve_status=0 id how stored origin_state=unrecorded origin_id stored_id archive_state=''
   # The origin task is never its own captain-call inventory: it is the work the
   # calls were found in, so accepting it would let a refused hold look recorded.
   if [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ] && [ "$entry" = "$origin" ]; then
     refuse_self_inventory "$origin" "$entry"
   fi
+  # A live row wins; only an id absent from the active backlog consults the
+  # Done retention archive, so a task id found nowhere still refuses below.
+  if ! task_show "$entry"; then
+    archive_state=$(archived_call_state "$entry")
+    if [ "$archive_state" = answered ]; then
+      printf '%s archived archived\n' "$entry"
+      return 0
+    fi
+  fi
   resolved=$(resolve_entry "$origin" "$entry") || resolve_status=$?
   if [ "$resolve_status" -ne 0 ]; then
     [ "$resolve_status" -ne 124 ] \
       || fail "the backlog backend exceeded its read bound resolving $entry"
+    if [ "$archive_state" = unanswered ]; then
+      printf 'fm-captain-hold: %s is archived in the Done retention archive without a recorded captain answer\n' "$entry" >&2
+    fi
     exit "$resolve_status"
   fi
   id=${resolved%% *}
