@@ -26,8 +26,9 @@
 #   8. A home with no spend config is silent and never calls Boat, and arm
 #      refuses without a spend config or a readable box list.
 #   9. With several boxes, each probe refreshes the shared alias to the
-#      probed box (the transport stub refuses a route/alias mismatch), and
-#      sweeps rotate from the durable position.
+#      probed box (the transport stub refuses a route/alias mismatch, and a
+#      slow refresh fails into the extend path within its bound), and sweeps
+#      rotate from the durable position.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -134,6 +135,7 @@ fi
 [ "$#" -eq 2 ] && [ "${2:-}" = boat-prove ] || exit 97
 case "${1:-}" in bx_*) ;; *) exit 97 ;; esac
 [ ! -e "$FIXTURES/refresh.fail" ] || exit 1
+[ ! -e "$FIXTURES/refresh.slow" ] || sleep 25
 printf '%s\n' "$1" > "$FIXTURES/alias.box"
 printf 'sandbox=%s state=running\n' "$1"
 FAKE
@@ -423,6 +425,24 @@ test_extend_caps_at_plan_timer() {
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a busy box was stopped'
 }
 
+test_slow_refresh_still_extends() {
+  local other=bx_cccccccc
+  new_case slow-refresh '{"expected_running":2}'
+  printf '%s\n' "$BOX" "$other" > "$HOME_DIR/config/boat-box-id"
+  BOX=$other
+  printf '%s\n' '{"sandbox":{"id":"'"$BOX"'","type":"default","state":"stopped"}}' > "$FIXTURES/$BOX.info.json"
+  BOX=bx_aaaaaaaa
+  make_info running 600
+  set_idle 'boat-tasks-remaining: yes'
+  : > "$FIXTURES/refresh.slow"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "slow refresh check: $OUT"
+  assert_equals "boat-idle: cannot point the worker route at $BOX; keeping it up" "$OUT" 'slow refresh line'
+  assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 3600 --json" \
+    "$FIXTURES/calls" 'a busy box was not extended after its refresh timed out'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a busy box was stopped'
+}
+
 test_sweep_rotates_across_boxes() {
   local other=bx_cccccccc
   new_case rotate '{"expected_running":2}'
@@ -498,6 +518,7 @@ test_absent_config_is_off
 test_two_boxes_extend_and_stop_on_one_line
 test_late_worker_skips_stop
 test_extend_caps_at_plan_timer
+test_slow_refresh_still_extends
 test_sweep_rotates_across_boxes
 test_arm_and_disarm
 pass "fm-boat-idle-check"

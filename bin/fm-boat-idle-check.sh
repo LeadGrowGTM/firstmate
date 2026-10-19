@@ -55,12 +55,14 @@
 #
 # The CLI comes from FM_BOAT_BIN, else "boat_bin" in the config, else `boat`
 # on PATH. docs/configuration.md owns the config schema. Each Boat read is
-# bounded to 6 seconds, the idle probe to 12, extend to 60, and stop to 30.
-# Sweeps rotate across listed boxes from a durable position, so a poll killed
-# at FM_CHECK_TIMEOUT resumes with the next box instead of starving every box
-# behind one slow extend. Extend, stop, and refresh failures are reported at
-# most once per hour per box, config problems at most once per 24 hours, and
-# every completed stop is reported at once.
+# bounded to 6 seconds, the idle probe to 12, the alias refresh to 10,
+# extend to 60, and stop to 30. The refresh bound sits inside its own reads
+# so a slow route fails into the conservative extend path instead of eating
+# the poll. Sweeps rotate across listed boxes from a durable position, so a
+# poll killed at FM_CHECK_TIMEOUT resumes with the next box instead of
+# starving every box behind one slow extend. Extend, stop, and refresh
+# failures are reported at most once per hour per box, config problems at
+# most once per 24 hours, and every completed stop is reported at once.
 set -u
 export LC_ALL=C
 
@@ -81,6 +83,7 @@ MAX_LINE=1000
 INFO_SECS=6
 EXEC_SECS=6
 IDLE_SECS=12
+REFRESH_SECS=10
 RESUME_SECS=60
 STOP_SECS=30
 LOCK_WAIT=5
@@ -101,7 +104,7 @@ ACTION_INTERVAL=3600
 . "$SCRIPT_DIR/fm-boat-budget-lib.sh"
 
 usage() {
-  sed -n '2,63{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
+  sed -n '2,65{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
 }
 
 fail() {
@@ -228,7 +231,10 @@ idle_probe() {
       [ "$held" -eq 1 ] || release_idle_lock
       return 1
     fi
-    if ! FM_BOAT_HYDRATE_WAIT=0 "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$box" boat-prove >/dev/null 2>&1; then
+    # The refresh is bounded tighter than its own reads so a slow route
+    # fails into the conservative extend path instead of eating the poll;
+    # its alias writes are atomic renames, so a kill leaves no half state.
+    if ! FM_BOAT_HYDRATE_WAIT=0 fm_run_timed "$REFRESH_SECS" "$SCRIPT_DIR/fm-boat-alias-refresh.sh" "$box" boat-prove >/dev/null 2>&1; then
       [ "$held" -eq 1 ] || release_idle_lock
       return 2
     fi
