@@ -4,6 +4,7 @@
 #        fm-boat-worker.sh spawn <box-instance> < request.json
 #        fm-boat-worker.sh teardown <task-id> <box-instance>
 #        fm-boat-worker.sh idle <box-instance>
+#        fm-boat-worker.sh retire-claim <task-id> <box-instance>
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
 #   id: safe task id; project: firstmate|dev-loop; kind: ship|scout;
@@ -25,7 +26,18 @@
 # so ordinary spawn and inventory both target the exact firstmate session.
 # Capacity counts distinct task IDs across retained worker records and live
 # fm-* windows from one backend inventory read; unreadable inventory refuses.
-# Stop is allowed only when both counts are zero.
+# A retained record stops counting only when its endpoint is absent and its
+# last status is terminal (done, failed, blocked, needs-decision) or stale
+# (a readable status time at least FM_BOAT_RECORD_STALE_SECS old, default
+# 86400); each such record is reported by name on stderr. A record with a
+# live endpoint, a fresh nonterminal status, or no readable status at all
+# always counts, so an unproven record keeps its slot. Stop is allowed only
+# when the counted total is zero.
+# retire-claim is the box-side records-only cleanup for such a record: it
+# refuses a live endpoint or a fresh nonterminal status, archives the record
+# under data/<task-id>/, and removes only state/<task-id>.meta; it never
+# touches a worktree, an endpoint, or the backlog. Run it from the controller
+# as fm-on.sh boat-eng fm-boat-worker.sh retire-claim <task-id> <instance>.
 # An id may be retried only without a spawn record or matching live endpoint;
 # unknown transport completion
 # must be reconciled before reusing its id or rewriting its briefs.
@@ -58,6 +70,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-classify-lib.sh
+. "$SCRIPT_DIR/fm-classify-lib.sh"
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 boat_runtime() {
   [ -z "${TMUX:-}" ] || die 'Boat worker commands must run outside tmux through the remote transport'
@@ -66,8 +80,54 @@ boat_runtime() {
   [ "$(fm_backend_name)" = tmux ] || die 'Boat worker inventory requires the tmux backend'
   fm_backend_source tmux || die 'Boat tmux adapter unavailable'
 }
+# boat_record_not_counted <id> <windows>: returns 0 and reports the record by
+# name on stderr when it must not count toward the cap: its endpoint is absent
+# and its last status is terminal or stale. Returns 1 when it counts.
+boat_record_not_counted() { # <task-id> <windows>
+  local id=$1 windows=$2 status_file line verb epoch now stale_secs
+  if printf '%s\n' "$windows" | grep -Fxq -- "fm-$id"; then
+    return 1
+  fi
+  stale_secs=${FM_BOAT_RECORD_STALE_SECS:-86400}
+  case "$stale_secs" in ''|*[!0-9]*|0) die 'FM_BOAT_RECORD_STALE_SECS must be a whole number of seconds above 0' ;; esac
+  status_file="$FM_HOME/state/$id.status"
+  if [ -L "$status_file" ]; then
+    return 1
+  fi
+  if [ ! -f "$status_file" ]; then
+    return 1
+  fi
+  line=$(last_status_line "$status_file")
+  if [ -z "$line" ]; then
+    return 1
+  fi
+  verb=''
+  status_line_verb "$line" verb
+  case "$verb" in
+    done|failed|blocked|needs-decision)
+      printf 'boat-stale-record: %s not counted (endpoint absent, status terminal: %s)\n' "$id" "$verb" >&2
+      return 0
+      ;;
+  esac
+  epoch=$(status_line_at_epoch "$line" 2>/dev/null) || epoch=''
+  if [ -z "$epoch" ]; then
+    return 1
+  fi
+  now=$(date +%s)
+  case "$now" in ''|*[!0-9]*) die 'could not read the current time' ;; esac
+  if [ $((now - epoch)) -ge "$stale_secs" ]; then
+    printf 'boat-stale-record: %s not counted (endpoint absent, status stale: last status %ss ago)\n' "$id" "$((now - epoch))" >&2
+    return 0
+  fi
+  return 1
+}
 boat_worker_count() { # [new task id, refused if its endpoint already exists]
   local meta id records='' windows status=0
+  windows=$(fm_backend_tmux_window_inventory '=firstmate') || status=$?
+  case "$status" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
+  if [ -n "${1:-}" ] && printf '%s\n' "$windows" | grep -Fxq -- "fm-$1"; then
+    die 'task id has a live endpoint; reconcile before retry'
+  fi
   for meta in "$FM_HOME/state/"*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
     [ -f "$meta" ] && [ ! -L "$meta" ] || die 'unsafe worker metadata'
@@ -75,14 +135,12 @@ boat_worker_count() { # [new task id, refused if its endpoint already exists]
       id=${meta##*/}
       id=${id%.meta}
       case "$id" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) die 'unsafe worker metadata' ;; esac
+      if boat_record_not_counted "$id" "$windows"; then
+        continue
+      fi
       records="${records}fm-$id"$'\n'
     fi
   done
-  windows=$(fm_backend_tmux_window_inventory '=firstmate') || status=$?
-  case "$status" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
-  if [ -n "${1:-}" ] && printf '%s\n' "$windows" | grep -Fxq -- "fm-$1"; then
-    die 'task id has a live endpoint; reconcile before retry'
-  fi
   printf '%s\n%s\n' "$records" "$windows" | awk '/^fm-/ && !seen[$0]++ { n++ } END { print n+0 }'
 }
 case "${1:-}" in
@@ -91,14 +149,15 @@ case "${1:-}" in
   spawn) [ "$#" -eq 2 ] || die 'box instance required' ;;
   teardown) [ "$#" -eq 3 ] || die 'task id and box instance required' ;;
   idle) [ "$#" -eq 2 ] || die 'box instance required' ;;
-  *) die 'expected validate, spawn, teardown, or idle' ;;
+  retire-claim|--retire-claim) [ "$#" -eq 3 ] || die 'task id and box instance required' ;;
+  *) die 'expected validate, spawn, teardown, idle, or retire-claim' ;;
 esac
 if [ "$1" != validate ]; then
   expected_instance=${!#}
   [[ "$expected_instance" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die 'invalid box instance'
   [ "$(cat /proc/sys/kernel/random/boot_id)" = "$expected_instance" ] || die 'Boat instance changed; action refused'
 fi
-if [ "$1" = teardown ] || [ "$1" = idle ]; then
+if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" = --retire-claim ]; then
   FM_HOME=${FM_HOME:?FM_HOME is required}
   [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
     [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] || die 'not the purpose-built boat-eng home'
@@ -119,6 +178,27 @@ if [ "$1" = teardown ] || [ "$1" = idle ]; then
       die "scout completion inventory required; after reviewing unresolved calls, run from the controller: fm-on.sh boat-eng fm-captain-hold.sh complete $ID --none (or list the held task ids instead of --none)"
     fi
     "$SCRIPT_DIR/fm-teardown.sh" "$ID" >&2
+  fi
+  if [ "$1" = retire-claim ] || [ "$1" = --retire-claim ]; then
+    ID=$2
+    case "$ID" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) die 'invalid task id' ;; esac
+    [ -f "$FM_HOME/state/$ID.meta" ] && [ ! -L "$FM_HOME/state/$ID.meta" ] || die 'task has no safe spawn record; reconcile before retire-claim'
+    kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
+    project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
+    case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
+    case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
+    windows=$(fm_backend_tmux_window_inventory '=firstmate') || windows_status=$?
+    case "${windows_status:-0}" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
+    boat_record_not_counted "$ID" "$windows" || die 'task has a live endpoint or a fresh nonterminal status; retire-claim refused'
+    if [ ! -e "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ]; then
+      mkdir -p -- "$FM_HOME/data/$ID" || die 'could not create the task data directory'
+    fi
+    [ -d "$FM_HOME/data/$ID" ] && [ ! -L "$FM_HOME/data/$ID" ] || die 'task data directory is unavailable or unsafe'
+    archive="$FM_HOME/data/$ID/retired-boat-record.$(date +%s).meta"
+    [ ! -e "$archive" ] && [ ! -L "$archive" ] || die 'retired record archive already exists; retry retire-claim'
+    cp -- "$FM_HOME/state/$ID.meta" "$archive" || die 'could not archive the worker record'
+    rm -f -- "$FM_HOME/state/$ID.meta"
+    printf 'retired boat record: %s (archived %s)\n' "$ID" "$archive"
   fi
   COUNT=$(boat_worker_count) || exit 1
   if [ "$COUNT" -ne 0 ]; then

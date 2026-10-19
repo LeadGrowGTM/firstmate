@@ -1099,9 +1099,10 @@ test_remote_cap_and_merge_authority() {
   seed_worker worker-a ship dev-loop 'state: working active'
   seed_worker worker-b scout firstmate 'state: paused waiting'
   seed_worker worker-done ship dev-loop 'state: done complete'
+  printf 'working [at=1791892800]: still active\n' > "$REMOTE_HOME/state/worker-done.status"
   seed_worker mate secondmate dev-loop 'state: working active'
   spawn_task
-  expect_code 75 "$CODE" 'retained terminal worker still occupies a slot'
+  expect_code 75 "$CODE" 'retained fresh worker still occupies a slot'
   assert_no_grep '^spawn ' "$FIXTURES/calls" 'terminal worker metadata bypassed capacity'
   rm "$REMOTE_HOME/state/worker-done.meta"
   : > "$FIXTURES/calls"
@@ -1153,6 +1154,68 @@ test_remote_cap_and_merge_authority() {
   assert_contains "$OUT" 'has not been proven' 'unproven pipeline refusal'
   assert_no_grep '^spawn ' "$FIXTURES/calls" 'unproven no-mistakes launched or downgraded'
   pass 'remote capacity spans projects until teardown, excludes secondmates, and merge authority is off'
+}
+
+test_stale_records_and_retire_claim() {
+  new_case stale-terminal-cap
+  seed_project firstmate
+  seed_worker stale-a ship firstmate 'state: working active'
+  printf 'done [at=1791892800]: finished\n' > "$REMOTE_HOME/state/stale-a.status"
+  seed_worker stale-b scout dev-loop 'state: working active'
+  printf 'failed [at=1791000000]: broken\n' > "$REMOTE_HOME/state/stale-b.status"
+  seed_worker stale-c ship dev-loop 'state: working active'
+  printf 'working [at=1791000000]: old progress\n' > "$REMOTE_HOME/state/stale-c.status"
+  spawn_task
+  expect_code 0 "$CODE" "stale terminal records must not fill the cap: $OUT"
+  assert_contains "$OUT" 'boat-stale-record: stale-a not counted' 'terminal record was not reported by name'
+  assert_contains "$OUT" 'boat-stale-record: stale-b not counted' 'failed record was not reported by name'
+  assert_contains "$OUT" 'boat-stale-record: stale-c not counted' 'stale working record was not reported by name'
+  new_case fresh-records-cap
+  seed_project firstmate
+  seed_worker fresh-a ship firstmate 'state: working active'
+  printf 'working [at=1791892800]: active\n' > "$REMOTE_HOME/state/fresh-a.status"
+  seed_worker fresh-b scout dev-loop 'state: working active'
+  printf 'working [at=1791892800]: active\n' > "$REMOTE_HOME/state/fresh-b.status"
+  seed_worker fresh-c ship dev-loop 'state: working active'
+  printf 'paused [at=1791892800]: waiting\n' > "$REMOTE_HOME/state/fresh-c.status"
+  spawn_task
+  expect_code 75 "$CODE" 'fresh nonterminal records still fill the cap'
+  new_case no-status-records-cap
+  seed_project firstmate
+  seed_worker unknown-a ship firstmate 'state: working active'
+  seed_worker unknown-b scout dev-loop 'state: working active'
+  seed_worker unknown-c ship dev-loop 'state: working active'
+  spawn_task
+  expect_code 75 "$CODE" 'records with no status file keep their slots'
+  new_case terminal-with-endpoint-cap
+  seed_project firstmate
+  seed_worker live-a ship firstmate 'state: working active'
+  printf 'done [at=1791892800]: finished\n' > "$REMOTE_HOME/state/live-a.status"
+  seed_worker live-b scout dev-loop 'state: working active'
+  printf 'working [at=1791892800]: active\n' > "$REMOTE_HOME/state/live-b.status"
+  seed_worker live-c ship dev-loop 'state: working active'
+  printf 'working [at=1791892800]: active\n' > "$REMOTE_HOME/state/live-c.status"
+  printf 'fm-live-a\n' > "$FIXTURES/windows"
+  spawn_task
+  expect_code 75 "$CODE" 'a terminal record with a live endpoint still counts'
+  new_case retire-claim-stale
+  seed_project firstmate
+  seed_worker stale-a ship firstmate 'state: working active'
+  printf 'done [at=1791892800]: finished\n' > "$REMOTE_HOME/state/stale-a.status"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh retire-claim stale-a "$(cat "$FIXTURES/boot-id")"
+  expect_code 0 "$CODE" "retire-claim of a stale record: $OUT"
+  assert_contains "$OUT" 'retired boat record: stale-a' 'retire-claim did not report the record'
+  assert_absent "$REMOTE_HOME/state/stale-a.meta" 'retire-claim kept the worker record'
+  [ -n "$(ls "$REMOTE_HOME/data/stale-a/"retired-boat-record.*.meta 2>/dev/null)" ] || fail 'retire-claim did not archive the worker record'
+  assert_contains "$OUT" 'boat-tasks-remaining: no' 'retire-claim did not recount after retiring'
+  new_case retire-claim-live-refused
+  seed_project firstmate
+  seed_worker live-a ship firstmate 'state: working active'
+  printf 'working [at=1791892800]: active\n' > "$REMOTE_HOME/state/live-a.status"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh --retire-claim live-a "$(cat "$FIXTURES/boot-id")"
+  expect_code 1 "$CODE" 'retire-claim of a fresh record must refuse'
+  [ -f "$REMOTE_HOME/state/live-a.meta" ] || fail 'refused retire-claim removed the worker record'
+  pass 'stale Boat records stop counting by name, fresh and live records count, and retire-claim archives only stale records'
 }
 
 test_same_id_orphan_retry() {
@@ -1578,4 +1641,5 @@ test_running_quota_and_route
 test_prepare_before_route
 test_teardown_stop
 test_remote_cap_and_merge_authority
+test_stale_records_and_retire_claim
 pass 'fm-boat-send'

@@ -576,6 +576,8 @@ Record approved box ids in the controller home's `config/boat-box-id`, one id pe
 One id stays valid.
 More ids are allowed up to `expected_running` in `config/boat-spend.json`.
 To add a box, fork a seeded one with `boat fork <seeded-id> --ttl 3600`, which keeps the `fm-code` environment, the home and the box's agent sign-ins, and wait until Boat reports the restore finished.
+Fork only from a quiesced box or a named snapshot of one, never from a box carrying live or stale worker records.
+A fork copies the disk, so any worker record on the source is copied too and can strand capacity or collide with live work on the new box.
 Move the copied `state/<task-id>.*` records and their `data/backlog.md` rows out of the new home before anything else, because retained worker records count toward the three-worker cap.
 Then stop the fork, list its id, and let the sender's next resume record its environment receipt.
 The sender's header owns that validation, the reservation ceilings, and the fixed `boat-prove` SSH alias.
@@ -591,7 +593,7 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < <request.json>
 ```
 
 The box generates its own normal worker brief and operational paths, allocates its own worktree, and calls the existing spawn command with merge authority off.
-The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback.
+The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback, with the stale-record exception [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) owns in its header.
 Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 Provision the dedicated `fm-code` Boat environment with GitHub access enabled and secrets, Boat credentials, and agent credentials disabled.

@@ -30,6 +30,12 @@
 #            always-on list
 #   refill   auto-refill is enabled
 #   period   the trial or plan end is within 3 days
+#   health   a sandbox reports health other than ok, carries a restore error,
+#            or is an active sandbox that has not finished restoring its disk
+#            (hydrated is false at this daily evaluation)
+#   expiry   a stopped sandbox is within 3 days of Boat deleting its stopped
+#            disk (14 days after it stopped), or is already past that point;
+#            this is the one stopped-sandbox condition ever reported
 # account_seconds_per_24h and box_seconds_per_24h are accepted and ignored.
 # fm-boat-send.sh owns those reservation ceilings. resume_ttl_seconds and
 # idle_grace_seconds are accepted and ignored here; fm-boat-send.sh owns the
@@ -85,7 +91,7 @@ PROBE_SECS=9
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 
 usage() {
-  sed -n '2,55{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
+  sed -n '2,60{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}"
 }
 
 fail() {
@@ -241,6 +247,22 @@ findings() {
     (if $billing.prepaid.enabled == true then "auto-refill is enabled" else empty end),
     ([$trial_end, $period_end] | map(select(. != null and . >= $now and . <= $now + $warn_days * 86400)) | min |
       if . != null then "trial or plan ends \(strftime("%Y-%m-%d")) UTC, within \($warn_days) days" else empty end),
+    ($boxes[] | select(.health != null and .health != "ok") |
+      "sandbox \(.id) health is \(.health)"),
+    ($boxes[] | select(.error != null and .error != "") |
+      "sandbox \(.id) has a restore error: \(.error[0:80])"),
+    ($live[] | select(.hydrated == false) |
+      "sandbox \(.id) has not finished restoring its disk"),
+    ($boxes[] | select(.state == "stopped") |
+      ((.stop.endedAt | ts) // (.updatedAt | ts)) as $stopped_at |
+      if $stopped_at == null then empty
+      else ($stopped_at + 14 * 86400) as $disk_end |
+        if $disk_end <= $now
+        then "stopped sandbox \(.id) disk expired \($disk_end | strftime("%Y-%m-%d")) UTC (14 days after it stopped)"
+        elif $disk_end <= $now + $warn_days * 86400
+        then "stopped sandbox \(.id) disk expires \($disk_end | strftime("%Y-%m-%d")) UTC, within \($warn_days) days"
+        else empty end
+      end),
     (if ($unread | length) > 0 then "read failed: unreadable \($unread | join(", "))" else empty end)'
 }
 
