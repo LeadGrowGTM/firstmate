@@ -175,7 +175,7 @@
 #   even when they select different backends. A fresh spawn first takes the
 #   per-home task-set lock and refuses rather than waits when forced teardown owns
 #   it; relaunch is exempt because the existing task's control lock covers it.
-#   A secondmate spawn waits up to FM_SPAWN_TASK_SET_WAIT seconds (default 30)
+#   A secondmate spawn waits up to 30 seconds
 #   for that lock, then trades it for its own per-task publisher lock held
 #   through publication, so mates relaunched together do not refuse each other.
 #   A fresh Treehouse-backed spawn also takes the project-identity lock in the local
@@ -1987,9 +1987,9 @@ if [ "$RELAUNCH" -eq 0 ]; then
   # moments from removal, so there is nothing worth waiting for.
   #
   # A secondmate spawn is the one bounded exception. One session start relaunches
-  # every dead mate concurrently, so it waits up to FM_SPAWN_TASK_SET_WAIT
-  # seconds (default 30) for a sibling's brief hold, then holds its own
-  # publisher lock instead of the set lock through publication
+  # every dead mate concurrently, so it waits up to 30 seconds for a sibling's
+  # brief hold, then holds its own publisher lock instead of the set lock
+  # through publication
   # (bin/fm-wake-lib.sh's fm_task_set_publisher_lock_path owns why). A forced
   # teardown holds the set lock for its whole run, so it still makes this spawn
   # refuse, and it refuses while this spawn's publisher lock is live.
@@ -1999,9 +1999,7 @@ if [ "$RELAUNCH" -eq 0 ]; then
   }
   task_set_acquired=0
   if [ "$KIND" = secondmate ]; then
-    task_set_wait=${FM_SPAWN_TASK_SET_WAIT:-30}
-    case "$task_set_wait" in ''|*[!0-9]*|0) task_set_wait=30 ;; esac
-    if fm_lock_acquire_wait_bounded "$SPAWN_TASK_SET_LOCK" "$task_set_wait"; then
+    if fm_lock_acquire_wait_bounded "$SPAWN_TASK_SET_LOCK" 30; then
       task_set_acquired=1
     fi
   elif fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then

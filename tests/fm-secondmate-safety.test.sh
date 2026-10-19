@@ -2724,13 +2724,13 @@ test_fresh_remote_secondmate_spawn_refuses_while_task_set_is_owned() {
   mkdir -p "$home/state" "$home/data"
   printf '%s\n' '- remote-new - remote domain (host: remote-mac; root: /remote/root; home: /remote/home; scope: remote work; projects: alpha; added 2026-08-02)' \
     > "$home/data/secondmates.md"
-  held=$(hold_task_set_lock "$home/state") \
+  held=$(hold_task_set_lock "$home/state" 45) \
     || fail "could not stage a held remote-spawn task-set lock"
   holder=${held%% *}
   lock=${held#* }
   # A secondmate spawn waits briefly for a sibling relaunch's hold; a holder
   # that outlasts the wait, like a forced teardown, still makes it refuse.
-  if FM_HOME="$home" FM_SPAWN_NO_GUARD=1 FM_SPAWN_TASK_SET_WAIT=1 \
+  if FM_HOME="$home" FM_SPAWN_NO_GUARD=1 \
     "$ROOT/bin/fm-spawn.sh" remote-new --secondmate >/dev/null 2>"$err"; then
     kill "$holder" 2>/dev/null || true
     fail "a fresh remote secondmate spawn published while the task set was owned"
@@ -2791,7 +2791,7 @@ test_secondmate_spawn_waits_out_a_sibling_spawns_brief_hold() {
     || fail "could not stage a briefly held task-set lock"
   holder=${held%% *}
   lock=${held#* }
-  FM_HOME="$home" FM_SPAWN_NO_GUARD=1 FM_SPAWN_TASK_SET_WAIT=20 FM_SSH_BIN=false \
+  FM_HOME="$home" FM_SPAWN_NO_GUARD=1 FM_SSH_BIN=false \
     "$ROOT/bin/fm-spawn.sh" remote-new --secondmate >/dev/null 2>"$err" || true
   wait "$holder" 2>/dev/null || true
   grep -F "task set is locked" "$err" >/dev/null \
