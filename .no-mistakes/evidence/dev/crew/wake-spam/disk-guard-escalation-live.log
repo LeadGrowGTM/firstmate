@@ -1,0 +1,2 @@
+first sample: reasons=ram-soon action=paused wake_rows=0
+floor escalation: reasons=ram action=already-paused wake_rows=1 payload=disk-guard pause reasons=ram

@@ -1,0 +1,7 @@
+offer=eligible=0
+queued before drain=2
+presented signal=2
+presented check=1
+ack instruction=--ack-through 2 --recovery-generation 434180.1792451394.NOUFiH
+queued before ack=2
+queued after ack=0

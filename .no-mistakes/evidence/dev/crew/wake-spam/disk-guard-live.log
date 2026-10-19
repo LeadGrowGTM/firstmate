@@ -1,0 +1,6 @@
+persistent first projected sample: alert=ok pressure=yes reasons=ram-soon action=paused; wake_rows=0; pause=yes; mark=deferred disk-guard pause reasons=ram-soon
+persistent second projected sample: alert=ok pressure=yes reasons=ram-soon action=already-paused; wake_rows=1; pause=yes; mark=disk-guard pause reasons=ram-soon
+persistent clear: alert=ok pressure=no reasons=none action=cleared; wake_rows=2; pause=no; mark=absent
+flap projected sample: alert=ok pressure=yes reasons=ram-soon action=paused; wake_rows=0; pause=yes; mark=deferred disk-guard pause reasons=ram-soon
+flap healthy clear: alert=ok pressure=no reasons=none action=cleared; wake_rows=0; pause=no; mark=absent
+actual RAM floor pressure: alert=ok pressure=yes reasons=ram action=paused; wake_rows=1; pause=yes; mark=disk-guard pause reasons=ram

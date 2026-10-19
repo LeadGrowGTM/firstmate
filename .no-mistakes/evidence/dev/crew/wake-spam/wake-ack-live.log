@@ -1,0 +1,6 @@
+offer before main drain: eligible=0
+presented rows: 2
+queue before ack: 2
+ack instruction: --ack-through 2 --recovery-generation 2010425.1792448138.pJ6p15
+queue after ack: 0
+recovery marker: acked

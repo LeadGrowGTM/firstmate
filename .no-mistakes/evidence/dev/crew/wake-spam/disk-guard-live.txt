@@ -1,0 +1,16 @@
+CASE first projected RAM fall, live host metrics
+sample ram_avail_kib=26947928 swap_free_kib=16717556 linux_used_pct=27 linux_size_kib=1055762868 linux_used_kib=261499232 linux_avail_kib=740560164 root_free_kib=740560160 c_free_kib=210871172 d_free_kib=368067064 vhdx_bytes=absent alert=ok pressure=yes reasons=ram-soon action=paused
+pause=yes queued=0 announcement=deferred disk-guard pause reasons=ram-soon
+CASE persistent projection at next sample
+sample ram_avail_kib=27000444 swap_free_kib=16717556 linux_used_pct=27 linux_size_kib=1055762868 linux_used_kib=261499236 linux_avail_kib=740560160 root_free_kib=740560164 c_free_kib=210871172 d_free_kib=368067064 vhdx_bytes=absent alert=ok pressure=yes reasons=ram-soon action=already-paused
+pause=yes queued=1 announcement=disk-guard pause reasons=ram-soon
+CASE healthy sample after announced pause
+sample ram_avail_kib=26980248 swap_free_kib=16717556 linux_used_pct=27 linux_size_kib=1055762868 linux_used_kib=261499240 linux_avail_kib=740560156 root_free_kib=740560156 c_free_kib=210871172 d_free_kib=368067064 vhdx_bytes=absent alert=ok pressure=no reasons=none action=cleared
+pause=no queued=2
+CASE fresh one-sample projection followed by recovery
+sample ram_avail_kib=27002624 swap_free_kib=16717556 linux_used_pct=27 linux_size_kib=1055762868 linux_used_kib=261499248 linux_avail_kib=740560148 root_free_kib=740560156 c_free_kib=210871172 d_free_kib=368067064 vhdx_bytes=absent alert=ok pressure=yes reasons=ram-soon action=paused
+sample ram_avail_kib=27002432 swap_free_kib=16717556 linux_used_pct=27 linux_size_kib=1055762868 linux_used_kib=261499276 linux_avail_kib=740560120 root_free_kib=740560128 c_free_kib=210871172 d_free_kib=368067064 vhdx_bytes=absent alert=ok pressure=no reasons=none action=cleared
+pause=no queued=2
+CASE queued alert records
+1792451072	1	check	disk-guard	disk-guard pause reasons=ram-soon
+1792451072	2	check	disk-guard	disk-guard clear

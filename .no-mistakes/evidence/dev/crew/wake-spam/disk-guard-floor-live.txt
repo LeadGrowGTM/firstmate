@@ -1,0 +1,7 @@
+CASE projected fall defers alert
+sample ram_avail_kib=26570684 swap_free_kib=16717556 linux_used_pct=27 linux_size_kib=1055762868 linux_used_kib=261845940 linux_avail_kib=740213456 root_free_kib=740213456 c_free_kib=210867036 d_free_kib=368067064 vhdx_bytes=absent alert=ok pressure=yes reasons=ram-soon action=paused
+queued=0
+CASE actual floor breach overrides deferred alert
+sample ram_avail_kib=26573028 swap_free_kib=16717556 linux_used_pct=27 linux_size_kib=1055762868 linux_used_kib=261845956 linux_avail_kib=740213440 root_free_kib=740213440 c_free_kib=210867036 d_free_kib=368067064 vhdx_bytes=absent alert=ok pressure=yes reasons=ram action=already-paused
+queued=1
+1792451380	1	check	disk-guard	disk-guard pause reasons=ram

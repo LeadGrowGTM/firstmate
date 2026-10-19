@@ -1,0 +1,44 @@
+ok - host+hook: a turn-end resurface of a routine lost close is handled on the engine, and one holding a main row still wakes main
+CASE hook-resurface-routine
+FILE hook.err
+FILE hook.out
+FILE hook.rc
+FILE state/.supervision-host.log
+1792451135	start	gen=host-3728093-1792451135	primary=claude
+1792451136	pass-through	attended	main-only	signal: /tmp/fm-supervision-host.OSD86w/hook-resurface-routine/state/demo.status
+1792451140	start	gen=host-3750786-1792451140	primary=claude
+1792451144	handled	turn=host-3750786-1792451140.1	posture=attended	rc=0	reports=1	error=0 cost=0.25 conversation_cost=0.25 input=5 cache_read=100 cache_write=10 output=20 turns=3	check: rearm-resurface
+FILE state/.wake-queue
+FILE state/.watcher-down
+acked:handling:3729435.1792451136.Axq5Ml
+FILE state/.watch.lock/pid
+3754730
+FILE state/demo.status
+needs-decision [at=1792451135]: which export format?
+FILE state/other.status
+working [at=1792451138]: step two
+CASE hook-resurface-main-row
+FILE hook.err
+firstmate watcher wake - one supervision event needs a handling turn now.
+check: rearm-resurface
+Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.
+FILE hook.out
+FILE hook.rc
+2
+FILE state/.supervision-host.log
+1792451147	start	gen=host-3768764-1792451146	primary=claude
+1792451148	pass-through	attended	main-only	signal: /tmp/fm-supervision-host.OSD86w/hook-resurface-main-row/state/demo.status
+1792451152	start	gen=host-3783121-1792451152	primary=claude
+1792451153	pass-through	attended	main-only	check: rearm-resurface
+FILE state/.wake-queue
+1792451151	3	signal	other.status	signal: /tmp/fm-supervision-host.OSD86w/hook-resurface-main-row/state/other.status
+1792451151	4	signal	other.status	signal: /tmp/fm-supervision-host.OSD86w/hook-resurface-main-row/state/other.status
+1792451151	5	check	disk-guard	disk-guard pause reasons=ram
+FILE state/.watcher-down
+announced:handling:3769319.1792451147.396Yhb
+FILE state/.watch.lock/pid
+3785877
+FILE state/demo.status
+needs-decision [at=1792451147]: which export format?
+FILE state/other.status
+working [at=1792451150]: step two

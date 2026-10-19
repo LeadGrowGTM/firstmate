@@ -1,0 +1,7 @@
+empty resurface: eligible=0 status=empty corrupted=0 rows= tasks= unscoped=0 
+routine resurface: eligible=1 status=safe corrupted=0 rows=1 tasks=demo unscoped=0 
+ordinary check close: eligible=0 status=safe corrupted=0 rows=1 tasks=demo unscoped=0 
+resurface with main-owned check: eligible=0 status=safe corrupted=0 rows=1 tasks=demo unscoped=0 
+resurface with heartbeat row: eligible=0 status=safe corrupted=0 rows=3 tasks=demo unscoped=0 
+resurface with open decision: eligible=0 status=unsafe corrupted=0 rows= tasks= unscoped=0 
+unread queue rows after offer: 1

@@ -1,0 +1,9 @@
+CASE decision-owned signal, rearm-resurface
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+CASE queue remains durable after refused branch offer
+1792451373	1	signal	demo.status	signal: /tmp/fm-lab.68O12K/state/demo.status

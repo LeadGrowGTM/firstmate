@@ -1,0 +1,31 @@
+CASE empty queue, rearm-resurface
+eligible=0
+status=unsafe
+corrupted=1
+rows=
+tasks=
+unscoped=0
+CASE routine progress row, rearm-resurface
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+CASE routine progress row, ordinary check
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+CASE main-owned check row alongside routine row, rearm-resurface
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+CASE durable queue after offers
+1792451054	1	signal	demo.status	signal: /tmp/fm-lab.qTF7VV/state/demo.status
+1792451054	2	check	disk-guard	disk-guard pause reasons=ram
