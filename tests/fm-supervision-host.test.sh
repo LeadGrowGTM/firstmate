@@ -467,6 +467,25 @@ test_dispatch_offer_takes_a_routine_recovery_resurface_on_the_attended_host() {
   assert_contains "$out" "eligible=1" "an away resurface must stay the branch's"
 
   : > "$state/.wake-queue"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  append_wake "$state" heartbeat heartbeat heartbeat
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface beside a heartbeat row must stay main's"
+
+  # A stale row is the branch's until its task holds an open decision.
+  : > "$state/.wake-queue"
+  printf 'project=demo\nwindow=fm-other\n' > "$state/other.meta"
+  printf 'working [at=%s]: step one\n' "$(date +%s)" > "$state/other.status"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  append_wake "$state" stale fm-other "stale: fm-other (fixture)"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=1" "a resurface beside a routine stale row must be offered to the branch"
+  printf 'needs-decision [at=%s]: which region?\n' "$(date +%s)" >> "$state/other.status"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface beside a decision-owned stale row must stay main's"
+  rm -f "$state/other.meta" "$state/other.status"
+
+  : > "$state/.wake-queue"
   printf 'needs-decision [at=%s]: which export format?\n' "$(date +%s)" >> "$state/demo.status"
   append_wake "$state" signal demo.status "signal: $state/demo.status"
   out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
