@@ -400,16 +400,16 @@ pass "quota refresh terminates a stalled probe"
 # --- claude-line: whitelisted fields only ---
 json='{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_window":{"used_percentage":7.4},"rate_limits":{"five_hour":{"used_percentage":31},"seven_day":{"used_percentage":11}},"workspace":{"current_dir":"/x/y/firstmate","git_worktree":"firstmate2"},"transcript_path":"/home/u/SECRET-transcript.jsonl","session_id":"abc-123","cost":{"total_cost_usd":1.5}}'
 line=$(printf '%s' "$json" | bash "$SB" claude-line --task fm-demo-task)
-[ "$line" = "Opus 5.5 high | fm-demo-task | firstmate2 | 5h 31% 7d 11%" ] || fail "claude-line output" "$line"
-case "$line" in *SECRET* | *abc-123* | *1.5*) fail "claude-line leaked a non-whitelisted field" "$line" ;; esac
-pass "claude-line prints only model, effort, task, worktree and rate limits"
+[ "$line" = "Opus 5.5 high | Ctx 7% | fm-demo-task | firstmate2 | 5h 31% 7d 11%" ] || fail "claude-line output" "$line"
+case "$line" in *SECRET* | *abc-123* | *1.5* | *7.4*) fail "claude-line leaked a non-whitelisted field" "$line" ;; esac
+pass "claude-line prints model, Ctx %, task, worktree and rate limits"
 
 sparse=$(printf '%s' '{"model":{"display_name":"Haiku"}}' | bash "$SB" claude-line --task t1)
 [ "$sparse" = "Haiku ? | t1" ] || fail "claude-line with missing fields" "$sparse"
 pass "claude-line tolerates missing fields"
 
 optional=$(printf '%s' '{"model":{"display_name":"Haiku"},"context_window":{"used_percentage":7},"rate_limits":{"seven_day":{"used_percentage":13}},"workspace":{"current_dir":"/homes/secondmate/child","project_dir":"/homes/secondmate"}}' | bash "$SB" claude-line --task t1)
-[ "$optional" = 'Haiku ? | t1 | secondmate | 7d 13%' ] || fail "optional Claude fields shifted or home changed after cd" "$optional"
+[ "$optional" = 'Haiku ? | Ctx 7% | t1 | secondmate | 7d 13%' ] || fail "optional Claude fields shifted or home changed after cd" "$optional"
 no_model=$(printf '%s' '{"effort":{"level":"high"}}' | bash "$SB" claude-line --task t1)
 [ "$no_model" = '? high | t1' ] || fail "missing Claude model lacked its own unknown marker" "$no_model"
 pass "Claude fields remain aligned when effort and a limit window are absent"
@@ -878,5 +878,122 @@ for opt in window-status-format window-status-current-format; do
   case "$shown" in *"$(tmux display-message -p -t restarted:0 '#{window_name}')"*) ;; *) fail "loaded theme $opt changed an unlabeled window to '$shown'" ;; esac
 done
 pass "loading the theme after spawn shows the recorded label"
+
+# --- claude-line fleet segment: durable mates, cache, captain holds ---
+FLEET_HOME="$WORK/fleet-home"
+FLEET_STATE="$FLEET_HOME/state"
+FLEET_DATA="$FLEET_HOME/data"
+DEV_HOME="$WORK/fleet-mates/dev"
+NAP_HOME="$WORK/fleet-mates/ada"
+OTTER_HOME="$WORK/fleet-mates/ottersec"
+ALEX_HOME="$WORK/fleet-mates/alexander"
+LEGION_HOME="$WORK/fleet-mates/legion"
+DECOY_HOME="$WORK/fleet-mates/remote-decoy"
+mkdir -p "$FLEET_STATE" "$FLEET_DATA" \
+  "$DEV_HOME/state" "$NAP_HOME/state" "$OTTER_HOME/state" \
+  "$ALEX_HOME/state" "$LEGION_HOME/state" "$DECOY_HOME/state"
+tmux new-session -d -s fleetbar -n spare "sleep 600" || fail "fleet session did not start"
+tmux new-window -d -t fleetbar: -n fm-fleet-dev "sleep 600" || fail "dev window did not start"
+tmux new-window -d -t fleetbar: -n fm-fleet-dev-task "sleep 600" || fail "dev task window did not start"
+tmux new-window -d -t fleetbar: -n fm-fleet-ada "sleep 600" || fail "ada window did not start"
+tmux new-window -d -t fleetbar: -n fm-fleet-otter "sleep 600" || fail "otter window did not start"
+tmux new-window -d -t fleetbar: -n fm-fleet-alex "sleep 600" || fail "alex window did not start"
+tmux new-window -d -t fleetbar: -n fm-fleet-legion "sleep 600" || fail "legion window did not start"
+cat >"$FLEET_DATA/secondmates.md" <<REG
+- dev - charts (home: $DEV_HOME; scope: charts; projects: none; added 2026-01-01)
+- ada - copy (home: $NAP_HOME; scope: copy; projects: none; added 2026-01-01)
+- ottersec - review (home: $OTTER_HOME; scope: review; projects: none; added 2026-01-01)
+- alexander - media (home: $ALEX_HOME; scope: media; projects: none; added 2026-01-01)
+- legion - mail (home: $LEGION_HOME; scope: mail; projects: none; added 2026-01-01)
+REG
+printf 'window=fleetbar:fm-fleet-dev\nkind=secondmate\nhome=%s\n' "$DEV_HOME" >"$FLEET_STATE/dev.meta"
+printf 'window=fleetbar:fm-fleet-ada\nkind=secondmate\nhome=%s\n' "$NAP_HOME" >"$FLEET_STATE/ada.meta"
+printf 'window=fleetbar:fm-fleet-otter\nkind=secondmate\nhome=%s\n' "$OTTER_HOME" >"$FLEET_STATE/ottersec.meta"
+printf 'window=fleetbar:fm-fleet-alex\nkind=secondmate\nhome=%s\n' "$ALEX_HOME" >"$FLEET_STATE/alexander.meta"
+printf 'window=fleetbar:fm-fleet-legion\nkind=secondmate\nhome=%s\n' "$LEGION_HOME" >"$FLEET_STATE/legion.meta"
+printf 'window=fleetbar:fm-gone-mate\nkind=secondmate\nhome=%s\n' "$DEV_HOME" >"$FLEET_STATE/gone.meta"
+printf 'window=remote:far\nkind=secondmate\nremote_host=example.invalid\nhome=%s\n' "$DECOY_HOME" >"$FLEET_STATE/far.meta"
+printf 'window=fleetbar:fm-fleet-dev-task\nkind=ship\nbackend=tmux\n' >"$DEV_HOME/state/supercalifragilistic.meta"
+printf 'working [at=1]: reviewing charts\n' >"$DEV_HOME/state/supercalifragilistic.status"
+printf 'window=fleetbar:fm-fleet-ada\nkind=ship\nbackend=tmux\n' >"$NAP_HOME/state/headlines.meta"
+printf 'paused [at=1]: waiting on a draft\n' >"$NAP_HOME/state/headlines.status"
+printf 'window=fleetbar:fm-fleet-otter\nkind=ship\nbackend=tmux\n' >"$OTTER_HOME/state/audit.meta"
+printf 'working [at=1]: auditing\n' >"$OTTER_HOME/state/audit.status"
+printf 'window=fleetbar:fm-fleet-alex\nkind=ship\nbackend=tmux\n' >"$ALEX_HOME/state/cuts.meta"
+printf 'working [at=1]: cutting\n' >"$ALEX_HOME/state/cuts.status"
+printf 'window=fleetbar:fm-fleet-legion\nkind=ship\nbackend=tmux\n' >"$LEGION_HOME/state/send.meta"
+printf 'working [at=1]: sending\n' >"$LEGION_HOME/state/send.status"
+printf 'needs-decision [at=1] [key=color]: choose a color\n' >"$FLEET_STATE/palette.status"
+printf 'needs-decision [at=1] [key=old]: stale\nresolved [at=2] [key=old]: picked\n' >"$FLEET_STATE/closed.status"
+printf 'needs-decision [at=1] [key=mate-pick]: which chart\n' >"$DEV_HOME/state/chart-call.status"
+printf 'window=fleetbar:fm-fleet-dev-task\nkind=ship\nbackend=tmux\n' >"$DECOY_HOME/state/should-not-appear.meta"
+printf 'working [at=1]: leak\n' >"$DECOY_HOME/state/should-not-appear.status"
+fleet_env() {
+  FM_HOME="$FLEET_HOME" FM_STATE_OVERRIDE="$FLEET_STATE" FM_DATA_OVERRIDE="$FLEET_DATA" "$@"
+}
+fleet_env bash "$SB" --socket "$SOCKET_PATH" claude-fleet-refresh || fail "fleet refresh failed"
+fleet_line=$(printf '%s' '{"model":{"display_name":"Opus"},"effort":{"level":"high"},"context_window":{"used_percentage":12.8}}' | fleet_env bash "$SB" --socket "$SOCKET_PATH" claude-line --task main-task)
+case "$fleet_line" in
+  "Opus high | Ctx 12% | "*" | main-task") ;;
+  *) fail "fleet line dropped Ctx or the model and task segments" "$fleet_line" ;;
+esac
+case "$fleet_line" in
+  *"dev:supercalifra working"*) ;;
+  *) fail "live mate task was not truncated into the line" "$fleet_line" ;;
+esac
+case "$fleet_line" in
+  *"ada:headlines paused"*) ;;
+  *) fail "paused mate task missing" "$fleet_line" ;;
+esac
+case "$fleet_line" in
+  *"far:remote"*) ;;
+  *) fail "remote mate missing" "$fleet_line" ;;
+esac
+case "$fleet_line" in
+  *should-not-appear* | *gone:*) fail "dead or remote-decoy work leaked" "$fleet_line" ;;
+esac
+case "$fleet_line" in
+  *"hold 2"*) ;;
+  *) fail "captain waits were not counted" "$fleet_line" ;;
+esac
+case "$fleet_line" in
+  *"+2"*) ;;
+  *) fail "mates past the fourth were not collapsed" "$fleet_line" ;;
+esac
+pass "claude-line shows live mates, truncates names, and counts captain waits"
+
+stale="$FLEET_STATE/statusbar-claude-fleet.txt"
+printf 'cached-mates\n' >"$stale"
+touch "$stale" "$FLEET_STATE/.statusbar-claude-fleet-attempt"
+cached_line=$(printf '%s' '{"model":{"display_name":"Opus"},"context_window":{"used_percentage":3}}' | fleet_env bash "$SB" --socket "$SOCKET_PATH" claude-line --task main-task)
+case "$cached_line" in
+  "Opus ? | Ctx 3% | cached-mates | main-task") ;;
+  *) fail "warm cache was not used" "$cached_line" ;;
+esac
+start_ns=$(date +%s%N)
+i=0
+while [ "$i" -lt 20 ]; do
+  printf '%s' '{"model":{"display_name":"Opus"},"context_window":{"used_percentage":3}}' | fleet_env bash "$SB" --socket "$SOCKET_PATH" claude-line --task main-task >/dev/null
+  i=$((i + 1))
+done
+elapsed_ms=$(( ($(date +%s%N) - start_ns) / 1000000 ))
+# A quiet 20-call run measured about 96ms each. The bound stays above that so a
+# synchronous rebuild (sourcing the status readers on the hot path) still fails.
+[ "$elapsed_ms" -lt 3000 ] || fail "warm statusLine did not stay on the cache" "$elapsed_ms ms for 20 calls"
+pass "warm fleet cache stays fast and is not rebuilt inside the TTL"
+
+chmod 000 "$FLEET_DATA/secondmates.md"
+touch -d '30 seconds ago' "$stale" "$FLEET_STATE/.statusbar-claude-fleet-attempt"
+fleet_env bash "$SB" --socket "$SOCKET_PATH" claude-fleet-refresh || fail "unreadable registry refresh failed"
+chmod 644 "$FLEET_DATA/secondmates.md"
+unreadable=$(head -n 1 "$stale")
+[ -z "$unreadable" ] || fail "unreadable registry still produced a fleet segment" "$unreadable"
+dropped=$(printf '%s' '{"model":{"display_name":"Opus"},"context_window":{"used_percentage":3}}' | fleet_env bash "$SB" --socket "$SOCKET_PATH" claude-line --task main-task)
+[ "$dropped" = "Opus ? | Ctx 3% | main-task" ] || fail "unreadable fleet source changed the model or Ctx segments" "$dropped"
+pass "an unreadable mate registry drops only the fleet segment"
+
+missing=$(printf '%s' '{"model":{"display_name":"Haiku"}}' | FM_HOME="$WORK/missing-fleet-home" FM_STATE_OVERRIDE="$WORK/missing-fleet-home/state" FM_DATA_OVERRIDE="$WORK/missing-fleet-home/data" bash "$SB" --socket "$SOCKET_PATH" claude-line --task t1)
+[ "$missing" = "Haiku ? | t1" ] || fail "missing fleet sources failed the status line" "$missing"
+pass "missing fleet sources leave the status line intact"
 
 echo "fm-statusbar: all passed"

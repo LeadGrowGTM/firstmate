@@ -40,8 +40,11 @@
 #       The cache holds account keys and percentages, never credentials.
 #   fm-statusbar.sh claude-line --task <id>
 #       The Claude Code statusLine command: reads Claude's statusLine JSON on
-#       stdin and prints one short line (model and effort, rate-limit
-#       windows, task). Only whitelisted fields are ever printed.
+#       stdin and prints one short line (model and effort, Ctx %, live second
+#       mates, task, worktree, rate-limit windows). Only whitelisted JSON
+#       fields are ever printed. The mate segment is a few-second cache of
+#       this home's durable records and is omitted when that cache or a
+#       required source cannot be read. claude-fleet-refresh rebuilds it.
 #
 # Environment: FM_STATE_OVERRIDE selects the state directory (default
 # $FM_HOME/state).
@@ -55,6 +58,10 @@ USAGE_CACHE="$STATE/statusbar-usage.txt"
 USAGE_ATTEMPT="$STATE/.statusbar-usage-attempt"
 USAGE_LOCK="$STATE/.statusbar-usage.lock"
 USAGE_TTL=60
+FLEET_CACHE="$STATE/statusbar-claude-fleet.txt"
+FLEET_ATTEMPT="$STATE/.statusbar-claude-fleet-attempt"
+FLEET_LOCK="$STATE/.statusbar-claude-fleet.lock"
+FLEET_TTL=5
 TRACKER_ROOT=${FM_SB_TRACKER_ROOT:-}
 TRACKER_MAIN_HOME=${FM_SB_TRACKER_MAIN_HOME:-}
 case "${1:-}" in --socket) tracker_sub=${3:-} ;; *) tracker_sub=${1:-} ;; esac
@@ -577,29 +584,216 @@ cmd_usage() {
   return 0
 }
 
+# Same liveness rule as cmd_fleet: a tmux record counts only while its window
+# exists; any other backend counts while the record exists; remote: windows
+# count without a probe.
+fm_sb_record_live() {  # <window> <backend> <live-windows>
+  local win=$1 backend=${2:-tmux} live=$3
+  [ -n "$win" ] || return 1
+  case "$win" in
+    remote:*) return 0 ;;
+  esac
+  case "$backend" in
+    tmux) printf '%s\n' "$live" | grep -qxF -- "$win" ;;
+    *) return 0 ;;
+  esac
+}
+
+fm_sb_meta_field() {  # <file> <key>
+  sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1
+}
+
+# Newest active task in one mate home: "<name> <verb>" or "idle".
+# Reads only that home's meta and status files. A missing or unreadable home
+# is idle, never a failure.
+fm_sb_mate_task() {  # <home> <live-windows>
+  local home=$1 live=$2 state_dir
+  state_dir=$home/state
+  local meta id kind backend win status line verb mtime best_m=0 best_id='' best_verb=''
+  [ -d "$state_dir" ] && [ ! -L "$state_dir" ] && [ -r "$state_dir" ] || { printf 'idle\n'; return 0; }
+  for meta in "$state_dir"/*.meta; do
+    [ -f "$meta" ] && [ ! -L "$meta" ] && [ -r "$meta" ] || continue
+    id=${meta##*/}; id=${id%.meta}
+    kind=$(fm_sb_meta_field "$meta" kind)
+    [ "$kind" = secondmate ] && continue
+    backend=$(fm_sb_meta_field "$meta" backend)
+    win=$(fm_sb_meta_field "$meta" window)
+    fm_sb_record_live "$win" "${backend:-tmux}" "$live" || continue
+    status=$state_dir/$id.status
+    verb=
+    line=
+    if [ -f "$status" ] && [ ! -L "$status" ] && [ -r "$status" ]; then
+      line=$(status_current_line "$status" "$kind" 2>/dev/null) || line=
+      status_line_verb "$line" verb || verb=
+    fi
+    case "$verb" in
+      working|paused|blocked|needs-decision|parked) ;;
+      *) continue ;;
+    esac
+    mtime=$(fm_sb_mtime "$status")
+    [ "$mtime" != 0 ] || mtime=$(fm_sb_mtime "$meta")
+    if [ "$mtime" -ge "$best_m" ]; then
+      best_m=$mtime
+      best_id=$id
+      best_verb=$verb
+    fi
+  done
+  if [ -n "$best_id" ]; then
+    printf '%s %s\n' "$(fm_sb_clean "$best_id" 12)" "$(fm_sb_clean "$best_verb" 16)"
+  else
+    printf 'idle\n'
+  fi
+}
+
+fm_sb_count_holds() {  # <state-dir>
+  local dir=$1 n=0 task key verb _
+  [ -d "$dir" ] && [ ! -L "$dir" ] && [ -r "$dir" ] || { printf '0\n'; return 0; }
+  while IFS=$'\t' read -r task key verb _; do
+    [ "$verb" = needs-decision ] || continue
+    n=$((n + 1))
+  done < <(scan_open_decisions "$dir" 2>/dev/null || true)
+  printf '%s\n' "$n"
+}
+
+fm_sb_claude_fleet_refresh() {
+  local data_dir reg live tmp seg='' holds=0 count=0 extra=0 piece
+  local meta id kind backend win home task remote state_real mate_real mate_holds
+  local -A mate_home=()
+  local -a pieces=()
+  data_dir=${FM_DATA_OVERRIDE:-$FM_HOME/data}
+  mkdir -p "$STATE" 2>/dev/null || return 0
+  reg=$data_dir/secondmates.md
+  tmp="$FLEET_CACHE.$$"
+  if [ -e "$reg" ] && { [ -L "$reg" ] || [ ! -r "$reg" ]; }; then
+    printf '\n' >"$tmp" && mv -f "$tmp" "$FLEET_CACHE"
+    return 0
+  fi
+  # shellcheck source=bin/fm-secondmate-registry-lib.sh
+  . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
+  # shellcheck source=bin/fm-classify-lib.sh
+  . "$SCRIPT_DIR/fm-classify-lib.sh"
+  if [ -f "$reg" ] && [ ! -L "$reg" ]; then
+    while IFS= read -r piece || [ -n "$piece" ]; do
+      secondmate_registry_parse_line "$piece" || continue
+      [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] || continue
+      mate_home[$SECONDMATE_REGISTRY_ID]=$SECONDMATE_REGISTRY_HOME
+    done <"$reg"
+  fi
+  live=$(fm_run_timed 2 tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
+  holds=$(fm_sb_count_holds "$STATE") || holds=0
+  state_real=$(cd "$STATE" 2>/dev/null && pwd -P) || state_real=$STATE
+  for meta in "$STATE"/*.meta; do
+    [ -f "$meta" ] && [ ! -L "$meta" ] && [ -r "$meta" ] || continue
+    id=${meta##*/}; id=${id%.meta}
+    kind=$(fm_sb_meta_field "$meta" kind)
+    [ "$kind" = secondmate ] || continue
+    backend=$(fm_sb_meta_field "$meta" backend)
+    win=$(fm_sb_meta_field "$meta" window)
+    fm_sb_record_live "$win" "${backend:-tmux}" "$live" || continue
+    remote=$(fm_sb_meta_field "$meta" remote_host)
+    [ -n "$remote" ] || remote=$(fm_sb_meta_field "$meta" remote_backend)
+    case "$win" in remote:*) remote=${remote:-remote} ;; esac
+    if [ -n "$remote" ]; then
+      pieces+=("$(fm_sb_clean "$id" 12):remote")
+      continue
+    fi
+    home=${mate_home[$id]-}
+    [ -n "$home" ] || home=$(fm_sb_meta_field "$meta" home)
+    if [ -n "$home" ] && [ -d "$home" ] && [ ! -L "$home" ] && [ -r "$home" ]; then
+      task=$(fm_sb_mate_task "$home" "$live") || task=idle
+      mate_real=$(cd "$home/state" 2>/dev/null && pwd -P) || mate_real=
+      if [ -n "$mate_real" ] && [ "$mate_real" != "$state_real" ]; then
+        mate_holds=$(fm_sb_count_holds "$home/state") || mate_holds=0
+        holds=$((holds + mate_holds))
+      fi
+    else
+      task=idle
+    fi
+    pieces+=("$(fm_sb_clean "$id" 12):$task")
+  done
+  while IFS= read -r piece; do
+    [ -n "$piece" ] || continue
+    count=$((count + 1))
+    if [ "$count" -le 4 ]; then
+      seg="${seg}${seg:+, }$piece"
+    else
+      extra=$((extra + 1))
+    fi
+  done < <(printf '%s\n' "${pieces[@]+"${pieces[@]}"}" | LC_ALL=C sort)
+  [ "$extra" -eq 0 ] || seg="${seg}${seg:+, }+$extra"
+  [ "${#seg}" -le 160 ] || seg="${seg:0:157}..."
+  [ "$holds" -eq 0 ] || seg="${seg}${seg:+, }hold $holds"
+  printf '%s\n' "$seg" >"$tmp" && mv -f "$tmp" "$FLEET_CACHE"
+}
+
+fm_sb_claude_fleet_kick() {
+  local now
+  now=$(date +%s) || return 0
+  if [ -f "$FLEET_ATTEMPT" ] && [ $((now - $(fm_sb_mtime "$FLEET_ATTEMPT"))) -lt "$FLEET_TTL" ]; then
+    return 0
+  fi
+  mkdir -p "$STATE" 2>/dev/null || return 0
+  if [ -d "$FLEET_LOCK" ] && [ $((now - $(fm_sb_mtime "$FLEET_LOCK"))) -gt 30 ]; then
+    rmdir "$FLEET_LOCK" 2>/dev/null || true
+  fi
+  mkdir "$FLEET_LOCK" 2>/dev/null || return 0
+  touch "$FLEET_ATTEMPT" 2>/dev/null || { rmdir "$FLEET_LOCK" 2>/dev/null; return 0; }
+  (
+    trap 'rmdir "$FLEET_LOCK" 2>/dev/null' EXIT
+    fm_sb_claude_fleet_refresh >/dev/null 2>&1 || true
+  ) >/dev/null 2>&1 </dev/null &
+  return 0
+}
+
+# Warm path: print the cached segment, or nothing when it is missing.
+# A stale cache is still printed; the refresh is never waited on.
+fm_sb_claude_fleet_segment() {
+  local now age seg=''
+  now=$(date +%s) || { printf ''; return 0; }
+  if [ -f "$FLEET_CACHE" ] && [ ! -L "$FLEET_CACHE" ] && [ -r "$FLEET_CACHE" ]; then
+    seg=$(head -n 1 "$FLEET_CACHE" 2>/dev/null) || seg=
+    age=$((now - $(fm_sb_mtime "$FLEET_CACHE")))
+  else
+    age=$((FLEET_TTL + 1))
+  fi
+  [ "$age" -lt "$FLEET_TTL" ] || fm_sb_claude_fleet_kick || true
+  printf '%s' "$seg"
+}
+
 cmd_claude_line() {
-  local task json parts model effort limits wt out
+  local task json parts model effort ctx limits wt fleet out
   [ "$#" -eq 2 ] && [ "$1" = --task ] && [ -n "$2" ] || return 2
   task=$2
-  command -v jq >/dev/null 2>&1 || { printf '? ? | %s\n' "$(fm_sb_clean "$task" 32)"; return 0; }
+  fleet=$(fm_sb_claude_fleet_segment) || fleet=
+  command -v jq >/dev/null 2>&1 || {
+    out="? ? | $(fm_sb_clean "$task" 32)"
+    [ -z "$fleet" ] || out="? ? | $fleet | $(fm_sb_clean "$task" 32)"
+    printf '%s\n' "$out"
+    return 0
+  }
   json=$(cat)
-  # Whitelist: model, effort, rate-limit windows, workspace name.
+  # Whitelist: model, effort, context percent, rate-limit windows, workspace name.
   parts=$(printf '%s' "$json" | jq -r '
     def pct: if . == null then "" else (. | floor | tostring) + "%" end;
     [ (.model.display_name // .model.id // ""),
       (.effort.level // ""),
+      (if .context_window.used_percentage == null then "" else "Ctx " + (.context_window.used_percentage | pct) end),
       ([if .rate_limits.five_hour.used_percentage == null then empty else "5h " + (.rate_limits.five_hour.used_percentage | pct) end,
         if .rate_limits.seven_day.used_percentage == null then empty else "7d " + (.rate_limits.seven_day.used_percentage | pct) end] | join(" ")),
       (if .workspace.git_worktree != null then .workspace.git_worktree
        elif .workspace.project_dir != null then (.workspace.project_dir | split("/") | last)
        else "" end)
     ] | map(tostring) | join("\u001f")' 2>/dev/null) || parts=
-  IFS=$'\037' read -r model effort limits wt <<< "$parts"
+  IFS=$'\037' read -r model effort ctx limits wt <<< "$parts"
   model=$(fm_sb_clean "$model" 24)
   effort=$(fm_sb_clean "$effort" 8)
+  ctx=$(fm_sb_clean "$ctx" 12)
   limits=$(fm_sb_clean "$limits" 20)
   wt=$(fm_sb_clean "$wt" 24)
-  out="${model:-?} ${effort:-?} | $(fm_sb_clean "$task" 32)"
+  out="${model:-?} ${effort:-?}"
+  [ -z "$ctx" ] || out="$out | $ctx"
+  [ -z "$fleet" ] || out="$out | $fleet"
+  out="$out | $(fm_sb_clean "$task" 32)"
   [ -z "$wt" ] || out="$out | $wt"
   [ -z "$limits" ] || out="$out | $limits"
   printf '%s\n' "$out"
@@ -662,6 +856,7 @@ apply) cmd_apply "$@" ;;
 sync) cmd_sync ;;
 usage) cmd_usage "$@" ;;
 fleet) cmd_fleet "$@" ;;
+claude-fleet-refresh) fm_sb_claude_fleet_refresh ;;
 claude-line) cmd_claude_line "$@" ;;
 *)
   echo "usage: fm-statusbar.sh label|sync|apply|fleet|crew-tracker|usage|claude-line|theme|install|check|source-line" >&2
