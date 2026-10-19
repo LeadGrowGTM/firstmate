@@ -1,0 +1,21 @@
+decision signal plus routine row:
+eligible=0
+status=safe
+corrupted=0
+rows=2
+tasks=other
+unscoped=0
+routine row alone:
+eligible=1
+status=safe
+corrupted=0
+rows=3
+tasks=other
+unscoped=0
+malformed row plus routine row:
+eligible=0
+status=unsafe
+corrupted=1
+rows=
+tasks=
+unscoped=0
