@@ -2294,7 +2294,7 @@ task_status_is_own_parked_run() {  # <worktree> <axi-status-output> [any-active]
     fm_nm_run_is_active "$out" || return 1
   else
     case "$status" in
-      completed|failed|cancelled|passed|checks-passed) return 1 ;;
+      completed|failed|cancelled|ci_monitor_interrupted|passed|checks-passed) return 1 ;;
     esac
   fi
   if ! { [ "$any_active" = 1 ] && fm_nm_run_is_pipeline_owned_active "$out"; } \

@@ -2138,6 +2138,23 @@ test_retire_claim_refuses_attributable_validation_runs() {
   pass "retirement refuses attributable parked and active runs without administering them"
 }
 
+test_retire_claim_accepts_ci_monitor_interrupted_run() {
+  local dir id=retire-ci-interrupted head
+  dir=$(make_retire_claim_case retire-ci-interrupted "$id")
+  head=$(git -C "$dir/worktree" rev-parse HEAD)
+  printf 'id: run-fixture\nbranch: fm/%s\nhead: %s\nstatus: ci\n' \
+    "$id" "$head" > "$dir/run.status"
+  assert_retire_refused_unchanged "$dir" "$id" "active ci run"
+  printf 'id: run-fixture\nbranch: fm/%s\nhead: %s\nstatus: ci_monitor_interrupted\n' \
+    "$id" "$head" > "$dir/run.status"
+  run_retire_claim "$dir" "$id" > "$dir/retry.out" 2> "$dir/retry.err" \
+    || fail "retirement after ci_monitor_interrupted run failed: $(cat "$dir/retry.err")"
+  assert_absent "$dir/home/state/$id.meta" "retirement after interrupted ci monitor kept the active record"
+  assert_absent "$dir/pool/1/.fm-slot-owner" "retirement after interrupted ci monitor kept the claim"
+  assert_no_grep 'no-mistakes <axi> <abort>' "$dir/runtime.log" "retirement aborted an already-terminal run"
+  pass "retirement accepts a run whose ci monitor was interrupted and still refuses an active ci run"
+}
+
 test_retire_claim_rejects_same_id_from_another_home() {
   local dir other_dir id=retire-cross-home
   dir=$(make_retire_claim_case retire-cross-home "$id")
@@ -2610,6 +2627,7 @@ test_retire_claim_refuses_live_agent
 test_retire_claim_refuses_unsafe_identity_and_options
 test_retire_claim_preserves_tasktmp_and_retries_after_refusals
 test_retire_claim_refuses_attributable_validation_runs
+test_retire_claim_accepts_ci_monitor_interrupted_run
 test_retire_claim_rejects_same_id_from_another_home
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts

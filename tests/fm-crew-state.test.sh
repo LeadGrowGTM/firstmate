@@ -1690,6 +1690,23 @@ test_terminal_failed() {
   pass "terminal failed run is authoritative"
 }
 
+test_terminal_ci_monitor_interrupted() {
+  reset_fakes
+  local d; d=$(new_case ci-monitor-interrupted)
+  make_repo_on_branch "$d/wt" fm/feat-ci
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-ci.meta" "window=fm:fm-feat-ci" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS="$(run_failed fm/feat-ci)"
+  FM_FAKE_AXI_STATUS=${FM_FAKE_AXI_STATUS/status: completed/status: ci_monitor_interrupted}
+  FM_FAKE_AXI_STATUS=$(printf '%s\n' "$FM_FAKE_AXI_STATUS" | sed '/^outcome:/d')
+  local out; out=$(run_crew_state "$d" feat-ci)
+  assert_contains "$out" "state: unknown" "interrupted ci monitor is terminal with no verdict"
+  assert_contains "$out" "run ci monitor interrupted: no verdict" "explicit terminal reason"
+  assert_not_contains "$out" "run active" "interrupted ci monitor is not reported as an active run"
+  assert_not_contains "$out" "status unverified" "interrupted ci monitor status is recognized"
+  pass "ci_monitor_interrupted run is recognized as terminal"
+}
+
 # Recovered delivery cases, varying only the terminal route and the optional
 # rebase step. The already-fixed passed-run case remains a control.
 test_cancelled_delivery_and_skipped_rebase() {
@@ -5558,6 +5575,7 @@ test_terminal_passed_with_open_gerrit_change_does_not_claim_merged
 test_terminal_passed_with_merged_gerrit_change_reports_merged
 test_terminal_passed_with_unreadable_gerrit_change_reports_unknown
 test_terminal_failed
+test_terminal_ci_monitor_interrupted
 test_terminal_failed_ci_orphan_after_green_reads_done
 test_terminal_failed_ci_orphan_status_only_reads_done
 test_terminal_failed_ci_genuine_red_stays_failed
