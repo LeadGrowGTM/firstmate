@@ -1255,6 +1255,25 @@ test_attended_digest_overdue_at_park_start_wakes_main() {
   pass "host: captain outcomes already due when a park starts wake main at once"
 }
 
+test_attended_digest_failure_at_park_start_wakes_main() {
+  local home store
+  home=$(make_home attended-digest-undecidable attended)
+  store="$home/state/branch-outcomes.jsonl"
+  printf '{"seq":1,"epoch":%s,"task":"demo","wake":"signal: demo.status","verdict":"captain","urgency":"digest","summary":"held by a host that died","silent":false,"statusEndpoint":0,"statusIdent":"-"}\n' \
+    $(( $(date +%s) - 120 )) > "$store"
+  printf 'not-json\n' >> "$store"
+  expect_code 1 "$(FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" digest --window 3600 --pr-ready digest >/dev/null 2>&1; echo $?)" \
+    "fixture: the malformed tail must make the digest undecidable"
+  start_host "$home"
+  wait_until 250 host_exited "$home" || fail "digest undecidable: main was not woken on the first park pass: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "an undecidable digest must exit cleanly for the owner to deliver"
+  assert_re '^supervision-host: branch-outcome: the outcome digest could not be judged; check the outcome store, then drain and acknowledge captain outcomes$' \
+    "$home/host.out" "the startup wake must direct main to inspect the outcome store"
+  assert_no_re '^(signal:|stale:|check:|heartbeat)' "$home/host.out" "the startup digest failure must carry no watcher close"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the host ran an engine turn before handing the undecidable digest to main"
+  pass "host: a held outcome with a malformed store tail wakes main at park start"
+}
+
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return() {
   local home drained
   home=$(make_home attended-go-away attended)
@@ -3420,6 +3439,7 @@ test_attended_digest_lets_an_urgent_outcome_carry_the_held_ones
 test_attended_digest_stays_quiet_once_main_drained_the_held_outcome
 test_attended_digest_takes_decision_closes_and_a_bad_config_restores_main
 test_attended_digest_overdue_at_park_start_wakes_main
+test_attended_digest_failure_at_park_start_wakes_main
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return
 test_quiet_record_without_its_daemon_is_a_present_captain
 test_attended_main_only_close_passes_straight_to_main

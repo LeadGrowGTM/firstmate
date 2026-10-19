@@ -713,6 +713,9 @@ digest_exit() {
   ARM_PID=
   ARM_OUT=
   ARM_TEXT=
+  if [ -z "$DIGEST_PENDING" ]; then
+    exit_to_main "branch-outcome: the outcome digest could not be judged; check the outcome store, then drain and acknowledge captain outcomes" "$HEALTH_NOTE"
+  fi
   exit_to_main "$(digest_line "captain outcomes the supervision session recorded for you are due")" "$HEALTH_NOTE"
 }
 
@@ -1146,13 +1149,9 @@ else
 fi || { echo "watcher: FAILED - the supervision host could not start a watcher cycle"; exit 1; }
 ARM_PID=$STARTED_ARM_PID
 ARM_OUT=$STARTED_ARM_OUT
-# Captain outcomes an earlier park held for the digest window keep their
-# deadline, which the store's epochs carry across hosts; rows already due go
-# out on the first pass, but a judgment that could not be computed holds
-# nothing here, since no turn of this host recorded an outcome yet.
 if ! fm_afk_contract_away_present "$STATE"; then
   digest_judge
-  if [ "$DIGEST_DUE" = now ] && [ -n "$DIGEST_PENDING" ]; then
+  if [ "$DIGEST_DUE" = now ]; then
     park_elapsed
     DIGEST_DUE_ELAPSED=$PARK_ELAPSED
   fi
