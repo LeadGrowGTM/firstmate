@@ -172,12 +172,12 @@
 #   focus-sensitive presentation mutation.
 #   Every single-task invocation holds one task-id-scoped lock across backend
 #   creation through metadata publication, so concurrent same-id spawns serialize
-#   even when they select different backends. A fresh spawn first takes the
-#   per-home task-set lock and refuses rather than waits when forced teardown owns
+#   even when they select different backends. An ordinary fresh spawn first takes
+#   the per-home task-set lock and refuses rather than waits when forced teardown owns
 #   it; relaunch is exempt because the existing task's control lock covers it.
-#   A secondmate spawn waits up to 30 seconds
-#   for that lock, then trades it for its own per-task publisher lock held
-#   through publication, so mates relaunched together do not refuse each other.
+#   A fresh secondmate spawn waits up to 30 seconds for that lock, then trades
+#   it for its own per-task publisher lock held through publication, so mates
+#   relaunched together do not refuse each other.
 #   A fresh Treehouse-backed spawn also takes the project-identity lock in the local
 #   root Firstmate home's state directory before slot allocation and holds it through
 #   task metadata publication. Teardown holds that same lock while proving and
@@ -1991,8 +1991,9 @@ if [ "$RELAUNCH" -eq 0 ]; then
   # brief hold, then holds its own publisher lock instead of the set lock
   # through publication
   # (bin/fm-wake-lib.sh's fm_task_set_publisher_lock_path owns why). A forced
-  # teardown holds the set lock for its whole run, so it still makes this spawn
-  # refuse, and it refuses while this spawn's publisher lock is live.
+  # teardown holds the set lock for its whole run, so this spawn proceeds only
+  # after teardown finishes or refuses on timeout; teardown refuses while this
+  # spawn's publisher lock is live.
   SPAWN_TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || {
     echo "error: could not resolve the task-set lock for $STATE" >&2
     exit 1

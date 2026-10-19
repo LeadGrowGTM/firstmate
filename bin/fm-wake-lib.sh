@@ -1416,9 +1416,10 @@ fm_meta_lock_path() {
 # so it gets destructively processed while never lifecycle-locked (reproduced
 # with real agents: a record published 0.249s after teardown began was removed
 # and its worktree returned to the pool, with both commands reporting success).
-# Holding this lock from enumeration through cleanup makes the two operations
-# serialize: either the spawn publishes first and the teardown's preflight
-# covers it, or the teardown owns the set and the spawn refuses. Both directions
+# Holding this lock from enumeration through cleanup prevents an ordinary spawn
+# from publishing during teardown. A secondmate spawn takes a publisher lock
+# before releasing the set lock; teardown checks for live publishers while it
+# owns the set lock and refuses before enumerating children. Both directions
 # fail closed.
 fm_task_set_lock_path() {  # <state-dir>
   local state=$1
@@ -1428,14 +1429,9 @@ fm_task_set_lock_path() {  # <state-dir>
 }
 
 # fm_task_set_publisher_lock_path: a secondmate spawn's stand-in for holding the
-# task-set lock through publication. Several mates relaunched by one session
-# start publish at once; holding the shared set lock for a whole launch made
-# every sibling refuse as if a forced teardown owned the home, so only one dead
-# mate came back per session start. A secondmate spawn therefore
-# takes the set lock only to take this per-task lock, releases the set lock,
-# and holds this one until its record is published. Forced teardown, holding
-# the set lock, refuses while any of these is live (fm_task_set_live_publisher),
-# so the serialization with teardown is unchanged in both directions.
+# task-set lock through publication. Concurrent session-start relaunches need
+# separate publisher locks so each can launch without holding the shared lock.
+# Forced teardown checks these locks under the set lock before enumeration.
 fm_task_set_publisher_lock_path() {  # <state-dir> <task-id>
   local state=$1 id=$2
   [ -n "$state" ] && [ -n "$id" ] || return 1
