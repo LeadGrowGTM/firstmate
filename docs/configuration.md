@@ -882,6 +882,10 @@ When Claude uses `bin/fm-statusbar.sh claude-line --task <id>` as its `statusLin
 Visible local mate entries show an id and latest active task state, while remote mate entries say remote.
 The summary counts open captain decisions in the primary and eligible live local mate homes, and reads durable records through a short background cache so rendering does not wait for fleet probes.
 Firstmate adds the command to spawned Claude workers when neither their account nor project already defines a `statusLine`; the main Claude session needs its own `statusLine` setting pointing to this command to show the summary.
+The line also ends with a subscription-usage segment for Muse, Grok, each Claude account (labelled `cl-` plus its config directory name) and Codex, showing remaining percent and time to reset, with `n/a` for a provider quota-axi reports no quota for and `?` for one it could not read.
+It reads a cache that a background `quota-axi` job refreshes about every five minutes, so rendering never waits on `quota-axi`; the cache is marked stale after ten minutes and dropped after an hour.
+Claude accounts come from `config/statusline-claude-accounts` (one Claude config directory per line, optional), else every `~/.claude-accounts/*/` directory holding a `.claude.json` and `projects/`, else the ambient Claude login.
+`bin/fm-statusbar.sh claude-segments` prints just the mate and usage segments on one line, so a custom `statusLine` wrapper can append them; `FM_SB_CLAUDE_USAGE=0` turns the usage segment off.
 The command's [header](../bin/fm-statusbar.sh) owns the exact fields, truncation, and refresh behavior.
 This Claude line is separate from the [primary tmux session bar](tmux-backend.md#watching-the-crew), which continues to show live crew and secondmate counts.
 

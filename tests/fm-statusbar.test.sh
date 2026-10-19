@@ -70,6 +70,7 @@ export PATH="$WORK/bin:$PATH"
 export FM_STATE_OVERRIDE="$WORK/state"
 export FM_SB_TRACKER_ROOT="$WORK"
 export FM_SB_TRACKER_CACHE_DIR="$WORK/tracker-cache"
+export FM_SB_CLAUDE_USAGE=0
 
 tmux new-session -d -s firstmate -x 150 -y 20 -n fm-demo-task "sleep 600" || fail "scratch server did not start"
 tmux new-window -d -t firstmate: -n bare "sleep 600"
@@ -1001,5 +1002,91 @@ pass "an unreadable mate registry drops only the fleet segment"
 missing=$(printf '%s' '{"model":{"display_name":"Haiku"}}' | FM_HOME="$WORK/missing-fleet-home" FM_STATE_OVERRIDE="$WORK/missing-fleet-home/state" FM_DATA_OVERRIDE="$WORK/missing-fleet-home/data" bash "$SB" --socket "$SOCKET_PATH" claude-line --task t1)
 [ "$missing" = "Haiku ? | t1" ] || fail "missing fleet sources failed the status line" "$missing"
 pass "missing fleet sources leave the status line intact"
+
+# --- subscription usage segment: cached quota-axi read, per-account labels ---
+USAGE_HOME="$WORK/usage-home"
+USAGE_STATE="$USAGE_HOME/state"
+USAGE_BIN="$WORK/usage-bin"
+ACCOUNTS="$WORK/accounts"
+mkdir -p "$USAGE_STATE" "$USAGE_HOME/config" "$USAGE_BIN" \
+  "$ACCOUNTS/gmail/projects" "$ACCOUNTS/second/projects" "$ACCOUNTS/backups"
+: >"$ACCOUNTS/gmail/.claude.json"; : >"$ACCOUNTS/second/.claude.json"; : >"$ACCOUNTS/backups/.claude.json"
+RESET_2D=$(date -u -d '+50 hours' +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -v+50H +%Y-%m-%dT%H:%M:%S.000Z)
+RESET_4H=$(date -u -d '+4 hours 30 minutes' +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null || date -u -v+4H -v+30M +%Y-%m-%dT%H:%M:%S+00:00)
+RESET_6D=$(date -u -d '+6 days 2 hours' +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -v+6d -v+2H +%Y-%m-%dT%H:%M:%S.000Z)
+cat >"$USAGE_BIN/quota-axi" <<SH
+#!/usr/bin/env bash
+echo "\$CLAUDE_CONFIG_DIR|\$*" >>"$WORK/usage-calls"
+[ ! -f "$WORK/usage-fail" ] || exit 1
+echo 'quota[1]{provider,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+case "\$*" in
+  *--provider\ claude*)
+    case "\$CLAUDE_CONFIG_DIR" in
+      */gmail) echo '  claude,all_models,15,0.1,through_reset,early,seven_day,"$RESET_2D"' ;;
+      */second) echo '  claude,all_models,91.4,0.1,through_reset,early,five_hour,"$RESET_4H"' ;;
+      *) echo '  claude,all_models,77,0.1,through_reset,early,five_hour,"$RESET_4H"' ;;
+    esac ;;
+  *)
+    echo '  grok,all_products,47,1,through_reset,established,credits,"$RESET_2D"'
+    echo '  grok,"product:grok_build",30,1,through_reset,established,credits,"$RESET_2D"'
+    echo '  codex,all_models,43,-1,projected_exhaustion,established,weekly,"$RESET_6D"' ;;
+esac
+SH
+chmod +x "$USAGE_BIN/quota-axi"
+usage_env() {
+  FM_HOME="$USAGE_HOME" FM_STATE_OVERRIDE="$USAGE_STATE" FM_DATA_OVERRIDE="$USAGE_HOME/data" \
+    FM_SB_CLAUDE_USAGE=1 FM_SB_CLAUDE_ACCOUNTS_ROOT="$ACCOUNTS" PATH="$USAGE_BIN:$PATH" "$@"
+}
+cache="$USAGE_STATE/statusbar-claude-usage.tsv"
+
+cold=$(usage_env bash "$SB" claude-segments)
+[ -z "$cold" ] || fail "cold usage cache printed a segment" "$cold"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$cache" ] && break; sleep 0.25; done
+[ -s "$cache" ] || fail "cold render did not start a background refresh"
+seg=$(usage_env bash "$SB" claude-segments)
+expect_re='^mu n/a, gk 47% 2d, cl-gmail 15% 2d, cl-second 91% 4h[0-9]+m, cx 43% 6d$'
+[[ $seg =~ $expect_re ]] || fail "usage segment wrong" "$seg"
+case "$seg" in *backups*) fail "a config directory without projects was treated as an account" "$seg" ;; esac
+grep -q "second|--provider claude" "$WORK/usage-calls" || fail "claude read did not carry the account directory" "$(cat "$WORK/usage-calls")"
+pass "usage segment shows each subscription, labelled per Claude account, from a background refresh"
+
+calls=$(wc -l <"$WORK/usage-calls")
+for _ in 1 2 3; do usage_env bash "$SB" claude-segments >/dev/null; done
+[ "$(wc -l <"$WORK/usage-calls")" = "$calls" ] || fail "fresh usage cache re-ran quota-axi"
+pass "a fresh usage cache is only read"
+
+line=$(printf '%s' '{"model":{"display_name":"Opus"},"rate_limits":{"seven_day":{"used_percentage":11}}}' | usage_env bash "$SB" claude-line --task t1)
+case "$line" in "Opus ? | t1 | 7d 11% | mu n/a, gk 47%"*) ;; *) fail "claude-line missing the usage segment" "$line" ;; esac
+pass "claude-line appends the usage segment after the limits"
+
+printf 'cached-mate:idle\n' >"$USAGE_STATE/statusbar-claude-fleet.txt"
+both=$(usage_env bash "$SB" claude-segments)
+[ "$both" = "cached-mate:idle | $seg" ] || fail "claude-segments did not join mates and usage" "$both"
+pass "claude-segments prints mates and usage on one line"
+
+touch -d '12 minutes ago' "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+stale=$(usage_env bash "$SB" claude-segments)
+case "$stale" in *' (stale)') ;; *) fail "old usage cache was not marked stale" "$stale" ;; esac
+touch -d '2 hours ago' "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+dropped_usage=$(usage_env bash "$SB" claude-segments)
+[ "$dropped_usage" = "cached-mate:idle" ] || fail "very old usage cache was not dropped" "$dropped_usage"
+pass "a stale usage cache is marked and a very old one is dropped"
+
+touch "$WORK/usage-fail"
+usage_env bash "$SB" claude-usage-refresh
+failed=$(usage_env bash "$SB" claude-segments)
+[ "$failed" = "cached-mate:idle | mu ?, gk ?, cl-gmail ?, cl-second ?, cx ?" ] || fail "unreadable quota-axi did not mark providers unknown" "$failed"
+rm -f "$WORK/usage-fail"
+pass "a failed quota read marks the segment unknown instead of failing"
+
+printf '# pinned\n%s\n' "$ACCOUNTS/second" >"$USAGE_HOME/config/statusline-claude-accounts"
+usage_env bash "$SB" claude-usage-refresh
+pinned=$(usage_env bash "$SB" claude-segments)
+case "$pinned" in *cl-gmail*) fail "configured account list did not replace discovery" "$pinned" ;; esac
+case "$pinned" in *"cl-second 91%"*) ;; *) fail "configured account missing" "$pinned" ;; esac
+pass "config/statusline-claude-accounts selects the Claude accounts"
+
+(usage_env bash "$SB" claude-usage-refresh; usage_env bash "$SB" claude-segments) | grep -qiE 'token|secret|credential' && fail "usage output carried a credential-like word"
+pass "usage output holds no credential material"
 
 echo "fm-statusbar: all passed"
