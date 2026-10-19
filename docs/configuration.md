@@ -2217,7 +2217,7 @@ This section is the single owner of the schema.
 - Every field is optional.
   The check's defaults are the values above, with an empty `always_on` and no `boat_bin`.
   `account_seconds_per_24h` and `box_seconds_per_24h` are optional whole numbers of seconds, 1 or more, and are omitted by default.
-  `resume_ttl_seconds` is an optional whole number of seconds from 1800 to 14400, and `idle_grace_seconds` is an optional whole number of seconds from 0 to 86400 that must be shorter than the resume timer, including when either uses its default.
+  `resume_ttl_seconds` is an optional whole number of seconds from 1800 to 14400, and `idle_grace_seconds` is an optional whole number of seconds from 0 to 86400 that must be shorter than both the configured resume timer and the 3600-second renewal fallback, including when either uses its default.
   The timer floor keeps it well above the watcher poll cadence, so extends land before it expires.
 - `account_seconds_per_24h` and `box_seconds_per_24h` are for dispatch, not for this check.
   The check accepts them and does not report on them.
@@ -2268,15 +2268,15 @@ Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
 ## Boat idle check
 
 A Boat box runs only while it has a live worker or queued Boat work: the sender resumes with the short `resume_ttl_seconds` timer and never extends it, and [`bin/fm-boat-idle-check.sh`](../bin/fm-boat-idle-check.sh) does the other two halves from the PC, so a down box watcher does not matter.
-While `fm-boat-worker.sh idle` reports live workers it re-arms the timer by the same amount, and once a listed running box reports no worker records or endpoints for `idle_grace_seconds` it stops that box with the Boat CLI's stop command, keeping the snapshot and never deleting.
+While `fm-boat-worker.sh idle` reports live workers it starts a detached, 60-second bounded renewal when at most half the configured timer remains, and once a listed running box reports no worker records or endpoints for `idle_grace_seconds` it stops that box with the Boat CLI's stop command, keeping the snapshot and never deleting.
 Scheduled work still resumes only through the sender when a Boat-eligible task is actually queued; nothing here is always-on, and worker boxes stay off the `always_on` list.
 This section owns the behavior; the script's header owns the exact commands, bounds, and records.
 
 **Safety**
 
 - A box with a live worker is never stopped, and a box not listed in `config/boat-box-id` is never touched.
-- An unreadable idle report, state, timer, or instance is treated as busy, so blindness keeps a box up rather than stopping work.
-- The send lock covers the state read, worker probe, timer extension, and stop, so a concurrent dispatch or teardown cannot change a box between its liveness report and action.
+- An unreadable idle report or instance is treated as busy when the box's running state and timer are known, and can trigger renewal. An unreadable state or timer prevents an explicit stop but cannot guarantee renewal.
+- The send lock covers each state read, worker probe, timer extension, and stop, so a concurrent dispatch or teardown cannot change a box between its liveness report and action.
 - With several boxes, each sweep starts where the last one left off, so a slow box cannot starve the rest of extends and stops.
 - The supported fleet has at most three listed boxes; with the default 300-second watcher cadence, the rotation revisits each within 15 minutes, below the minimum 30-minute resume timer.
 - `FM_CHECK_TIMEOUT` must be at least 30 seconds for this check to run, which is also the default.
@@ -2287,7 +2287,7 @@ This section owns the behavior; the script's header owns the exact commands, bou
 The check prints one `boat-idle:` line only when firstmate should wake, and prints nothing otherwise.
 
 - Every box it stopped, with how long the box had been idle.
-- A failed extend or stop, at most once per hour per box.
+- A failed extend after two consecutive attempts, once until an extend succeeds, and a failed stop at most once per hour per box.
 - An invalid config, a missing CLI, or a missing box list, at most once per 24 hours.
 - A poll killed at `FM_CHECK_TIMEOUT` prints nothing and resumes next cadence from the durable idle-since records.
 

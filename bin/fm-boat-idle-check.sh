@@ -26,10 +26,11 @@
 #
 # Safety, in priority order: a box with a live worker is never stopped; a
 # box not listed in config/boat-box-id is never touched; an unreadable idle
-# report, state, timer, or instance is treated as busy, so blindness keeps a
-# box up rather than stopping work. The send lock covers the state read,
-# worker probes, timer extension, and stop, so a concurrent dispatch or
-# teardown cannot change a box between its liveness report and action.
+# report or instance is treated as busy when state and timer are readable.
+# An unreadable state or timer prevents an explicit stop but cannot guarantee
+# renewal. The send lock covers each state read, worker probe, timer extension,
+# and stop, so a concurrent dispatch or teardown cannot change a box between
+# its liveness report and action.
 # Stopped boxes are left alone, and
 # scheduled work still resumes only through fm-boat-send.sh when a
 # Boat-eligible task is actually queued; nothing here is always-on.
@@ -54,13 +55,13 @@
 # The CLI comes from FM_BOAT_BIN, else "boat_bin" in the config, else `boat`
 # on PATH. docs/configuration.md owns the config schema. Each Boat read is
 # bounded to 6 seconds, the idle probe to 5, and the alias refresh to 4.
-# Every timed action also fits the remaining poll budget, which ends before
-# FM_CHECK_TIMEOUT. Ten seconds are reserved for renewal when optional
-# probes or plan reads run slowly. The configured fleet supports at most three
-# listed boxes. Sweeps rotate across them from a durable position, so a slow
-# box does not starve those behind it. Extend, stop, and refresh
-# failures are reported at most once per hour per box, config problems at
-# most once per 24 hours, and every completed stop is reported at once.
+# The poll ends before FM_CHECK_TIMEOUT. A needed renewal runs in a detached
+# 60-second job, with one job per box and a recorded start time. The configured
+# fleet supports at most three listed boxes. Sweeps rotate across them from a durable position, so a slow
+# box does not starve those behind it. Two consecutive renewal failures emit
+# one wake line. Stop and refresh failures are reported at most once per hour
+# per box, config problems at most once per 24 hours, and every completed stop
+# is reported at once.
 set -u
 export LC_ALL=C
 
@@ -76,6 +77,7 @@ CHECK_TRUST="$STATE/$CHECK_ID.check-trust"
 SINCE_FILE="$STATE/.boat-idle-since"
 REPORT_FILE="$STATE/.boat-idle-report"
 POS_FILE="$STATE/.boat-idle-pos"
+RENEW_PREFIX="$STATE/.boat-idle-renew-"
 REGISTER_BIN="$SCRIPT_DIR/fm-check-register.sh"
 MAX_LINE=1000
 INFO_SECS=6
@@ -88,7 +90,7 @@ LOCK_WAIT=4
 CONFIG_INTERVAL=86400
 ACTION_INTERVAL=3600
 CHECK_DEADLINE=0
-EXTEND_RESERVE=10
+EXTEND_RESERVE=1
 MIN_BOX_BUDGET=24
 
 # shellcheck source=bin/fm-pr-lib.sh
@@ -291,6 +293,130 @@ box_extend() {
     --environment fm-code --ttl "$ttl" --json >/dev/null 2>&1
 }
 
+renew_marker() {
+  printf '%s%s\n' "$RENEW_PREFIX" "$1"
+}
+
+renew_clear() {
+  local marker
+  marker=$(renew_marker "$1")
+  if [ -d "$marker" ] && [ ! -L "$marker" ]; then
+    rm -f -- "$marker/start" "$marker/attempts" "$marker/result"
+    rmdir -- "$marker" 2>/dev/null || true
+  fi
+  record_drop "$REPORT_FILE" "renew-$1" || true
+}
+
+renew_result() {
+  local marker=$1 result=$2 tmp
+  [ -d "$marker" ] && [ ! -L "$marker" ] || return 1
+  tmp="$marker/result.$$"
+  printf '%s\n' "$result" > "$tmp" || return 1
+  mv -f -- "$tmp" "$marker/result"
+}
+
+renew_run() {
+  local box=$1 ttl multi ids state remaining instance probe
+  valid_box "$box" || return 1
+  fm_boat_load_reservation || return 1
+  ids=$(fm_boat_read_box_ids "$BOX_CONFIG") || return 1
+  printf '%s\n' "$ids" | grep -Fxq -- "$box" || return 1
+  ttl=$FM_BOAT_RESUME_TTL
+  multi=0
+  [ "$(printf '%s\n' "$ids" | wc -l)" -le 1 ] || multi=1
+  BOAT_BIN=${FM_BOAT_BIN:-$(jq -r '.boat_bin // ""' "$CONFIG" 2>/dev/null)}
+  [ -n "$BOAT_BIN" ] || BOAT_BIN=boat
+  command -v "$BOAT_BIN" >/dev/null 2>&1 || return 1
+  CHECK_DEADLINE=$(($(date +%s) + 58))
+  EXTEND_RESERVE=20
+  fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" 25 || return 1
+  IDLE_LOCK="$FM_HOME/state/.boat-send.lock"
+  if ! read -r state remaining <<< "$(boat_info "$box" 2>/dev/null)" \
+    || [ -z "$state" ] || [ -z "$remaining" ]; then
+    release_idle_lock
+    return 1
+  fi
+  case "$state" in
+    ready|idle|running) ;;
+    stopped) release_idle_lock; return 0 ;;
+    *) release_idle_lock; return 1 ;;
+  esac
+  if instance=$(boat_instance "$box" 2>/dev/null) && [ -n "$instance" ]; then
+    probe=$(idle_probe "$box" "$instance" "$multi" 2>/dev/null) || probe=
+    if [ "$probe" = no ]; then
+      release_idle_lock
+      return 0
+    fi
+  fi
+  if [ "$remaining" -gt "$((ttl / 2))" ]; then
+    release_idle_lock
+    return 0
+  fi
+  if [ ! -d "$(renew_marker "$box")" ] || [ -L "$(renew_marker "$box")" ]; then
+    release_idle_lock
+    return 0
+  fi
+  if box_extend "$box" "$ttl"; then
+    release_idle_lock
+    return 0
+  fi
+  release_idle_lock
+  return 1
+}
+
+renew_job() {
+  local box=$1 marker rc=0
+  valid_box "$box" || return 1
+  marker=$(renew_marker "$box")
+  fm_run_timed 60 "$0" renew-run "$box" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    renew_result "$marker" ok
+  else
+    renew_result "$marker" fail
+  fi
+}
+
+renew_start() {
+  local box=$1 marker start attempts result
+  marker=$(renew_marker "$box")
+  if [ -e "$marker" ] && { [ ! -d "$marker" ] || [ -L "$marker" ]; }; then
+    return 1
+  fi
+  if [ -d "$marker" ]; then
+    result=$(cat "$marker/result" 2>/dev/null || true)
+    if [ -z "$result" ]; then
+      start=$(cat "$marker/start" 2>/dev/null || true)
+      case "$start" in ''|*[!0-9]*) start=0 ;; esac
+      [ "$(date +%s)" -gt "$((start + 65))" ] || return 0
+    fi
+    attempts=$(cat "$marker/attempts" 2>/dev/null || true)
+    case "$attempts" in ''|*[!0-9]*) attempts=0 ;; esac
+  else
+    mkdir -m 0700 -- "$marker" || return 1
+    attempts=0
+  fi
+  printf '%s\n' "$(date +%s)" > "$marker/start" || return 1
+  printf '%s\n' "$((attempts + 1))" > "$marker/attempts" || return 1
+  rm -f -- "$marker/result"
+  FM_BOAT_BIN="$BOAT_BIN" nohup perl -MPOSIX=setsid -e 'setsid() >= 0 or exit 1; exec @ARGV' \
+    "$0" renew "$box" </dev/null >/dev/null 2>&1 &
+}
+
+renew_reconcile() {
+  local box=$1 marker result attempts
+  marker=$(renew_marker "$box")
+  result=$(cat "$marker/result" 2>/dev/null || true)
+  if [ "$result" = ok ]; then
+    renew_clear "$box"
+  elif [ "$result" = fail ]; then
+    attempts=$(cat "$marker/attempts" 2>/dev/null || true)
+    if [ "$attempts" = 2 ] && [ "$(record_read "$REPORT_FILE" "renew-$box")" != 2 ]; then
+      part "extend $box failed twice with live or unreadable workers"
+      record_write "$REPORT_FILE" "renew-$box" 2 || true
+    fi
+  fi
+}
+
 # box_stop <box>: stops the box, drops its environment receipt line,
 # and parks the alias. Reports through STOP_DETAIL on a partial failure;
 # the box itself is already stopped then.
@@ -327,6 +453,7 @@ box_stop() {
 }
 
 PARTS=
+RENEW_QUEUE=()
 part() {  # <text>: appends one finding to the one line.
   if [ -z "$PARTS" ]; then
     PARTS=$1
@@ -353,12 +480,13 @@ check_box_locked() {
     return 0
   fi
   case "$state" in
-    stopped) record_drop "$SINCE_FILE" "$box" || true; return 0 ;;
+    stopped) record_drop "$SINCE_FILE" "$box" || true; renew_clear "$box"; return 0 ;;
     ready|idle|running) ;;
     *) record_drop "$SINCE_FILE" "$box" || true; return 0 ;;
   esac
   if ! instance=$(boat_instance "$box" 2>/dev/null) || [ -z "$instance" ]; then
     record_drop "$SINCE_FILE" "$box" || true
+    [ "$remaining" -gt "$((ttl / 2))" ] || RENEW_QUEUE+=("$box")
     return 0
   fi
   probe=$(idle_probe "$box" "$instance" "$multi" 2>/dev/null)
@@ -372,26 +500,15 @@ check_box_locked() {
   # Retained worker records without endpoints count as busy; only no starts grace.
   if [ "$probe_rc" -ne 0 ]; then
     record_drop "$SINCE_FILE" "$box" || true
-    if [ "$remaining" -lt "$ttl" ] && ! box_extend "$box" "$ttl" \
-      && report_due "extend-$box" "$now" "$ACTION_INTERVAL"; then
-      part "extend $box failed while its workers could not be confirmed"
-      report_note "extend-$box" "$now"
-    fi
+    [ "$remaining" -gt "$((ttl / 2))" ] || RENEW_QUEUE+=("$box")
     return 0
   fi
   if [ "$probe" = yes ]; then
     record_drop "$SINCE_FILE" "$box" || true
-    if [ "$remaining" -lt "$ttl" ]; then
-      if box_extend "$box" "$ttl"; then
-        return 0
-      fi
-      if report_due "extend-$box" "$now" "$ACTION_INTERVAL"; then
-        part "extend $box failed with live workers"
-        report_note "extend-$box" "$now"
-      fi
-    fi
+    [ "$remaining" -gt "$((ttl / 2))" ] || RENEW_QUEUE+=("$box")
     return 0
   fi
+  renew_clear "$box"
   since=$(record_read "$SINCE_FILE" "$box")
   case "$since" in ''|*[!0-9]*) since=$now; record_write "$SINCE_FILE" "$box" "$since" || true ;; esac
   idle_for=$((now - since))
@@ -420,8 +537,9 @@ check_box_locked() {
 }
 
 run_check() {
-  local now problem bin ids multi box pos count i timeout ORDER
+  local now problem bin ids multi box pos count i timeout renewal ORDER
   PARTS=
+  RENEW_QUEUE=()
   [ -f "$CONFIG" ] || return 0
   timeout=${FM_CHECK_TIMEOUT:-30}
   case "$timeout" in ''|*[!0-9]*) timeout=30 ;; esac
@@ -436,6 +554,8 @@ run_check() {
   problem=
   if ! command -v jq >/dev/null 2>&1; then
     problem='jq is missing'
+  elif ! command -v perl >/dev/null 2>&1; then
+    problem='perl is missing'
   elif ! fm_boat_load_reservation; then
     problem="config/boat-spend.json is invalid: ${FM_BOAT_SPEND_PROBLEM:-unreadable}"
   else
@@ -456,6 +576,10 @@ run_check() {
       report_note config "$now"
     fi
   else
+    while IFS= read -r box; do
+      [ -n "$box" ] || continue
+      renew_reconcile "$box"
+    done <<< "$ids"
     if [ "$(poll_remaining)" -lt "$MIN_BOX_BUDGET" ]; then
       part 'Boat idle poll budget ran out before checking a box'
       fm_cap_line "boat-idle: $PARTS" "$MAX_LINE"
@@ -487,6 +611,13 @@ run_check() {
         check_box "$box" "$now" "$FM_BOAT_RESUME_TTL" "$FM_BOAT_IDLE_GRACE" "$multi"
       done
     fi
+  fi
+  if [ "${#RENEW_QUEUE[@]}" -gt 0 ] \
+    && fm_lock_acquire_wait_max "$FM_HOME/state/.boat-send.lock" 1; then
+    for renewal in "${RENEW_QUEUE[@]}"; do
+      renew_start "$renewal" || part "cannot start renewal for $renewal"
+    done
+    fm_lock_release "$FM_HOME/state/.boat-send.lock" || true
   fi
   [ -z "$PARTS" ] || fm_cap_line "boat-idle: $PARTS" "$MAX_LINE"
 }
@@ -577,12 +708,20 @@ arm() {
 }
 
 disarm() {
+  local marker
+  for marker in "$RENEW_PREFIX"*; do
+    [ -d "$marker" ] && [ ! -L "$marker" ] || continue
+    valid_box "${marker#"$RENEW_PREFIX"}" || continue
+    renew_clear "${marker#"$RENEW_PREFIX"}"
+  done
   rm -f -- "$CHECK_SHIM" "$CHECK_TRUST" "$SINCE_FILE" "$REPORT_FILE" "$POS_FILE"
   printf 'disarmed: state/%s.check.sh\n' "$CHECK_ID"
 }
 
 case "${1:-check}" in
   check) [ "$#" -le 1 ] || die_usage; run_check ;;
+  renew) [ "$#" -eq 2 ] || die_usage; renew_job "$2" ;;
+  renew-run) [ "$#" -eq 2 ] || die_usage; renew_run "$2" ;;
   arm) [ "$#" -eq 1 ] || die_usage; arm ;;
   disarm) [ "$#" -eq 1 ] || die_usage; disarm ;;
   -h|--help|help) usage ;;

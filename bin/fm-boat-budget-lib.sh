@@ -68,7 +68,7 @@ fm_boat_load_reservation() {
       elif has("box_seconds_per_24h") and (.box_seconds_per_24h | wholepos | not) then error("box_seconds_per_24h must be a whole number, 1 or more")
       elif has("resume_ttl_seconds") and (.resume_ttl_seconds | (type == "number" and . >= 1800 and . <= 14400 and . == floor) | not) then error("resume_ttl_seconds must be a whole number of seconds, 1800 to 14400")
       elif has("idle_grace_seconds") and (.idle_grace_seconds | (type == "number" and . >= 0 and . <= 86400 and . == floor) | not) then error("idle_grace_seconds must be a whole number of seconds, 0 to 86400")
-      elif (.idle_grace_seconds // 900) >= (.resume_ttl_seconds // 3600) then error("idle_grace_seconds " + ((.idle_grace_seconds // 900) | tostring) + " must be shorter than resume_ttl_seconds " + ((.resume_ttl_seconds // 3600) | tostring))
+      elif (.idle_grace_seconds // 900) >= ([.resume_ttl_seconds // 3600, 3600] | min) then error("idle_grace_seconds " + ((.idle_grace_seconds // 900) | tostring) + " must be shorter than min(resume_ttl_seconds " + ((.resume_ttl_seconds // 3600) | tostring) + ", fallback 3600)")
       else {
         ceiling_usd: (if has("ceiling_usd") then .ceiling_usd else null end),
         expected_running: (if has("expected_running") then .expected_running else null end),

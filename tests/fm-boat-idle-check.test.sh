@@ -61,6 +61,15 @@ case "${1:-}" in
     [ ! -e "$FIXTURES/info.slow" ] || sleep 5
     [ ! -e "$FIXTURES/$box.info.fail" ] || exit 1
     [ -f "$FIXTURES/$box.info.json" ] || exit 97
+    if [ -e "$FIXTURES/info.stops-on-renew" ]; then
+      count=$(cat "$FIXTURES/info.count" 2>/dev/null || printf '0')
+      count=$((count + 1))
+      printf '%s\n' "$count" > "$FIXTURES/info.count"
+      if [ "$count" -ge 2 ]; then
+        printf '{"sandbox":{"id":"%s","type":"default","state":"stopped"}}\n' "$box"
+        exit 0
+      fi
+    fi
     cat "$FIXTURES/$box.info.json"
     ;;
   exec)
@@ -85,6 +94,7 @@ case "${1:-}" in
     [ "${5:-}" = --ttl ] || exit 97
     case "${6:-}" in ''|*[!0-9]*) exit 97 ;; esac
     [ "${7:-}" = --json ] && [ "$#" -eq 7 ] || exit 97
+    [ ! -e "$FIXTURES/resume.slow" ] || sleep 11
     [ ! -e "$FIXTURES/resume.fail" ] || exit 1
     printf '{}\n'
     ;;
@@ -123,6 +133,15 @@ found=$(grep -l -F -- "${4:-}" "$FIXTURES/"*.boot 2>/dev/null | head -n 1 || tru
 box=$(basename "$found")
 box=${box%.boot}
 [ -f "$FIXTURES/idle.$box" ] || exit 1
+if [ -e "$FIXTURES/idle.clears-on-renew" ]; then
+  count=$(cat "$FIXTURES/idle.count" 2>/dev/null || printf '0')
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$FIXTURES/idle.count"
+  if [ "$count" -ge 2 ]; then
+    printf 'boat-tasks-remaining: no\n'
+    exit 0
+  fi
+fi
 cat "$FIXTURES/idle.$box"
 FAKE
 cat > "$BIN/fm-boat-alias-refresh.sh" <<'FAKE'
@@ -181,6 +200,17 @@ run_at() {
     FM_BOAT_BIN="$FAKEBIN/boat" FM_BOAT_IDLE_NOW="$1" FIXTURES="$FIXTURES" \
     "$BIN/fm-boat-idle-check.sh" check 2>&1)
   CODE=$?
+  wait_renewal
+}
+
+wait_renewal() {
+  local marker="$HOME_DIR/state/.boat-idle-renew-$BOX" i
+  [ -d "$marker" ] || return 0
+  for ((i = 0; i < 700; i++)); do
+    [ ! -d "$marker" ] || [ -f "$marker/result" ] && return 0
+    sleep 0.1
+  done
+  fail "renewal did not finish for $BOX"
 }
 
 boat_calls() { grep -c '^boat ' "$FIXTURES/calls" | tr -d ' '; }
@@ -211,6 +241,9 @@ test_busy_box_extends_short_timer() {
     "$FIXTURES/calls" 'the short timer was not re-armed while workers were live'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a busy box was stopped'
   assert_absent "$HOME_DIR/state/.boat-idle-since" 'a busy box kept an idle record'
+  make_info running 3600
+  run_at "$((NOW + 300))"
+  assert_absent "$HOME_DIR/state/.boat-idle-renew-$BOX" 'successful renewal kept its marker'
 }
 
 test_busy_box_with_full_timer_is_silent() {
@@ -289,6 +322,37 @@ test_unreadable_info_is_silent() {
   assert_no_grep 'on ' "$FIXTURES/calls" 'an unreadable state was probed'
 }
 
+test_unreadable_instance_renews() {
+  new_case unreadable-instance
+  make_info running 600
+  : > "$FIXTURES/$BOX.exec.fail"
+  seed_since "$((NOW - 900))"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "unreadable instance check: $OUT"
+  [ -z "$OUT" ] || fail "an unreadable instance should be silent: $OUT"
+  assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 3600 --json" \
+    "$FIXTURES/calls" 'an unreadable instance skipped renewal'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'an unreadable instance caused stop'
+}
+
+test_renewal_rechecks_state_and_liveness() {
+  new_case changed-state
+  make_info running 600
+  set_idle 'boat-tasks-remaining: yes'
+  : > "$FIXTURES/info.stops-on-renew"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "changed state check: $OUT"
+  assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'renewal restarted a stopped box'
+
+  new_case changed-liveness
+  make_info running 600
+  set_idle 'boat-tasks-remaining: yes'
+  : > "$FIXTURES/idle.clears-on-renew"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "changed liveness check: $OUT"
+  assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'renewal used stale liveness'
+}
+
 test_instance_rotation_skips_stop() {
   new_case rotated
   make_info running 600
@@ -314,6 +378,16 @@ test_configured_resume_timer() {
     "$FIXTURES/calls" 'the configured timer was not used for the extend'
 }
 
+test_half_timer_renews() {
+  new_case half-timer '{"resume_ttl_seconds":1800}'
+  make_info running 900
+  set_idle 'boat-tasks-remaining: yes'
+  run_at "$NOW"
+  expect_code 0 "$CODE" "half timer check: $OUT"
+  assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 1800 --json" \
+    "$FIXTURES/calls" 'a half-expired timer was not renewed'
+}
+
 test_configured_grace() {
   new_case quick-grace '{"idle_grace_seconds":60}'
   make_info running 600
@@ -331,7 +405,12 @@ test_extend_failure_is_reported() {
   : > "$FIXTURES/resume.fail"
   run_at "$NOW"
   expect_code 0 "$CODE" "failed extend: $OUT"
-  assert_equals "boat-idle: extend $BOX failed with live workers" "$OUT" 'extend failure line'
+  [ -z "$OUT" ] || fail "the first renewal failure woke early: $OUT"
+  run_at "$((NOW + 300))"
+  expect_code 0 "$CODE" "second failed extend: $OUT"
+  [ -z "$OUT" ] || fail "the second renewal failure woke before a later poll: $OUT"
+  run_at "$((NOW + 600))"
+  assert_equals "boat-idle: extend $BOX failed twice with live or unreadable workers" "$OUT" 'two-failure wake line'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a failed extend stopped the box'
 }
 
@@ -369,14 +448,19 @@ test_grace_and_fleet_limits_are_validated() {
   new_case grace-over-timer '{"idle_grace_seconds":7200}'
   run_at "$NOW"
   expect_code 0 "$CODE" "grace over timer: $OUT"
-  assert_contains "$OUT" 'idle_grace_seconds 7200 must be shorter than resume_ttl_seconds 3600' 'default timer was not checked against grace'
+  assert_contains "$OUT" 'idle_grace_seconds 7200 must be shorter than min(resume_ttl_seconds 3600, fallback 3600)' 'default timer was not checked against grace'
   assert_equals 0 "$(boat_calls)" 'invalid grace contacted Boat'
 
   new_case grace-equals-timer '{"resume_ttl_seconds":1800,"idle_grace_seconds":1800}'
   run_at "$NOW"
   expect_code 0 "$CODE" "grace equals timer: $OUT"
-  assert_contains "$OUT" 'idle_grace_seconds 1800 must be shorter than resume_ttl_seconds 1800' 'equal grace was accepted'
+  assert_contains "$OUT" 'idle_grace_seconds 1800 must be shorter than min(resume_ttl_seconds 1800, fallback 3600)' 'equal grace was accepted'
   assert_equals 0 "$(boat_calls)" 'equal grace contacted Boat'
+
+  new_case grace-over-fallback '{"resume_ttl_seconds":14400,"idle_grace_seconds":4000}'
+  run_at "$NOW"
+  assert_contains "$OUT" 'idle_grace_seconds 4000 must be shorter than min(resume_ttl_seconds 14400, fallback 3600)' 'fallback timer was not checked against grace'
+  assert_equals 0 "$(boat_calls)" 'fallback grace contacted Boat'
 
   new_case unsupported-fleet '{"expected_running":4}'
   run_at "$NOW"
@@ -412,12 +496,12 @@ test_two_boxes_extend_and_stop_on_one_line() {
   BOX=bx_aaaaaaaa
   run_at "$NOW"
   expect_code 0 "$CODE" "two-box check: $OUT"
-  assert_equals "boat-idle: extend $BOX failed with live workers; stopped $other after 900s with no workers reported" \
-    "$OUT" 'joined line'
+  assert_equals "boat-idle: stopped $other after 900s with no workers reported" \
+    "$OUT" 'idle stop line'
   assert_grep "boat --no-update stop $other --json" "$FIXTURES/calls" 'the idle box was not stopped'
   assert_no_grep "boat --no-update stop $BOX " "$FIXTURES/calls" 'the busy box was stopped'
   assert_no_grep 'bx_zzzzzzzz' "$FIXTURES/calls" 'an unlisted box was touched'
-  assert_equals "$other" "$(cat "$HOME_DIR/state/.boat-route-box")" 'the route record did not follow the probed box'
+  assert_equals "$BOX" "$(cat "$HOME_DIR/state/.boat-route-box")" 'the renewal recheck did not route to its box'
   assert_grep "alias $BOX boat-prove" "$FIXTURES/calls" 'the alias was not refreshed to the first probed box'
   assert_grep "alias $other boat-prove" "$FIXTURES/calls" 'the alias was not refreshed to the second probed box'
 }
@@ -486,7 +570,7 @@ test_configured_cli_reaches_probe_children() {
 }
 
 test_slow_poll_extends_within_watcher_budget() {
-  local started elapsed
+  local started elapsed second
   new_case slow-poll '{"expected_running":2,"resume_ttl_seconds":14400}'
   printf '%s\n' '{"billingStatus":"trialing"}' > "$FIXTURES/limits.json"
   printf '%s\n' "$BOX" bx_cccccccc > "$HOME_DIR/config/boat-box-id"
@@ -496,6 +580,7 @@ test_slow_poll_extends_within_watcher_budget() {
   : > "$FIXTURES/info.slow"
   : > "$FIXTURES/exec.slow"
   : > "$FIXTURES/limits.slow"
+  : > "$FIXTURES/resume.slow"
   started=$(date +%s)
   OUT=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
     FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_TIMEOUT=30 FIXTURES="$FIXTURES" \
@@ -504,8 +589,16 @@ test_slow_poll_extends_within_watcher_budget() {
   elapsed=$(($(date +%s) - started))
   expect_code 0 "$CODE" "slow poll check: $OUT"
   [ "$elapsed" -lt 30 ] || fail "slow poll exceeded watcher budget: ${elapsed}s"
+  rm -f "$FIXTURES/info.slow" "$FIXTURES/exec.slow" "$FIXTURES/refresh.slow"
+  printf 'pos 0\n' > "$HOME_DIR/state/.boat-idle-pos"
+  second=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_TIMEOUT=30 FIXTURES="$FIXTURES" \
+    "$BIN/fm-boat-idle-check.sh" check 2>&1)
+  [ -z "$second" ] || fail "a pending renewal caused a wake: $second"
+  wait_renewal
   assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 3600 --json" \
     "$FIXTURES/calls" 'slow poll did not renew with the safe fallback timer'
+  assert_equals 1 "$(grep -c "boat --no-update resume $BOX " "$FIXTURES/calls")" 'a second renewal started while one was in flight'
 }
 
 test_short_watcher_budget_is_reported() {
@@ -584,8 +677,11 @@ test_idle_box_stops_after_grace
 test_live_worker_is_never_stopped
 test_unreadable_idle_is_busy
 test_unreadable_info_is_silent
+test_unreadable_instance_renews
+test_renewal_rechecks_state_and_liveness
 test_instance_rotation_skips_stop
 test_configured_resume_timer
+test_half_timer_renews
 test_configured_grace
 test_extend_failure_is_reported
 test_stop_failure_is_reported_throttled
