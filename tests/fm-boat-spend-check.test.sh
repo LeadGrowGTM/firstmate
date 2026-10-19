@@ -454,8 +454,41 @@ test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
   assert_absent "$home/state/.boat-spend-check-failed" "disarm left the failure record"
 }
 
+test_health_restore_and_expiry_are_reported() {
+  local home out
+  home=$(make_world health-degraded)
+  set_json "$home" list '.sandboxes[0].health = "degraded"'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: sandbox bx_one health is degraded' "$out" "degraded health line"
+  home=$(make_world health-restore-error)
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: two image files missing"'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: Restore incomplete: two image files missing' "$out" "restore error line"
+  home=$(make_world health-unhydrated)
+  set_json "$home" list '.sandboxes[0].hydrated = false'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: sandbox bx_one has not finished restoring its disk' "$out" "unhydrated line"
+  home=$(make_world health-ok-unhydrated-done)
+  set_json "$home" list '.sandboxes[0].hydrated = true | .sandboxes[0].health = "ok" | .sandboxes[0].error = null'
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "a healthy hydrated sandbox should be silent: $out"
+  home=$(make_world expiry-near)
+  set_json "$home" list '.sandboxes = [{"id":"bx_old","state":"stopped","type":"default","archiveAfter":null,"stop":{"endedAt":"2026-09-29T14:00:00.000Z"}}]'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: stopped sandbox bx_old disk expires 2026-10-13 UTC, within 3 days' "$out" "stopped expiry line"
+  home=$(make_world expiry-past)
+  set_json "$home" list '.sandboxes = [{"id":"bx_old","state":"stopped","type":"default","archiveAfter":null,"stop":{"endedAt":"2026-09-20T14:00:00.000Z"}}]'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: stopped sandbox bx_old disk expired 2026-10-04 UTC (14 days after it stopped)' "$out" "stopped expired line"
+  home=$(make_world expiry-far)
+  set_json "$home" list '.sandboxes = [{"id":"bx_old","state":"stopped","type":"default","archiveAfter":null,"stop":{"endedAt":"2026-10-10T14:00:00.000Z"}}]'
+  out=$(run_check "$home")
+  [ -z "$out" ] || fail "a recently stopped sandbox should be silent: $out"
+}
+
 test_healthy_account_is_silent_and_only_reads
 test_stopped_sandbox_is_never_reported
+test_health_restore_and_expiry_are_reported
 test_spend_over_ceiling
 test_spend_projected_over_ceiling
 test_configured_ceiling_is_used

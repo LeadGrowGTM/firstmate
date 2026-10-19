@@ -2276,11 +2276,14 @@ The check prints one `boat-spend:` line, joining every condition that is outside
 - An active sandbox has no auto-stop deadline and is not in `always_on`.
 - Auto-refill is enabled.
 - The trial or plan end is within 3 days, which also gives a renewal reminder each month.
+- A sandbox reports health other than ok, carries a restore error, or is an active sandbox that has not finished restoring its disk at the daily evaluation.
+- A stopped sandbox is within 3 days of Boat deleting its stopped disk, 14 days after it stopped, or is already past that point.
+  This expiry warning is the one stopped-sandbox condition the check reports.
 - The check could not see everything, because a check that cannot see is reported rather than treated as quiet.
   That covers a missing `jq` or Boat CLI, a timed-out call, malformed JSON, an invalid `config/boat-spend.json`, a sandbox list with more pages than were read, and a field that is missing or not readable: spend, last-24-hour usage, active states, a plan or trial end, the sandbox list, a sandbox's state, or the auto-refill state.
   Every such cause in one run is consolidated into a single `read failed:` part of the line (an invalid file is named as such instead), not one part per cause.
 
-Stopped sandboxes are never reported, because Boat bills only while a sandbox runs.
+Stopped sandboxes are otherwise never reported, because Boat bills only while a sandbox runs.
 
 **Arm, cadence, and disarm**
 
