@@ -7,7 +7,7 @@
 #   fm-boat-idle-check.sh disarm
 #   fm-boat-idle-check.sh --help
 #
-# A Boat box runs only while it has a live worker or queued Boat work.
+# This PC-side check manages listed worker boxes.
 # fm-boat-send.sh resumes with the short on-demand timer and can extend it before spawn.
 # This check does the other two halves from the PC, so a down box watcher
 # does not matter: while fm-boat-worker.sh idle reports live work it re-arms
@@ -56,8 +56,11 @@
 # on PATH. docs/configuration.md owns the config schema. Each Boat read is
 # bounded to 6 seconds, the idle probe to 5, and the alias refresh to 4.
 # The poll ends before FM_CHECK_TIMEOUT. A needed renewal runs in a detached
-# bounded renewal job, with one job per box and a recorded start time. The configured
-# fleet supports at most three listed boxes. Sweeps rotate across them from a durable position, so a slow
+# bounded renewal job, with one job per box and a recorded start time.
+# A renewal uses one deadline from preflight through resume and fails before
+# resume unless the full 60-second resume allowance remains.
+# The configured fleet supports at most three listed boxes.
+# Sweeps rotate across them from a durable position, so a slow
 # box does not starve those behind it. Two consecutive renewal failures emit
 # one wake line. Stop and refresh failures are reported at most once per hour
 # per box, config problems at most once per 24 hours, and every completed stop
