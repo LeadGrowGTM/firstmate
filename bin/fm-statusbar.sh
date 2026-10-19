@@ -907,7 +907,7 @@ fm_sb_claude_usage_refresh() {
   tmp="$CUSAGE_CACHE.$$"
   main=$(fm_run_timed 20 quota-axi --provider muse,grok,codex 2>/dev/null </dev/null) || ok_main=0
   dirs=$(fm_sb_cusage_claude_dirs)
-  {
+  if ! {
     fm_sb_cusage_line mu muse default "$ok_main" "$main"
     fm_sb_cusage_line gk grok default "$ok_main" "$main"
     while IFS=$'\t' read -r label dir; do
@@ -921,7 +921,14 @@ fm_sb_claude_usage_refresh() {
       fi
     done <<< "$dirs"
     fm_sb_cusage_line cx codex codex-home "$ok_main" "$main"
-  } >"$tmp" 2>/dev/null && mv -f "$tmp" "$CUSAGE_CACHE" || { rm -f "$tmp"; return 1; }
+  } >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$CUSAGE_CACHE"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 # Seconds to "2d", "1d6h", "4h12m" or "35m"; nothing when not in the future.
