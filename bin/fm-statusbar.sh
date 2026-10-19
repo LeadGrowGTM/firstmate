@@ -45,7 +45,26 @@
 #       fields are ever printed. The mate segment is a few-second cache of
 #       this home's durable records and is omitted when that cache or a
 #       required source cannot be read. Mates named by secondmate_on_demand
-#       are left out of it. claude-fleet-refresh rebuilds it.
+#       are left out of it. claude-fleet-refresh rebuilds it. The
+#       subscription-usage segment follows the rate-limit windows (see
+#       claude-segments).
+#   fm-statusbar.sh claude-segments
+#       Print only the live-mates and subscription-usage segments, joined by
+#       " | " on one line (empty when neither is readable), so a custom
+#       statusLine wrapper can append them without calling claude-line.
+#       The usage segment lists Muse (mu), Grok (gk), each Claude account
+#       (cl-gmail and cl-second) and Codex (cx) as remaining percent and, when
+#       COLUMNS indicates enough room, time to reset. An unmeasurable quota
+#       shows "n/a"; Muse also shows "n/a" when no quota row is reported.
+#       A failed read or unavailable account shows "?". Claude accounts use
+#       the two directories listed in order in
+#       ${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/statusline-claude-accounts,
+#       or the gmail and second directories under $HOME/.claude-accounts;
+#       quota-axi reads each available directory using only that profile.
+#       The segment only reads a cache that a
+#       background quota-axi job rebuilds at most every five minutes. A cache
+#       over ten minutes old is marked "(stale)" and one over an hour old is
+#       dropped. The cache holds only labels, percentages and reset times.
 #
 # Environment: FM_STATE_OVERRIDE selects the state directory (default
 # $FM_HOME/state).
@@ -63,6 +82,10 @@ FLEET_CACHE="$STATE/statusbar-claude-fleet.txt"
 FLEET_ATTEMPT="$STATE/.statusbar-claude-fleet-attempt"
 FLEET_LOCK="$STATE/.statusbar-claude-fleet.lock"
 FLEET_TTL=5
+CUSAGE_CACHE="$STATE/statusbar-claude-usage.tsv"
+CUSAGE_ATTEMPT="$STATE/.statusbar-claude-usage-attempt"
+CUSAGE_LOCK="$STATE/.statusbar-claude-usage.lock"
+CUSAGE_TTL=300
 TRACKER_ROOT=${FM_SB_TRACKER_ROOT:-}
 TRACKER_MAIN_HOME=${FM_SB_TRACKER_MAIN_HOME:-}
 case "${1:-}" in --socket) tracker_sub=${3:-} ;; *) tracker_sub=${1:-} ;; esac
@@ -740,23 +763,30 @@ fm_sb_claude_fleet_refresh() {
   printf '%s\n' "$seg" >"$tmp" && mv -f "$tmp" "$FLEET_CACHE"
 }
 
-fm_sb_claude_fleet_kick() {
-  local now
+# Start <fn> in the background unless a refresh was attempted inside <ttl>
+# seconds or another is running. A lock older than <lock-max> seconds belongs
+# to a dead refresher.
+fm_sb_cache_kick() {  # <attempt> <lock> <ttl> <lock-max> <fn>
+  local attempt=$1 lock=$2 ttl=$3 lock_max=$4 fn=$5 now
   now=$(date +%s) || return 0
-  if [ -f "$FLEET_ATTEMPT" ] && [ $((now - $(fm_sb_mtime "$FLEET_ATTEMPT"))) -lt "$FLEET_TTL" ]; then
+  if [ -f "$attempt" ] && [ $((now - $(fm_sb_mtime "$attempt"))) -lt "$ttl" ]; then
     return 0
   fi
   mkdir -p "$STATE" 2>/dev/null || return 0
-  if [ -d "$FLEET_LOCK" ] && [ $((now - $(fm_sb_mtime "$FLEET_LOCK"))) -gt 30 ]; then
-    rmdir "$FLEET_LOCK" 2>/dev/null || true
+  if [ -d "$lock" ] && [ $((now - $(fm_sb_mtime "$lock"))) -gt "$lock_max" ]; then
+    rmdir "$lock" 2>/dev/null || true
   fi
-  mkdir "$FLEET_LOCK" 2>/dev/null || return 0
-  touch "$FLEET_ATTEMPT" 2>/dev/null || { rmdir "$FLEET_LOCK" 2>/dev/null; return 0; }
+  mkdir "$lock" 2>/dev/null || return 0
+  touch "$attempt" 2>/dev/null || { rmdir "$lock" 2>/dev/null; return 0; }
   (
-    trap 'rmdir "$FLEET_LOCK" 2>/dev/null' EXIT
-    fm_sb_claude_fleet_refresh >/dev/null 2>&1 || true
+    trap 'rmdir "$lock" 2>/dev/null' EXIT
+    "$fn" >/dev/null 2>&1 || true
   ) >/dev/null 2>&1 </dev/null &
   return 0
+}
+
+fm_sb_claude_fleet_kick() {
+  fm_sb_cache_kick "$FLEET_ATTEMPT" "$FLEET_LOCK" "$FLEET_TTL" 30 fm_sb_claude_fleet_refresh
 }
 
 # Warm path: print the cached segment, or nothing when it is missing.
@@ -774,14 +804,206 @@ fm_sb_claude_fleet_segment() {
   printf '%s' "$seg"
 }
 
+# Subscription usage segment: one cached quota-axi read per source.
+
+# The two Claude config directories to read.
+fm_sb_cusage_claude_dirs() {
+  local list d
+  local -a dirs=()
+  list=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/statusline-claude-accounts
+  if [ -f "$list" ] && [ ! -L "$list" ] && [ -r "$list" ]; then
+    while IFS= read -r d || [ -n "$d" ]; do
+      case "$d" in ''|'#'*) continue ;; esac
+      dirs+=("${d%/}")
+    done <"$list"
+  else
+    dirs=("$HOME/.claude-accounts/gmail" "$HOME/.claude-accounts/second")
+  fi
+  printf 'gmail\t%s\nsecond\t%s\n' "${dirs[0]:--}" "${dirs[1]:--}"
+}
+
+# "<pct>\t<resetsAt>" of one provider's intended account-wide row in default
+# TOON on stdin, or nothing when it has none.
+fm_sb_cusage_row() {  # <provider> <account>
+  awk -v want="$1" -v account="$2" '
+    /^quota\[[0-9]+\]\{provider,/ { keyed = index($0, "provider,accountKey,") > 0; in_quota = 1; next }
+    in_quota && !/^  / { in_quota = 0 }
+    in_quota && !done {
+      sub(/^  /, ""); n = split($0, row, ",")
+      key = keyed ? row[2] : account; scope = row[2 + keyed]
+      gsub(/"/, "", key); gsub(/"/, "", scope); reset = row[n]; gsub(/"/, "", reset)
+      if (row[1] != want || (scope != "all_models" && scope != "all_products")) next
+      if (key == account) { done = 1; printf "%s\t%s\n", row[3 + keyed], reset }
+    }
+  '
+}
+
+fm_sb_cusage_attention() {  # <provider> <account>
+  local toon=$3 counted inline
+  counted=$(printf '%s\n' "$toon" | awk -v want="$1" -v account="$2" '
+    /^attention\[[0-9]+\]\{provider,/ { keyed = index($0, "provider,accountKey,") > 0; in_attention = 1; next }
+    in_attention && !/^  / { in_attention = 0 }
+    in_attention {
+      sub(/^  /, ""); split($0, row, ",")
+      key = keyed ? row[2] : account; gsub(/"/, "", key)
+      if (row[1] == want && key == account) {
+        kind = row[3 + keyed]; gsub(/"/, "", kind)
+        found = 1
+        if (kind != "unmeasurable") result = "?"
+        else if (result == "") result = "n/a"
+      }
+    }
+    END { if (found) print result }
+  ')
+  if [ -n "$counted" ]; then printf '%s' "$counted"; return 0; fi
+  inline=$(printf '%s\n' "$toon" | sed -n 's/^attention: //p' | head -n 1)
+  [ -n "$inline" ] || return 0
+  printf '%s' "$inline" | jq -r --arg provider "$1" --arg account "$2" '
+    [.[] | select(.provider == $provider and (.accountKey // $account) == $account)] |
+    if length == 0 then empty elif any(.[]; .kind != "unmeasurable") then "?" else "n/a" end
+  ' 2>/dev/null || true
+}
+
+# ISO-8601 UTC instant to epoch seconds, or nothing.
+fm_sb_cusage_epoch() {  # <iso>
+  local iso
+  iso=$(printf '%s' "$1" | sed -E 's/\.[0-9]+//; s/\+00:00$/Z/')
+  case "$iso" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) return 0 ;;
+  esac
+  date -u -d "$iso" +%s 2>/dev/null || date -u -j -f %Y-%m-%dT%H:%M:%SZ "$iso" +%s 2>/dev/null || true
+}
+
+# One cache line: "<label>\t<pct|n/a|?>\t<reset epoch|->".
+fm_sb_cusage_line() {  # <label> <provider> <account> <ok> <toon>
+  local label=$1 provider=$2 account=$3 ok=$4 toon=$5 row pct reset epoch attention
+  if [ "$ok" != 1 ]; then
+    printf '%s\t?\t-\n' "$label"
+    return 0
+  fi
+  row=$(printf '%s\n' "$toon" | fm_sb_cusage_row "$provider" "$account")
+  if [ -z "$row" ]; then
+    attention=$(fm_sb_cusage_attention "$provider" "$account" "$toon")
+    if [ -z "$attention" ]; then
+      case "$provider" in muse) attention=n/a ;; *) attention='?' ;; esac
+    fi
+    printf '%s\t%s\t-\n' "$label" "$attention"
+    return 0
+  fi
+  IFS=$'\t' read -r pct reset <<< "$row"
+  if ! [[ $pct =~ ^[0-9]+(\.[0-9]+)?$ ]] || [ "$(awk -v p="$pct" 'BEGIN { print (p + 0 <= 100) }')" != 1 ]; then
+    printf '%s\t?\t-\n' "$label"
+    return 0
+  fi
+  epoch=$(fm_sb_cusage_epoch "$reset")
+  printf '%s\t%s\t%s\n' "$label" "$pct" "${epoch:--}"
+}
+
+fm_sb_claude_usage_refresh() {
+  local tmp toon ok=1 ok_main=1 dir label dirs main
+  command -v quota-axi >/dev/null 2>&1 || return 1
+  mkdir -p "$STATE" 2>/dev/null || return 1
+  tmp="$CUSAGE_CACHE.$$"
+  main=$(fm_run_timed 20 quota-axi --provider muse,grok,codex 2>/dev/null </dev/null) || ok_main=0
+  dirs=$(fm_sb_cusage_claude_dirs)
+  if ! {
+    fm_sb_cusage_line mu muse default "$ok_main" "$main"
+    fm_sb_cusage_line gk grok default "$ok_main" "$main"
+    while IFS=$'\t' read -r label dir; do
+      label="cl-$label"
+      if [ "$dir" != - ] && [ -d "$dir" ]; then
+        ok=1
+        toon=$(fm_run_timed 20 env "CLAUDE_CONFIG_DIR=$dir" quota-axi --provider claude --profile-only 2>/dev/null </dev/null) || ok=0
+        fm_sb_cusage_line "$label" claude default "$ok" "$toon"
+      else
+        fm_sb_cusage_line "$label" claude default 0 ''
+      fi
+    done <<< "$dirs"
+    fm_sb_cusage_line cx codex codex-home "$ok_main" "$main"
+  } >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$CUSAGE_CACHE"; then
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+# Seconds to "2d", "1d6h", "4h12m" or "35m"; nothing when not in the future.
+fm_sb_cusage_eta() {  # <seconds>
+  local s=$1 d h m
+  [ "$s" -gt 0 ] 2>/dev/null || return 0
+  d=$((s / 86400)); h=$((s % 86400 / 3600)); m=$((s % 3600 / 60))
+  if [ "$d" -ge 2 ]; then printf '%sd' "$d"
+  elif [ "$d" -ge 1 ]; then printf '%sd%sh' "$d" "$h"
+  elif [ "$h" -ge 1 ]; then printf '%sh%sm' "$h" "$m"
+  else printf '%sm' "$m"
+  fi
+}
+
+# Warm path: render the cache, never waiting on quota-axi. Prints nothing when
+# the cache is missing, unreadable or over an hour old.
+fm_sb_claude_usage_segment() {  # <line-prefix>
+  local prefix=$1 now age seg='' timed='' label pct reset eta shown stale='' separator=
+  now=$(date +%s) || return 0
+  if [ -f "$CUSAGE_CACHE" ] && [ ! -L "$CUSAGE_CACHE" ] && [ -r "$CUSAGE_CACHE" ]; then
+    age=$((now - $(fm_sb_mtime "$CUSAGE_CACHE")))
+  else
+    age=$((CUSAGE_TTL + 1))
+  fi
+  if [ "$age" -ge "$CUSAGE_TTL" ]; then
+    fm_sb_cache_kick "$CUSAGE_ATTEMPT" "$CUSAGE_LOCK" "$CUSAGE_TTL" 180 fm_sb_claude_usage_refresh
+  fi
+  [ "$age" -le 3600 ] && [ -f "$CUSAGE_CACHE" ] && [ -r "$CUSAGE_CACHE" ] || return 0
+  while IFS=$'\t' read -r label pct reset; do
+    [ -n "$label" ] || continue
+    label=$(fm_sb_clean "$label" 14)
+    case "$pct" in
+      n/a|'?') shown=$pct; eta= ;;
+      *) shown=$(LC_ALL=C awk -v p="$pct" 'BEGIN {
+           if (p > 0 && p < 1) print "<1%"
+           else if (p > 99 && p < 100) print ">99%"
+           else printf "%.0f%%", p
+         }')
+         eta=
+         [[ $reset =~ ^[0-9]+$ ]] && eta=$(fm_sb_cusage_eta $((reset - now))) ;;
+    esac
+    seg="${seg}${seg:+, }${label} ${shown}"
+    timed="${timed}${timed:+, }${label} ${shown}${eta:+ $eta}"
+  done <"$CUSAGE_CACHE"
+  [ -n "$seg" ] || return 0
+  [ "$age" -le 600 ] || stale=' (stale)'
+  [ -z "$prefix" ] || separator=' | '
+  if [[ ${COLUMNS:-} =~ ^[0-9]+$ ]] &&
+    [ $(( ${#prefix} + ${#separator} + ${#timed} + ${#stale} )) -le "$COLUMNS" ]; then
+    seg=$timed
+  fi
+  seg="$seg$stale"
+  printf '%s' "$seg"
+}
+
+cmd_claude_segments() {
+  local fleet usage out=
+  [ "$#" -eq 0 ] || return 2
+  fleet=$(fm_sb_claude_fleet_segment) || fleet=
+  [ -z "$fleet" ] || out=$fleet
+  usage=$(fm_sb_claude_usage_segment "$out") || usage=
+  [ -z "$usage" ] || out="${out}${out:+ | }$usage"
+  printf '%s\n' "$out"
+}
+
 cmd_claude_line() {
-  local task json parts model effort ctx limits wt fleet out
+  local task json parts model effort ctx limits wt fleet usage out
   [ "$#" -eq 2 ] && [ "$1" = --task ] && [ -n "$2" ] || return 2
   task=$2
   fleet=$(fm_sb_claude_fleet_segment) || fleet=
   command -v jq >/dev/null 2>&1 || {
     out="? ? | $(fm_sb_clean "$task" 32)"
     [ -z "$fleet" ] || out="? ? | $fleet | $(fm_sb_clean "$task" 32)"
+    usage=$(fm_sb_claude_usage_segment "$out") || usage=
+    [ -z "$usage" ] || out="$out | $usage"
     printf '%s\n' "$out"
     return 0
   }
@@ -810,6 +1032,8 @@ cmd_claude_line() {
   out="$out | $(fm_sb_clean "$task" 32)"
   [ -z "$wt" ] || out="$out | $wt"
   [ -z "$limits" ] || out="$out | $limits"
+  usage=$(fm_sb_claude_usage_segment "$out") || usage=
+  [ -z "$usage" ] || out="$out | $usage"
   printf '%s\n' "$out"
 }
 
@@ -872,8 +1096,9 @@ usage) cmd_usage "$@" ;;
 fleet) cmd_fleet "$@" ;;
 claude-fleet-refresh) fm_sb_claude_fleet_refresh ;;
 claude-line) cmd_claude_line "$@" ;;
+claude-segments) cmd_claude_segments "$@" ;;
 *)
-  echo "usage: fm-statusbar.sh label|sync|apply|fleet|crew-tracker|usage|claude-line|theme|install|check|source-line" >&2
+  echo "usage: fm-statusbar.sh label|sync|apply|fleet|crew-tracker|usage|claude-line|claude-segments|theme|install|check|source-line" >&2
   exit 2
   ;;
 esac

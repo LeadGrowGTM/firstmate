@@ -882,7 +882,9 @@ When Claude uses `bin/fm-statusbar.sh claude-line --task <id>` as its `statusLin
 Visible local mate entries show an id and latest active task state, while remote mate entries say remote.
 The summary counts open captain decisions in the primary and eligible live local mate homes, and reads durable records through a short background cache so rendering does not wait for fleet probes.
 Firstmate adds the command to spawned Claude workers when neither their account nor project already defines a `statusLine`; the main Claude session needs its own `statusLine` setting pointing to this command to show the summary.
-The command's [header](../bin/fm-statusbar.sh) owns the exact fields, truncation, and refresh behavior.
+When its cache is available, the line ends with compact remaining quota for Muse, Grok, the separately labelled Claude gmail and second accounts, and Codex.
+The `claude-segments` command supplies the mate and usage segments to custom `statusLine` wrappers.
+The command's [header](../bin/fm-statusbar.sh) owns the exact fields, account sources, unavailable states, truncation, reset times, and refresh behavior.
 This Claude line is separate from the [primary tmux session bar](tmux-backend.md#watching-the-crew), which continues to show live crew and secondmate counts.
 
 ### Remote routes and validation

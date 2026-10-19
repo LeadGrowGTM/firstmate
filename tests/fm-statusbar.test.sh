@@ -32,6 +32,8 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$WORK/bin" "$WORK/state"
+: >"$WORK/state/statusbar-claude-usage.tsv"
+touch "$WORK/state/.statusbar-claude-usage-attempt"
 : >"$WORK/empty.conf"
 cat >"$WORK/bin/tmux" <<SH
 #!/usr/bin/env bash
@@ -893,6 +895,8 @@ DECOY_HOME="$WORK/fleet-mates/remote-decoy"
 mkdir -p "$FLEET_STATE" "$FLEET_DATA" \
   "$DEV_HOME/state" "$NAP_HOME/state" "$OTTER_HOME/state" \
   "$ALEX_HOME/state" "$LEGION_HOME/state" "$HEALTH_HOME/state" "$DECOY_HOME/state"
+: >"$FLEET_STATE/statusbar-claude-usage.tsv"
+touch "$FLEET_STATE/.statusbar-claude-usage-attempt"
 tmux new-session -d -s fleetbar -n spare "sleep 600" || fail "fleet session did not start"
 tmux new-window -d -t fleetbar: -n fm-fleet-dev "sleep 600" || fail "dev window did not start"
 tmux new-window -d -t fleetbar: -n fm-fleet-dev-task "sleep 600" || fail "dev task window did not start"
@@ -1001,5 +1005,210 @@ pass "an unreadable mate registry drops only the fleet segment"
 missing=$(printf '%s' '{"model":{"display_name":"Haiku"}}' | FM_HOME="$WORK/missing-fleet-home" FM_STATE_OVERRIDE="$WORK/missing-fleet-home/state" FM_DATA_OVERRIDE="$WORK/missing-fleet-home/data" bash "$SB" --socket "$SOCKET_PATH" claude-line --task t1)
 [ "$missing" = "Haiku ? | t1" ] || fail "missing fleet sources failed the status line" "$missing"
 pass "missing fleet sources leave the status line intact"
+
+# --- subscription usage segment: cached quota-axi read, per-account labels ---
+USAGE_HOME="$WORK/usage-home"
+USAGE_STATE="$USAGE_HOME/state"
+USAGE_BIN="$WORK/usage-bin"
+ACCOUNTS="$WORK/accounts"
+mkdir -p "$USAGE_STATE" "$USAGE_HOME/config" "$USAGE_BIN" \
+  "$ACCOUNTS/gmail" "$ACCOUNTS/second" "$ACCOUNTS/backups"
+: >"$ACCOUNTS/gmail/.claude.json"; : >"$ACCOUNTS/second/.claude.json"; : >"$ACCOUNTS/backups/.claude.json"
+printf '%s\n%s\n' "$ACCOUNTS/gmail" "$ACCOUNTS/second" >"$USAGE_HOME/config/statusline-claude-accounts"
+RESET_2D=$(date -u -d '+50 hours' +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -v+50H +%Y-%m-%dT%H:%M:%S.000Z)
+RESET_4H=$(date -u -d '+4 hours 30 minutes' +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null || date -u -v+4H -v+30M +%Y-%m-%dT%H:%M:%S+00:00)
+RESET_6D=$(date -u -d '+6 days 2 hours' +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -v+6d -v+2H +%Y-%m-%dT%H:%M:%S.000Z)
+cat >"$USAGE_BIN/quota-axi" <<SH
+#!/usr/bin/env bash
+echo "\$CLAUDE_CONFIG_DIR|\$*" >>"$WORK/usage-calls"
+[ ! -f "$WORK/usage-fail" ] || exit 1
+if [ -f "$WORK/usage-profile-missing" ] && [[ "\$CLAUDE_CONFIG_DIR" == */gmail ]]; then
+  case "\$*" in
+    *--profile-only*)
+      echo 'quota: []'
+      echo 'attention[1]{provider,accountKey,scope,kind,detail,remedy}:'
+      echo '  claude,default,all_models,auth_required,profile_missing,none' ;;
+    *)
+      echo 'quota[1]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+      echo '  claude,default,all_models,77,0.1,through_reset,early,five_hour,none' ;;
+  esac
+  exit 0
+fi
+if [ -f "$WORK/usage-codex-default-only" ]; then
+  echo 'quota[1]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+  echo '  codex,default,all_models,68,0.1,through_reset,early,weekly,none'
+  exit 0
+fi
+if [ -f "$WORK/usage-codex-attention-counted" ]; then
+  echo 'quota: []'
+  echo 'attention[1]{provider,accountKey,scope,kind,detail,remedy}:'
+  echo '  codex,default,all_models,unmeasurable,no_quota,none'
+  exit 0
+fi
+if [ -f "$WORK/usage-codex-attention-inline" ]; then
+  echo 'quota: []'
+  echo 'attention: [{"provider":"codex","accountKey":"default","scope":"all_models","kind":"unmeasurable","detail":"no_quota","remedy":"none"}]'
+  exit 0
+fi
+if [ -f "$WORK/usage-endpoints" ]; then
+  case "\$*" in
+    *--provider\ claude*)
+      echo 'quota[1]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+      case "\$CLAUDE_CONFIG_DIR" in
+        */gmail) echo '  claude,default,all_models,0.5,0.1,through_reset,early,weekly,none' ;;
+        *) echo '  claude,default,all_models,99.6,0.1,through_reset,early,weekly,none' ;;
+      esac ;;
+    *)
+      echo 'quota[3]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+      echo '  muse,default,all_models,0.5,0.1,through_reset,early,weekly,none'
+      echo '  grok,default,all_products,99.6,0.1,through_reset,early,weekly,none'
+      echo '  codex,codex-home,all_models,0.5,0.1,through_reset,early,weekly,none' ;;
+  esac
+  exit 0
+fi
+if [ -f "$WORK/usage-attention" ]; then
+  echo 'quota: []'
+  echo 'attention[5]{provider,accountKey,scope,kind,detail,remedy}:'
+  echo '  muse,default,all_models,unmeasurable,no_quota,none'
+  echo '  grok,default,all_models,auth_required,login_required,none'
+  echo '  codex,codex-home,all_models,error,request_failed,none'
+  echo '  claude,default,all_models,auth_required,login_required,none'
+  echo '  claude,other,all_models,unmeasurable,no_quota,none'
+  exit 0
+fi
+if [ -f "$WORK/usage-inline-attention" ]; then
+  echo 'quota: []'
+  echo 'attention: [{"provider":"muse","accountKey":"default","scope":"all_models","kind":"unmeasurable","detail":"no_quota","remedy":"none"},{"provider":"grok","accountKey":"default","scope":"all_models","kind":"auth_required","detail":"login_required","remedy":"none"},{"provider":"codex","accountKey":"codex-home","scope":"all_models","kind":"error","detail":"request_failed","remedy":"none"},{"provider":"claude","accountKey":"default","scope":"all_models","kind":"auth_required","detail":"login_required","remedy":"none"}]'
+  exit 0
+fi
+case "\$*" in
+  *--provider\ claude*)
+    echo 'quota[2]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+    case "\$CLAUDE_CONFIG_DIR" in
+      */gmail) echo '  claude,other,all_models,77,0.1,through_reset,early,five_hour,"$RESET_4H"'; echo '  claude,default,all_models,15,0.1,through_reset,early,seven_day,"$RESET_2D"' ;;
+      */second) echo '  claude,other,all_models,77,0.1,through_reset,early,five_hour,"$RESET_4H"'; echo '  claude,default,all_models,91.4,0.1,through_reset,early,five_hour,"$RESET_4H"' ;;
+      *) echo '  claude,other,all_models,77,0.1,through_reset,early,five_hour,"$RESET_4H"'; echo '  claude,default,all_models,77,0.1,through_reset,early,five_hour,"$RESET_4H"' ;;
+    esac ;;
+  *)
+    echo 'quota[5]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+    echo '  grok,xai,all_products,30,1,through_reset,established,credits,"$RESET_2D"'
+    echo '  codex,default,all_models,68,-1,projected_exhaustion,established,weekly,"$RESET_6D"'
+    echo '  grok,default,all_products,47,1,through_reset,established,credits,"$RESET_2D"'
+    echo '  grok,default,"product:grok_build",30,1,through_reset,established,credits,"$RESET_2D"'
+    echo '  codex,codex-home,all_models,43,-1,projected_exhaustion,established,weekly,"$RESET_6D"' ;;
+esac
+SH
+chmod +x "$USAGE_BIN/quota-axi"
+usage_env() {
+  FM_HOME="$USAGE_HOME" FM_STATE_OVERRIDE="$USAGE_STATE" FM_DATA_OVERRIDE="$USAGE_HOME/data" \
+    COLUMNS="${COLUMNS:-160}" PATH="$USAGE_BIN:$PATH" "$@"
+}
+cache="$USAGE_STATE/statusbar-claude-usage.tsv"
+wait_usage() {
+  local expected=$1 actual
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    actual=$(usage_env bash "$SB" claude-segments)
+    case "$actual" in *"$expected"*) printf '%s' "$actual"; return 0 ;; esac
+    sleep 0.25
+  done
+  fail "background usage refresh did not produce $expected" "$actual"
+}
+
+cold=$(usage_env bash "$SB" claude-segments)
+[ -z "$cold" ] || fail "cold usage cache printed a segment" "$cold"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$cache" ] && break; sleep 0.25; done
+[ -s "$cache" ] || fail "cold render did not start a background refresh"
+seg=$(usage_env bash "$SB" claude-segments)
+expect_re='^mu n/a, gk 47% 2d, cl-gmail 15% 2d, cl-second 91% 4h[0-9]+m, cx 43% 6d$'
+[[ $seg =~ $expect_re ]] || fail "usage segment wrong" "$seg"
+case "$seg" in *backups*) fail "a config directory without projects was treated as an account" "$seg" ;; esac
+grep -q "second|--provider claude --profile-only" "$WORK/usage-calls" || fail "claude read did not select only the account directory" "$(cat "$WORK/usage-calls")"
+pass "usage segment shows each subscription, labelled per Claude account, from a background refresh"
+
+narrow=$(COLUMNS=65 usage_env bash "$SB" claude-segments)
+[ "$narrow" = 'mu n/a, gk 47%, cl-gmail 15%, cl-second 91%, cx 43%' ] || fail "narrow usage segment lost a percentage or retained reset times" "$narrow"
+narrow_line=$(printf '%s' '{"model":{"display_name":"Opus"},"rate_limits":{"seven_day":{"used_percentage":11}}}' | COLUMNS=60 usage_env bash "$SB" claude-line --task t1)
+case "$narrow_line" in *'mu n/a, gk 47%, cl-gmail 15%, cl-second 91%, cx 43%') ;; *) fail "narrow Claude line lost a percentage or retained reset times" "$narrow_line" ;; esac
+pass "both status-line commands omit reset times before subscription percentages"
+
+calls=$(wc -l <"$WORK/usage-calls")
+for _ in 1 2 3; do usage_env bash "$SB" claude-segments >/dev/null; done
+[ "$(wc -l <"$WORK/usage-calls")" = "$calls" ] || fail "fresh usage cache re-ran quota-axi"
+pass "a fresh usage cache is only read"
+
+line=$(printf '%s' '{"model":{"display_name":"Opus"},"rate_limits":{"seven_day":{"used_percentage":11}}}' | usage_env bash "$SB" claude-line --task t1)
+case "$line" in "Opus ? | t1 | 7d 11% | mu n/a, gk 47%"*) ;; *) fail "claude-line missing the usage segment" "$line" ;; esac
+pass "claude-line appends the usage segment after the limits"
+
+printf 'cached-mate:idle\n' >"$USAGE_STATE/statusbar-claude-fleet.txt"
+both=$(usage_env bash "$SB" claude-segments)
+case "$both" in "cached-mate:idle | mu n/a, gk 47% 2d, cl-gmail 15% 2d, cl-second 91% 4h"*"m, cx 43% 6d") ;; *) fail "claude-segments did not join mates and usage" "$both" ;; esac
+narrow_both=$(COLUMNS=75 usage_env bash "$SB" claude-segments)
+[ "$narrow_both" = "cached-mate:idle | $narrow" ] || fail "wrapper segment ignored the mate prefix width" "$narrow_both"
+pass "claude-segments prints mates and usage on one line"
+
+touch -d '12 minutes ago' "$cache"
+touch "$USAGE_STATE/.statusbar-claude-usage-attempt"
+stale=$(usage_env bash "$SB" claude-segments)
+case "$stale" in *' (stale)') ;; *) fail "old usage cache was not marked stale" "$stale" ;; esac
+touch -d '2 hours ago' "$cache"
+touch "$USAGE_STATE/.statusbar-claude-usage-attempt"
+dropped_usage=$(usage_env bash "$SB" claude-segments)
+[ "$dropped_usage" = "cached-mate:idle" ] || fail "very old usage cache was not dropped" "$dropped_usage"
+pass "a stale usage cache is marked and a very old one is dropped"
+
+touch "$WORK/usage-fail"
+rm -f "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+failed=$(wait_usage 'cl-second ?, cx ?')
+[ "$failed" = "cached-mate:idle | mu ?, gk ?, cl-gmail ?, cl-second ?, cx ?" ] || fail "unreadable quota-axi did not mark providers unknown" "$failed"
+rm -f "$WORK/usage-fail"
+pass "a failed quota read marks the segment unknown instead of failing"
+
+touch "$WORK/usage-attention"
+rm -f "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+attention=$(wait_usage 'cl-second ?, cx ?')
+[ "$attention" = "cached-mate:idle | mu n/a, gk ?, cl-gmail ?, cl-second ?, cx ?" ] || fail "quota attention was misclassified as unmeasurable" "$attention"
+rm -f "$WORK/usage-attention"
+pass "quota attention distinguishes unmeasurable and failed reads for every subscription"
+
+touch "$WORK/usage-inline-attention"
+rm -f "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+inline_attention=$(wait_usage 'cl-second ?, cx ?')
+[ "$inline_attention" = "$attention" ] || fail "inline quota attention differed from the counted table" "$inline_attention"
+rm -f "$WORK/usage-inline-attention"
+pass "inline quota attention also distinguishes unmeasurable and failed reads"
+
+for source in default-only attention-counted attention-inline; do
+  touch "$WORK/usage-codex-$source"
+  rm -f "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+  exact=$(wait_usage 'cx ?')
+  case "$exact" in *'cx ?') ;; *) fail "Codex borrowed another account from $source" "$exact" ;; esac
+  rm -f "$WORK/usage-codex-$source"
+done
+pass "Codex ignores other accounts in quota and both attention formats"
+
+touch "$WORK/usage-profile-missing"
+rm -f "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+profile=$(wait_usage 'cl-gmail ?')
+case "$profile" in *'cl-second 91%'*) ;; *) fail "profile-only Claude read hid the available account" "$profile" ;; esac
+rm -f "$WORK/usage-profile-missing"
+pass "unavailable Claude profile cannot borrow another credential"
+
+touch "$WORK/usage-endpoints"
+rm -f "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+endpoints=$(wait_usage 'cx <1%')
+[ "$endpoints" = 'cached-mate:idle | mu <1%, gk >99%, cl-gmail <1%, cl-second >99%, cx <1%' ] || fail "usage endpoints rounded to an exhausted or full percent" "$endpoints"
+rm -f "$WORK/usage-endpoints"
+pass "all subscription percentages retain nonzero and nonfull endpoints"
+
+printf '# pinned\n%s\n%s\n' "$ACCOUNTS/gmail-missing" "$ACCOUNTS/second" >"$USAGE_HOME/config/statusline-claude-accounts"
+rm -f "$cache" "$USAGE_STATE/.statusbar-claude-usage-attempt"
+pinned=$(wait_usage 'cl-second 91%')
+case "$pinned" in *'cl-gmail ?'*) ;; *) fail "missing configured account was omitted" "$pinned" ;; esac
+case "$pinned" in *"cl-second 91%"*) ;; *) fail "configured account missing" "$pinned" ;; esac
+pass "configured Claude paths keep both labelled accounts, including unavailable ones"
+
+printf '%s' "$pinned" | grep -qiE 'token|secret|credential' && fail "usage output carried a credential-like word"
+pass "usage output holds no credential material"
 
 echo "fm-statusbar: all passed"
