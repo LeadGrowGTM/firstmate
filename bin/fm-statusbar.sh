@@ -806,7 +806,7 @@ fm_sb_claude_fleet_segment() {
 
 # The two Claude config directories to read.
 fm_sb_cusage_claude_dirs() {
-  local list root d
+  local list d
   local -a dirs=()
   list=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/statusline-claude-accounts
   if [ -f "$list" ] && [ ! -L "$list" ] && [ -r "$list" ]; then
@@ -815,8 +815,7 @@ fm_sb_cusage_claude_dirs() {
       dirs+=("${d%/}")
     done <"$list"
   else
-    root=${FM_SB_CLAUDE_ACCOUNTS_ROOT:-$HOME/.claude-accounts}
-    dirs=("$root/gmail" "$root/second")
+    dirs=("$HOME/.claude-accounts/gmail" "$HOME/.claude-accounts/second")
   fi
   printf 'gmail\t%s\nsecond\t%s\n' "${dirs[0]:--}" "${dirs[1]:--}"
 }
@@ -833,9 +832,7 @@ fm_sb_cusage_row() {  # <provider> <account>
       gsub(/"/, "", key); gsub(/"/, "", scope); reset = row[n]; gsub(/"/, "", reset)
       if (row[1] != want || (scope != "all_models" && scope != "all_products")) next
       if (key == account) { done = 1; printf "%s\t%s\n", row[3 + keyed], reset }
-      else if (account == "codex-home" && key == "default") fallback = row[3 + keyed] "\t" reset
     }
-    END { if (!done && fallback != "") print fallback }
   '
 }
 
@@ -847,28 +844,20 @@ fm_sb_cusage_attention() {  # <provider> <account>
     in_attention {
       sub(/^  /, ""); split($0, row, ",")
       key = keyed ? row[2] : account; gsub(/"/, "", key)
-      if (row[1] == want && (key == account || (account == "codex-home" && key == "default"))) {
+      if (row[1] == want && key == account) {
         kind = row[3 + keyed]; gsub(/"/, "", kind)
-        if (key == account) {
-          found = 1
-          if (kind != "unmeasurable") result = "?"
-          else if (result == "") result = "n/a"
-        } else {
-          if (kind != "unmeasurable") fallback = "?"
-          else if (fallback == "") fallback = "n/a"
-        }
+        found = 1
+        if (kind != "unmeasurable") result = "?"
+        else if (result == "") result = "n/a"
       }
     }
-    END { if (found) print result; else if (fallback != "") print fallback }
+    END { if (found) print result }
   ')
   if [ -n "$counted" ]; then printf '%s' "$counted"; return 0; fi
   inline=$(printf '%s\n' "$toon" | sed -n 's/^attention: //p' | head -n 1)
   [ -n "$inline" ] || return 0
   printf '%s' "$inline" | jq -r --arg provider "$1" --arg account "$2" '
-    [.[] | select(.provider == $provider) |
-      select((.accountKey // $account) == $account or ($account == "codex-home" and .accountKey == "default"))] |
-    (map(select((.accountKey // $account) == $account)) as $exact |
-      if ($exact | length) > 0 then $exact else . end) |
+    [.[] | select(.provider == $provider and (.accountKey // $account) == $account)] |
     if length == 0 then empty elif any(.[]; .kind != "unmeasurable") then "?" else "n/a" end
   ' 2>/dev/null || true
 }
@@ -894,7 +883,10 @@ fm_sb_cusage_line() {  # <label> <provider> <account> <ok> <toon>
   row=$(printf '%s\n' "$toon" | fm_sb_cusage_row "$provider" "$account")
   if [ -z "$row" ]; then
     attention=$(fm_sb_cusage_attention "$provider" "$account" "$toon")
-    printf '%s\t%s\t-\n' "$label" "${attention:-n/a}"
+    if [ -z "$attention" ]; then
+      case "$provider" in muse) attention=n/a ;; *) attention='?' ;; esac
+    fi
+    printf '%s\t%s\t-\n' "$label" "$attention"
     return 0
   fi
   IFS=$'\t' read -r pct reset <<< "$row"
@@ -920,7 +912,7 @@ fm_sb_claude_usage_refresh() {
       label="cl-$label"
       if [ "$dir" != - ] && [ -d "$dir" ]; then
         ok=1
-        toon=$(fm_run_timed 20 env "CLAUDE_CONFIG_DIR=$dir" quota-axi --provider claude 2>/dev/null </dev/null) || ok=0
+        toon=$(fm_run_timed 20 env "CLAUDE_CONFIG_DIR=$dir" quota-axi --provider claude --profile-only 2>/dev/null </dev/null) || ok=0
         fm_sb_cusage_line "$label" claude default "$ok" "$toon"
       else
         fm_sb_cusage_line "$label" claude default 0 ''
@@ -961,7 +953,11 @@ fm_sb_claude_usage_segment() {  # <line-prefix>
     label=$(fm_sb_clean "$label" 14)
     case "$pct" in
       n/a|'?') shown=$pct; eta= ;;
-      *) shown="$(printf '%.0f' "$pct" 2>/dev/null)%"
+      *) shown=$(LC_ALL=C awk -v p="$pct" 'BEGIN {
+           if (p > 0 && p < 1) print "<1%"
+           else if (p > 99 && p < 100) print ">99%"
+           else printf "%.0f%%", p
+         }')
          eta=
          [[ $reset =~ ^[0-9]+$ ]] && eta=$(fm_sb_cusage_eta $((reset - now))) ;;
     esac
