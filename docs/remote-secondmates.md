@@ -573,6 +573,9 @@ Do not transfer an existing mate home or inherited private material.
 Record approved box ids in the controller home's `config/boat-box-id`, one id per line.
 One id stays valid.
 More ids are allowed up to `expected_running` in `config/boat-spend.json`.
+To add a box, fork a seeded one with `boat fork <seeded-id> --ttl 3600`, which keeps the `fm-code` environment, the home and the box's agent sign-ins, and wait until Boat reports the restore finished.
+Move the copied `state/<task-id>.*` records and their `data/backlog.md` rows out of the new home before anything else, because retained worker records count toward the three-worker cap.
+Then stop the fork, list its id, and let the sender's next resume record its environment receipt.
 The sender's header owns that validation, the reservation ceilings, and the fixed `boat-prove` SSH alias.
 `--prepare --code-only` takes a valid task envelope on stdin and performs its guarded resume and alias refresh before initial seeding without dispatching a worker.
 Use the sender for each overflow resume so it establishes the current instance's `fm-code` environment receipt; an independent resume does not authorize later dispatch.
