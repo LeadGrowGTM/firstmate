@@ -1,0 +1,34 @@
+=== apply with missing socket ===
+warning: task dead: recorded tmux socket is missing or ambiguous; skipping it and migrating the rest of the home
+crew-session: firstmate-crew
+skip unresolvable dead recorded tmux socket is missing or ambiguous
+moved healthy holding:fm-healthy -> firstmate-crew:fm-healthy
+=== persisted healthy task ===
+window=firstmate-crew:fm-healthy
+endpoint_task_id=healthy
+worktree=/tmp/fm-crew-migrate.ZAe3tg/missing-socket
+project=/tmp/fm-crew-migrate.ZAe3tg/missing-socket
+harness=codex
+kind=ship
+spawn_gen=s1
+tmux_socket=/tmp/fmt.O4MTfN/s/tmux-1000/fm-crewmig-78929
+=== persisted skipped task ===
+window=holding:fm-dead
+endpoint_task_id=dead
+worktree=/tmp/fm-crew-migrate.ZAe3tg/missing-socket
+project=/tmp/fm-crew-migrate.ZAe3tg/missing-socket
+harness=codex
+kind=ship
+spawn_gen=s1
+=== apply with empty backend ===
+warning: task empty: recorded backend is empty; skipping it and migrating the rest of the home
+crew-session: firstmate-crew
+skip unresolvable empty recorded backend is empty
+moved healthy holding:fm-healthy -> firstmate-crew:fm-healthy
+=== refused resolvable live mismatch ===
+warning: task dead: recorded tmux socket is missing or ambiguous; skipping it and migrating the rest of the home
+error: task wrong: recorded window is elsewhere:fm-wrong but that window is in session mismatch
+crew-session: firstmate-crew
+skip unresolvable dead recorded tmux socket is missing or ambiguous
+=== healthy task remained at source ===
+window=holding:fm-healthy

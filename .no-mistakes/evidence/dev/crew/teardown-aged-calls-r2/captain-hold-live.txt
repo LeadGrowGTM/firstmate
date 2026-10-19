@@ -1,0 +1,23 @@
+=== verify archived answered calls ===
+verified: sample-aged-scout captain-call inventory
+=== refused: active backlog read failed ===
+fm-captain-hold: could not read active backlog entry aged-call-a: error: temporary backlog read failure
+=== refused: archived without answer ===
+fm-captain-hold: aged-call-bare is archived in the Done retention archive without a recorded captain answer
+=== refused: reconciliation quoted a decision ===
+fm-captain-hold: aged-call-reconciled is archived in the Done retention archive without a recorded captain answer
+=== verified: quoted origin is only answer text ===
+verified: sample-aged-scout captain-call inventory
+=== refused: recorded origin differs ===
+fm-captain-hold: captain-held task aged-call-other was held for origin some-other-origin, not sample-aged-scout; hold a task for sample-aged-scout or list the right one
+=== refused: id missing from backlog and archive ===
+fm-captain-hold: no captain-held task aged-call-nowhere and no migrated hold for it in this home's configured backlog (data directory /tmp/fm-captain-hold.tGhyFm/aged-out-calls/data) or its Done retention archive; the nearest legacy identity sample-aged-scout-decision-aged-call-nowhere also resolves to nothing
+=== legacy archived identity complete and verify ===
+complete: sample-aged-scout captain-call inventory reviewed (route)
+verified: sample-aged-scout captain-call inventory
+=== refused: exact unanswered archive row wins ===
+fm-captain-hold: shadow is archived in the Done retention archive without a recorded captain answer
+=== teardown accepted archived answered calls and archive path with # ===
+teardown sample-aged-scout complete (window firstmate:fm-sample-aged-scout, worktree /tmp/fm-captain-hold.tGhyFm/aged-out-calls/projects/missing-sample-aged-scout)
+Backlog: sample-aged-scout is closed in /tmp/fm-captain-hold.tGhyFm/aged-out-calls/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+task metadata removed

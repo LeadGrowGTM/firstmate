@@ -1,0 +1,14 @@
+=== teardown refusal for unlanded ship commit ===
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: worktree /tmp/fm-teardown-tests.JT4jPG/nm-unpushed/wt has work not on any remote and not landed.
+unpushed commits:
+7b5d546 unpushed work
+Push the branch, land its PR, or get the captain's explicit OK to discard, then --force.
+=== retained metadata ===
+task metadata remains

@@ -1,0 +1,6 @@
+=== real tasks-axi baseline ===
+verified: sample-read-failure captain-call inventory
+=== real tasks-axi unreadable backlog ===
+exit code: 1
+fm-captain-hold: could not read active backlog entry archived-answered: error: "EACCES: permission denied, open '/tmp/fm-captain-hold.ZMJkJy/real-read-failure/data/backlog.md'"
+code: UNKNOWN
