@@ -791,17 +791,28 @@ leave_successor_for_main() {
 # this main session and has turns left, otherwise a new one. Sets ENGINE_SESSION
 # and ENGINE_MODE (new|resume).
 choose_conversation() {
-  local key recorded_key recorded_session recorded_engine recorded_model turns
+  local key recorded_key recorded_session recorded_engine recorded_model recorded_prompt_hash turns tmp
+  tmp=$(mktemp "$PROMPT_FILE.tmp.XXXXXX") || return 1
+  if ! "$SCRIPT_DIR/fm-branch-prompt.sh" > "$tmp" 2>/dev/null \
+    || [ "$(wc -c < "$tmp" | tr -d ' ')" -lt 1024 ]; then
+    rm -f "$tmp"
+    return 1
+  fi
+  ENGINE_PROMPT_HASH=$(node -e 'const fs = require("node:fs"); const crypto = require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$tmp") \
+    || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$PROMPT_FILE" || { rm -f "$tmp"; return 1; }
   key=$(fm_supervision_host_main_key "$STATE") || key=
   recorded_key=$(sed -n 's/^key=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   recorded_session=$(sed -n 's/^session=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   recorded_engine=$(sed -n 's/^engine=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   recorded_model=$(sed -n 's/^model=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
+  recorded_prompt_hash=$(sed -n 's/^prompt_sha256=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   turns=$(numeric_or "$(sed -n 's/^turns=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)" 0)
   if [ -n "$key" ] && [ -n "$recorded_session" ] && [ "$recorded_key" = "$key" ] \
     && [ "$recorded_engine" = "$FM_SUPERVISION_ENGINE" ] \
     && [ "$recorded_model" = "$FM_SUPERVISION_ENGINE_MODEL" ] \
-    && [ "$turns" -lt "$ROTATE_TURNS" ] && [ -s "$PROMPT_FILE" ]; then
+    && [ "$recorded_prompt_hash" = "$ENGINE_PROMPT_HASH" ] \
+    && [ "$turns" -lt "$ROTATE_TURNS" ]; then
     ENGINE_SESSION=$recorded_session
     ENGINE_MODE=resume
     ENGINE_TURNS=$turns
@@ -818,22 +829,14 @@ choose_conversation() {
   ENGINE_TURNS=0
   ENGINE_COST=0
   ENGINE_KEY=$key
-  local tmp
-  tmp=$(mktemp "$PROMPT_FILE.tmp.XXXXXX") || return 1
-  if ! "$SCRIPT_DIR/fm-branch-prompt.sh" > "$tmp" 2>/dev/null \
-    || [ "$(wc -c < "$tmp" | tr -d ' ')" -lt 1024 ]; then
-    rm -f "$tmp"
-    return 1
-  fi
-  mv -f "$tmp" "$PROMPT_FILE" || return 1
   return 0
 }
 
 write_engine_record() {  # <turns> <conversation-cost>
   local tmp
   tmp=$(mktemp "$ENGINE_RECORD.tmp.XXXXXX") || return 1
-  printf 'engine=%s\nmodel=%s\nsession=%s\nkey=%s\nturns=%s\nconversation_cost=%s\n' \
-    "$FM_SUPERVISION_ENGINE" "$FM_SUPERVISION_ENGINE_MODEL" "$ENGINE_SESSION" "$ENGINE_KEY" "$1" "$2" > "$tmp" \
+  printf 'engine=%s\nmodel=%s\nsession=%s\nkey=%s\nprompt_sha256=%s\nturns=%s\nconversation_cost=%s\n' \
+    "$FM_SUPERVISION_ENGINE" "$FM_SUPERVISION_ENGINE_MODEL" "$ENGINE_SESSION" "$ENGINE_KEY" "$ENGINE_PROMPT_HASH" "$1" "$2" > "$tmp" \
     && mv -f "$tmp" "$ENGINE_RECORD"
 }
 

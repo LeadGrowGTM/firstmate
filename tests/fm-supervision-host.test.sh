@@ -72,6 +72,11 @@ n=$(( $(ls "$FM_HOME"/engine-call.* 2>/dev/null | wc -l) + 1 ))
     "${FM_LEASE_HOLDER_PID:-}" "${FM_SUPERVISION_PRIMARY_HARNESS:-}" "${FM_BRANCH_REPORT_TURN:-}"
   for a in "$@"; do printf 'arg=%s\n' "$a"; done
 } > "$FM_HOME/engine-call.$n"
+previous=
+for a in "$@"; do
+  [ "$previous" != --system-prompt-file ] || cp "$a" "$FM_HOME/engine-prompt.$n"
+  previous=$a
+done
 case "$mode" in held|captain-held) printf 'ready\n' > "$FM_HOME/stub-ready" ;; esac
 # Like Claude, the reported cost is the conversation's running total.
 result() {
@@ -2146,6 +2151,45 @@ test_attended_wake_carries_the_dialog_mirror() {
   pass "host: each wake carries the captain's dialog since the last wake, without operational input"
 }
 
+test_attended_prompt_change_opens_a_new_conversation() {
+  local home prompt record stale_hash first_session second_session
+  home=$(make_home attended-prompt-change attended)
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "prompt change: the host never started a watcher cycle"
+  append_status "$home" 'step one'
+  wait_until 250 handled_at_least "$home" 1 || fail "prompt change: the first wake was not handled"
+  prompt="$home/state/.supervision-host-prompt"
+  record="$home/state/.supervision-host-engine"
+  cp "$prompt" "$home/current-prompt"
+  first_session=$(sed -n '/^arg=--session-id$/{n;s/^arg=//p;}' "$home/engine-call.1")
+  [ -n "$first_session" ] || fail "prompt change: the first turn did not open a conversation"
+
+  printf '\nprevious branch instruction\n' >> "$prompt"
+  stale_hash=$(node -e 'const fs = require("node:fs"); const crypto = require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$prompt")
+  if grep -q '^prompt_sha256=' "$record"; then
+    sed "s/^prompt_sha256=.*/prompt_sha256=$stale_hash/" "$record" > "$record.tmp"
+  else
+    cat "$record" > "$record.tmp"
+    printf 'prompt_sha256=%s\n' "$stale_hash" >> "$record.tmp"
+  fi
+  mv -f "$record.tmp" "$record"
+
+  echo captain > "$home/stub-mode"
+  echo digest > "$home/stub-urgency"
+  append_status "$home" 'which export format?' needs-decision
+  wait_until 250 handled_at_least "$home" 2 || fail "prompt change: the decision wake was not handled"
+  assert_re '^arg=--session-id$' "$home/engine-call.2" "a changed prompt must open a new conversation for the decision wake"
+  second_session=$(sed -n '/^arg=--session-id$/{n;s/^arg=//p;}' "$home/engine-call.2")
+  [ -n "$second_session" ] && [ "$second_session" != "$first_session" ] \
+    || fail "the decision wake reused the previous engine conversation"
+  cmp -s "$home/current-prompt" "$home/engine-prompt.2" \
+    || fail "the decision wake did not deliver the current prompt to the engine"
+  wait_until 100 host_logged "$home" 'digest.*due=later.*pending=2' \
+    || fail "the decision outcome was not held for the digest: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "the decision wake escaped the attended host"
+  pass "host: a changed branch prompt opens a new attended engine conversation before a decision wake"
+}
+
 mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 # Every file carrying the captain's dialog is owner-only, even under an open
@@ -3398,6 +3442,7 @@ test_a_park_stopped_mid_take_over_leaves_the_take_over_to_the_next_park
 test_unrecorded_successor_is_stopped_rather_than_left_for_main
 test_primary_without_a_verified_mirror_runs_away_only
 test_attended_wake_carries_the_dialog_mirror
+test_attended_prompt_change_opens_a_new_conversation
 test_dialog_bearing_files_are_owner_only
 test_undelivered_dialog_is_fed_again_on_the_next_turn
 test_attended_wake_with_an_unreadable_mirror_reaches_main
