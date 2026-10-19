@@ -197,6 +197,39 @@ set_collector_values 9000000 8000000 30 1000000 300000 700000 200000000
 out=$(run_guard)
 assert_contains "$out" "reasons=ram-soon" "a RAM fall inside the lead window is pressure"
 assert_present "$home/state/disk-guard.pause" "the projected fall pauses spawns"
+assert_equals 0 "$(wake_count)" "a one-sample RAM projection defers its wake"
+write_previous 600 9500000 200000000 30
+set_collector_values 8800000 8000000 30 1000000 300000 700000 200000000
+out=$(run_guard)
+assert_contains "$out" "action=already-paused" "a second projected sample keeps the pause"
+assert_equals 1 "$(wake_count)" "a RAM projection that persists to the next sample wakes once"
+assert_contains "$(cat "$home/state/.wake-queue")" "disk-guard pause reasons=ram-soon" "the persisted projection wake names the reason"
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+out=$(run_guard)
+assert_contains "$out" "action=cleared" "a healthy sample clears the announced projection pause"
+assert_equals 2 "$(wake_count)" "clearing an announced projection pause wakes once"
+
+# A RAM projection that clears on the next sample flaps without waking, while
+# the flag itself still paused and cleared spawns on each sample.
+reset_guard
+write_previous 600 20000000 200000000 30
+set_collector_values 9000000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+assert_present "$home/state/disk-guard.pause" "a flapping projection still pauses spawns"
+set_collector_values 30000000 8000000 30 1000000 300000 700000 200000000
+out=$(run_guard)
+assert_contains "$out" "action=cleared" "the next healthy sample clears the flapping pause"
+assert_absent "$home/state/disk-guard.pause" "the flapping pause flag is gone"
+assert_absent "$home/state/disk-guard.announced" "a cleared deferred pause leaves no announcement state"
+write_previous 600 20000000 200000000 30
+set_collector_values 9000000 8000000 30 1000000 300000 700000 200000000
+run_guard >/dev/null
+assert_equals 0 "$(wake_count)" "a projection that flaps pause and clear never wakes"
+set_collector_values 1000 8000000 30 1000000 300000 700000 200000000
+out=$(run_guard)
+assert_contains "$out" "reasons=ram" "RAM below the floor during a deferred projection is pressure now"
+assert_equals 1 "$(wake_count)" "RAM below the floor wakes at once even while a projection wake is deferred"
+assert_contains "$(cat "$home/state/.wake-queue")" "disk-guard pause reasons=ram" "the floor wake names the floor reason"
 
 reset_guard
 write_previous 600 9000000 200000000 30
