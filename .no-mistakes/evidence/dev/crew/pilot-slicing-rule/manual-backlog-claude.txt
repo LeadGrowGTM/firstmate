@@ -1,0 +1,40 @@
+  - After DC-2, DC-3, DC-4 and DC-5 are independent of each other. I would dispatch them in parallel, each in its own
+    isolated copy of the repo.
+  - DC-4 and DC-5 both touch the staff form and the validation module, so I'd expect ordinary rebase conflicts. That is
+    not a reason to serialize them.
+  - Migrations: DC-1 creates the codes table. DC-2 adds the order columns. DC-4 adds columns to the codes table. Each
+    migration is additive and ships in its own slice, so none of them blocks another.
+
+  Open questions for you
+  1. Is a fixed-amount code required in the first release? I put it in DC-5 so the percent-off path can ship earlier.
+  2. Do you want a refund or cancellation rule that releases a redemption? I left it out. If you want it, I would file
+     it as DC-6, blocked by DC-4.
+  3. If tax or shipping exists, does the discount apply before or after it? I assumed subtotal only. Please confirm,
+     because it changes the DC-2 calculation.
+
+✻ Crunched for 17s · done 12:29 AM
+
+❯ For review, restate only DC-1 through DC-3 as concise manual backlog title lines plus one sentence of observable
+  completion evidence for each. Do not add scope or take action.
+
+● Captain, here are the three entries. Nothing was filed.
+
+  - [ ] DC-1 Staff create a percent-off discount code end to end
+    Evidence: A staff user creates a code in the staff app and sees it in the code list, and creating a duplicate code
+  is rejected.
+
+  - [ ] DC-2 Customer applies a code at checkout and the final total persists  blocked-by: DC-1
+    Evidence: A customer applies a valid code and places the order, and the stored total equals the subtotal minus the
+  discount, while an invalid code shows an error and leaves the total unchanged.
+
+  - [ ] DC-3 Receipts show the discount  blocked-by: DC-2
+    Evidence: A discounted order's receipt shows the subtotal, the code and discount amount, and the final total, while
+  an order with no code looks the same as before.
+
+✻ Worked for 3s · done 12:29 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M5960FY0V07WYHBMF6SV6SX6  ◆ Sonnet 5.5  ctx 8%
+  ⏵⏵ auto mode on (shift+tab to cycle)

@@ -1,0 +1,30 @@
+{
+  "records": [
+    {
+      "structured": true,
+      "id": "discount-codes-create",
+      "blocked_by_ids": [],
+      "unresolved_blocker_ids": []
+    },
+    {
+      "structured": true,
+      "id": "discount-codes-apply",
+      "blocked_by_ids": [
+        "discount-codes-create"
+      ],
+      "unresolved_blocker_ids": [
+        "discount-codes-create"
+      ]
+    },
+    {
+      "structured": true,
+      "id": "discount-codes-persist-receipt",
+      "blocked_by_ids": [
+        "discount-codes-apply"
+      ],
+      "unresolved_blocker_ids": [
+        "discount-codes-apply"
+      ]
+    }
+  ]
+}

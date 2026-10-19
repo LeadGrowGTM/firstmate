@@ -1,0 +1,6 @@
+count: 1
+ready[1]{id,state,kind,repo,title}:
+  DC-1,queued,ship,sample,Staff create a percent-off discount code end to end
+ready_public_followups: 0 delivery-ready obligations
+help[1]:
+  - Run `tasks-axi start <id>` to dispatch one of these

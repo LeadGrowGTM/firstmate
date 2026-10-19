@@ -1,0 +1,33 @@
+{
+  "records": [
+    {
+      "id": "DC-1",
+      "state": "queued",
+      "title": "Staff create a percent-off discount code end to end",
+      "blocked_by_ids": [],
+      "unresolved_blocker_ids": []
+    },
+    {
+      "id": "DC-2",
+      "state": "queued",
+      "title": "Customer applies a code at checkout and the final total persists",
+      "blocked_by_ids": [
+        "DC-1"
+      ],
+      "unresolved_blocker_ids": [
+        "DC-1"
+      ]
+    },
+    {
+      "id": "DC-3",
+      "state": "queued",
+      "title": "Receipts show the discount",
+      "blocked_by_ids": [
+        "DC-2"
+      ],
+      "unresolved_blocker_ids": [
+        "DC-2"
+      ]
+    }
+  ]
+}

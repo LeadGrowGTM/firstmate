@@ -1,0 +1,40 @@
+  - [ ] discount-codes-persist-receipt - Persist the discount on the placed order and show it on the receipt: the API
+  recomputes the total from the code at order time and never trusts the client total, the database stores code, discount
+  amount and final total on the order, the receipt shows the discount line and final total; verified by placing an
+  order and reloading its receipt blocked-by: discount-codes-apply
+  - [ ] discount-codes-fixed-amount - Support fixed-amount codes alongside percent-off in staff create, checkout pricing
+  and receipt, with the total floored at zero; verified end to end for a fixed-amount code blocked-by:
+  discount-codes-persist-receipt
+  - [ ] discount-codes-limits - Add code expiry date, max redemptions and staff deactivate: enforced in checkout
+  validation and again at order placement, with redemption counting in the database and staff app controls; verified by
+  exhausting and expiring a code blocked-by: discount-codes-persist-receipt
+
+  Cut and dependencies
+  - Chain: each slice is a full path through the layers it touches, and each can be merged and verified alone.
+  - Order: discount-codes-create comes first, then discount-codes-apply, then discount-codes-persist-receipt, one worker
+    per step.
+  - Parallel work: discount-codes-fixed-amount and discount-codes-limits both depend only on
+    discount-codes-persist-receipt, so they can run in parallel afterward.
+  - File overlap: the last two both touch the code model and checkout validation. I'd dispatch them together and let the
+    rebase reconcile unless the first worker's diff shows a real conflict.
+  - Why not one slice per layer: cutting by layer (database, then API, then apps) would leave nothing verifiable until
+    the last slice. The only deliberate layer-light split is create, and it can still be checked by hand in the staff
+    app.
+
+  Assumptions to confirm
+  - A launch scope of one percent-off code per order, with no stacking.
+  - Receipts are rendered from stored order data, so there is no email or PDF slice.
+  - The API prices the order, and the checkout and receipt only display what it returns.
+  - Delivery mode and merge posture come from the project's registry entry at intake. I haven't picked them, since no
+    project is named.
+
+  Open question: if you want fixed-amount codes in the first release, say so and I'll fold discount-codes-fixed-amount
+  ahead of the limits slice. The default is that percent-off ships first.
+
+✻ Cooked for 21s · done 12:34 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M5960FY0V07WYHBMF6SV6SX6  ◆ Sonnet 5.5  ctx 8%
+  ⏵⏵ auto mode on (shift+tab to cycle)

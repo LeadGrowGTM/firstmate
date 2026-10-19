@@ -1,0 +1,40 @@
+
+
+● Captain, here is the tasks-axi version of the plan. Nothing was run or filed.
+
+  The IDs below are placeholders. The real ones come from the backlog once the three items are filed. Blockers go in
+  with bin/fm-tasks-axi.sh block <id> --by <blocker>, and dispatch comes from bin/fm-tasks-axi.sh ready.
+
+  Blocker commands
+
+  bin/fm-tasks-axi.sh block <DC-2-id> --by <DC-1-id>
+  bin/fm-tasks-axi.sh block <DC-3-id> --by <DC-2-id>
+
+  DC-1 gets no blocker. DC-3 is blocked only by DC-2, because DC-2 already depends on DC-1.
+
+  Ready command
+
+  bin/fm-tasks-axi.sh ready
+
+  Which task dispatches first
+  - DC-1 is the only one ready should list at first. DC-2 and DC-3 have unclosed blockers, so they stay out of the list.
+  - Once DC-1 closes, DC-2 becomes ready. Once DC-2 closes, DC-3 becomes ready.
+  - I would run ready again after each close and dispatch only what it lists. I would not rely on my own reading of the
+    order.
+  - The three tasks run strictly in sequence, so there is nothing to parallelize in this part of the plan. The parallel
+    work starts after DC-2, with the DC-4 and DC-5 slices from the earlier plan.
+
+  Differences from the manual backlog
+  - The manual version puts blocked-by: <blocker> on each blocked task's title line. Here the blocker is a recorded
+    relationship, so the title lines stay clean.
+  - Spawning a task moves it to In flight automatically, so I wouldn't move items by hand.
+  - The command syntax comes from the task-slicing skill. I'd check tasks-axi --help before running anything, since the
+    backend's own help is the authority.
+
+✻ Sautéed for 6s · done 12:30 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M5960FY0V07WYHBMF6SV6SX6  ◆ Sonnet 5.5  ctx 8%
+  ⏵⏵ auto mode on (shift+tab to cycle)

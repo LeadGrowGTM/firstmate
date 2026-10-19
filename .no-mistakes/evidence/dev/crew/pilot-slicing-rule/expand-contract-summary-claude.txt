@@ -1,0 +1,40 @@
+      payment_id, and responses stop returning it. This is the point where a missed caller breaks, so it goes out alone
+      and can be reverted by reverting the PR.
+  15. PR15: Tighten the database. Make payment_id NOT NULL with its constraints and remove the dual-write. The
+      application no longer reads or writes legacy_payment_ref.
+  16. PR16: Drop the column. Drop legacy_payment_ref and its index. This goes out at least one deploy cycle after PR15,
+      so a rollback of the application never meets a missing column. Take a backup or snapshot before it runs.
+
+  Dependencies
+  - PR1 → PR2 → PR3 and PR1 → PR4. PR5 can go in parallel with PR3 and PR4 after PR1.
+  - PR6 to PR13 need PR4 deployed and are independent of each other, so they run in parallel.
+  - PR14 needs the full gate, PR15 needs PR14 deployed, and PR16 needs PR15 deployed for a full cycle.
+
+✻ Cogitated for 15s · done 12:30 AM
+
+❯ For review, restate your PR sequence in at most 10 short lines: the additive path, coexistence, one-session caller
+  batches, the gate for removal, and final cleanup. Do not take action.
+
+● Captain, here is the sequence in short form. Nothing was run or filed.
+
+  1. PR1: Add a nullable payment_id column and index, with no constraints.
+  2. PR2: Dual-write so either column fills the other, and reject rows where both are set and differ.
+  3. PR3: Add a batched, resumable backfill job, run after merge until no nulls remain.
+  4. PR4: The API accepts either field name, returns both, and returns 422 if the two differ.
+  5. PR5: Per-caller telemetry for legacy-field use, a Deprecation header and a sunset date.
+  6. PR6 to PR13: Caller batches of about 5 each, one worker session per batch. Old and new callers coexist because the
+     API accepts and returns both names.
+  7. Gate, not a PR: zero legacy traffic from all 40 callers over a window at least as long as the slowest release
+     cycle. Backfill is complete, owners of unconfirmed callers have signed off, and Mitch approves the removal.
+  8. PR14: The API rejects legacy_payment_ref and stops returning it.
+  9. PR15: payment_id becomes NOT NULL, and the dual-write and all application reads and writes of the old column are
+     removed.
+  10. PR16: Drop legacy_payment_ref and its index, at least one deploy cycle after PR15 and after taking a backup.
+
+✻ Churned for 4s · done 12:31 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M5960FY0V07WYHBMF6SV6SX6  ◆ Sonnet 5.5  ctx 8%
+  ⏵⏵ auto mode on (shift+tab to cycle)

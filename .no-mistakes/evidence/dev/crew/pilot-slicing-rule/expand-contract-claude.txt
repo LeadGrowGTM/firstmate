@@ -1,0 +1,40 @@
+     This PR is the only way to know when removal is safe. Evidence: the dashboard shows per-caller legacy usage.
+
+  Migrate (the callers coexist with old ones)
+
+  6. PR6 to PR13: Caller migration, about 5 callers each. Each caller switches to sending and reading payment_id only.
+     Because the API accepts both names and returns both, a migrated caller works while unmigrated ones keep running.
+     Within a caller the change is deployed before its legacy usage disappears from the dashboard, so it is the
+     dashboard that confirms each caller is done, not the merge. Evidence per PR: the caller's tests pass, and its
+     legacy-field traffic falls to zero after deploy.
+
+  Gate before any removal (not a PR, a checklist)
+  - Legacy-field traffic is zero for all 40 callers over a full window. I'd set it to at least the longest release cycle
+    among the callers, plus a margin, for example 30 days.
+  - Any caller that can't be confirmed (offline jobs, rarely used scripts) has an owner who has signed off or has been
+    told the sunset date.
+  - The backfill count is zero, and payment_id has no nulls where the legacy value exists.
+  - Mitch approves the removal. Dropping a column is destructive, so I would not treat the gate as automatic authority.
+
+  Contract (removal, in this order)
+
+  14. PR14: Stop honoring the old name in the API. Requests that send legacy_payment_ref return 400 with a pointer to
+      payment_id, and responses stop returning it. This is the point where a missed caller breaks, so it goes out alone
+      and can be reverted by reverting the PR.
+  15. PR15: Tighten the database. Make payment_id NOT NULL with its constraints and remove the dual-write. The
+      application no longer reads or writes legacy_payment_ref.
+  16. PR16: Drop the column. Drop legacy_payment_ref and its index. This goes out at least one deploy cycle after PR15,
+      so a rollback of the application never meets a missing column. Take a backup or snapshot before it runs.
+
+  Dependencies
+  - PR1 → PR2 → PR3 and PR1 → PR4. PR5 can go in parallel with PR3 and PR4 after PR1.
+  - PR6 to PR13 need PR4 deployed and are independent of each other, so they run in parallel.
+  - PR14 needs the full gate, PR15 needs PR14 deployed, and PR16 needs PR15 deployed for a full cycle.
+
+✻ Cogitated for 15s · done 12:30 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M5960FY0V07WYHBMF6SV6SX6  ◆ Sonnet 5.5  ctx 8%
+  ⏵⏵ auto mode on (shift+tab to cycle)
