@@ -1,0 +1,19 @@
+SCENARIO live worker, short timer
+CLI output: <silent>
+Boat actions:
+boat --no-update resume bx_aaaaaaaa --environment fm-code --ttl 3600 --json
+
+SCENARIO idle grace and stop
+First check output: <silent>
+First check idle record: bx_aaaaaaaa 1792368000:11111111-1111-4111-8111-111111111111
+Second check output: boat-idle: stopped bx_aaaaaaaa after 900s with no workers reported
+Boat stop action: boat --no-update stop bx_aaaaaaaa --json
+
+SCENARIO unreadable worker report
+CLI output: <silent>
+Boat actions:
+boat --no-update resume bx_aaaaaaaa --environment fm-code --ttl 3600 --json
+
+SCENARIO unsafe cadence refuses before Boat contact
+CLI output: boat-idle: config/boat-box-id is missing or invalid: resume_ttl_seconds 1800 with fallback 3600 gives an effective timer shorter than 3092s required for 3 listed boxes at FM_CHECK_INTERVAL 300
+Boat calls: 0
