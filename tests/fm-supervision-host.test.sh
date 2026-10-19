@@ -495,6 +495,8 @@ test_dispatch_offer_takes_a_routine_recovery_resurface_on_the_attended_host() {
   append_wake "$state" signal demo.status "needs-decision: which export format?"
   append_wake "$state" signal other.status "signal: $state/other.status"
   out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "status=safe" "a decision-signal and routine-row scan must be safe"
+  assert_contains "$out" "tasks=other" "the decision-signal scan must contain a claimable routine row"
   assert_contains "$out" "eligible=0" "a resurface beside a decision-signal payload and a routine row must stay main's"
   rm -f "$state/other.meta" "$state/other.status"
 
@@ -502,8 +504,11 @@ test_dispatch_offer_takes_a_routine_recovery_resurface_on_the_attended_host() {
   # would offer it; eligible stays 0 only because the scan itself is ineligible.
   : > "$state/.wake-queue"
   append_wake "$state" signal demo.status "signal: $state/demo.status"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=1" "the routine row must be claimable before the malformed row is added"
   printf 'not a queue row\n' >> "$state/.wake-queue"
   out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "status=unsafe" "a malformed queue row must make the scan unsafe"
   assert_contains "$out" "eligible=0" "a resurface beside a malformed queue row must stay main's"
   pass "dispatch entry: the attended host offers a recovery resurface to the branch only when no unread row is main's"
 }
