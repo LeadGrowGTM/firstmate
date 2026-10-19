@@ -61,6 +61,10 @@ case "${1:-}" in
     [ ! -e "$FIXTURES/info.slow" ] || sleep 5
     [ ! -e "$FIXTURES/$box.info.fail" ] || exit 1
     [ -f "$FIXTURES/$box.info.json" ] || exit 97
+    if [ -e "$FIXTURES/wake-on-info" ]; then
+      : > "$FM_HOME/state/.boat-idle-renew-$box/wake"
+      rm "$FIXTURES/wake-on-info"
+    fi
     if [ -e "$FIXTURES/info.stops-on-renew" ]; then
       count=$(cat "$FIXTURES/info.count" 2>/dev/null || printf '0')
       count=$((count + 1))
@@ -140,6 +144,10 @@ box=$(basename "$found")
 box=${box%.boot}
 box=${box%.boot2}
 [ -f "$FIXTURES/idle.$box" ] || exit 1
+if [ -e "$FIXTURES/wake-on-idle" ]; then
+  : > "$FM_HOME/state/.boat-idle-renew-$box/wake"
+  rm "$FIXTURES/wake-on-idle"
+fi
 if [ -e "$FIXTURES/idle.clears-on-renew" ]; then
   count=$(cat "$FIXTURES/idle.count" 2>/dev/null || printf '0')
   count=$((count + 1))
@@ -535,6 +543,50 @@ test_second_renewal_failure_survives_next_attempt() {
   assert_absent "$marker" 'completed renewal marker was not cleared'
 }
 
+test_second_failure_wake_survives_clear_and_output() {
+  local marker
+  new_case wake-after-reconcile-stopped
+  marker="$HOME_DIR/state/.boat-idle-renew-$BOX"
+  mkdir "$marker"
+  printf '2\n' > "$marker/attempts"
+  printf 'fail\n' > "$marker/result"
+  : > "$FIXTURES/wake-on-info"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "stopped box with completed second failure: $OUT"
+  assert_equals "boat-idle: extend $BOX failed twice with live or unreadable workers" "$OUT" 'stopped box cleanup lost the failure wake'
+  assert_absent "$marker" 'stopped box kept an emitted failure wake'
+
+  new_case wake-after-reconcile-idle
+  make_info running 600
+  set_idle 'boat-tasks-remaining: no'
+  marker="$HOME_DIR/state/.boat-idle-renew-$BOX"
+  mkdir "$marker"
+  printf '2\n' > "$marker/attempts"
+  printf 'fail\n' > "$marker/result"
+  : > "$FIXTURES/wake-on-idle"
+  run_at "$NOW"
+  expect_code 0 "$CODE" "idle box with completed second failure: $OUT"
+  assert_equals "boat-idle: extend $BOX failed twice with live or unreadable workers" "$OUT" 'idle cleanup lost the failure wake'
+  assert_absent "$marker" 'idle box kept an emitted failure wake'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a fresh idle report stopped the box'
+
+  new_case wake-interrupted-output
+  marker="$HOME_DIR/state/.boat-idle-renew-$BOX"
+  mkdir "$marker"
+  printf 'fail\n' > "$marker/result"
+  : > "$marker/wake"
+  env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_INTERVAL="$CASE_INTERVAL" FIXTURES="$FIXTURES" \
+    "$BIN/fm-boat-idle-check.sh" check 2>/dev/null | head -c 0 >/dev/null
+  [ -f "$marker/wake" ] || fail 'interrupted output acknowledged a failure wake'
+  run_at "$NOW"
+  expect_code 0 "$CODE" "retry after interrupted output: $OUT"
+  assert_equals "boat-idle: extend $BOX failed twice with live or unreadable workers" "$OUT" 'interrupted output lost the failure wake'
+  assert_absent "$marker" 'retry left an emitted failure wake'
+  run_at "$NOW"
+  [ -z "$OUT" ] || fail "an emitted failure wake repeated: $OUT"
+}
+
 test_stop_failure_is_reported_throttled() {
   new_case stop-fail
   make_info running 600
@@ -809,6 +861,7 @@ test_configured_grace
 test_extend_failure_is_reported
 test_renewal_deadline_keeps_full_resume_allowance
 test_second_renewal_failure_survives_next_attempt
+test_second_failure_wake_survives_clear_and_output
 test_stop_failure_is_reported_throttled
 test_invalid_config_is_reported_once_a_day
 test_grace_and_fleet_limits_are_validated

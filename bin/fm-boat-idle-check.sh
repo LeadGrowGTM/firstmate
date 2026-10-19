@@ -303,7 +303,10 @@ renew_clear() {
   local marker
   marker=$(renew_marker "$1")
   if [ -d "$marker" ] && [ ! -L "$marker" ]; then
-    rm -f -- "$marker/start" "$marker/attempts" "$marker/result" "$marker/wake"
+    if [ -f "$marker/start" ] && [ ! -f "$marker/result" ]; then
+      return 0
+    fi
+    rm -f -- "$marker/start" "$marker/attempts" "$marker/result"
     rmdir -- "$marker" 2>/dev/null || true
   fi
 }
@@ -414,10 +417,6 @@ renew_start() {
 renew_reconcile() {
   local box=$1 marker result
   marker=$(renew_marker "$box")
-  if [ -f "$marker/wake" ] && [ ! -L "$marker/wake" ]; then
-    part "extend $box failed twice with live or unreadable workers"
-    rm -f -- "$marker/wake"
-  fi
   result=$(cat "$marker/result" 2>/dev/null || true)
   if [ "$result" = ok ]; then
     renew_clear "$box"
@@ -467,6 +466,25 @@ part() {  # <text>: appends one finding to the one line.
   else
     PARTS="$PARTS; $1"
   fi
+}
+
+emit_parts() {
+  local box marker wake_parts=
+  local -a wake_markers=()
+  while IFS= read -r box; do
+    valid_box "$box" || continue
+    marker=$(renew_marker "$box")
+    if [ -f "$marker/wake" ] && [ ! -L "$marker/wake" ]; then
+      wake_parts="${wake_parts:+$wake_parts; }extend $box failed twice with live or unreadable workers"
+      wake_markers+=("$marker")
+    fi
+  done <<< "$1"
+  [ -z "$wake_parts" ] || PARTS="$wake_parts${PARTS:+; $PARTS}"
+  [ -z "$PARTS" ] || fm_cap_line "boat-idle: $PARTS" "$MAX_LINE" || return 1
+  for marker in "${wake_markers[@]}"; do
+    rm -f -- "$marker/wake"
+    rmdir -- "$marker" 2>/dev/null || true
+  done
 }
 
 # check_box <box> <now> <ttl> <grace> <multi>: extend while busy, stop once
@@ -547,6 +565,7 @@ check_box_locked() {
 run_check() {
   local now problem bin ids cadence multi box pos count i timeout renewal ORDER
   PARTS=
+  ids=
   RENEW_QUEUE=()
   RENEW_THRESHOLD=0
   [ -f "$CONFIG" ] || return 0
@@ -595,7 +614,7 @@ run_check() {
     done <<< "$ids"
     if [ "$(poll_remaining)" -lt "$MIN_BOX_BUDGET" ]; then
       part 'Boat idle poll budget ran out before checking a box'
-      fm_cap_line "boat-idle: $PARTS" "$MAX_LINE"
+      emit_parts "$ids"
       return 0
     fi
     multi=0
@@ -632,7 +651,7 @@ run_check() {
     done
     fm_lock_release "$FM_HOME/state/.boat-send.lock" || true
   fi
-  [ -z "$PARTS" ] || fm_cap_line "boat-idle: $PARTS" "$MAX_LINE"
+  emit_parts "$ids"
 }
 
 SHIM_TMP=
@@ -726,7 +745,8 @@ disarm() {
   for marker in "$RENEW_PREFIX"*; do
     [ -d "$marker" ] && [ ! -L "$marker" ] || continue
     valid_box "${marker#"$RENEW_PREFIX"}" || continue
-    renew_clear "${marker#"$RENEW_PREFIX"}"
+    rm -f -- "$marker/start" "$marker/attempts" "$marker/result" "$marker/wake"
+    rmdir -- "$marker" 2>/dev/null || true
   done
   rm -f -- "$CHECK_SHIM" "$CHECK_TRUST" "$SINCE_FILE" "$REPORT_FILE" "$POS_FILE"
   printf 'disarmed: state/%s.check.sh\n' "$CHECK_ID"
