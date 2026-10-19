@@ -199,7 +199,7 @@ trap suite_cleanup EXIT
 
 make_home() {  # <name> <attended|away|quiet> [config line]
   local home="$TMP_ROOT/$1"
-  mkdir -p "$home/state" "$home/config" "$home/fakebin"
+  mkdir -p "$home/state" "$home/data" "$home/config" "$home/fakebin"
   # An unreachable backend: the watcher reads no endpoint as dead, so the only
   # wakes are the status appends each case makes.
   printf '#!/usr/bin/env bash\nexit 1\n' > "$home/fakebin/tmux"
@@ -1561,6 +1561,7 @@ assert_turn_end_resurface() {  # <name> <main-row: yes|no>
   append_status "$home" 'which export format?' needs-decision
   wait_until 250 hook_exited "$home" || fail "$1: the decision close never reached the Stop hook: $(cat "$home/state/.supervision-host.log")"
   assert_rewoke_main "$home" "$1 (decision)"
+  wait_until 150 watcher_live "$home" || fail "$1: the pass-through did not leave a successor watcher"
   successor=$(cat "$home/state/.watch.lock/pid")
   main_drain "$home" >/dev/null
   printf 'working [at=%s]: step two\n' "$(date +%s)" >> "$home/state/other.status"

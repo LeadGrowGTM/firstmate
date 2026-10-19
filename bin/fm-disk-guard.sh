@@ -51,9 +51,10 @@
 # alert=low means a free-space floor is already crossed or will be inside
 # the lead window. That is the low-disk alert.
 #
-# Entering pressure appends one `check` wake with key `disk-guard`. That wake
-# is the alert. A pause whose only reason is `ram-soon` still writes the flag
-# at once but defers its wake: the wake is appended only when the next sample
+# Entering pressure normally appends one `check` wake with key `disk-guard`.
+# That wake is the alert.
+# A pause whose only reason is `ram-soon` still writes the flag at once but
+# defers its wake: the wake is appended only when the next sample
 # is still under pressure, and a healthy sample that clears a deferred pause
 # appends no wake. Available RAM on WSL swings by many GiB between samples as
 # the page cache is reclaimed, so a single falling pair is not yet an alert.

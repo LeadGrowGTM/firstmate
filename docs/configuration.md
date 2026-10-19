@@ -2428,7 +2428,7 @@ After reviewing the dry-run report, create the authorization marker and add `--l
 
 [`bin/fm-disk-guard.sh`](../bin/fm-disk-guard.sh) samples available RAM, free swap, Linux disk, free space on `/`, `C:`, and `D:`, and an optional virtual-disk file.
 It is the predictive check for this machine.
-The script header owns the floors, the lead window, the projection, the log line, and when the pause flag is written or removed.
+The script header owns the floors, the lead window, the projection, the log line, when the pause flag is written or removed, and when pressure wakes are sent.
 The defaults are 8 GiB of available RAM, 100 GiB free on `/`, `C:`, and `D:`, 70 percent of the Linux filesystem that holds the home, and a 30 minute lead.
 `/mnt/c` and `/mnt/d` are checked only when that path is a real directory.
 The script header owns the optional `FM_DISK_GUARD_ROOT`, `FM_DISK_GUARD_C`, and `FM_DISK_GUARD_D` path overrides.
