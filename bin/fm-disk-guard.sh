@@ -52,13 +52,19 @@
 # the lead window. That is the low-disk alert.
 #
 # Entering pressure appends one `check` wake with key `disk-guard`. That wake
-# is the alert. bin/fm-jev-mem-guard.sh only prints a verdict and, with
+# is the alert. A pause whose only reason is `ram-soon` still writes the flag
+# at once but defers its wake: the wake is appended only when the next sample
+# is still under pressure, and a healthy sample that clears a deferred pause
+# appends no wake. Available RAM on WSL swings by many GiB between samples as
+# the page cache is reclaimed, so a single falling pair is not yet an alert.
+# bin/fm-jev-mem-guard.sh only prints a verdict and, with
 # `--check`, exits 1 on warning or critical. It is not scheduled. This
 # sample's wake is the scheduled alert beside that check.
 # The same transition runs `fm-data-manage.sh clean` once when the root
 # home's `config/data-management` is regular, adding `--live` only when
 # `config/data-management.live-authorized` is also regular. A later healthy
-# sample removes a regular flag and wakes once. This script does not trim
+# sample removes a regular flag and wakes once, unless that pause's wake was
+# still deferred. This script does not trim
 # the page cache. It may stat the configured virtual-disk file and read free
 # space on `/`, `/mnt/c`, and `/mnt/d`. It does not walk `/mnt`.
 #
@@ -427,8 +433,14 @@ announce() {
       fm_wake_append check disk-guard "$payload" || return 1
       printf '%s\n' "$payload" > "$mark"
       ;;
+    defer)
+      printf 'deferred %s\n' "$payload" > "$mark"
+      ;;
     clear)
-      fm_wake_append check disk-guard "$payload" || return 1
+      case "$(cat "$mark" 2>/dev/null || true)" in
+        'deferred '*) ;;
+        *) fm_wake_append check disk-guard "$payload" || return 1 ;;
+      esac
       [ ! -L "$mark" ] && rm -f -- "$mark"
       ;;
   esac
@@ -540,7 +552,11 @@ sample_once() {
     case "$flag_state" in
       created)
         action=paused
-        announce pause "disk-guard pause reasons=$REASONS" || die "could not record the pressure wake"
+        if [ "$REASONS" = ram-soon ]; then
+          announce defer "disk-guard pause reasons=$REASONS" || die "could not record the deferred pressure wake"
+        else
+          announce pause "disk-guard pause reasons=$REASONS" || die "could not record the pressure wake"
+        fi
         cleanup_state=$(run_cleanup) || cleanup_state=failed
         case "$cleanup_state" in
           none) ;;

@@ -141,6 +141,12 @@ export interface UnreadWakeScope {
    * non-heartbeat wake claims it in the away posture.
    */
   heartbeatSeqs: string[];
+  /**
+   * The rows this scan left queued for main: attended check rows, heartbeat
+   * rows outside a heartbeat review, and decision-owned signal or stale rows.
+   * Always empty in the away posture, where the branch takes every row.
+   */
+  mainOnlySeqs: string[];
   taskByWakeKey: Record<string, string>;
 }
 
@@ -154,6 +160,7 @@ const EMPTY_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  mainOnlySeqs: [],
   taskByWakeKey: {},
 };
 const UNSAFE_SCOPE: UnreadWakeScope = {
@@ -166,6 +173,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  mainOnlySeqs: [],
   taskByWakeKey: {},
 };
 
@@ -414,6 +422,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
   const needsDecisionKeys: string[] = [];
   const checkSeqs: string[] = [];
   const heartbeatSeqs: string[] = [];
+  const mainOnlySeqs: string[] = [];
   const staleDecisionOwnership = new Map<string, boolean>();
   const resolveVerb = process.env.FM_CLASSIFY_RESOLVE_VERB || "resolved";
   const heldVerb = process.env.FM_CLASSIFY_CAPTAIN_HELD_VERB || "captain-held";
@@ -434,6 +443,8 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
       if (heartbeat || afk) {
         eligibleSeqs.push(seq);
         heartbeatSeqs.push(seq);
+      } else {
+        mainOnlySeqs.push(seq);
       }
       continue;
     }
@@ -445,6 +456,8 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
       if (afk) {
         eligibleSeqs.push(seq);
         checkSeqs.push(seq);
+      } else {
+        mainOnlySeqs.push(seq);
       }
       continue;
     }
@@ -460,7 +473,10 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
         // takes the decision row like any other task-local row; the guarded
         // scripts decide what it may do about it (bin/fm-lease-lib.sh).
         needsDecisionKeys.push(key);
-        if (!afk) continue;
+        if (!afk) {
+          mainOnlySeqs.push(seq);
+          continue;
+        }
       }
       task = key.replace(/\.(?:status|turn-ended)$/, "");
       project = metadata.get(task) ?? "";
@@ -538,7 +554,10 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
       }
       if (staleDecisionOwnership.get(ownershipKey)) {
         needsDecisionKeys.push(key);
-        if (!afk) continue;
+        if (!afk) {
+          mainOnlySeqs.push(seq);
+          continue;
+        }
       }
     }
     if (!project || !task) return UNSAFE_SCOPE;
@@ -564,6 +583,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     needsDecisionKeys,
     checkSeqs,
     heartbeatSeqs,
+    mainOnlySeqs,
     taskByWakeKey: Object.fromEntries(taskByKey),
   };
 }
@@ -600,13 +620,22 @@ export interface BranchOfferVerdict {
 // row: until that row is read, a later signal or stale trigger for the same
 // task stays on main. Other tasks and heartbeat handling remain independent.
 //
+// One check trigger is not main's by class on the attended supervision host:
+// `check: rearm-resurface` carries no event of its own. There it most often
+// re-announces a close the successor watcher a main-only pass-through left
+// running caught while main was in its turn, a close no reader saw
+// (docs/supervision-host.md "Attended"). So it is offered like that lost
+// close, but only when the scan leaves no row for main: any check,
+// heartbeat, or decision-owned row, or an empty queue, keeps it main's.
+//
 // The away posture collapses that partition: every actionable row is
 // branch-eligible and the trigger class no longer forces anything to main
 // (scopeForUnreadWake owns the per-row rule).
 export function branchOfferForWake(state: string, message: string, afk: boolean, attendedHost = false): BranchOfferVerdict {
   const heartbeat = /^heartbeat($|:)/.test(message);
-  const isCheckTrigger = /^check:/.test(message);
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
+  const isHostResurface = attendedHost && !afk && message === "check: rearm-resurface";
+  const isCheckTrigger = /^check:/.test(message) && !(isHostResurface && scope.mainOnlySeqs.length === 0);
   const triggerKeys = /^signal:/.test(message)
     ? message
       .slice("signal:".length)

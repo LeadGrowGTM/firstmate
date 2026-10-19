@@ -438,6 +438,42 @@ test_dispatch_entry_scopes_rows_and_renders_the_away_tail() {
   pass "dispatch entry: the host reads branch eligibility, the offer rule, and the wake prompt from the Pi branch's own owner"
 }
 
+# A recovery resurface carries no event of its own, so the attended host
+# offers it to the branch when every unread row is the branch's, and keeps it
+# main's when any row is main's or nothing is queued.
+test_dispatch_offer_takes_a_routine_recovery_resurface_on_the_attended_host() {
+  local home state out
+  home="$TMP_ROOT/dispatch-resurface"
+  state="$home/state"
+  mkdir -p "$state"
+  printf 'project=demo\nwindow=fm-demo\n' > "$state/demo.meta"
+
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface over an empty queue must stay main's"
+
+  printf 'working [at=%s]: step one\n' "$(date +%s)" >> "$state/demo.status"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=1" "a resurface whose unread rows are all the branch's must be offered to the branch"
+  assert_contains "$out" "rows=1" "the resurface offer must carry the routine row"
+  assert_contains "$out" "tasks=demo" "the resurface offer must scope the routine row's task"
+  out=$(printf 'check: merge landed: fixture\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "any other attended check trigger must stay main's"
+
+  append_wake "$state" check disk-guard "disk-guard pause reasons=ram"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface beside a main-owned check row must stay main's"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer --afk)
+  assert_contains "$out" "eligible=1" "an away resurface must stay the branch's"
+
+  : > "$state/.wake-queue"
+  printf 'needs-decision [at=%s]: which export format?\n' "$(date +%s)" >> "$state/demo.status"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  out=$(printf 'check: rearm-resurface\n' | FM_HOME="$home" node "$DISPATCH" offer)
+  assert_contains "$out" "eligible=0" "a resurface beside a decision-owned row must stay main's"
+  pass "dispatch entry: the attended host offers a recovery resurface to the branch only when no unread row is main's"
+}
+
 # --- host loop ----------------------------------------------------------------
 
 
@@ -1489,6 +1525,62 @@ test_successor_close_during_main_turn_is_delivered_at_the_next_turn_end() {
   pass "host+hook: a successor close that lands during main's turn is delivered at the next turn end"
 }
 
+# The live noise (2026-10-19): a routine status that lands while main handles
+# a main-only pass-through closes the successor that pass-through left, with no
+# reader. At the next turn end the fresh cycle resurfaces it as
+# "check: rearm-resurface", which used to wake main as a main-only check even
+# though the lost close itself was the branch's. Now the branch takes it and
+# main stays idle; a resurface that still holds a main row keeps waking main.
+assert_turn_end_resurface() {  # <name> <main-row: yes|no>
+  local home successor drained
+  home=$(make_primary_home "$1")
+  ln -s "$ROOT/.agents" "$home/.agents"
+  printf 'project=demo\nwindow=fm-other\nharness=claude\n' > "$home/state/other.meta"
+  start_hook_session "$home"
+  turn_end "$home"
+  wait_until 150 watcher_live "$home" || fail "$1: the Stop hook never started a watcher cycle: $(cat "$home/hook.err" 2>/dev/null)"
+  append_status "$home" 'which export format?' needs-decision
+  wait_until 250 hook_exited "$home" || fail "$1: the decision close never reached the Stop hook: $(cat "$home/state/.supervision-host.log")"
+  assert_rewoke_main "$home" "$1 (decision)"
+  successor=$(cat "$home/state/.watch.lock/pid")
+  main_drain "$home" >/dev/null
+  printf 'working [at=%s]: step two\n' "$(date +%s)" >> "$home/state/other.status"
+  wait_until 250 bash -c '! kill -0 "$1" 2>/dev/null' _ "$successor" || fail "fixture: the successor did not close on the routine status"
+  [ "$2" = no ] || append_wake "$home/state" check disk-guard "disk-guard pause reasons=ram"
+  # shellcheck disable=SC2086 # the printed acknowledgement arguments
+  [ -z "$MAIN_ACK" ] || FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" "$@" >/dev/null 2>&1' "$ROOT/bin/fm-wake-drain.sh" $MAIN_ACK \
+    || fail "$1: main's acknowledgement failed: $MAIN_ACK"
+  assert_grep 'other.status' "$home/state/.wake-queue" "fixture: the lost close's row must still be queued"
+  turn_end "$home"
+  if [ "$2" = yes ]; then
+    wait_until 250 hook_exited "$home" || fail "$1: the resurface with a main row never reached main: $(cat "$home/state/.supervision-host.log")"
+    assert_rewoke_main "$home" "$1 (resurface)"
+    assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
+      "$1: a resurface beside a main-owned row must stay main's"
+    [ "$(engine_calls "$home")" -eq 0 ] || fail "$1: the engine took a resurface that held a main row"
+    drained=$(main_drain "$home")
+    assert_contains "$drained" 'other.status' "$1: main's drain must present the lost close's row"
+    assert_contains "$drained" 'disk-guard pause reasons=ram' "$1: main's drain must present its own row"
+  else
+    wait_until 250 handled_at_least "$home" 1 \
+      || fail "$1: the routine resurface was not handled on the engine: $(cat "$home/state/.supervision-host.log")"
+    assert_re '	handled	turn=[^	]*	posture=attended	.*	check: rearm-resurface$' "$home/state/.supervision-host.log" \
+      "$1: the ledger must record the engine handling the resurface"
+    assert_re '^(arg=)?FIRSTMATE SUPERVISION WAKE: check: rearm-resurface$' "$home/engine-call.1" "$1: the engine must receive the resurface"
+    assert_grep 'other.status' "$home/engine-drain.1" "$1: the engine's drain must present the lost close's row"
+    assert_no_grep 'other.status' "$home/state/.wake-queue" "$1: the engine's acknowledgement must consume the row"
+    sleep 2
+    hook_exited "$home" && fail "$1: a routine resurface woke main: $(cat "$home/hook.err")"
+    watcher_live "$home" || fail "$1: the host is not parked on a live successor after the resurface"
+  fi
+}
+
+test_routine_turn_end_resurface_stays_off_main() {
+  assert_turn_end_resurface hook-resurface-routine no
+  assert_turn_end_resurface hook-resurface-main-row yes
+  pass "host+hook: a turn-end resurface of a routine lost close is handled on the engine, and one holding a main row still wakes main"
+}
+
 # The live loop (2026-10-07): the successor a main-only pass-through leaves
 # for main shared the Stop hook's process group, so Claude's teardown of that
 # group after the exit-2 rewake stopped it mid-turn. The stop published
@@ -1896,9 +1988,13 @@ SH
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until 200 host_exited "$home" || fail "mirror boundary: the host did not stop mid-turn on TERM"
   echo handle > "$home/stub-mode"
-  park_after_stop "$home"
-  append_status "$home" 'handled after the stop'
-  wait_until 250 handled_at_least "$home" 3 || fail "mirror boundary: the wake after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
+  # The stopped turn left its routine row unread, so the downtime resurface
+  # that re-announces it is the branch's, and its engine turn is the next one.
+  rm -f "$home/host.rc"
+  : > "$home/park.go"
+  wait_until 250 handled_at_least "$home" 3 || fail "mirror boundary: the resurface after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
+  tail -n 1 "$home/state/.supervision-host.log" | grep -q '	handled	.*	check: rearm-resurface$' \
+    || fail "the resurface of a stopped turn's routine row must be handled on the engine: $(tail -n 1 "$home/state/.supervision-host.log")"
   third="$home/engine-call.4"
   assert_re '^arg=--resume$' "$third" "fixture: the turn after the stop did not resume the conversation"
   assert_re '^\[captain\] third ask, turn stopped$' "$third" "dialog of a turn stopped before its report must reach the next turn"
@@ -2961,6 +3057,7 @@ test_park_exit_probe_uses_half_second_child_sleeps
 test_report_surface_enforces_actor_turn_and_scope
 test_report_after_the_return_is_queued_for_main
 test_dispatch_entry_scopes_rows_and_renders_the_away_tail
+test_dispatch_offer_takes_a_routine_recovery_resurface_on_the_attended_host
 test_branch_outcomes_only_on_a_host_home_off_pi
 test_branch_outcomes_put_captain_first_and_collapse_routine_overflow
 test_branch_outcomes_collapse_repeated_captain_outcomes_per_task
@@ -2992,6 +3089,7 @@ test_claude_stop_hook_delivers_a_close_that_turns_main_only_at_its_turn
 test_successor_left_at_the_turn_survives_the_hook_process_group_teardown
 test_claude_stop_hook_notifies_when_at_turn_downtime_write_fails
 test_successor_close_during_main_turn_is_delivered_at_the_next_turn_end
+test_routine_turn_end_resurface_stays_off_main
 test_pass_through_successor_survives_the_hook_process_group_teardown
 test_next_park_takes_over_the_cycle_a_pass_through_left_for_main
 test_a_park_stopped_mid_take_over_leaves_the_take_over_to_the_next_park
