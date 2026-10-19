@@ -308,7 +308,9 @@ timer_before_spawn() {
     (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now | select(. > 0)
   ' "$TMP/info" 2>/dev/null) || stop_refuse 'box auto-stop timer is unavailable before worker spawn'
   current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable before worker spawn'
-  [ "$current" = "$instance" ] && receipt_matches "$current" || stop_refuse 'Boat instance changed before worker spawn'
+  if [ "$current" != "$instance" ] || ! receipt_matches "$current"; then
+    stop_refuse 'Boat instance changed before worker spawn'
+  fi
   [ "$remaining" -ge "$RENEW_THRESHOLD" ] && return 0
   cap=3600
   if read_boat_soft limits; then
@@ -322,7 +324,9 @@ timer_before_spawn() {
   fm_run_timed 60 "$BOAT_BIN" --no-update resume "$BOX" --environment fm-code --ttl "$extend_ttl" --json > "$TMP/resume" ||
     stop_refuse "Boat timer extend failed before worker spawn (${remaining}s remaining, below renewal threshold ${RENEW_THRESHOLD}s)"
   current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable after timer extend'
-  [ "$current" = "$instance" ] && receipt_matches "$current" || stop_refuse 'Boat instance changed after timer extend'
+  if [ "$current" != "$instance" ] || ! receipt_matches "$current"; then
+    stop_refuse 'Boat instance changed after timer extend'
+  fi
 }
 dispatch_prepared_box() {
   case "$STATE" in
