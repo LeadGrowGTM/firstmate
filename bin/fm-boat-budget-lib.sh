@@ -60,7 +60,7 @@ fm_boat_load_reservation() {
       (keys - ["ceiling_usd", "expected_running", "allowed_sizes", "always_on", "boat_bin", "account_seconds_per_24h", "box_seconds_per_24h", "resume_ttl_seconds", "idle_grace_seconds"]) as $extra |
       if ($extra | length) > 0 then error("unknown key " + ($extra[0] | tojson))
       elif has("ceiling_usd") and (.ceiling_usd | numpos | not) then error("ceiling_usd must be a number above 0")
-      elif has("expected_running") and (.expected_running | whole | not) then error("expected_running must be a whole number, 0 or more")
+      elif has("expected_running") and (.expected_running | (whole and . <= 3) | not) then error("expected_running must be a whole number, 0 to 3")
       elif has("allowed_sizes") and (.allowed_sizes | strs | not) then error("allowed_sizes must be a list of size names")
       elif has("always_on") and (.always_on | strs | not) then error("always_on must be a list of sandbox ids")
       elif has("boat_bin") and (.boat_bin | (type == "string" and startswith("/")) | not) then error("boat_bin must be an absolute path")
@@ -68,6 +68,7 @@ fm_boat_load_reservation() {
       elif has("box_seconds_per_24h") and (.box_seconds_per_24h | wholepos | not) then error("box_seconds_per_24h must be a whole number, 1 or more")
       elif has("resume_ttl_seconds") and (.resume_ttl_seconds | (type == "number" and . >= 1800 and . <= 14400 and . == floor) | not) then error("resume_ttl_seconds must be a whole number of seconds, 1800 to 14400")
       elif has("idle_grace_seconds") and (.idle_grace_seconds | (type == "number" and . >= 0 and . <= 86400 and . == floor) | not) then error("idle_grace_seconds must be a whole number of seconds, 0 to 86400")
+      elif (.idle_grace_seconds // 900) >= (.resume_ttl_seconds // 3600) then error("idle_grace_seconds " + ((.idle_grace_seconds // 900) | tostring) + " must be shorter than resume_ttl_seconds " + ((.resume_ttl_seconds // 3600) | tostring))
       else {
         ceiling_usd: (if has("ceiling_usd") then .ceiling_usd else null end),
         expected_running: (if has("expected_running") then .expected_running else null end),

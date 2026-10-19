@@ -15,12 +15,11 @@
 #   3. An idle box is recorded on first sight and stopped only after the
 #      grace (900 by default) with no workers, dropping its receipt line and
 #      parking the alias, with one boat-idle: line.
-#   4. A box with a live worker is never stopped, even past the grace; a
-#      worker that arrives between the first probe and the locked final check
-#      is seen and skips the stop. An unreadable idle report, state, timer,
-#      or instance is treated as busy.
+#   4. A box with a live worker is never stopped, even past the grace; the
+#      state read, worker probe, extend, and stop all hold the send lock.
+#      An unreadable idle report, state, timer, or instance is treated as busy.
 #   5. A box not listed in config/boat-box-id is never touched.
-#   6. A changed boot instance between probe and stop skips the stop.
+#   6. A boot instance the remote probe cannot recognize skips the stop.
 #   7. Extend, stop, and refresh failures, and config problems, are reported
 #      throttled.
 #   8. A home with no spend config is silent and never calls Boat, and arm
@@ -69,19 +68,19 @@ case "${1:-}" in
     [ "${3:-} ${4:-} ${5:-} ${6:-}" = "--json -- cat /proc/sys/kernel/random/boot_id" ] || exit 97
     [ ! -e "$FIXTURES/exec.slow" ] || sleep 5
     [ ! -e "$FIXTURES/$box.exec.fail" ] || exit 1
-    n=$(cat "$FIXTURES/exec.count" 2>/dev/null || printf 0); n=$((n + 1))
-    printf '%s' "$n" > "$FIXTURES/exec.count"
     id=$(cat "$FIXTURES/$box.boot")
-    if [ -e "$FIXTURES/rotate" ] && [ "$n" -ge 2 ]; then id=$(cat "$FIXTURES/$box.boot2"); fi
+    if [ -e "$FIXTURES/rotate" ]; then id=$(cat "$FIXTURES/$box.boot2"); fi
     jq -n --arg id "$id" '{exitCode:0,stdout:($id+"\n")}'
     ;;
   limits)
     [ "${2:-}" = --json ] && [ "$#" -eq 2 ] || exit 97
+    [ ! -e "$FIXTURES/limits.slow" ] || sleep 25
     [ ! -e "$FIXTURES/limits.fail" ] || exit 1
     cat "$FIXTURES/limits.json"
     ;;
   resume)
     box=${2:-}
+    [ ! -e "$FIXTURES/require-lock" ] || [ -e "$FM_HOME/state/.boat-send.lock" ] || exit 98
     [ "${3:-}" = --environment ] && [ "${4:-}" = fm-code ] || exit 97
     [ "${5:-}" = --ttl ] || exit 97
     case "${6:-}" in ''|*[!0-9]*) exit 97 ;; esac
@@ -91,6 +90,7 @@ case "${1:-}" in
     ;;
   stop)
     box=${2:-}; [ "${3:-}" = --json ] || exit 97
+    [ ! -e "$FIXTURES/require-lock" ] || [ -e "$FM_HOME/state/.boat-send.lock" ] || exit 98
     [ ! -e "$FIXTURES/stop.fail" ] || exit 1
     printf '{}\n'
     ;;
@@ -114,9 +114,7 @@ if [ -f "$FM_HOME/state/.boat-route-box" ] && [ ! -L "$FM_HOME/state/.boat-route
   [ -f "$FIXTURES/alias.box" ] || exit 1
   [ "$(cat "$FIXTURES/alias.box")" = "$route" ] || exit 1
 fi
-n=$(cat "$FIXTURES/idle.count" 2>/dev/null || printf 0); n=$((n + 1))
-printf '%s' "$n" > "$FIXTURES/idle.count"
-if [ -e "$FIXTURES/idle-rerace" ] && [ "$n" -ge 2 ]; then
+if [ -e "$FIXTURES/retained.meta" ]; then
   printf 'boat-tasks-remaining: yes\n'
   exit 0
 fi
@@ -242,6 +240,7 @@ test_idle_box_stops_after_grace() {
   new_case grace
   make_info running 600
   set_idle 'boat-tasks-remaining: no'
+  : > "$FIXTURES/require-lock"
   seed_since "$((NOW - 900))"
   seed_receipt
   run_at "$NOW"
@@ -257,6 +256,7 @@ test_live_worker_is_never_stopped() {
   new_case never-stop
   make_info running 600
   set_idle 'boat-tasks-remaining: yes'
+  : > "$FIXTURES/require-lock"
   seed_since "$((NOW - 3600))"
   run_at "$NOW"
   expect_code 0 "$CODE" "past-grace busy check: $OUT"
@@ -300,7 +300,7 @@ test_instance_rotation_skips_stop() {
   expect_code 0 "$CODE" "rotated check: $OUT"
   [ -z "$OUT" ] || fail "a resumed box should be silent: $OUT"
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a freshly resumed box was stopped'
-  assert_equals "$BOX $NOW" "$(cat "$HOME_DIR/state/.boat-idle-since")" 'the grace did not restart on rotation'
+  assert_absent "$HOME_DIR/state/.boat-idle-since" 'an unreadable instance kept the old grace'
 }
 
 test_configured_resume_timer() {
@@ -365,6 +365,26 @@ test_invalid_config_is_reported_once_a_day() {
   [ -z "$OUT" ] || fail "a repeated config problem should stay throttled: $OUT"
 }
 
+test_grace_and_fleet_limits_are_validated() {
+  new_case grace-over-timer '{"idle_grace_seconds":7200}'
+  run_at "$NOW"
+  expect_code 0 "$CODE" "grace over timer: $OUT"
+  assert_contains "$OUT" 'idle_grace_seconds 7200 must be shorter than resume_ttl_seconds 3600' 'default timer was not checked against grace'
+  assert_equals 0 "$(boat_calls)" 'invalid grace contacted Boat'
+
+  new_case grace-equals-timer '{"resume_ttl_seconds":1800,"idle_grace_seconds":1800}'
+  run_at "$NOW"
+  expect_code 0 "$CODE" "grace equals timer: $OUT"
+  assert_contains "$OUT" 'idle_grace_seconds 1800 must be shorter than resume_ttl_seconds 1800' 'equal grace was accepted'
+  assert_equals 0 "$(boat_calls)" 'equal grace contacted Boat'
+
+  new_case unsupported-fleet '{"expected_running":4}'
+  run_at "$NOW"
+  expect_code 0 "$CODE" "unsupported fleet: $OUT"
+  assert_contains "$OUT" 'expected_running must be a whole number, 0 to 3' 'unsupported fleet was accepted'
+  assert_equals 0 "$(boat_calls)" 'unsupported fleet contacted Boat'
+}
+
 test_absent_config_is_off() {
   new_case nocfg
   rm "$HOME_DIR/config/boat-spend.json"
@@ -402,18 +422,18 @@ test_two_boxes_extend_and_stop_on_one_line() {
   assert_grep "alias $other boat-prove" "$FIXTURES/calls" 'the alias was not refreshed to the second probed box'
 }
 
-test_late_worker_skips_stop() {
-  new_case late-worker
+test_retained_record_counts_as_busy() {
+  new_case retained-record
   make_info running 600
   set_idle 'boat-tasks-remaining: no'
   seed_since "$((NOW - 900))"
-  : > "$FIXTURES/idle-rerace"
+  : > "$FIXTURES/retained.meta"
   run_at "$NOW"
-  expect_code 0 "$CODE" "late worker check: $OUT"
-  [ -z "$OUT" ] || fail "a box with a newly arrived worker should be silent: $OUT"
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a box with a live worker was stopped'
-  assert_grep 'boat --no-update resume' "$FIXTURES/calls" 'the newly busy box was not extended'
-  assert_absent "$HOME_DIR/state/.boat-idle-since" 'the busy box kept its idle record'
+  expect_code 0 "$CODE" "retained worker record check: $OUT"
+  [ -z "$OUT" ] || fail "a retained record should keep the box up: $OUT"
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a retained record did not prevent stop'
+  assert_grep 'boat --no-update resume' "$FIXTURES/calls" 'a retained record did not trigger renewal'
+  assert_absent "$HOME_DIR/state/.boat-idle-since" 'a retained record kept the idle record'
 }
 
 test_extend_caps_at_plan_timer() {
@@ -467,22 +487,36 @@ test_configured_cli_reaches_probe_children() {
 
 test_slow_poll_extends_within_watcher_budget() {
   local started elapsed
-  new_case slow-poll '{"expected_running":2}'
+  new_case slow-poll '{"expected_running":2,"resume_ttl_seconds":14400}'
+  printf '%s\n' '{"billingStatus":"trialing"}' > "$FIXTURES/limits.json"
   printf '%s\n' "$BOX" bx_cccccccc > "$HOME_DIR/config/boat-box-id"
   make_info running 600
   set_idle 'boat-tasks-remaining: yes'
   : > "$FIXTURES/refresh.slow"
   : > "$FIXTURES/info.slow"
   : > "$FIXTURES/exec.slow"
+  : > "$FIXTURES/limits.slow"
   started=$(date +%s)
   OUT=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
-    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_TIMEOUT=22 FIXTURES="$FIXTURES" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_TIMEOUT=30 FIXTURES="$FIXTURES" \
     "$BIN/fm-boat-idle-check.sh" check 2>&1)
   CODE=$?
   elapsed=$(($(date +%s) - started))
   expect_code 0 "$CODE" "slow poll check: $OUT"
-  [ "$elapsed" -lt 22 ] || fail "slow poll exceeded watcher budget: ${elapsed}s"
-  assert_grep "boat --no-update resume $BOX" "$FIXTURES/calls" 'slow poll did not attempt a timely extend'
+  [ "$elapsed" -lt 30 ] || fail "slow poll exceeded watcher budget: ${elapsed}s"
+  assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 3600 --json" \
+    "$FIXTURES/calls" 'slow poll did not renew with the safe fallback timer'
+}
+
+test_short_watcher_budget_is_reported() {
+  new_case short-budget
+  OUT=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_TIMEOUT=22 FIXTURES="$FIXTURES" \
+    "$BIN/fm-boat-idle-check.sh" check 2>&1)
+  CODE=$?
+  expect_code 0 "$CODE" "short watcher budget: $OUT"
+  assert_contains "$OUT" 'FM_CHECK_TIMEOUT must be at least 30 seconds' 'short watcher budget was silent'
+  assert_equals 0 "$(boat_calls)" 'short watcher budget contacted Boat'
 }
 
 test_sweep_rotates_across_boxes() {
@@ -556,13 +590,15 @@ test_configured_grace
 test_extend_failure_is_reported
 test_stop_failure_is_reported_throttled
 test_invalid_config_is_reported_once_a_day
+test_grace_and_fleet_limits_are_validated
 test_absent_config_is_off
 test_two_boxes_extend_and_stop_on_one_line
-test_late_worker_skips_stop
+test_retained_record_counts_as_busy
 test_extend_caps_at_plan_timer
 test_slow_refresh_still_extends
 test_configured_cli_reaches_probe_children
 test_slow_poll_extends_within_watcher_budget
+test_short_watcher_budget_is_reported
 test_sweep_rotates_across_boxes
 test_arm_and_disarm
 pass "fm-boat-idle-check"

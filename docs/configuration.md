@@ -2217,7 +2217,7 @@ This section is the single owner of the schema.
 - Every field is optional.
   The check's defaults are the values above, with an empty `always_on` and no `boat_bin`.
   `account_seconds_per_24h` and `box_seconds_per_24h` are optional whole numbers of seconds, 1 or more, and are omitted by default.
-  `resume_ttl_seconds` is an optional whole number of seconds from 1800 to 14400, and `idle_grace_seconds` is an optional whole number of seconds from 0 to 86400.
+  `resume_ttl_seconds` is an optional whole number of seconds from 1800 to 14400, and `idle_grace_seconds` is an optional whole number of seconds from 0 to 86400 that must be shorter than the resume timer, including when either uses its default.
   The timer floor keeps it well above the watcher poll cadence, so extends land before it expires.
 - `account_seconds_per_24h` and `box_seconds_per_24h` are for dispatch, not for this check.
   The check accepts them and does not report on them.
@@ -2226,7 +2226,7 @@ This section is the single owner of the schema.
   Extends use the same cap.
   `idle_grace_seconds` is how long a listed running box may report no workers before the idle check stops it.
   The spend check accepts both and does not report on them; [Boat idle check](#boat-idle-check) owns them.
-- `expected_running` is also the sender's cap on how many box ids `config/boat-box-id` may list and how many sandboxes may be active together.
+- `expected_running` is also the sender's cap on how many box ids `config/boat-box-id` may list and how many sandboxes may be active together; the supported range is 0 to 3.
   A fleet that runs up to three default boxes all day sets `ceiling_usd` to 100, `expected_running` to 3, `account_seconds_per_24h` to 259200 (3 times 86400), and `box_seconds_per_24h` to 86400.
   With `box_seconds_per_24h` set, a box whose rolling usage is still within that value may reserve one more timer, so usage plus that timer may reach the value plus the timer.
   The account, monthly, and balance checks also add the remaining timers of the other active listed boxes.
@@ -2276,8 +2276,10 @@ This section owns the behavior; the script's header owns the exact commands, bou
 
 - A box with a live worker is never stopped, and a box not listed in `config/boat-box-id` is never touched.
 - An unreadable idle report, state, timer, or instance is treated as busy, so blindness keeps a box up rather than stopping work.
-- Before a stop, the worker and instance checks run again under the send lock, held through the stop, so a dispatch that lands after the first probe is never stopped.
+- The send lock covers the state read, worker probe, timer extension, and stop, so a concurrent dispatch or teardown cannot change a box between its liveness report and action.
 - With several boxes, each sweep starts where the last one left off, so a slow box cannot starve the rest of extends and stops.
+- The supported fleet has at most three listed boxes; with the default 300-second watcher cadence, the rotation revisits each within 15 minutes, below the minimum 30-minute resume timer.
+- `FM_CHECK_TIMEOUT` must be at least 30 seconds for this check to run, which is also the default.
 - Extend skips its spend reservation on purpose, because a live worker must not lose its box to a ceiling; the spend check stays the ceiling watchdog.
 
 **What is reported**
