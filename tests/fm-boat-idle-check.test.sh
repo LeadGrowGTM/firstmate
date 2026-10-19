@@ -414,7 +414,7 @@ test_configured_resume_timer() {
 
 test_revisit_window_renews() {
   new_case revisit-window '{"resume_ttl_seconds":1800}'
-  make_info running 935
+  make_info running 781
   set_idle 'boat-tasks-remaining: yes'
   run_at "$NOW"
   expect_code 0 "$CODE" "revisit window check: $OUT"
@@ -428,15 +428,20 @@ test_three_box_renewal_window() {
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
   run_at "$NOW"
   expect_code 0 "$CODE" "short three-box timer: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 1800 with fallback 3600 gives an effective timer shorter than 3920s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'unsafe fleet timer was accepted'
+  assert_contains "$OUT" 'resume_ttl_seconds 1800 with fallback 3600 gives an effective timer shorter than 3092s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'unsafe fleet timer was accepted'
   assert_equals 0 "$(boat_calls)" 'unsafe fleet timer contacted Boat'
 
   new_case default-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
+  printf '%s\n' '{"sandbox":{"id":"'"$second"'","type":"default","state":"stopped"}}' > "$FIXTURES/$second.info.json"
+  printf '%s\n' '{"sandbox":{"id":"'"$third"'","type":"default","state":"stopped"}}' > "$FIXTURES/$third.info.json"
+  make_info running 2000
+  set_idle 'boat-tasks-remaining: yes'
   run_at "$NOW"
   expect_code 0 "$CODE" "default three-box timer: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 3600 with fallback 3600 gives an effective timer shorter than 3920s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'three-box 300-second cadence omitted sweep time'
-  assert_equals 0 "$(boat_calls)" 'unsafe default fleet cadence contacted Boat'
+  assert_grep "boat --no-update resume $BOX --environment fm-code --ttl 3600 --json" \
+    "$FIXTURES/calls" 'accepted three-box timer was not renewed in time'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'accepted live fleet was stopped'
 
   new_case slow-fleet-poll '{"expected_running":3,"resume_ttl_seconds":12000}'
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
@@ -445,7 +450,7 @@ test_three_box_renewal_window() {
     "$BIN/fm-boat-idle-check.sh" check 2>&1)
   CODE=$?
   expect_code 0 "$CODE" "slow three-box poll: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 12000 with fallback 3600 gives an effective timer shorter than 12020s required for 3 listed boxes at FM_CHECK_INTERVAL 1200' 'fallback timer below the fleet cadence was accepted'
+  assert_contains "$OUT" 'resume_ttl_seconds 12000 with fallback 3600 gives an effective timer shorter than 11192s required for 3 listed boxes at FM_CHECK_INTERVAL 1200' 'fallback timer below the fleet cadence was accepted'
   assert_equals 0 "$(boat_calls)" 'unsafe fleet cadence contacted Boat'
 
   new_case safe-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
@@ -453,7 +458,7 @@ test_three_box_renewal_window() {
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
   printf '%s\n' '{"sandbox":{"id":"'"$second"'","type":"default","state":"stopped"}}' > "$FIXTURES/$second.info.json"
   printf '%s\n' '{"sandbox":{"id":"'"$third"'","type":"default","state":"stopped"}}' > "$FIXTURES/$third.info.json"
-  make_info running 2223
+  make_info running 1741
   set_idle 'boat-tasks-remaining: yes'
   : > "$FIXTURES/resume.fail"
   run_at "$NOW"
@@ -465,7 +470,7 @@ test_three_box_renewal_window() {
   : > "$FIXTURES/exec.slow"
   : > "$FIXTURES/limits.near-bound"
   : > "$FIXTURES/resume.long"
-  run_at "$((NOW + 1056))"
+  run_at "$((NOW + 810))"
   expect_code 0 "$CODE" "three-box renewal retry: $OUT"
   assert_equals 2 "$(grep -c "boat --no-update resume $BOX " "$FIXTURES/calls")" 'a failed renewal was not retried before expiry'
   assert_equals ok "$(cat "$HOME_DIR/state/.boat-idle-renew-$BOX/result")" 'the renewal retry did not succeed'

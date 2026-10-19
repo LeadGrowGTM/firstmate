@@ -23,6 +23,7 @@
 # times 12, whichever is smaller.
 
 FM_BOAT_RENEW_TIMEOUT=$((10 + 25 + 6 + 6 + 4 + 5 + 6 + 60))
+FM_BOAT_CHECK_BUDGET=30
 
 fm_boat_spend_config_path() {
   printf '%s\n' "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/boat-spend.json"
@@ -117,7 +118,7 @@ fm_boat_load_reservation() {
 fm_boat_revisit_seconds() {
   local count=$1 interval=${FM_CHECK_INTERVAL:-300}
   case "$interval" in ''|*[!0-9]*) return 1 ;; esac
-  printf '%s\n' "$(( (10#$interval + FM_BOAT_RENEW_TIMEOUT) * count ))"
+  printf '%s\n' "$(( (10#$interval + FM_BOAT_CHECK_BUDGET) * count ))"
 }
 
 fm_boat_renew_threshold_seconds() {

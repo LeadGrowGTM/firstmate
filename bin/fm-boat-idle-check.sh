@@ -8,7 +8,7 @@
 #   fm-boat-idle-check.sh --help
 #
 # A Boat box runs only while it has a live worker or queued Boat work.
-# fm-boat-send.sh resumes with the short on-demand timer and never extends it.
+# fm-boat-send.sh resumes with the short on-demand timer and can extend it before spawn.
 # This check does the other two halves from the PC, so a down box watcher
 # does not matter: while fm-boat-worker.sh idle reports live work it re-arms
 # the timer by the same amount, and once a listed running box reports no
@@ -569,10 +569,10 @@ run_check() {
   RENEW_QUEUE=()
   RENEW_THRESHOLD=0
   [ -f "$CONFIG" ] || return 0
-  timeout=${FM_CHECK_TIMEOUT:-30}
-  case "$timeout" in ''|*[!0-9]*) timeout=30 ;; esac
-  [ "$timeout" -le 30 ] || timeout=30
-  [ "$timeout" -ge 30 ] || {
+  timeout=${FM_CHECK_TIMEOUT:-$FM_BOAT_CHECK_BUDGET}
+  case "$timeout" in ''|*[!0-9]*) timeout=$FM_BOAT_CHECK_BUDGET ;; esac
+  [ "$timeout" -le "$FM_BOAT_CHECK_BUDGET" ] || timeout=$FM_BOAT_CHECK_BUDGET
+  [ "$timeout" -ge "$FM_BOAT_CHECK_BUDGET" ] || {
     part 'FM_CHECK_TIMEOUT must be at least 30 seconds for Boat idle checks'
     fm_cap_line "boat-idle: $PARTS" "$MAX_LINE"
     return 0

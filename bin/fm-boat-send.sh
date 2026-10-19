@@ -52,9 +52,9 @@
 # fm-code. The old .boat-no-env receipt cannot authorize a send.
 # Running metadata must name environment fm-code; a present noEnv flag must
 # be false. Permanently no-env boxes refuse dispatch.
-# A running box must already have a readable timer within that budget window;
-# this command never extends it. fm-boat-idle-check.sh owns the PC-side
-# extend while workers are live and the idle stop after its grace. No box
+# A running box must have a readable timer within that budget window. Before
+# worker spawn, dispatch renews a timer that fell below the renewal window.
+# fm-boat-idle-check.sh owns recurring extends and idle stop. No box
 # creation/deletion/sharing, billing, plan, credit, environment editing, or
 # merge command exists here.
 #
@@ -298,6 +298,32 @@ running_timer_ok() {
   SHORT_TIMER_REASON="running box $BOX has ${TTL}s remaining, below renewal threshold ${RENEW_THRESHOLD}s"
   return 1
 }
+timer_before_spawn() {
+  local remaining cap extend_ttl current
+  read_boat info "$BOX"
+  remaining=$(jq -er --arg box "$BOX" --argjson now "$(date +%s)" '
+    .sandbox | select(.id == $box and .type == "default" and .environment == "fm-code" and
+      ((has("noEnv") | not) or .noEnv == false) and (.state | IN("ready", "idle", "running"))) |
+    .archiveAfter | select(type == "string") |
+    (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - $now | select(. > 0)
+  ' "$TMP/info" 2>/dev/null) || stop_refuse 'box auto-stop timer is unavailable before worker spawn'
+  current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable before worker spawn'
+  [ "$current" = "$instance" ] && receipt_matches "$current" || stop_refuse 'Boat instance changed before worker spawn'
+  [ "$remaining" -ge "$RENEW_THRESHOLD" ] && return 0
+  cap=3600
+  if read_boat_soft limits; then
+    case "$(jq -r '.billingStatus // empty' "$TMP/limits")" in
+      active) cap=14400 ;;
+      trialing) cap=7200 ;;
+    esac
+  fi
+  extend_ttl=$FM_BOAT_RESUME_TTL
+  [ "$extend_ttl" -le "$cap" ] || extend_ttl=$cap
+  fm_run_timed 60 "$BOAT_BIN" --no-update resume "$BOX" --environment fm-code --ttl "$extend_ttl" --json > "$TMP/resume" ||
+    stop_refuse "Boat timer extend failed before worker spawn (${remaining}s remaining, below renewal threshold ${RENEW_THRESHOLD}s)"
+  current=$(boat_instance) || stop_refuse 'Boat instance identity is unavailable after timer extend'
+  [ "$current" = "$instance" ] && receipt_matches "$current" || stop_refuse 'Boat instance changed after timer extend'
+}
 dispatch_prepared_box() {
   case "$STATE" in
     stopped)
@@ -352,6 +378,7 @@ dispatch_prepared_box() {
     printf 'prepared: %s route=%s (no worker dispatched)\n' "$BOX" "$ROUTE"
     exit 0
   fi
+  timer_before_spawn
   record_task_box
   # Stdin and argv reuse the existing remote job lane, environment scrub, and
   # exit-255 contract. An uncertain launch is deliberately not retried or stopped.

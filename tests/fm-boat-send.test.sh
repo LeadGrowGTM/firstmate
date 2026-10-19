@@ -104,6 +104,14 @@ if [ -d "$FIXTURES/multi" ]; then
       [ "${5:-}" = --ttl ] || exit 97
       case "${6:-}" in ''|*[!0-9]*) exit 97 ;; esac
       [ "${7:-}" = --json ] && [ "$#" -eq 7 ] || exit 97
+      [ ! -e "$FIXTURES/resume.fail" ] || exit 1
+      if jq -e '.sandbox.state | IN("ready", "idle", "running")' "$FIXTURES/multi/$bid.info.json" >/dev/null; then
+        jq --argjson end "$((BOAT_NOW + ${6}))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+          "$FIXTURES/multi/$bid.info.json" > "$FIXTURES/multi/$bid.info.new"
+        mv "$FIXTURES/multi/$bid.info.new" "$FIXTURES/multi/$bid.info.json"
+        printf '{}\n'
+        exit 0
+      fi
       : > "$FIXTURES/multi/$bid.resumed"
       cp "$FIXTURES/multi/$bid.ready-boot" "$FIXTURES/multi/$bid.boot"
       printf '{}\n'
@@ -141,6 +149,14 @@ case "$*" in
     ttl=${ttl% --json}
     case "$ttl" in ''|*[!0-9]*) printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97 ;; esac
     [ "$*" = "resume $box --environment fm-code --ttl $ttl --json" ] || { printf 'unexpected Boat call: %s\n' "$*" >&2; exit 97; }
+    [ ! -e "$FIXTURES/resume.fail" ] || exit 1
+    if jq -e '.sandbox.state | IN("ready", "idle", "running")' "$FIXTURES/info.json" >/dev/null; then
+      jq --argjson end "$((BOAT_NOW + ttl))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+        "$FIXTURES/info.json" > "$FIXTURES/info.new"
+      mv "$FIXTURES/info.new" "$FIXTURES/info.json"
+      printf '{}\n'
+      exit 0
+    fi
     : > "$FIXTURES/resumed"
     printf '%s\n' '22222222-2222-4222-8222-222222222222' > "$FIXTURES/boot-id"
     printf '{}\n'
@@ -162,13 +178,28 @@ cat > "$BIN/fm-boat-alias-refresh.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
 if [ -d "$FIXTURES/multi" ] && [ "$1" != --park ]; then
-  case "$1" in bx_*) [ "$2" = boat-prove ] || exit 97; exit 0 ;; esac
+  case "$1" in bx_*)
+    [ "$2" = boat-prove ] || exit 97
+    if [ -f "$FIXTURES/late-timer-seconds" ]; then
+      seconds=$(cat "$FIXTURES/late-timer-seconds")
+      jq --argjson end "$((BOAT_NOW + seconds))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+        "$FIXTURES/multi/$1.info.json" > "$FIXTURES/multi/$1.info.new"
+      mv "$FIXTURES/multi/$1.info.new" "$FIXTURES/multi/$1.info.json"
+    fi
+    exit 0 ;;
+  esac
 fi
 if [ "$*" = "--park $(cat "$FIXTURES/box-id") boat-prove" ]; then
   [ ! -e "$FIXTURES/park.fail" ] || { printf 'error: boat info failed after stop\n' >&2; exit 1; }
   exit 0
 fi
 [ "$*" = "$(cat "$FIXTURES/box-id") boat-prove" ] || exit 97
+[ ! -f "$FIXTURES/late-timer-seconds" ] || {
+  seconds=$(cat "$FIXTURES/late-timer-seconds")
+  jq --argjson end "$((BOAT_NOW + seconds))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/info.json" > "$FIXTURES/info.new"
+  mv "$FIXTURES/info.new" "$FIXTURES/info.json"
+}
 [ ! -e "$FIXTURES/rotate-on-alias" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
 [ ! -e "$FIXTURES/alias.fail" ]
 SH
@@ -418,14 +449,65 @@ test_running_reservation_and_start() {
 
 test_running_timer_covers_next_renewal() {
   new_case running-renewal-window
-  jq --argjson end "$((NOW + 845))" '.sandbox.archiveAfter = ($end|todateiso8601)' "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  jq --argjson end "$((NOW + 661))" '.sandbox.archiveAfter = ($end|todateiso8601)' "$FIXTURES/ready.json" > "$FIXTURES/info.json"
   seed_receipt
   send_task
   assert_pre_resume_refusal 'running timer below renewal window'
-  assert_contains "$OUT" '845s remaining, below renewal threshold 846s' 'running dispatch did not name the renewal window'
+  assert_contains "$OUT" '661s remaining, below renewal threshold 662s' 'running dispatch did not name the renewal window'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --prepare --code-only
   assert_pre_resume_refusal 'running prepare below renewal window'
-  assert_contains "$OUT" '845s remaining, below renewal threshold 846s' 'running prepare did not name the renewal window'
+  assert_contains "$OUT" '661s remaining, below renewal threshold 662s' 'running prepare did not name the renewal window'
+}
+
+test_late_timer_extend() {
+  new_case late-running-timer
+  printf '%s\n' '{"resume_ttl_seconds":12000}' > "$LOCAL_HOME/config/boat-spend.json"
+  set_json limits '.billingStatus = "trialing"'
+  jq --argjson end "$((NOW + 1300))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  seed_receipt
+  printf '%s\n' 661 > "$FIXTURES/late-timer-seconds"
+  send_task
+  expect_code 0 "$CODE" "late running timer: $OUT"
+  assert_grep 'boat --no-update resume bx_ahnbu3qr --environment fm-code --ttl 7200 --json' \
+    "$FIXTURES/calls" 'late running timer was not extended within the trial plan cap'
+  assert_grep 'on --stdin boat-eng fm-boat-worker.sh spawn 11111111-1111-4111-8111-111111111111' \
+    "$FIXTURES/calls" 'late timer extension did not allow worker spawn'
+
+  new_case late-running-timer-failure
+  printf '%s\n' '{"resume_ttl_seconds":12000}' > "$LOCAL_HOME/config/boat-spend.json"
+  set_json limits '.billingStatus = "trialing"'
+  jq --argjson end "$((NOW + 1300))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  seed_receipt
+  printf '%s\n' 661 > "$FIXTURES/late-timer-seconds"
+  : > "$FIXTURES/resume.fail"
+  send_task
+  expect_code 1 "$CODE" 'failed late timer extension refuses dispatch'
+  assert_contains "$OUT" 'Boat timer extend failed before worker spawn' 'failed late extension had no clear reason'
+  assert_no_grep 'on --stdin boat-eng' "$FIXTURES/calls" 'failed late extension spawned a worker'
+  [ ! -e "$LOCAL_HOME/state/.boat-task-box" ] || fail 'failed late extension recorded a dispatched task'
+
+  new_case late-multi-timer
+  printf '%s\n' '{"expected_running":2,"resume_ttl_seconds":12000}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_bbbbbbbb' 'bx_aaaaaaaa' > "$LOCAL_HOME/config/boat-box-id"
+  prime_multi_box bx_bbbbbbbb running 3000 11111111-1111-4111-8111-111111111111 55555555-5555-4555-8555-555555555555
+  prime_multi_box bx_aaaaaaaa stopped 1000 66666666-6666-4666-8666-666666666666 22222222-2222-4222-8222-222222222222
+  jq --argjson end "$((NOW + 1300))" '.sandbox.archiveAfter = ($end|todateiso8601)' \
+    "$FIXTURES/multi/bx_bbbbbbbb.info.json" > "$FIXTURES/multi/bx_bbbbbbbb.info.new"
+  mv "$FIXTURES/multi/bx_bbbbbbbb.info.new" "$FIXTURES/multi/bx_bbbbbbbb.info.json"
+  printf '%s\n' 'bx_bbbbbbbb 11111111-1111-4111-8111-111111111111 fm-code' > "$LOCAL_HOME/state/.boat-environment"
+  jq -n --argjson end "$((NOW + 1300))" '{pageInfo:{hasMore:false},sandboxes:[
+    {id:"bx_bbbbbbbb",state:"running",archiveAfter:($end|todateiso8601)},
+    {id:"bx_aaaaaaaa",state:"stopped"}]}' > "$FIXTURES/list.json"
+  printf '%s\n' 1201 > "$FIXTURES/late-timer-seconds"
+  set_json limits '.billingStatus = "trialing"'
+  send_task
+  expect_code 0 "$CODE" "late multi-box timer: $OUT"
+  assert_grep 'boat --no-update resume bx_bbbbbbbb --environment fm-code --ttl 7200 --json' \
+    "$FIXTURES/calls" 'multi-box timer was not extended within the trial plan cap'
+  assert_grep 'on --stdin boat-eng fm-boat-worker.sh spawn 11111111-1111-4111-8111-111111111111' \
+    "$FIXTURES/calls" 'multi-box timer extension did not allow worker spawn'
 }
 
 test_worker_start() {
@@ -650,8 +732,9 @@ test_sender_success_and_timer() {
       grep -Fx 120 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan resume was not bounded"
       grep -Fx 45 "$FIXTURES/timeout.calls" >/dev/null || fail "$plan instance read was not bounded"
     fi
-    assert_equals $'alias bx_ahnbu3qr boat-prove\non --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
-      "$(tail -n 2 "$FIXTURES/calls")" 'alias refresh precedes existing remote lane'
+    assert_grep 'alias bx_ahnbu3qr boat-prove' "$FIXTURES/calls" 'alias refresh did not run'
+    assert_equals 'on --stdin boat-eng fm-boat-worker.sh spawn 22222222-2222-4222-8222-222222222222' \
+      "$(tail -n 1 "$FIXTURES/calls")" 'alias refresh did not precede existing remote lane'
     assert_equals "$(jq -Sc . "$FIXTURES/request.json")" "$(jq -Sc . "$FIXTURES/transport.request")" 'transport changed task fields'
     assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'successful dispatch stopped the box'
     assert_equals 'bx_ahnbu3qr 22222222-2222-4222-8222-222222222222 fm-code' "$(cat "$LOCAL_HOME/state/.boat-environment")" 'successful environment resume receipt'
@@ -1128,7 +1211,7 @@ test_instance_changes_at_action_boundary() {
   : > "$FIXTURES/use-real-worker"
   send_task
   expect_code 1 "$CODE" 'changed instance refuses remote spawn'
-  assert_contains "$OUT" 'Boat instance changed; action refused' 'remote instance refusal was not returned'
+  assert_contains "$OUT" 'Boat instance changed before worker spawn' 'remote instance refusal was not returned'
   assert_no_grep '^spawn ' "$FIXTURES/calls" 'changed instance launched a worker'
   assert_absent "$REMOTE_HOME/data/task-one/brief.md" 'changed instance wrote a worker brief'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'changed running instance was stopped'
@@ -1484,6 +1567,7 @@ test_confirmed_prelaunch_refusal_stop
 test_native_spawn_refusal_stop
 test_running_reservation_and_start
 test_running_timer_covers_next_renewal
+test_late_timer_extend
 test_worker_start
 test_ship_prerequisites_and_identity
 test_validation
