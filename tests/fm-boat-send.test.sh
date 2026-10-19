@@ -416,6 +416,18 @@ test_running_reservation_and_start() {
   pass 'running dispatch reserves remaining timer and sender requires start proof'
 }
 
+test_running_timer_covers_next_renewal() {
+  new_case running-renewal-window
+  jq --argjson end "$((NOW + 845))" '.sandbox.archiveAfter = ($end|todateiso8601)' "$FIXTURES/ready.json" > "$FIXTURES/info.json"
+  seed_receipt
+  send_task
+  assert_pre_resume_refusal 'running timer below renewal window'
+  assert_contains "$OUT" '845s remaining, below renewal threshold 846s' 'running dispatch did not name the renewal window'
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --prepare --code-only
+  assert_pre_resume_refusal 'running prepare below renewal window'
+  assert_contains "$OUT" '845s remaining, below renewal threshold 846s' 'running prepare did not name the renewal window'
+}
+
 test_worker_start() {
   local variant
   for variant in status key-before-at at-before-key failed-key-before-at needs-decision-key-before-at trust stale quoted quoted-no-op quoted-exact negative; do
@@ -1471,6 +1483,7 @@ test_existing_backlog_row
 test_confirmed_prelaunch_refusal_stop
 test_native_spawn_refusal_stop
 test_running_reservation_and_start
+test_running_timer_covers_next_renewal
 test_worker_start
 test_ship_prerequisites_and_identity
 test_validation

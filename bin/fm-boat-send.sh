@@ -106,6 +106,9 @@ if [ -z "$TEARDOWN_ID" ]; then
   fm_boat_validate_cadence "$BOX_ID_TEXT" || die "${FM_BOAT_BOX_PROBLEM:-invalid Boat cadence}"
 fi
 mapfile -t BOX_IDS <<< "$BOX_ID_TEXT"
+if [ -z "$TEARDOWN_ID" ]; then
+  RENEW_THRESHOLD=$(fm_boat_renew_threshold_seconds "${#BOX_IDS[@]}") || die 'FM_CHECK_INTERVAL is invalid'
+fi
 if [ "${#BOX_IDS[@]}" -eq 1 ]; then
   MULTI=0
   BOX=${BOX_IDS[0]}
@@ -289,6 +292,12 @@ reserve_ttl() {
     then error("spend cap would be exceeded")
     else $ttl end'
 }
+running_timer_ok() {
+  [ "$STATE" = stopped ] && return 0
+  [ "$TTL" -ge "$RENEW_THRESHOLD" ] && return 0
+  SHORT_TIMER_REASON="running box $BOX has ${TTL}s remaining, below renewal threshold ${RENEW_THRESHOLD}s"
+  return 1
+}
 dispatch_prepared_box() {
   case "$STATE" in
     stopped)
@@ -366,6 +375,7 @@ dispatch_prepared_box() {
   exit "$DISPATCH_STATUS"
 }
 if [ "$MULTI" -eq 1 ]; then
+  SHORT_TIMER_REASON=
   read_boat limits
   read_boat list --all
   order=$(jq -nr --slurpfile b "$TMP/list" --slurpfile l "$TMP/limits" \
@@ -396,6 +406,7 @@ if [ "$MULTI" -eq 1 ]; then
     case "$STATE" in stopped|ready|idle|running) ;; *) continue ;; esac
     read_boat_soft usage "$BOX" --since "$(( $(date +%s) - 86400 ))" || continue
     TTL=$(reserve_ttl 2> "$TMP/reason") || continue
+    running_timer_ok || continue
     if [ "$STATE" != stopped ]; then
       inst=$(boat_instance) || continue
       receipt_matches "$inst" || continue
@@ -403,9 +414,9 @@ if [ "$MULTI" -eq 1 ]; then
     dispatch_prepared_box
   done <<< "$order"
   if [ -n "${PINNED:-}" ]; then
-    die "assigned box $PINNED cannot take this task; dispatch refused"
+    die "assigned box $PINNED cannot take this task${SHORT_TIMER_REASON:+: $SHORT_TIMER_REASON}; dispatch refused"
   fi
-  die 'no listed box has spend room and worker capacity; dispatch refused'
+  die "${SHORT_TIMER_REASON:-no listed box has spend room and worker capacity}; dispatch refused"
 fi
 read_boat info "$BOX"
 STATE=$(jq -r '.sandbox.state // empty' "$TMP/info")
@@ -418,4 +429,5 @@ read_boat list --all
 read_boat usage "$BOX" --since "$(( $(date +%s) - 86400 ))"
 # Reserve the existing remaining timer, or the full timer for a new resume.
 TTL=$(reserve_ttl 2> "$TMP/reason") || stop_refuse 'Boat safety or spend reservation failed'
+running_timer_ok || die "$SHORT_TIMER_REASON; dispatch refused"
 dispatch_prepared_box

@@ -420,14 +420,14 @@ test_three_box_renewal_window() {
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
   run_at "$NOW"
   expect_code 0 "$CODE" "short three-box timer: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 1800 with fallback 3600 gives an effective timer shorter than 3820s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'unsafe fleet timer was accepted'
+  assert_contains "$OUT" 'resume_ttl_seconds 1800 with fallback 3600 gives an effective timer shorter than 3920s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'unsafe fleet timer was accepted'
   assert_equals 0 "$(boat_calls)" 'unsafe fleet timer contacted Boat'
 
   new_case default-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
   printf '%s\n' "$BOX" "$second" "$third" > "$HOME_DIR/config/boat-box-id"
   run_at "$NOW"
   expect_code 0 "$CODE" "default three-box timer: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 3600 with fallback 3600 gives an effective timer shorter than 3820s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'three-box 300-second cadence omitted sweep time'
+  assert_contains "$OUT" 'resume_ttl_seconds 3600 with fallback 3600 gives an effective timer shorter than 3920s required for 3 listed boxes at FM_CHECK_INTERVAL 300' 'three-box 300-second cadence omitted sweep time'
   assert_equals 0 "$(boat_calls)" 'unsafe default fleet cadence contacted Boat'
 
   new_case slow-fleet-poll '{"expected_running":3,"resume_ttl_seconds":12000}'
@@ -437,7 +437,7 @@ test_three_box_renewal_window() {
     "$BIN/fm-boat-idle-check.sh" check 2>&1)
   CODE=$?
   expect_code 0 "$CODE" "slow three-box poll: $OUT"
-  assert_contains "$OUT" 'resume_ttl_seconds 12000 with fallback 3600 gives an effective timer shorter than 11920s required for 3 listed boxes at FM_CHECK_INTERVAL 1200' 'fallback timer below the fleet cadence was accepted'
+  assert_contains "$OUT" 'resume_ttl_seconds 12000 with fallback 3600 gives an effective timer shorter than 12020s required for 3 listed boxes at FM_CHECK_INTERVAL 1200' 'fallback timer below the fleet cadence was accepted'
   assert_equals 0 "$(boat_calls)" 'unsafe fleet cadence contacted Boat'
 
   new_case safe-fleet-timer '{"expected_running":3,"resume_ttl_seconds":3600}'
@@ -488,6 +488,51 @@ test_extend_failure_is_reported() {
   run_at "$((NOW + 600))"
   assert_equals "boat-idle: extend $BOX failed twice with live or unreadable workers" "$OUT" 'two-failure wake line'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a failed extend stopped the box'
+}
+
+test_renewal_deadline_keeps_full_resume_allowance() {
+  new_case renewal-deadline
+  make_info running 600
+  set_idle 'boat-tasks-remaining: yes'
+  mkdir "$HOME_DIR/state/.boat-idle-renew-$BOX"
+  OUT=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_INTERVAL="$CASE_INTERVAL" FIXTURES="$FIXTURES" \
+    "$BIN/fm-boat-idle-check.sh" renew-run "$BOX" "$(($(date +%s) + 20))" 2>&1)
+  CODE=$?
+  expect_code 1 "$CODE" "renewal with under 60 seconds left: $OUT"
+  assert_grep "boat --no-update info $BOX --json" "$FIXTURES/calls" 'the renewal did not reach its timer recheck'
+  assert_no_grep 'boat --no-update resume' "$FIXTURES/calls" 'renewal started a resume without its full allowance'
+}
+
+test_second_renewal_failure_survives_next_attempt() {
+  local marker
+  new_case renewal-failure-transition
+  make_info running 600
+  set_idle 'boat-tasks-remaining: yes'
+  marker="$HOME_DIR/state/.boat-idle-renew-$BOX"
+  mkdir "$marker"
+  printf '2\n' > "$marker/attempts"
+  : > "$FIXTURES/resume.fail"
+  OUT=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_INTERVAL="$CASE_INTERVAL" FIXTURES="$FIXTURES" \
+    "$BIN/fm-boat-idle-check.sh" renew "$BOX" 2>&1)
+  CODE=$?
+  expect_code 0 "$CODE" "second failed renewal: $OUT"
+  assert_equals fail "$(cat "$marker/result")" 'second failure result'
+  [ -f "$marker/wake" ] || fail 'second failure did not preserve its wake'
+  printf '3\n' > "$marker/attempts"
+  rm "$marker/result" "$FIXTURES/resume.fail"
+  OUT=$(env FM_HOME="$HOME_DIR" PATH="$FAKEBIN:$PATH" FM_BOAT_BIN="$FAKEBIN/boat" \
+    FM_BOAT_IDLE_NOW="$NOW" FM_CHECK_INTERVAL="$CASE_INTERVAL" FIXTURES="$FIXTURES" \
+    "$BIN/fm-boat-idle-check.sh" renew "$BOX" 2>&1)
+  CODE=$?
+  expect_code 0 "$CODE" "third successful renewal: $OUT"
+  assert_equals ok "$(cat "$marker/result")" 'third renewal result'
+  make_info running 3600
+  run_at "$NOW"
+  expect_code 0 "$CODE" "reconcile after a third renewal: $OUT"
+  assert_equals "boat-idle: extend $BOX failed twice with live or unreadable workers" "$OUT" 'second failure wake was overwritten'
+  assert_absent "$marker" 'completed renewal marker was not cleared'
 }
 
 test_stop_failure_is_reported_throttled() {
@@ -762,6 +807,8 @@ test_revisit_window_renews
 test_three_box_renewal_window
 test_configured_grace
 test_extend_failure_is_reported
+test_renewal_deadline_keeps_full_resume_allowance
+test_second_renewal_failure_survives_next_attempt
 test_stop_failure_is_reported_throttled
 test_invalid_config_is_reported_once_a_day
 test_grace_and_fleet_limits_are_validated
