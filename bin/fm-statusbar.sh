@@ -44,7 +44,8 @@
 #       mates, task, worktree, rate-limit windows). Only whitelisted JSON
 #       fields are ever printed. The mate segment is a few-second cache of
 #       this home's durable records and is omitted when that cache or a
-#       required source cannot be read. claude-fleet-refresh rebuilds it.
+#       required source cannot be read. Mates named by secondmate_on_demand
+#       are left out of it. claude-fleet-refresh rebuilds it.
 #
 # Environment: FM_STATE_OVERRIDE selects the state directory (default
 # $FM_HOME/state).
@@ -672,6 +673,10 @@ fm_sb_claude_fleet_refresh() {
   . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
   # shellcheck source=bin/fm-classify-lib.sh
   . "$SCRIPT_DIR/fm-classify-lib.sh"
+  if secondmate_on_demand_unreadable "$data_dir"; then
+    printf '\n' >"$tmp" && mv -f "$tmp" "$FLEET_CACHE"
+    return 0
+  fi
   if [ -f "$reg" ] && [ ! -L "$reg" ]; then
     while IFS= read -r piece || [ -n "$piece" ]; do
       secondmate_registry_parse_line "$piece" || continue
@@ -679,7 +684,13 @@ fm_sb_claude_fleet_refresh() {
       mate_home[$SECONDMATE_REGISTRY_ID]=$SECONDMATE_REGISTRY_HOME
     done <"$reg"
   fi
-  live=$(fm_run_timed 2 tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
+  # fm_run_timed runs the probe outside this shell, so the socket has to be an
+  # argument rather than the tmux() wrapper above.
+  if [ -n "$FM_SB_SOCKET" ]; then
+    live=$(fm_run_timed 2 command tmux -S "$FM_SB_SOCKET" list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
+  else
+    live=$(fm_run_timed 2 tmux list-windows -a -F '#{session_name}:#{window_name}' 2>/dev/null) || live=
+  fi
   holds=$(fm_sb_count_holds "$STATE") || holds=0
   state_real=$(cd "$STATE" 2>/dev/null && pwd -P) || state_real=$STATE
   for meta in "$STATE"/*.meta; do
@@ -687,6 +698,9 @@ fm_sb_claude_fleet_refresh() {
     id=${meta##*/}; id=${id%.meta}
     kind=$(fm_sb_meta_field "$meta" kind)
     [ "$kind" = secondmate ] || continue
+    if secondmate_on_demand "$data_dir" "$id"; then
+      continue
+    fi
     backend=$(fm_sb_meta_field "$meta" backend)
     win=$(fm_sb_meta_field "$meta" window)
     fm_sb_record_live "$win" "${backend:-tmux}" "$live" || continue

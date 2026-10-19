@@ -53,6 +53,8 @@
 # removed only when retirement completes.
 # This probe treats any existing inode, including an unsafe one, as skipped
 # without a probe, kill, or relaunch.
+# A mate named by secondmate_on_demand is the same kind of stand-down.
+# bin/fm-secondmate-registry-lib.sh owns that list.
 # A retry keeps an existing regular file.
 # A symlink or non-file refuses both the write and the clear and still stands
 # relaunch down.
@@ -197,6 +199,23 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   FM_SM_LIVE_CAUSE='' FM_SM_LIVE_WHERE='' FM_SM_LIVE_REASON='' FM_SM_LIVE_LINE=''
   if fm_secondmate_retirement_marked "$id"; then
     FM_SM_LIVE_REASON="retirement is in progress; endpoint left untouched"
+    return 0
+  fi
+  if ! command -v secondmate_on_demand >/dev/null 2>&1; then
+    # shellcheck source=bin/fm-secondmate-registry-lib.sh
+    . "$FM_SM_LIVE_LIB_DIR/fm-secondmate-registry-lib.sh"
+  fi
+  local on_demand_data on_demand_rc=1
+  if on_demand_data=$(secondmate_on_demand_data_dir); then
+    secondmate_on_demand "$on_demand_data" "$id"
+    on_demand_rc=$?
+  fi
+  if [ "$on_demand_rc" -eq 0 ]; then
+    FM_SM_LIVE_REASON="on demand; automatic relaunch left it stopped"
+    return 0
+  fi
+  if [ "$on_demand_rc" -eq 2 ]; then
+    FM_SM_LIVE_REASON="on-demand list is unreadable; endpoint left untouched"
     return 0
   fi
   local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend

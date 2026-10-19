@@ -862,6 +862,20 @@ The skill text owns the marker spelling, the tick order, and the reinforcement r
 Persistent secondmate routes live locally in `data/secondmates.md`.
 The concise single-line route contract is owned by the [`secondmate-provisioning` skill](../.agents/skills/secondmate-provisioning/SKILL.md#routing-table), including the parser-compatible fields, one-sentence summary requirement, `home:` pointer to the seeded charter, and limit on extra registry prose.
 
+### On-demand mates
+
+`data/secondmate-on-demand` sits beside the registry and names mates that stay down until work is routed to them, one id per line.
+`bin/fm-secondmate-registry-lib.sh` owns how that file is read.
+A missing file names nobody.
+Session-start recovery, the liveness check, and secondmate restart leave a listed mate stopped.
+The Claude status line omits a listed mate.
+This example is documentation only:
+
+```
+health
+lead-haven
+```
+
 ### Remote routes and validation
 
 A remote route adds `host:` and `root:` before the existing fields and places the whole secondmate home on that SSH host; the bounded [Boat overflow sender](remote-secondmates.md#code-only-boat-overflow) can dispatch code-only workers through its purpose-built route.

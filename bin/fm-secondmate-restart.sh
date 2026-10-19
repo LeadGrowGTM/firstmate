@@ -58,14 +58,16 @@
 # Restart candidacy itself belongs to bin/fm-update.sh, which knows which homes
 # the update pass actually left on the target commit; this command re-checks
 # capability on its own argv rather than trusting a caller's list.
+# An id that secondmate_on_demand lists is reported as skipped and is not restarted.
+# bin/fm-secondmate-registry-lib.sh owns that list.
 #
 # Environment knobs:
 #   FM_SECONDMATE_PERSIST_WAIT  seconds to wait for one mate's persist answer (900)
 #   FM_SECONDMATE_PERSIST_POLL  seconds between checks of that answer (5)
 #
-# Exit status: 0 every named mate restarted; 3 at least one was nudged or left
-# unreached and every mate was still accounted for; 1 the input itself is
-# unusable; 2 invalid use.
+# Exit status: 0 every named mate restarted or left stopped because it is
+# on demand; 3 at least one was nudged or left unreached and every mate was
+# still accounted for; 1 the input itself is unusable; 2 invalid use.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,6 +92,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 
 # shellcheck source=bin/fm-secondmate-restart-lib.sh
 . "$SCRIPT_DIR/fm-secondmate-restart-lib.sh"
+# shellcheck source=bin/fm-secondmate-registry-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
 # shellcheck source=bin/fm-secondmate-nudge-lib.sh
 . "$SCRIPT_DIR/fm-secondmate-nudge-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
@@ -134,6 +138,7 @@ RESTART_RESULT=()
 restarted_count=0
 nudged_count=0
 unreached_count=0
+skipped_count=0
 
 # Prefer the first error over preceding warnings, then use the first nonblank
 # line when a command reports no error. Flatten the chosen line for the report.
@@ -253,6 +258,22 @@ i=0
 while [ "$i" -lt "${#IDS[@]}" ]; do
   id=${IDS[$i]}
   PLAN[i]="fallback"
+  demand_rc=1
+  if demand_data=$(secondmate_on_demand_data_dir); then
+    secondmate_on_demand "$demand_data" "$id"
+    demand_rc=$?
+  fi
+  if [ "$demand_rc" -eq 0 ] || [ "$demand_rc" -eq 2 ]; then
+    PLAN[i]="skipped"
+    skipped_count=$((skipped_count + 1))
+    if [ "$demand_rc" -eq 0 ]; then
+      printf 'skipped: %s: on demand; automatic restart left it stopped\n' "$id"
+    else
+      printf 'skipped: %s: on-demand list is unreadable; automatic restart left it stopped\n' "$id"
+    fi
+    i=$((i + 1))
+    continue
+  fi
   REASON[i]=""
   CORR[i]=""
   DEADLINE[i]=""
@@ -324,6 +345,8 @@ i=0
 while [ "$i" -lt "${#IDS[@]}" ]; do
   if [ "${PLAN[i]}" = persisted-pending ]; then
     pending_count=$((pending_count + 1))
+  elif [ "${PLAN[i]}" = skipped ]; then
+    PLAN[i]="done"
   else
     fall_back_to_nudge "${IDS[$i]}" "${REASON[i]}"
     PLAN[i]="done"
@@ -376,7 +399,9 @@ done
 
 # --- summary ---------------------------------------------------------------
 
-printf 'summary: %d of %d restarted, %d nudged, %d unreached\n' \
-  "$restarted_count" "${#IDS[@]}" "$nudged_count" "$unreached_count"
+summary=$(printf 'summary: %d of %d restarted, %d nudged, %d unreached' \
+  "$restarted_count" "${#IDS[@]}" "$nudged_count" "$unreached_count")
+[ "$skipped_count" -eq 0 ] || summary="$summary, $skipped_count skipped"
+printf '%s\n' "$summary"
 [ "$((nudged_count + unreached_count))" -eq 0 ] || exit 3
 exit 0

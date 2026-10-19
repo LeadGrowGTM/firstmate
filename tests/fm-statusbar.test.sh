@@ -888,10 +888,11 @@ NAP_HOME="$WORK/fleet-mates/ada"
 OTTER_HOME="$WORK/fleet-mates/ottersec"
 ALEX_HOME="$WORK/fleet-mates/alexander"
 LEGION_HOME="$WORK/fleet-mates/legion"
+HEALTH_HOME="$WORK/fleet-mates/health"
 DECOY_HOME="$WORK/fleet-mates/remote-decoy"
 mkdir -p "$FLEET_STATE" "$FLEET_DATA" \
   "$DEV_HOME/state" "$NAP_HOME/state" "$OTTER_HOME/state" \
-  "$ALEX_HOME/state" "$LEGION_HOME/state" "$DECOY_HOME/state"
+  "$ALEX_HOME/state" "$LEGION_HOME/state" "$HEALTH_HOME/state" "$DECOY_HOME/state"
 tmux new-session -d -s fleetbar -n spare "sleep 600" || fail "fleet session did not start"
 tmux new-window -d -t fleetbar: -n fm-fleet-dev "sleep 600" || fail "dev window did not start"
 tmux new-window -d -t fleetbar: -n fm-fleet-dev-task "sleep 600" || fail "dev task window did not start"
@@ -899,6 +900,7 @@ tmux new-window -d -t fleetbar: -n fm-fleet-ada "sleep 600" || fail "ada window 
 tmux new-window -d -t fleetbar: -n fm-fleet-otter "sleep 600" || fail "otter window did not start"
 tmux new-window -d -t fleetbar: -n fm-fleet-alex "sleep 600" || fail "alex window did not start"
 tmux new-window -d -t fleetbar: -n fm-fleet-legion "sleep 600" || fail "legion window did not start"
+tmux new-window -d -t fleetbar: -n fm-fleet-health "sleep 600" || fail "health window did not start"
 cat >"$FLEET_DATA/secondmates.md" <<REG
 - dev - charts (home: $DEV_HOME; scope: charts; projects: none; added 2026-01-01)
 - ada - copy (home: $NAP_HOME; scope: copy; projects: none; added 2026-01-01)
@@ -911,6 +913,10 @@ printf 'window=fleetbar:fm-fleet-ada\nkind=secondmate\nhome=%s\n' "$NAP_HOME" >"
 printf 'window=fleetbar:fm-fleet-otter\nkind=secondmate\nhome=%s\n' "$OTTER_HOME" >"$FLEET_STATE/ottersec.meta"
 printf 'window=fleetbar:fm-fleet-alex\nkind=secondmate\nhome=%s\n' "$ALEX_HOME" >"$FLEET_STATE/alexander.meta"
 printf 'window=fleetbar:fm-fleet-legion\nkind=secondmate\nhome=%s\n' "$LEGION_HOME" >"$FLEET_STATE/legion.meta"
+printf 'window=fleetbar:fm-fleet-health\nkind=secondmate\nhome=%s\n' "$HEALTH_HOME" >"$FLEET_STATE/health.meta"
+printf 'window=fleetbar:fm-fleet-health\nkind=ship\nbackend=tmux\n' >"$HEALTH_HOME/state/vitals.meta"
+printf 'working [at=1]: checking vitals\n' >"$HEALTH_HOME/state/vitals.status"
+printf '# example only\nhealth\nlead-haven\n' >"$FLEET_DATA/secondmate-on-demand"
 printf 'window=fleetbar:fm-gone-mate\nkind=secondmate\nhome=%s\n' "$DEV_HOME" >"$FLEET_STATE/gone.meta"
 printf 'window=remote:far\nkind=secondmate\nremote_host=example.invalid\nhome=%s\n' "$DECOY_HOME" >"$FLEET_STATE/far.meta"
 printf 'window=fleetbar:fm-fleet-dev-task\nkind=ship\nbackend=tmux\n' >"$DEV_HOME/state/supercalifragilistic.meta"
@@ -950,7 +956,7 @@ case "$fleet_line" in
   *) fail "remote mate missing" "$fleet_line" ;;
 esac
 case "$fleet_line" in
-  *should-not-appear* | *gone:*) fail "dead or remote-decoy work leaked" "$fleet_line" ;;
+  *should-not-appear* | *gone:* | *health* | *vitals*) fail "dead, on-demand, or remote-decoy work leaked" "$fleet_line" ;;
 esac
 case "$fleet_line" in
   *"hold 2"*) ;;
