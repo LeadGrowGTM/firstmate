@@ -2772,6 +2772,12 @@ case "$ARG3" in
   ;;
 esac
 
+if [ "$RAW_LAUNCH" = 1 ] && [ "$HARNESS" = muse ] \
+  && fm_muse_carries_client_data "$FM_HOME" "$DATA/$ID/brief.md"; then
+  echo "error: a raw Muse launch carrying client data cannot guarantee --contributor-mode off; use the canonical muse harness" >&2
+  exit 1
+fi
+
 # muse, gemini, agy, and devin are verified as CREWMATE/SCOUT adapters only. A secondmate is
 # a firstmate instance, so it needs a primary supervision protocol.
 # gemini has none: docs/supervision-protocols/ carries no gemini wake protocol

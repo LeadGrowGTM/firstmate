@@ -188,7 +188,7 @@ EOF
 }
 
 run_muse_spawn() {  # <home> <proj> <wt> <fakebin> <id> [extra args...]
-  local home=$1 proj=$2 wt=$3 fakebin=$4 id=$5
+  local home=$1 proj=$2 wt=$3 fakebin=$4 id=$5 harness=${FM_TEST_MUSE_LAUNCH:-muse}
   shift 5
   FM_ROOT_OVERRIDE='' FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
@@ -205,7 +205,7 @@ run_muse_spawn() {  # <home> <proj> <wt> <fakebin> <id> [extra args...]
     XDG_CONFIG_HOME="${FM_TEST_MUSE_CONFIG_HOME-$home/xdgconfig}" \
     XDG_DATA_HOME="${FM_TEST_MUSE_DATA_HOME-$home/xdgdata}" \
     PATH="$fakebin:$PATH" \
-    "$SPAWN" "$id" "$proj" muse "$@" 2>&1
+    "$SPAWN" "$id" "$proj" "$harness" "$@" 2>&1
 }
 
 # --- detection --------------------------------------------------------------
@@ -326,19 +326,45 @@ EOF
 }
 
 test_spawn_contributor_off_for_client_home() {
-  local rec case_dir home proj wt fakebin id launch client_home
-  rec=$(make_spawn_case client-home)
-  IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+  local rec case_dir home proj wt fakebin id launch client_home client
+  for client in ikeuchi launchclub polyshares pewter ottersec napoleon; do
+    rec=$(make_spawn_case "client-home-$client")
+    IFS='|' read -r case_dir home proj wt fakebin id <<EOF
 $rec
 EOF
-  client_home="$case_dir/ikeuchi"
-  mv "$home" "$client_home"
-  home=$client_home
-  run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off >/dev/null \
-    || fail "muse spawn from a client home failed"
-  launch=$(cat "$home/launch.log")
-  assert_contains "$launch" '--contributor-mode off ' "client-home muse launch omitted contributor-mode off"
-  pass "muse spawn adds contributor-mode off from a client home"
+    client_home="$case_dir/$client"
+    mv "$home" "$client_home"
+    home=$client_home
+    run_muse_spawn "$home///" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off >/dev/null \
+      || fail "muse spawn from a client home failed"
+    launch=$(cat "$home/launch.log")
+    assert_contains "$launch" '--contributor-mode off ' "client-home muse launch omitted contributor-mode off"
+  done
+  pass "muse spawn adds contributor-mode off from all client homes with trailing slashes"
+}
+
+test_spawn_refuses_raw_client_launches() {
+  local source rec case_dir home proj wt fakebin id out status client_home
+  for source in brief home; do
+    rec=$(make_spawn_case "raw-client-$source")
+    IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+    if [ "$source" = brief ]; then
+      printf 'client-data: yes\n' >> "$home/data/$id/brief.md"
+    else
+      client_home="$case_dir/ikeuchi"
+      mv "$home" "$client_home"
+      home=$client_home
+    fi
+    out=$(FM_TEST_MUSE_LAUNCH='muse --yolo' \
+      run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off)
+    status=$?
+    expect_code 1 "$status" "raw Muse launch carrying client data must be refused"
+    assert_contains "$out" 'raw Muse launch carrying client data' "raw Muse refusal lacks a clear reason"
+    assert_absent "$home/state/$id.meta" "raw Muse refusal still launched a worker"
+  done
+  pass "raw Muse launches carrying client data are refused before provisioning"
 }
 
 test_spawn_no_contributor_flag_for_non_client() {
@@ -1082,6 +1108,7 @@ test_spawn_clears_inherited_foreign_harness_markers
 test_spawn_launch_shape
 test_spawn_contributor_off_for_client_brief
 test_spawn_contributor_off_for_client_home
+test_spawn_refuses_raw_client_launches
 test_spawn_no_contributor_flag_for_non_client
 test_spawn_maps_effort_and_model
 test_spawn_refuses_without_credential

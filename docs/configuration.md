@@ -1136,8 +1136,8 @@ The exception is the Muse counterpart of [Claude permission mode](#claude-permis
 The safety boundary lives in the worker's instructions instead: no merges, deploys, spend, client sends, or destructive actions without the captain's word.
 Client data may go to a Muse worker only on a launch that runs with `--contributor-mode off`.
 `bin/fm-spawn.sh` adds that per-run flag, which is never persisted, for a client home or a brief marked with `client-data: yes`; [`bin/fm-muse-client-lib.sh`](../bin/fm-muse-client-lib.sh) owns the client-home list and the brief marker.
+Muse 1.4.11 exposes no effective contributor-mode field in its session and does not persist the per-run flag to settings.json; the captured launch line and unchanged settings hash are the available evidence.
 Secrets and the captain's Gmail still never go to a Muse worker.
-Client data never goes to a Grok worker, with no contributor-mode exception.
 The [Muse adapter reference](../.agents/skills/harness-adapters/references/harness/muse.md) records the verified launch shape.
 
 ## Claude Remote Control (config/claude-remote-control)
