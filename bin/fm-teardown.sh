@@ -64,14 +64,20 @@
 # accepting unlanded edits to the same paths. Teardown still accepts a merged PR
 # whose head contains the current local work (ancestor or equivalent patch ids),
 # or a clean content-in-default tree match. Anything else refuses.
+# Before any of that, ordinary teardown and --only-if-stopped require a recorded
+# pr= to be confirmed merged: a pushed branch with an open PR would otherwise
+# read as landed and lose the record its merge needs. --retire-claim keeps its
+# records-only path outside this refusal.
 # The PR itself is resolved from the task's recorded pr= when present, or - when
 # no pr= was ever recorded (e.g. a yolo-authorized merge on a repo with no PR CI,
 # where the usual "checks green" fm-pr-check.sh trigger never fires) - by looking
 # up a merged PR whose head branch matches the worktree's branch, fetching its head
 # via refs/pull/<n>/head when the branch itself was deleted. So a missing pr= never
 # by itself causes a false refusal of landed work.
-# A gh lookup error falls back to the content check; if that is also inconclusive,
-# teardown refuses rather than risk discarding unlanded work.
+# A gh lookup error in the landed-work check falls back to the content check;
+# a failed merge-status lookup for a recorded pr= refuses before that check.
+# If the content check is also inconclusive, teardown refuses rather than risk
+# discarding unlanded work.
 # Uncommitted changes are never landed; dirty refusals distinguish untracked-only
 # leftovers from tracked edits and list at most ten non-exempt untracked paths.
 # local-only projects additionally accept work merged into the local default
@@ -1254,7 +1260,8 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
-if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$PR_URL" ]; then
+if [ -n "$PR_URL" ] && [ "$FORCE" != --force ] \
+  && { [ "$ONLY_IF_STOPPED" = 1 ] || [ "$RETIRE_CLAIM" != 1 ]; }; then
   if ! fm_pr_url_parse "$PR_URL"; then
     echo "REFUSED: recorded PR for $ID cannot be verified as merged; nothing was changed" >&2
     exit 1
