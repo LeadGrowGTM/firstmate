@@ -1416,7 +1416,7 @@ prime_multi_box() { # id state usage-seconds boot ready-boot
 test_project_list_and_cap_stop() {
   new_case project-list
   mkdir -p "$REMOTE_HOME/config" "$LOCAL_HOME/config"
-  printf 'gtm-client-acme\nextra-repo\n# a comment\n\nlead-haven MitchellkellerLG\n' > "$LOCAL_HOME/config/boat-projects"
+  printf 'gtm-client-acme\nextra-repo\n# a comment\n\nowned-repo ExampleOwner\n' > "$LOCAL_HOME/config/boat-projects"
   set_json request '.project = "gtm-client-acme"'
   run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
   expect_code 1 "$CODE" 'a client repository must never be allowed, whatever the list says'
@@ -1426,7 +1426,7 @@ test_project_list_and_cap_stop() {
   set_json request '.project = "extra-repo"'
   run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
   expect_code 0 "$CODE" "a project named in config/boat-projects must validate: $OUT"
-  set_json request '.project = "lead-haven"'
+  set_json request '.project = "owned-repo"'
   run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
   expect_code 0 "$CODE" "a project with its own GitHub owner must validate: $OUT"
   printf 'extra repo with spaces\n' > "$LOCAL_HOME/config/boat-projects"
@@ -1439,14 +1439,14 @@ test_project_list_and_cap_stop() {
 
   new_case project-owner-origin
   mkdir -p "$REMOTE_HOME/config"
-  printf 'firstmate\nlead-haven MitchellkellerLG\n' > "$REMOTE_HOME/config/boat-projects"
-  seed_project lead-haven
-  set_json request '.project = "lead-haven"'
+  printf 'firstmate\nowned-repo ExampleOwner\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project owned-repo
+  set_json request '.project = "owned-repo"'
   spawn_task
   expect_code 1 "$CODE" 'a clone whose origin owner differs from the list must refuse'
   assert_contains "$OUT" 'project origin is not the allowlisted fork' 'owner mismatch explanation'
   assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'an owner mismatch spawned a worker'
-  git -C "$REMOTE_HOME/projects/lead-haven" remote set-url origin https://github.com/MitchellkellerLG/lead-haven.git
+  git -C "$REMOTE_HOME/projects/owned-repo" remote set-url origin https://github.com/ExampleOwner/owned-repo.git
   spawn_task
   expect_code 0 "$CODE" "a listed project at its listed owner must dispatch: $OUT"
   assert_grep 'spawn task-one ' "$FIXTURES/calls" 'the listed project did not reach spawn'
