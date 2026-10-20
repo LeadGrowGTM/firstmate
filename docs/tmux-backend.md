@@ -70,6 +70,9 @@ Verify setup by spawning a small task and confirming its `fm-<id>` window appear
 
 ## Current behavior and safety
 
+A fresh spawn that fails before launching a worker closes the tmux window it created if no task record remains, allowing a same-id retry.
+If rollback retains the task record, the window stays with that record; a window the spawn did not create is left alone.
+
 For a disposable marked lab home, use `bin/fm-lab-home.sh tmux` to address its recorded named server.
 Tmux backend calls refuse that home unless its private `fm-lab` socket is selected; the helper's header owns setup and teardown.
 
