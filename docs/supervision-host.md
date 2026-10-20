@@ -125,7 +125,7 @@ It also passes the close through unchanged, with no added line, when any of thes
 
 A close the engine takes is handled as in [One wake](#one-wake), with the dialog mirror at the head of the wake message.
 A handled wake with only routine outcomes never reaches main.
-A handled wake that recorded a captain outcome while the captain is still attended exits with one `supervision-host: branch-outcome:` line naming its store rows, without the close it handled, when the digest says they are due, and otherwise parks; see [Captain outcomes](#captain-outcomes).
+A handled wake that recorded a captain outcome while the captain is still attended exits with one `supervision-host: branch-outcome:` line, without the close it handled, when the digest says outcomes are due or cannot judge them, and otherwise parks; see [Captain outcomes](#captain-outcomes).
 A turn that fails hands its close to main with one `supervision-host:` line, as away.
 Main-only rows that share the queue with the branch's rows stay queued for main, which is woken for each on its own triggering close, as on Pi.
 The captain-outcome digest is the one routing difference from Pi: while it is on, the host passes `--decision-digest`, so a decision-owned signal close goes to the engine, which reports it as a captain outcome and cannot answer it, and main hears it with the digest; a decision-owned stale close stays main's.
@@ -202,7 +202,7 @@ One example is a Cursor park superseded by the return turn's own end, which stop
 
 ## Captain outcomes
 
-A captain outcome the attended engine records while the captain remains attended wakes main through the owner's ordinary wake path, with one `supervision-host: branch-outcome:` line naming its store rows, once the digest says it is due.
+A captain outcome the attended engine records while the captain remains attended wakes main through the owner's ordinary wake path, with one `supervision-host: branch-outcome:` line, once the digest says it is due or cannot judge it.
 
 ### The digest
 
