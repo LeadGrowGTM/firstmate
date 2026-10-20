@@ -1,0 +1,36 @@
+scenario=existing PR relaunch trace=off
+command=bin/fm-control.sh rl20 relaunch --note "continuing review work"
+exit=0
+output=warning: /tmp/fm-control-relaunch.SA8DYG/evidence-off-25972/home/data/rl20/launch-brief.md records no ship branch; defaulting to legacy branch fm/rl20
+warning: /tmp/fm-control-relaunch.SA8DYG/evidence-off-25972/home/data/rl20/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl20 harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl20 worktree=/tmp/fm-control-relaunch.SA8DYG/evidence-off-25972/wt
+persisted-record-tail:
+realized_effort=default
+fallback_reason="continuing review work"
+busy_gen=g1792496071.918469.8586
+spawn_gen=s1792496071.916945.19693
+tmux_socket=/tmp/fm-control-relaunch.SA8DYG/evidence-off-25972/fake/recorded-socket
+control_relaunch_tx=914709.20261020T113430Z.31301
+pr=https://github.com/example/repo/pull/20
+pr_head=0123456789abcdef0123456789abcdef01234567
+merge-monitor-parser-exit=0 url=https://github.com/example/repo/pull/20
+
+injected-line-parser-exit=1 (expected nonzero)
+
+scenario=existing PR relaunch trace=on
+command=bin/fm-control.sh rl20 relaunch --note "continuing review work"
+exit=0
+output=warning: /tmp/fm-control-relaunch.SA8DYG/evidence-on-15309/home/data/rl20/launch-brief.md records no ship branch; defaulting to legacy branch fm/rl20
+warning: /tmp/fm-control-relaunch.SA8DYG/evidence-on-15309/home/data/rl20/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched rl20 harness=claude from=claude model=default effort=default backend=tmux endpoint=fmses:fm-rl20 worktree=/tmp/fm-control-relaunch.SA8DYG/evidence-on-15309/wt
+persisted-record-tail:
+fallback_reason="continuing review work"
+busy_gen=g1792496073.921709.12028
+spawn_gen=s1792496073.920580.14885
+tmux_socket=/tmp/fm-control-relaunch.SA8DYG/evidence-on-15309/fake/recorded-socket
+control_relaunch_tx=919600.20261020T113432Z.18735
+traceparent=00-99292658dfbd1dd4114d004c6632e93f-847c5ac8ec87d5a5-01
+pr=https://github.com/example/repo/pull/20
+pr_head=0123456789abcdef0123456789abcdef01234567
+merge-monitor-parser-exit=0 url=https://github.com/example/repo/pull/20
+
