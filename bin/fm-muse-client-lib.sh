@@ -16,9 +16,9 @@ FM_MUSE_CLIENT_HOMES="ikeuchi launchclub polyshares pewter ottersec napoleon"
 FM_MUSE_CLIENT_MARKER="client-data: yes"
 
 fm_muse_client_home_p() { # <home-path>
-  local path=${1:-} base
+  local path base
   local h
-  while [[ "$path" == */ ]]; do path=${path%/}; done
+  path=$(CDPATH='' cd -- "${1:-}" 2>/dev/null && pwd -P) || return 1
   base=${path##*/}
   for h in $FM_MUSE_CLIENT_HOMES; do
     [ "$base" = "$h" ] && return 0
