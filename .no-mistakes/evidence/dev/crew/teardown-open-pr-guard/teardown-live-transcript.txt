@@ -1,0 +1,25 @@
+warning: You appear to have cloned an empty repository.
+SCENARIO open-pr exit=1
+REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed
+task record: retained
+worker copy: retained
+task commit: unchanged
+remote branch head: 6ac29278d75bd3f53521a9fae36ea0ee00f81502
+SCENARIO failed-lookup exit=1
+REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed
+task record: retained
+worker copy: retained
+task commit: unchanged
+remote branch head: 6ac29278d75bd3f53521a9fae36ea0ee00f81502
+SCENARIO invalid-url exit=1
+REFUSED: recorded PR for task-live cannot be verified as merged; nothing was changed
+task record: retained
+worker copy: retained
+task commit: unchanged
+remote branch head: 6ac29278d75bd3f53521a9fae36ea0ee00f81502
+SCENARIO merged-pr exit=0
+task record: removed
+worker copy: retained
+task commit: unchanged
+remote branch head: 6ac29278d75bd3f53521a9fae36ea0ee00f81502
+teardown task-live complete (window worker:fm-task-live, worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5DJWV5V2FA1CBPQRFCZ0H81/.gate-live/projects/copy)
