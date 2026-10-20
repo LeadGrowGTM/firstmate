@@ -1598,10 +1598,6 @@ spawn_abort_cleanup() {
             echo "backend=orca"
             echo "orca_worktree_id=$ORCA_WORKTREE_ID"
             [ -z "${ORCA_TERMINAL:-}" ] || echo "terminal=$ORCA_TERMINAL"
-            # A relaunch abort must not drop a registered PR identity: merge
-            # monitoring reads pr=/pr_head= from this record, and the parser
-            # refuses any other key after pr=, so the identity rides last.
-            grep -E '^pr=|^pr_head=' "$STATE/$ID.meta" 2>/dev/null || true
           } >"$SPAWN_META_TMP" 2>/dev/null &&
             fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE" ||
             true
