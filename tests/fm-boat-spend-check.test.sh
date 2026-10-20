@@ -520,6 +520,70 @@ test_new_box_condition_survives_repeated_blind_read() {
   assert_not_contains "$out" 'read failed' "unchanged read failure should stay quiet"
 }
 
+test_observed_box_clear_during_unrelated_blind_read() {
+  local home out
+  home=$(make_world observed-box-clear)
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home")
+  assert_contains "$out" 'restore failed' "first restore error"
+  set_json "$home" list '.sandboxes[0].error = null'
+  set_json "$home" billing 'del(.prepaid.enabled)'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals 'boat-spend: read failed: unreadable auto-refill state' "$out" "unrelated blind read observes the error clear"
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: restore failed' "$out" "observed clear alerts on return during a blind read"
+}
+
+test_partial_read_clears_only_observed_sources() {
+  local home out
+  home=$(make_world observed-sources '{"expected_running":0}')
+  set_json "$home" limits '.creditUsedSeconds = 3500000 | .subscriptionTrialEndsAt = "2026-10-13T21:38:16.000Z"'
+  set_json "$home" list '.sandboxes[0].type = "large" | .sandboxes[0].archiveAfter = null | .sandboxes[0].hydrated = false | .sandboxes[0].health = "degraded" | .sandboxes[0].error = "restore failed"'
+  set_json "$home" billing '.prepaid.enabled = true'
+  out=$(run_check "$home")
+  assert_contains "$out" 'restore failed' "first set of conditions"
+  set_json "$home" limits '.creditUsedSeconds = 6124 | .subscriptionTrialEndsAt = "2026-10-30T21:38:16.000Z"'
+  set_json "$home" list '.sandboxes[0].state = "stopped" | .sandboxes[0].type = "default" | .sandboxes[0].archiveAfter = "2026-10-11T16:00:00.000Z" | .sandboxes[0].hydrated = true | .sandboxes[0].health = "ok" | .sandboxes[0].error = null'
+  set_json "$home" billing 'del(.prepaid.enabled)'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals 'boat-spend: read failed: unreadable auto-refill state' "$out" "observed conditions clear while refill stays unknown"
+  set_json "$home" limits '.creditUsedSeconds = 3500000 | .subscriptionTrialEndsAt = "2026-10-13T21:38:16.000Z"'
+  set_json "$home" list '.sandboxes[0].state = "running" | .sandboxes[0].type = "large" | .sandboxes[0].archiveAfter = null | .sandboxes[0].hydrated = false | .sandboxes[0].health = "degraded" | .sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  for text in 'spend $35' 'sandboxes active' 'is size large' 'has no auto-stop' 'trial or plan ends' 'health is degraded' 'restore failed' 'has not finished restoring'; do
+    assert_contains "$out" "$text" "observed $text condition should alert on return"
+  done
+  assert_not_contains "$out" 'auto-refill is enabled' "an unreadable refill value was not proven to clear"
+  assert_not_contains "$out" 'read failed' "unchanged blind read stays quiet"
+  set_json "$home" billing '.prepaid.enabled = true'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 87000)))
+  [ -z "$out" ] || fail "a refill condition hidden by an unreadable source should stay deduplicated: $out"
+}
+
+test_incomplete_list_does_not_clear_box_condition() {
+  local home out
+  home=$(make_world incomplete-list-retains)
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home")
+  assert_contains "$out" 'restore failed' "first restore error"
+  set_json "$home" list '.pageInfo.hasMore = true | .sandboxes = []'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_contains "$out" 'read failed' "incomplete list"
+  set_json "$home" list '.pageInfo.hasMore = false | .sandboxes = [{"id":"bx_one","state":"running","type":"default","archiveAfter":"2026-10-11T16:00:00.000Z","error":"restore failed"}]'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  [ -z "$out" ] || fail "an incomplete list must not prove a box error cleared: $out"
+  home=$(make_world visible-box-in-incomplete-list)
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  run_check "$home" >/dev/null
+  set_json "$home" list '.pageInfo.hasMore = true | .sandboxes[0].error = null'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_contains "$out" 'read failed' "partial list with visible box"
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  assert_contains "$out" 'restore failed' "a visible box error that cleared must alert on return"
+}
+
 test_daily_gate_and_persistent_condition() {
   local home out
   home=$(make_world gate)
@@ -618,6 +682,9 @@ test_spend_condition_uses_state_not_dollars
 test_restore_error_keys_full_text
 test_capped_alerts_remain_pending
 test_new_box_condition_survives_repeated_blind_read
+test_observed_box_clear_during_unrelated_blind_read
+test_partial_read_clears_only_observed_sources
+test_incomplete_list_does_not_clear_box_condition
 test_daily_gate_and_persistent_condition
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it
 pass "fm-boat-spend-check"

@@ -224,6 +224,8 @@ findings() {
     ($limits.subscriptionCurrentPeriodEnd | ts) as $period_end |
     ($limits.subscriptionTrialEndsAt | ts) as $trial_end |
     (if $period_end != null and $period_end > $now then $period_end else month_end($now) end) as $horizon |
+    (($list.sandboxes | type) == "array" and $list.pageInfo.hasMore == false) as $list_ok |
+    ($list_ok and all($boxes[]; has_state) and ($states | strs)) as $live_ok |
     [
       (if $spend_ok then empty else "spend" end),
       (if ($day | type) == "number" then empty else "last-24-hour usage" end),
@@ -239,6 +241,27 @@ findings() {
     ] as $unread |
     {
       status: (if ($unread | length) > 0 then "blind" else "ok" end),
+      observed: [
+        {kind: "read"},
+        (if $spend_ok then
+           if ($used / $spd) > $cfg.ceiling_usd or
+              (($day | type) == "number" and ($limits.subscriptionCurrentPeriodEnd == null or $period_end != null))
+           then {kind: "spend"} else empty end
+         else empty end),
+        (if $live_ok then {kind: "running"}, {kind: "size"}, {kind: "no-stop"},
+           {kind: "restore-incomplete"}, {kind: "disk-expiry"} else empty end),
+        (if ($billing.prepaid.enabled | type) == "boolean" then {kind: "refill"} else empty end),
+        (if ($limits.subscriptionCurrentPeriodEnd == null or $period_end != null) and
+            ($limits.subscriptionTrialEndsAt == null or $trial_end != null)
+         then {kind: "period"} else empty end),
+        (if $list_ok then {kind: "health"}, {kind: "restore-error"} else empty end),
+        ($boxes[] | ({kind: "health", id: .id}, {kind: "restore-error", id: .id})),
+        (if $states | strs then
+           $boxes[] | select(has_state) | (
+           {kind: "size", id: .id}, {kind: "no-stop", id: .id},
+           {kind: "restore-incomplete", id: .id}, {kind: "disk-expiry", id: .id})
+         else empty end)
+      ],
       findings: [
         (if $spend_ok then
            ($used / $spd) as $spent |
@@ -312,7 +335,7 @@ report() {  # <joined findings>
   fm_cap_line "boat-spend: $1" "$MAX_LINE"
 }
 
-# alerted_keys prints the JSON array of box conditions already reported, or []
+# alerted_keys prints the JSON array of conditions already reported, or []
 # when the record is missing or not this schema. A bad record alerts again
 # rather than hiding a condition forever.
 alerted_keys() {
@@ -350,14 +373,16 @@ alerted_write() {  # <json array of {id,kind,detail}>
 publish_alerts() {
   local mode=$1 prev result
   prev=$(alerted_keys)
-  result=$(jq -c --argjson prev "$prev" --arg mode "$mode" --argjson max "$MAX_LINE" '
+  result=$(jq -c --argjson prev "$prev" --arg mode "$mode" --argjson observed "$EVAL_OBSERVED" --argjson max "$MAX_LINE" '
     def norm: {id, kind, detail};
     (if type == "array" then . else [] end) as $f |
     ($prev | if type == "array" then map(select(type == "object") | norm) else [] end) as $seen |
     [$f[] | norm] as $cur |
     (if $mode == "replace"
      then [$seen[] as $key | select(any($cur[]; . == $key)) | $key]
-     else [$seen[] as $key | select($key.kind != "read" or any($cur[]; . == $key)) | $key]
+     else [$seen[] as $key |
+       select(any($cur[]; . == $key) or
+         (any($observed[]; .kind == $key.kind and ((has("id") | not) or .id == $key.id)) | not)) | $key]
      end) as $base |
     [$f[] as $item | select(any($seen[]; . == ($item | norm)) | not) | $item] as $pending |
     (reduce $pending[] as $item ({line: "", sent: []};
@@ -385,11 +410,13 @@ EVAL_LINE=
 EVAL_MODE=hard
 EVAL_FINDINGS='[]'
 EVAL_NEXT='[]'
+EVAL_OBSERVED='[{"kind":"read"}]'
 evaluate() {
-  local now=$1 cfg limits list billing rc found status findings
+  local now=$1 cfg limits list billing rc found status findings observed
   EVAL_LINE=
   EVAL_MODE=hard
   EVAL_FINDINGS='[]'
+  EVAL_OBSERVED='[{"kind":"read"}]'
   if ! config_normalized; then
     EVAL_LINE="config/boat-spend.json is invalid: $CONFIG_PROBLEM"
     return 1
@@ -406,6 +433,7 @@ evaluate() {
   }
   status=$(printf '%s' "$found" | jq -r '.status' 2>/dev/null) || status=
   findings=$(printf '%s' "$found" | jq -c '.findings' 2>/dev/null) || findings=
+  observed=$(printf '%s' "$found" | jq -c '.observed' 2>/dev/null) || observed=
   case "$status" in
     ok|blind) ;;
     *) EVAL_LINE="read failed: Boat output had an unexpected shape"; return 1 ;;
@@ -414,8 +442,13 @@ evaluate() {
     '['*) ;;
     *) EVAL_LINE="read failed: Boat output had an unexpected shape"; return 1 ;;
   esac
+  case "$observed" in
+    '['*) ;;
+    *) EVAL_LINE="read failed: Boat output had an unexpected shape"; return 1 ;;
+  esac
   EVAL_MODE=$status
   EVAL_FINDINGS=$findings
+  EVAL_OBSERVED=$observed
   [ "$EVAL_MODE" = ok ]
 }
 

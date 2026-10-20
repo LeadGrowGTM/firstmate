@@ -2296,6 +2296,8 @@ Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
   `bin/fm-boat-spend-check.sh` records only conditions included in the emitted line, so alerts omitted by the line cap remain pending.
 - An evaluation that could not see everything is not recorded, so the next watcher poll tries again and a passing failure does not cost the day's check.
   An unchanged failure stays silent while a newly observed condition can still alert.
+  A partial read clears a reported condition when its source was observed and the condition is absent.
+  Conditions from unreadable sources remain reported until they can be checked again.
 - Each Boat call is bounded to 9 seconds so the three together fit inside `FM_CHECK_TIMEOUT`.
 - Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and the check records.
 
