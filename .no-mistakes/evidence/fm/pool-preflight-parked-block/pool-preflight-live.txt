@@ -1,0 +1,29 @@
+Live pool preflight with Treehouse v2.1.1
+
+Later slot claim: preflight exit=0; output=<empty>
+Treehouse actual leased slot=1; later marker survived=yes
+
+Later task record: preflight exit=0; output=<empty>
+Treehouse actual leased slot=1; parked record survived=yes
+
+Selected task record: preflight exit=1; output=REFUSED: idle pool copy /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/1/project is still reserved by /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/lab-home/state/parked.meta; relaunch that task or use guarded --retire-claim teardown before allocation.
+
+Selected slot claim: preflight exit=1; output=REFUSED: idle pool slot /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/1 still carries a slot claim; reconcile it before allocation
+
+Dirty earlier copy with later claim: preflight exit=1; output=REFUSED: idle pool slot /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/2 still carries a slot claim; reconcile it before allocation; dirt preserved=yes
+
+Malformed first created_at with later claim: preflight exit=1; output=REFUSED: idle pool slot /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/2 still carries a slot claim; reconcile it before allocation; marker preserved=yes
+bridge pid=1812482; cwd=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/1/project
+agent-process classifier exit=0; pids=<empty>
+Treehouse-style rooted occupancy includes bridge=yes
+Orphan bridge in first copy with later claim: preflight exit=1; output=REFUSED: idle pool slot /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/2 still carries a slot claim; reconcile it before allocation
+
+Malformed first created_at with later task record: preflight exit=1; output=REFUSED: idle pool copy /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/2/project is still reserved by /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/lab-home/state/parked.meta; relaunch that task or use guarded --retire-claim teardown before allocation.
+
+Clone-local inventory path, later claim: exit=0; output=<empty>
+Clone-local inventory path, malformed earlier timestamp: exit=1; output=REFUSED: idle pool copy /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/2/project still carries task parked's slot claim; reconcile it before allocation
+
+First slot durably leased, second claimed: preflight exit=1; output=REFUSED: idle pool slot /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5C6TCJY0KF6YQ31C0RK3M3B/.live-pool.R043x9/.treehouse/project-0aff9c/2 still carries a slot claim; reconcile it before allocation
+
+Final Treehouse status after releasing disposable leases: [{"name":"1","status":"available","processes":[]},{"name":"2","status":"available","processes":[]}]
+All preflight invocations used the real bin/fm-treehouse-pool-check.sh with isolated HOME and FM_HOME. Real Treehouse get --lease --json supplied the allocation observations.
