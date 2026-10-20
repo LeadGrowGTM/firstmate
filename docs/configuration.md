@@ -2290,11 +2290,17 @@ Stopped sandboxes are otherwise never reported, because Boat bills only while a 
 Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
 
 - That writes `state/boat-spend.check.sh` and binds its bytes with `bin/fm-check-register.sh`, so the existing watcher polls it and turns its one line into a `check:` wake; no separate schedule is involved.
-- An evaluation that read everything is recorded, and the next one is due 24 hours later; a condition that persists is reported again at each due evaluation.
+- An evaluation that read everything is recorded, and the next one is due 24 hours later.
+  Every condition is reported once, then again only when it changes to a distinct condition or clears and later returns.
+  Spend uses the over-ceiling or projected-over-ceiling state, rather than a changing dollar amount, as its identity; a restore error uses its full error text even though the displayed text is shortened.
+  A partial read can clear an over-ceiling alert from readable spend alone; clearing a projected alert also requires the usage and plan-end inputs needed to calculate it.
+  `bin/fm-boat-spend-check.sh` records only conditions included in the emitted line, so alerts omitted by the line cap remain pending.
 - An evaluation that could not see everything is not recorded, so the next watcher poll tries again and a passing failure does not cost the day's check.
-  Its line is printed at most once per 24 hours while the failure lasts, and that limit is lifted as soon as a read succeeds.
+  An unchanged failure stays silent while a newly observed condition can still alert.
+  A partial read clears a reported condition when its source was observed and the condition is absent.
+  Conditions from unreadable sources remain reported until they can be checked again.
 - Each Boat call is bounded to 9 seconds so the three together fit inside `FM_CHECK_TIMEOUT`.
-- Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and both records.
+- Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and the check records.
 
 ## Boat idle check
 

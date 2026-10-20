@@ -19,10 +19,14 @@
 #   4. Only the three fixed read commands are ever passed, each with
 #      --no-update, and no mutating verb is ever seen.
 #   5. A home with no config is not checked and never calls Boat.
-#   6. The daily gate holds, a failed read does not use it up and is reported
-#      once a day, and arm and disarm bind and remove the shim.
+#   6. The daily gate holds, a failed read does not use it up, and arm and
+#      disarm bind and remove the shim.
 #   7. "boat_bin" selects the CLI only as an absolute path to an executable
 #      file, and FM_BOAT_BIN wins over it.
+#   8. A box condition alerts on first sight, stays silent while unchanged
+#      across a later due run, alerts when its detail changes, stays silent
+#      when it clears, and alerts again when it returns. The remembered set
+#      survives a new run of the check. Account and read conditions do too.
 # shellcheck disable=SC2016  # literal dollar amounts in expected report lines
 set -u
 
@@ -243,7 +247,7 @@ test_transient_read_failure_does_not_use_up_the_day() {
   assert_equals 4 "$(calls "$home" | wc -l | tr -d ' ')" "one failed call, three successful reads, then a gated poll"
 }
 
-test_persistent_read_failure_reports_once_a_day() {
+test_persistent_read_failure_alerts_once() {
   local home out
   home=$(make_world persistent)
   printf 'not json{' > "$home/fixtures/limits.json"
@@ -253,10 +257,10 @@ test_persistent_read_failure_reports_once_a_day() {
   [ -z "$out" ] || fail "a repeated failure inside the day should be silent: $out"
   assert_equals 2 "$(calls "$home" | wc -l | tr -d ' ')" "a failed read should be retried at the next poll"
   out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
-  assert_equals 'boat-spend: read failed: boat limits did not return readable JSON' "$out" "a failure that lasts is reported again a day later"
+  [ -z "$out" ] || fail "a persistent read failure should stay silent the next day: $out"
 }
 
-test_persistent_unreadable_field_reports_once_a_day() {
+test_persistent_unreadable_field_alerts_once() {
   local home out
   home=$(make_world persistent-field)
   set_json "$home" billing 'del(.prepaid.enabled)'
@@ -264,8 +268,10 @@ test_persistent_unreadable_field_reports_once_a_day() {
   assert_equals 'boat-spend: read failed: unreadable auto-refill state' "$out" "the first unreadable evaluation"
   out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 300)))
   [ -z "$out" ] || fail "a repeated unreadable field inside the day should be silent: $out"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  [ -z "$out" ] || fail "a repeated unreadable field on the next day should be silent: $out"
   set_json "$home" billing '.prepaid.enabled = true'
-  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 600)))
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
   assert_equals 'boat-spend: auto-refill is enabled' "$out" "the field becoming readable should be evaluated the same day"
 }
 
@@ -307,7 +313,7 @@ bad_boat_bin_case() {
   assert_equals "boat-spend: config/boat-spend.json is invalid: $3" "$out" "$1 should be one invalid-config line"
   assert_equals 0 "$(calls "$home" | wc -l | tr -d ' ')" "$1 must execute nothing"
   out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
-  assert_equals "boat-spend: config/boat-spend.json is invalid: $3" "$out" "$1 should be refused even with FM_BOAT_BIN set"
+  [ -z "$out" ] || fail "$1 should stay silent while its invalid config is unchanged: $out"
   assert_equals 0 "$(calls "$home" | wc -l | tr -d ' ')" "$1 must execute nothing with FM_BOAT_BIN set"
 }
 
@@ -418,6 +424,200 @@ test_only_the_three_read_commands_are_passed() {
   assert_equals 3 "$seen" "every alert path should still make only the three reads"
 }
 
+test_box_condition_alerts_once_per_distinct_detail() {
+  local home out
+  home=$(make_world dedupe-restore)
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: restore handed over with 2/2 image file(s) missing"'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: Restore incomplete: restore handed over with 2/2 image file(s) missing' \
+    "$out" "first sighting alerts"
+  assert_present "$home/state/.boat-spend-alerted" "the remembered set is stored under state"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  [ -z "$out" ] || fail "the same restore error should stay silent on the next due run: $out"
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: restore handed over with 1/2 image file(s) missing"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 172800)))
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: Restore incomplete: restore handed over with 1/2 image file(s) missing' \
+    "$out" "changed error text alerts"
+  set_json "$home" list '.sandboxes[0].error = null'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 259200)))
+  [ -z "$out" ] || fail "a cleared restore error should be silent: $out"
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: restore handed over with 2/2 image file(s) missing"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 345600)))
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: Restore incomplete: restore handed over with 2/2 image file(s) missing' \
+    "$out" "a cleared condition alerts again when it returns"
+}
+
+test_spend_cap_still_alerts_when_a_known_box_error_does_not() {
+  local home out
+  home=$(make_world dedupe-spend)
+  set_json "$home" limits '.creditUsedSeconds = 3500000'
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: two image files missing"'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: spend $35 is over the $30 ceiling; sandbox bx_one has a restore error: Restore incomplete: two image files missing' \
+    "$out" "first run reports the spend cap and the restore error"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  [ -z "$out" ] || fail "unchanged spend and restore conditions should stay quiet: $out"
+}
+
+test_spend_condition_uses_state_not_dollars() {
+  local home out
+  home=$(make_world spend-state)
+  set_json "$home" limits '.creditUsedSeconds = 3500000'
+  out=$(run_check "$home")
+  assert_contains "$out" 'spend $35 is over' "first over-cap condition"
+  set_json "$home" limits '.creditUsedSeconds = 3600000'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  [ -z "$out" ] || fail "a higher total inside the same over-cap condition should stay quiet: $out"
+  set_json "$home" limits '.creditUsedSeconds = 2000000 | .last24hUsageSeconds = 1000000'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 172800)))
+  assert_contains "$out" 'projects to' "moving from over-cap to projected should alert"
+  set_json "$home" limits '.creditUsedSeconds = 3500000'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 259200)))
+  assert_contains "$out" 'spend $35 is over' "returning to over-cap should alert"
+}
+
+test_spend_observation_uses_each_conditions_inputs() {
+  local home out source
+  for source in usage plan; do
+    home=$(make_world "spend-over-blind-$source")
+    set_json "$home" limits '.creditUsedSeconds = 3500000'
+    out=$(run_check "$home")
+    assert_contains "$out" 'spend $35 is over' "first over-cap alert with $source"
+    case "$source" in
+      usage) set_json "$home" limits '.creditUsedSeconds = 2000000 | del(.last24hUsageSeconds)' ;;
+      plan) set_json "$home" limits '.creditUsedSeconds = 2000000 | .subscriptionCurrentPeriodEnd = "not a date"' ;;
+    esac
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+    assert_contains "$out" 'read failed' "unreadable $source while spend falls below the ceiling"
+    assert_not_contains "$out" 'spend $' "unreadable $source cannot support a projection"
+    set_json "$home" limits '.creditUsedSeconds = 3500000'
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+    assert_equals 'boat-spend: spend $35 is over the $30 ceiling' "$out" "over-cap returns while $source is unreadable"
+
+    home=$(make_world "spend-projected-blind-$source")
+    set_json "$home" limits '.creditUsedSeconds = 2000000 | .last24hUsageSeconds = 1000000'
+    out=$(run_check "$home")
+    assert_contains "$out" 'projects to' "first projected alert with $source"
+    case "$source" in
+      usage) set_json "$home" limits '.creditUsedSeconds = 6124 | del(.last24hUsageSeconds)' ;;
+      plan) set_json "$home" limits '.creditUsedSeconds = 6124 | .subscriptionCurrentPeriodEnd = "not a date"' ;;
+    esac
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+    assert_contains "$out" 'read failed' "unreadable $source cannot prove a projection cleared"
+    set_json "$home" limits '.creditUsedSeconds = 2000000 | .last24hUsageSeconds = 1000000 | .subscriptionCurrentPeriodEnd = "2026-10-30T21:38:16.000Z"'
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+    [ -z "$out" ] || fail "projected spend should remain deduplicated after unreadable $source: $out"
+  done
+}
+
+test_restore_error_keys_full_text() {
+  local home out prefix
+  home=$(make_world full-restore-error)
+  prefix=$(printf '%080d' 0)
+  set_json "$home" list ".sandboxes[0].error = \"${prefix}A\""
+  out=$(run_check "$home")
+  assert_equals "boat-spend: sandbox bx_one has a restore error: $prefix" "$out" "first long error"
+  set_json "$home" list ".sandboxes[0].error = \"${prefix}B\""
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals "boat-spend: sandbox bx_one has a restore error: $prefix" "$out" "a distinct suffix behind the display cut must alert"
+}
+
+test_capped_alerts_remain_pending() {
+  local home out later day
+  home=$(make_world capped)
+  set_json "$home" list '.sandboxes = [range(0; 20) | {id: ("bx_" + (.|tostring)), state: "stopped", error: ("failure " + (.|tostring) + ("x" * 70))}]'
+  out=$(run_check "$home")
+  assert_contains "$out" 'bx_0' "first capped report"
+  [ "${#out}" -le 1000 ] || fail "report exceeded the line cap"
+  [ "$(sed 1d "$home/state/.boat-spend-alerted" | jq -s '[.[] | select(.id == "bx_19")] | length')" -eq 0 ] \
+    || fail "an omitted box condition was recorded as alerted"
+  later=
+  for day in 1 2 3 4; do
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + day * 86400)))
+    later="$later$out"
+  done
+  assert_contains "$later" 'bx_19' "capped box condition never reached a later report"
+  [ "$(sed 1d "$home/state/.boat-spend-alerted" | jq -s '[.[] | select(.kind == "restore-error")] | length')" -eq 20 ] \
+    || fail "not all reported box conditions were remembered"
+}
+
+test_new_box_condition_survives_repeated_blind_read() {
+  local home out
+  home=$(make_world blind-new-box)
+  set_json "$home" list '.pageInfo.hasMore = true | .sandboxes[0].error = "old restore error"'
+  out=$(run_check "$home")
+  assert_contains "$out" 'old restore error' "first partial read should report its box error"
+  set_json "$home" list '.sandboxes += [{"id":"bx_two","state":"stopped","error":"new restore error"}]'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 300)))
+  assert_contains "$out" 'new restore error' "new box error during the same blind read"
+  assert_not_contains "$out" 'old restore error' "old box error should stay quiet"
+  assert_not_contains "$out" 'read failed' "unchanged read failure should stay quiet"
+}
+
+test_observed_box_clear_during_unrelated_blind_read() {
+  local home out
+  home=$(make_world observed-box-clear)
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home")
+  assert_contains "$out" 'restore failed' "first restore error"
+  set_json "$home" list '.sandboxes[0].error = null'
+  set_json "$home" billing 'del(.prepaid.enabled)'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals 'boat-spend: read failed: unreadable auto-refill state' "$out" "unrelated blind read observes the error clear"
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: restore failed' "$out" "observed clear alerts on return during a blind read"
+}
+
+test_partial_read_clears_only_observed_sources() {
+  local home out
+  home=$(make_world observed-sources '{"expected_running":0}')
+  set_json "$home" limits '.creditUsedSeconds = 3500000 | .subscriptionTrialEndsAt = "2026-10-13T21:38:16.000Z"'
+  set_json "$home" list '.sandboxes[0].type = "large" | .sandboxes[0].archiveAfter = null | .sandboxes[0].hydrated = false | .sandboxes[0].health = "degraded" | .sandboxes[0].error = "restore failed"'
+  set_json "$home" billing '.prepaid.enabled = true'
+  out=$(run_check "$home")
+  assert_contains "$out" 'restore failed' "first set of conditions"
+  set_json "$home" limits '.creditUsedSeconds = 6124 | .subscriptionTrialEndsAt = "2026-10-30T21:38:16.000Z"'
+  set_json "$home" list '.sandboxes[0].state = "stopped" | .sandboxes[0].type = "default" | .sandboxes[0].archiveAfter = "2026-10-11T16:00:00.000Z" | .sandboxes[0].hydrated = true | .sandboxes[0].health = "ok" | .sandboxes[0].error = null'
+  set_json "$home" billing 'del(.prepaid.enabled)'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals 'boat-spend: read failed: unreadable auto-refill state' "$out" "observed conditions clear while refill stays unknown"
+  set_json "$home" limits '.creditUsedSeconds = 3500000 | .subscriptionTrialEndsAt = "2026-10-13T21:38:16.000Z"'
+  set_json "$home" list '.sandboxes[0].state = "running" | .sandboxes[0].type = "large" | .sandboxes[0].archiveAfter = null | .sandboxes[0].hydrated = false | .sandboxes[0].health = "degraded" | .sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  for text in 'spend $35' 'sandboxes active' 'is size large' 'has no auto-stop' 'trial or plan ends' 'health is degraded' 'restore failed' 'has not finished restoring'; do
+    assert_contains "$out" "$text" "observed $text condition should alert on return"
+  done
+  assert_not_contains "$out" 'auto-refill is enabled' "an unreadable refill value was not proven to clear"
+  assert_not_contains "$out" 'read failed' "unchanged blind read stays quiet"
+  set_json "$home" billing '.prepaid.enabled = true'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 87000)))
+  [ -z "$out" ] || fail "a refill condition hidden by an unreadable source should stay deduplicated: $out"
+}
+
+test_incomplete_list_does_not_clear_box_condition() {
+  local home out
+  home=$(make_world incomplete-list-retains)
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home")
+  assert_contains "$out" 'restore failed' "first restore error"
+  set_json "$home" list '.pageInfo.hasMore = true | .sandboxes = []'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_contains "$out" 'read failed' "incomplete list"
+  set_json "$home" list '.pageInfo.hasMore = false | .sandboxes = [{"id":"bx_one","state":"running","type":"default","archiveAfter":"2026-10-11T16:00:00.000Z","error":"restore failed"}]'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  [ -z "$out" ] || fail "an incomplete list must not prove a box error cleared: $out"
+  home=$(make_world visible-box-in-incomplete-list)
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  run_check "$home" >/dev/null
+  set_json "$home" list '.pageInfo.hasMore = true | .sandboxes[0].error = null'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_contains "$out" 'read failed' "partial list with visible box"
+  set_json "$home" list '.sandboxes[0].error = "restore failed"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+  assert_contains "$out" 'restore failed' "a visible box error that cleared must alert on return"
+}
+
 test_daily_gate_and_persistent_condition() {
   local home out
   home=$(make_world gate)
@@ -428,7 +628,7 @@ test_daily_gate_and_persistent_condition() {
   [ -z "$out" ] || fail "a poll inside the daily gate should be silent: $out"
   assert_equals 3 "$(calls "$home" | wc -l | tr -d ' ')" "a gated poll must not call Boat"
   out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
-  assert_equals 'boat-spend: auto-refill is enabled' "$out" "a persisting condition is reported again at the next due evaluation"
+  [ -z "$out" ] || fail "a persistent condition should stay silent at the next due evaluation: $out"
 }
 
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
@@ -442,16 +642,12 @@ test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
   out=$(env -u FM_HOME FM_BOAT_BIN="$FAKE_BOAT" FIXTURES="$home/fixtures" FM_BOAT_SPEND_NOW="$NOW" "$home/state/boat-spend.check.sh" 2>&1) \
     || fail "registered shim failed: $out"
   assert_equals 'boat-spend: auto-refill is enabled' "$out" "shim did not run the check in the pinned home"
+  assert_present "$home/state/.boat-spend-alerted" "a completed check should remember which box conditions it reported"
   env FM_HOME="$home" "$CHECK" disarm >/dev/null
   assert_absent "$home/state/boat-spend.check.sh" "disarm left the shim"
   assert_absent "$home/state/boat-spend.check-trust" "disarm left the trust binding"
   assert_absent "$home/state/.boat-spend-check" "disarm left the record"
-  home=$(make_world disarm-failed)
-  : > "$home/fixtures/timeout"
-  run_check "$home" >/dev/null
-  assert_present "$home/state/.boat-spend-check-failed" "a reported failed read should leave its record"
-  env FM_HOME="$home" "$CHECK" disarm >/dev/null
-  assert_absent "$home/state/.boat-spend-check-failed" "disarm left the failure record"
+  assert_absent "$home/state/.boat-spend-alerted" "disarm left the remembered box conditions"
 }
 
 test_health_restore_and_expiry_are_reported() {
@@ -500,8 +696,8 @@ test_trial_or_plan_end_within_three_days
 test_unreadable_fields_are_reported
 test_read_problems_are_consolidated_beside_real_findings
 test_transient_read_failure_does_not_use_up_the_day
-test_persistent_read_failure_reports_once_a_day
-test_persistent_unreadable_field_reports_once_a_day
+test_persistent_read_failure_alerts_once
+test_persistent_unreadable_field_alerts_once
 test_findings_are_joined_on_one_line
 test_missing_cli_is_reported
 test_boat_bin_config_selects_the_cli
@@ -514,6 +710,16 @@ test_missing_active_states_is_not_guessed
 test_absent_config_is_off
 test_dispatch_reservation_keys_are_accepted
 test_only_the_three_read_commands_are_passed
+test_box_condition_alerts_once_per_distinct_detail
+test_spend_cap_still_alerts_when_a_known_box_error_does_not
+test_spend_condition_uses_state_not_dollars
+test_spend_observation_uses_each_conditions_inputs
+test_restore_error_keys_full_text
+test_capped_alerts_remain_pending
+test_new_box_condition_survives_repeated_blind_read
+test_observed_box_clear_during_unrelated_blind_read
+test_partial_read_clears_only_observed_sources
+test_incomplete_list_does_not_clear_box_condition
 test_daily_gate_and_persistent_condition
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it
 pass "fm-boat-spend-check"
