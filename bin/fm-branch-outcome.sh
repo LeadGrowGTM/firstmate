@@ -14,6 +14,11 @@
 #     urgency as urgent. A silent row must have verdict `routine`, and only a
 #     captain row may carry urgency; the branch prompt and delivery consumers
 #     own the additional no-change eligibility rule.
+#     Append stores the task status log's position at append time, unless the
+#     caller passes --status-endpoint and --status-ident together. Those two
+#     values are the row's provenance as given: the attended report surface
+#     passes the status span it already validated, so a line that lands after
+#     that span is not stamped onto this row.
 #     Every read and append validates the complete log as a gap-free sequence;
 #     malformed, duplicate, or reordered rows fail closed.
 #     Existing lines are never rewritten, reordered, or deleted by any
@@ -82,9 +87,11 @@
 # Usage:
 #   fm-branch-outcome.sh append --task <id> --verdict routine|captain \
 #       --summary <text> [--wake <text>] [--silent true|false] \
-#       [--urgency urgent|pr-ready|digest]
+#       [--urgency urgent|pr-ready|digest] \
+#       [--status-endpoint <n> --status-ident <text>]
 #     Append one outcome record; prints the assigned seq. --urgency is legal
-#     only with the captain verdict.
+#     only with the captain verdict. The two status flags are optional and
+#     must be passed together; see the provenance rule above.
 #   fm-branch-outcome.sh unread
 #     Print every unread record (raw JSONL). Exit 0 with no output when none.
 #   fm-branch-outcome.sh mark-read --through <seq>
@@ -189,7 +196,7 @@ RECORDED_AGO_JQ='def recorded_ago: ([$now - .epoch, 0] | max) as $s
     else "\($s / 86400 | floor)d" end;'
 
 usage() {
-  echo "usage: fm-branch-outcome.sh append --task <id> --verdict routine|captain --summary <text> [--wake <text>] [--silent true|false] [--urgency urgent|pr-ready|digest] | unread | mark-read --through <seq> | unprocessed | mark-processed --through <seq> | present | digest --window <seconds> --pr-ready urgent|digest [--now <epoch>] | processed-init [--held-lock] | list [--recent <n>] | lookup --seqs <n,...> | startup-replay | seed-tail" >&2
+  echo "usage: fm-branch-outcome.sh append --task <id> --verdict routine|captain --summary <text> [--wake <text>] [--silent true|false] [--urgency urgent|pr-ready|digest] [--status-endpoint <n> --status-ident <text>] | unread | mark-read --through <seq> | unprocessed | mark-processed --through <seq> | present | digest --window <seconds> --pr-ready urgent|digest [--now <epoch>] | processed-init [--held-lock] | list [--recent <n>] | lookup --seqs <n,...> | startup-replay | seed-tail" >&2
   exit 2
 }
 
@@ -535,6 +542,10 @@ case "$CMD" in
     WAKE=''
     SILENT=false
     URGENCY=''
+    STATUS_ENDPOINT_SET=0
+    STATUS_IDENT_SET=0
+    STATUS_ENDPOINT=''
+    STATUS_IDENT=''
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --task) TASK=${2:-}; shift 2 || usage ;;
@@ -543,6 +554,8 @@ case "$CMD" in
         --wake) WAKE=${2:-}; shift 2 || usage ;;
         --silent) SILENT=${2:-}; shift 2 || usage ;;
         --urgency) URGENCY=${2:-}; shift 2 || usage ;;
+        --status-endpoint) STATUS_ENDPOINT=${2:-}; STATUS_ENDPOINT_SET=1; shift 2 || usage ;;
+        --status-ident) STATUS_IDENT=${2:-}; STATUS_IDENT_SET=1; shift 2 || usage ;;
         *) usage ;;
       esac
     done
@@ -560,6 +573,14 @@ case "$CMD" in
       echo "error: only a captain outcome carries an urgency" >&2
       exit 2
     fi
+    if [ "$STATUS_ENDPOINT_SET" -ne "$STATUS_IDENT_SET" ]; then
+      echo "error: --status-endpoint and --status-ident must be passed together" >&2
+      exit 2
+    fi
+    if [ "$STATUS_ENDPOINT_SET" -eq 1 ]; then
+      bounded_uint "$STATUS_ENDPOINT" || usage
+      case "$STATUS_IDENT" in ''|*$'\t'*|*$'\n'*) usage ;; esac
+    fi
     fm_lock_acquire_wait "$LOCK"
     if ! LAST_SEQ=$(last_seq); then
       fm_lock_release "$LOCK"
@@ -572,7 +593,12 @@ case "$CMD" in
       exit 1
     fi
     SEQ=$(( LAST_SEQ + 1 ))
-    capture_status_position "$TASK"
+    if [ "$STATUS_ENDPOINT_SET" -eq 1 ]; then
+      CAPTURED_STATUS_ENDPOINT=$STATUS_ENDPOINT
+      CAPTURED_STATUS_IDENT=$STATUS_IDENT
+    else
+      capture_status_position "$TASK"
+    fi
     rm -f -- "$OUTCOME_INDEX_READY" || { fm_lock_release "$LOCK"; exit 1; }
     printf '{"seq":%s,"epoch":%s,"task":"%s","wake":"%s","verdict":"%s",%s"summary":"%s","silent":%s,"statusEndpoint":%s,"statusIdent":"%s"}\n' \
       "$SEQ" "$(date +%s)" "$(json_escape "$TASK")" "$(json_escape "$WAKE")" \

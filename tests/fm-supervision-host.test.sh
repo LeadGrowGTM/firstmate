@@ -1383,6 +1383,202 @@ SH
   pass "host: an overdue held outcome reaches main before the engine takes a close that was already waiting"
 }
 
+# A status line that lands after the turn captured its span must not be
+# stamped onto the report of the earlier span. The later line's own report
+# then keeps a wake of its own, even at the same urgency, while main still
+# holds the earlier row.
+test_report_binds_status_provenance_to_the_validated_span() {
+  local home state span_end span_ident grown out row_end row_ident
+  home="$TMP_ROOT/report-span-provenance"
+  state="$home/state"
+  mkdir -p "$state"
+  printf 'working [at=1]: the report is finished\n' > "$state/demo.status"
+  span_end=$(wc -c < "$state/demo.status" | tr -d '[:space:]')
+  span_ident=$(bash -c '. "$1"; _fm_open_decisions_file_ident "$2"' _ "$ROOT/bin/fm-classify-lib.sh" "$state/demo.status") \
+    || fail "fixture: could not identify the status log"
+  printf 'working [at=2]: landed after the span was captured\n' >> "$state/demo.status"
+  grown=$(wc -c < "$state/demo.status" | tr -d '[:space:]')
+  [ "$grown" -gt "$span_end" ] || fail "fixture: the status log did not grow"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  printf 'turn=t1\nrows=1\ntasks=demo\nunscoped=0\nwake=signal: demo.status\nposture=attended\n' > "$state/.supervision-host-turn"
+  printf 'span=demo\t%s\t%s\t%s\n' 0 "$span_end" "$span_ident" >> "$state/.supervision-host-turn"
+  out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 "$REPORT" \
+    --task demo --verdict captain --urgency digest --summary 'the report is finished' 2>&1); rc=$?
+  expect_code 0 "$rc" "a report of the validated span must be recorded: $out"
+  row_end=$(jq -r 'select(.seq == 1) | .statusEndpoint' "$state/branch-outcomes.jsonl")
+  row_ident=$(jq -r 'select(.seq == 1) | .statusIdent' "$state/branch-outcomes.jsonl")
+  [ "$row_end" = "$span_end" ] || fail "the report stamped a later status line onto its provenance: endpoint $row_end, validated span $span_end"
+  [ "$row_ident" = "$span_ident" ] || fail "the report did not keep the validated status identity: $row_ident"
+  append_wake "$state" signal demo.status "signal: $state/demo.status"
+  printf 'turn=t2\nrows=2\ntasks=demo\nunscoped=0\nwake=signal: demo.status\nposture=attended\n' > "$state/.supervision-host-turn"
+  printf 'span=demo\t%s\t%s\t%s\n' "$span_end" "$grown" "$span_ident" >> "$state/.supervision-host-turn"
+  out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t2 "$REPORT" \
+    --task demo --verdict captain --urgency digest --summary 'landed after the span was captured' 2>&1); rc=$?
+  expect_code 0 "$rc" "the later status line must have a report of its own: $out"
+  [ "$(jq -r 'select(.seq == 2) | .statusEndpoint' "$state/branch-outcomes.jsonl")" = "$grown" ] \
+    || fail "the later report did not record its own span end"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-read --through 1 >/dev/null \
+    || fail "fixture: presentation refused"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" digest --window 3600 --pr-ready digest)
+  assert_contains "$out" "due=later" "the later line's report must wait for its own window: $out"
+  assert_contains "$out" "pending=2"$'\n' "the later line's report must stay pending: $out"
+  [ -z "$(printf '%s\n' "$out" | sed -n 's/^repeats=//p')" ] \
+    || fail "the later line's report was suppressed as a repeat of the earlier span: $out"
+  pass "report: an attended signal report keeps the status span it validated, so a later line is not suppressed as the same situation"
+}
+
+# Main has presented row 1 and not acknowledged it. Row 2 repeats it, so the
+# parked host has nothing due and no deadline. Acknowledging row 1 makes row
+# 2 due at once. The host must notice that while parked, without a new
+# captain outcome and without the old window elapsing.
+test_parked_host_wakes_when_an_acknowledged_repeat_becomes_due() {
+  local home out
+  home=$(make_home parked-repeat-ack attended)
+  printf 'window=60\n' > "$home/config/outcome-digest"
+  printf 'blocked [at=1]: credential needed\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency urgent --summary 'blocked on a credential' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency urgent --summary 'still blocked on that credential' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the repeat"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-read --through 1 >/dev/null \
+    || fail "fixture: presentation refused"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" digest --window 3600 --pr-ready digest)
+  assert_contains "$out" "due=none" "fixture: the repeat must not be due before the acknowledgement: $out"
+  assert_contains "$out" "repeats=2" "fixture: the second row must be the repeat: $out"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 host_logged "$home" '	digest	due=none	pending=none	repeats=2' \
+    || fail "repeat ack: the host did not park on the suppressed repeat: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "repeat ack: the suppressed repeat woke main: $(cat "$home/host.out")"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-processed --through 1 >/dev/null \
+    || fail "fixture: acknowledgement refused"
+  wait_until 150 host_exited "$home" \
+    || fail "repeat ack: the parked host did not wake after the acknowledgement made the repeat due: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the acknowledgement wake must exit 0 for the owner to deliver"
+  assert_re '^supervision-host: branch-outcome: captain outcomes the supervision session recorded for you are due \(store rows 2\); ' \
+    "$home/host.out" "the acknowledgement wake must name the row that is no longer a repeat"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the acknowledgement wake waited on the digest clock"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the acknowledgement wake ran an engine turn"
+  pass "host: acknowledging a held situation wakes main for the repeat that was waiting on it"
+}
+
+# A young digest outcome is held on a long window. Changing
+# config/outcome-digest to window=0 makes it due now. The parked host must
+# re-judge without waiting out the old deadline or a new captain outcome.
+test_parked_host_rejudges_when_the_digest_config_changes() {
+  local home
+  home=$(make_home parked-config-rejudge attended)
+  printf 'window=60\n' > "$home/config/outcome-digest"
+  printf 'working [at=1]: the report is finished\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency digest --summary 'the requested report is finished' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 host_logged "$home" '	digest	due=later	pending=1	' \
+    || fail "config rejudge: the outcome was not held: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "config rejudge: the held outcome woke main on the old window: $(cat "$home/host.out")"
+  printf 'window=0\n' > "$home/config/outcome-digest"
+  wait_until 150 host_exited "$home" \
+    || fail "config rejudge: the parked host left the outcome on the old window: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the config-change wake must exit 0 for the owner to deliver"
+  assert_re '^supervision-host: branch-outcome: captain outcomes the supervision session recorded for you are due \(store rows 1\); ' \
+    "$home/host.out" "window=0 must wake main for the outcome the old window was holding"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the config-change wake waited on the old deadline"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the config-change wake ran an engine turn"
+  pass "host: a digest configuration change re-judges outcomes the host is already holding"
+}
+
+test_parked_host_rejudges_when_config_text_matches_absent_state() {
+  local home
+  home=$(make_home parked-config-absent-collision attended)
+  printf 'working [at=1]: the report is finished\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency digest --summary 'the requested report is finished' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 host_logged "$home" $'\tdigest\tdue=later\tpending=1\t' \
+    || fail "config state: the default window did not hold the outcome: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "config state: the held outcome woke main before the edit"
+  printf 'absent\n' > "$home/config/outcome-digest"
+  wait_until 150 host_exited "$home" \
+    || fail "config state: a file containing absent was mistaken for no file: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the invalid config must wake main"
+  assert_re '^supervision-host: branch-outcome: .*\(store rows 1\); ' "$home/host.out" \
+    "the invalid config must wake main for the held outcome"
+  assert_contains "$(cat "$home/host.out")" "config/outcome-digest holds 'absent'" \
+    "the config reader must identify the new file as invalid"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the config change waited for the old digest deadline"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the invalid config ran an engine turn"
+  pass "host: creating an invalid config whose text matches the absent state wakes main"
+}
+
+test_parked_host_rejudges_a_config_edit_during_judgment() {
+  local home
+  home=$(make_home parked-config-during-judgment attended)
+  printf 'window=60\n' > "$home/config/outcome-digest"
+  printf 'working [at=1]: the report is finished\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency digest --summary 'the requested report is finished' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  cat > "$home/fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+previous=
+for arg in "$@"; do
+  if [ "$previous" = --argjson ] && [ "$arg" = processed ]; then
+    : > "$FM_HOME/digest-jq-entered"
+    while [ ! -e "$FM_HOME/digest-jq-release" ]; do sleep 0.1; done
+    break
+  fi
+  previous=$arg
+done
+exec "$FM_TEST_DIGEST_JQ_REAL" "$@"
+SH
+  chmod +x "$home/fakebin/jq"
+  echo 0 > "$home/park-clock"
+  FM_TEST_DIGEST_JQ_REAL=$(command -v jq) FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 test -e "$home/digest-jq-entered" \
+    || fail "config judgment: the digest did not reach its decision: $(cat "$home/state/.supervision-host.log")"
+  printf 'window=0\n' > "$home/config/outcome-digest"
+  : > "$home/digest-jq-release"
+  wait_until 150 host_exited "$home" \
+    || fail "config judgment: the edit made during judgment was forgotten: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the mid-judgment edit must wake main"
+  assert_re '^supervision-host: branch-outcome: .*\(store rows 1\); ' "$home/host.out" \
+    "the mid-judgment edit must wake main for the held outcome"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the edit waited for the old digest deadline"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the config edit ran an engine turn"
+  pass "host: an outcome-digest edit during judgment remains visible to the parked host"
+}
+
+test_parked_host_rejudges_a_config_symlink_target() {
+  local home
+  home=$(make_home parked-config-symlink attended)
+  printf 'window=60\n' > "$home/config/outcome-policy"
+  ln -s outcome-policy "$home/config/outcome-digest"
+  printf 'working [at=1]: the report is finished\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency digest --summary 'the requested report is finished' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 host_logged "$home" $'\tdigest\tdue=later\tpending=1\t' \
+    || fail "config symlink: the linked policy did not hold the outcome: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "config symlink: the held outcome woke main before the edit"
+  printf 'window=0\n' > "$home/config/outcome-policy"
+  wait_until 150 host_exited "$home" \
+    || fail "config symlink: the target edit was not detected: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the symlink target edit must wake main"
+  assert_re '^supervision-host: branch-outcome: .*\(store rows 1\); ' "$home/host.out" \
+    "the target edit must wake main for the held outcome"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the target edit waited for the old digest deadline"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the target edit ran an engine turn"
+  pass "host: editing a readable outcome-digest symlink target re-judges the parked outcome"
+}
+
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return() {
   local home drained
   home=$(make_home attended-go-away attended)
@@ -3553,6 +3749,12 @@ test_attended_digest_takes_decision_closes_and_a_bad_config_restores_main
 test_attended_digest_overdue_at_park_start_wakes_main
 test_attended_digest_failure_at_park_start_wakes_main
 test_attended_digest_overdue_beside_a_closed_arm_wakes_main_first
+test_report_binds_status_provenance_to_the_validated_span
+test_parked_host_wakes_when_an_acknowledged_repeat_becomes_due
+test_parked_host_rejudges_when_the_digest_config_changes
+test_parked_host_rejudges_when_config_text_matches_absent_state
+test_parked_host_rejudges_a_config_edit_during_judgment
+test_parked_host_rejudges_a_config_symlink_target
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return
 test_quiet_record_without_its_daemon_is_a_present_captain
 test_attended_main_only_close_passes_straight_to_main

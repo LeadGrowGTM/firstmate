@@ -208,16 +208,20 @@ A captain outcome the attended engine records while the captain remains attended
 ### The digest
 
 The prompt asks the engine to tag each attended captain outcome `urgent`, `pr-ready`, or `digest` (`bin/fm-branch-prompt.sh` "Verdict: routine or captain" owns the criteria), and the store keeps any supplied tag with the row.
-At startup, after every handled turn that recorded a captain outcome, and when a held outcome reaches its deadline, the host asks the store whether its unread captain outcomes are due (`bin/fm-branch-outcome.sh digest` owns the rule and `config/outcome-digest` the window and pr-ready policy, [configuration](configuration.md#captain-outcome-digest-configoutcome-digest)):
+At startup, after every handled turn that recorded a captain outcome, when a held outcome reaches its deadline, while the host is parked and the processed marker or `config/outcome-digest` changes, and before every attended close is offered to the engine, the host asks the store whether its unread captain outcomes are due (`bin/fm-branch-outcome.sh digest` owns the rule and `config/outcome-digest` the window and pr-ready policy, [configuration](configuration.md#captain-outcome-digest-configoutcome-digest)).
+Each ask reloads that policy, so a shorter window, an urgent ready-PR setting, or a configuration the host cannot read takes effect without waiting out a deadline recorded earlier.
 
 - An urgent outcome, a ready PR when the policy makes it urgent, and an outcome without a tag are due at once, and the wake carries every waiting outcome with it.
-- Otherwise the outcomes wait, and the host parks until the oldest one's window closes, then wakes main once for all of them.
-- A report of a situation main already holds, presented and not yet acknowledged, with the task's status log unchanged since and the same urgency, wakes nothing; the store decides this from the rows' recorded status provenance, never from their prose.
+- Otherwise the outcomes wait.
+  The host parks until the oldest one's window closes, the processed marker or the digest configuration changes, or the next attended close, then judges again and wakes main once if they are due.
+- A report of a situation main already holds, presented and not yet acknowledged, with the same recorded status provenance and the same urgency, wakes nothing.
+  The store decides this from the rows' recorded status provenance, never from their prose.
+  An attended signal report stores the endpoint and identity of the status span it validated, so a status line that lands after that span is not part of this row and keeps its own wake.
 
 Nothing waits outside the store: every outcome is durable before the host judges it, the window's deadline comes from the rows' own timestamps so it survives a host restart, and any drain main runs for another reason presents the waiting outcomes too, which retires them from the next digest.
 A judgment that cannot be computed reads as due, so a fault wakes main rather than holding an outcome.
 The digest exit stops the parked cycle and hands main the same state as a handled close's exit.
-Due outcomes never wait behind another engine turn: when the cycle has already closed by the time they are due, that close goes to main with them, as a main-only pass-through does.
+Due outcomes never wait behind another engine turn: the host judges again before offering an attended close, and when that close is already in hand it goes to main with the due outcomes, as a main-only pass-through does.
 While the digest is on, decision-owned signal rows are eligible for the branch ([Attended](#attended)); captain reports from them join the digest, and the decision stays open in the task's status log so every main drain still lists it under `OPEN DECISIONS`.
 
 ### Presentation and acknowledgement
