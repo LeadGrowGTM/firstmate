@@ -1,0 +1,91 @@
+primary ikeuchi:
+
+ ▐▛███▛█   Claude Code v2.1.304
+▝▜██████▀  Sonnet 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M5BJED7428TEQ4XCTH1DF6J9
+
+
+
+
+
+
+raw guard ikeuchi:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.XY9C2A/ikeuchi
+error: a raw Muse launch carrying client data cannot guarantee --contributor-mode off; use --harness muse
+exit=1
+no worker metadata
+primary regular:
+
+ ▐▛███▛█   Claude Code v2.1.304
+▝▜██████▀  Sonnet 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M5BJED7428TEQ4XCTH1DF6J9
+
+
+
+
+
+
+raw guard regular:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.XY9C2A/regular
+error: a raw Muse launch carrying client data cannot guarantee --contributor-mode off; use --harness muse
+exit=1
+no worker metadata
+primary normal:
+
+ ▐▛███▛█   Claude Code v2.1.304
+▝▜██████▀  Sonnet 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M5BJED7428TEQ4XCTH1DF6J9
+
+
+
+
+
+
+raw guard normal:
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-lab.XY9C2A/normal
+spawned muse-live-normal-x1 harness=muse kind=scout window=primary:fm-muse-live-normal-x1 worktree=/home/mitch/.treehouse/project-b4875a/1/project
+exit=0
+worker metadata exists
+primary:0: claude* (1 panes) [80x24] 
+primary:1: fm-muse-live-normal-x1 (1 panes) [80x24] 
+.nm-live-fixture/project$ bash '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/
+01M5BJED7428TEQ4XCTH1DF6J9/bin/fm-treehouse-pool-check.sh' '/tmp/fm-lab.XY9C2A/n
+ormal' '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BJED7428TEQ4XCTH1DF6
+J9/.nm-live-fixture/project' '/tmp/fm-lab.XY9C2A/normal/state/.fm-treehouse-pool
+.6OTTUz' '/tmp/fm-lab.XY9C2A/normal/state' && treehouse get
+A new version of treehouse is available: v2.1.1 → v3.1.4
+Run "treehouse update" to update
+
+🌳 Setting up worktree...
+🌳 Entered worktree at ~/.treehouse/project-b4875a/1/project. Type 'exit' to ret
+urn.
+mitch@The-GOAT:~/.treehouse/project-b4875a/1/project$ cd -- '/home/mitch/.treeho
+use/project-b4875a/1/project'
+mitch@The-GOAT:~/.treehouse/project-b4875a/1/project$ export GOTMPDIR=/tmp/fm-mu
+se-live-normal-x1/gotmp
+mitch@The-GOAT:~/.treehouse/project-b4875a/1/project$ export COMPACT_ADVISER_DIS
+ABLE=1
+mitch@The-GOAT:~/.treehouse/project-b4875a/1/project$ export FM_TASK_ID=muse-liv
+e-normal-x1
+mitch@The-GOAT:~/.treehouse/project-b4875a/1/project$ . '/tmp/fm-muse-live-norma
+l-x1+18aa6a40d9fad42f11057fee2281460b98be929f9a3c42bfaa5790da012d654c/launch.s17
+92466759.656453.10025.sh'
+
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+  File "/home/linuxbrew/.linuxbrew/Cellar/python@3.14/3.14.3_1/lib/python3.14/shutil.py", line 852, in rmtree
+    _rmtree_impl(path, dir_fd, onexc)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/home/linuxbrew/.linuxbrew/Cellar/python@3.14/3.14.3_1/lib/python3.14/shutil.py", line 721, in _rmtree_safe_fd
+    _rmtree_safe_fd_step(stack, onexc)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/home/linuxbrew/.linuxbrew/Cellar/python@3.14/3.14.3_1/lib/python3.14/shutil.py", line 802, in _rmtree_safe_fd_step
+    onexc(func, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/linuxbrew/.linuxbrew/Cellar/python@3.14/3.14.3_1/lib/python3.14/shutil.py", line 795, in _rmtree_safe_fd_step
+    onexc(os.unlink, fullname, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/linuxbrew/.linuxbrew/Cellar/python@3.14/3.14.3_1/lib/python3.14/shutil.py", line 791, in _rmtree_safe_fd_step
+    os.unlink(entry.name, dir_fd=topfd)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/tmp/fm-lab.XY9C2A/normal/state/muse-live-normal-x1.git-hooks'

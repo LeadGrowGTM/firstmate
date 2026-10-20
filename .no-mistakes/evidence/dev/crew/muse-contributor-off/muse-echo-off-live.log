@@ -1,0 +1,7 @@
+muse: local session messaging disabled: session logging is required
+muse: workspace root: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BJED7428TEQ4XCTH1DF6J9/.nm-muse-echo/workspace (explicit)
+muse: warning: rules file at /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BJED7428TEQ4XCTH1DF6J9/AGENTS.md exists, but the workspace is untrusted, so it is skipped for this session; restart with --trust-workspace to load project rules
+muse: Agent delegation: auto unavailable: workspace is untrusted.
+echo: Return the word ready
+muse exit=0
+settings file created=no
