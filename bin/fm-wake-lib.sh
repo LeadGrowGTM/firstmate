@@ -1952,7 +1952,7 @@ fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
 # a new one.
 # Returns 1 when the choice cannot be proven, so callers keep refusing.
 fm_treehouse_next_copy() {  # <pool>
-  local state="$1/treehouse-state.json" path processes listing leased dirty lock
+  local state="$1/treehouse-state.json" path processes pool_processes listing leased dirty lock
   FM_TREEHOUSE_NEXT_COPY=
   [ -f "$state" ] && [ ! -L "$state" ] && command -v python3 >/dev/null 2>&1 || return 1
   listing=$(python3 - "$state" <<'PY'
@@ -1992,6 +1992,14 @@ PY
       [ ! -e "$lock" ] && [ ! -L "$lock" ] || return 1
     done
     processes=$(fm_agent_worktree_processes "$path") || return 1
+    if [ "$(uname -s)" = Linux ]; then
+      pool_processes=$(python3 "$FM_WAKE_LIB_DIR/fm-agent-process.py" pool-rooted "$path") || return 1
+      if [ -z "$processes" ]; then
+        [ -z "$pool_processes" ] || return 1
+      else
+        [ -n "$pool_processes" ] || return 1
+      fi
+    fi
     [ "$leased" = 0 ] || continue
     [ -z "$processes" ] || continue
     FM_TREEHOUSE_NEXT_COPY=$path

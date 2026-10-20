@@ -1197,7 +1197,7 @@ SH
 # the provider would serve from another, while the copy it would serve stays
 # protected.
 test_pool_preflight_screens_only_the_copy_to_be_allocated() {
-  local rec provider copy variant out status n
+  local rec provider copy variant out status n variants bridge_pid bridge_script hidden process_pids
   rec=$(make_case next-copy pool-next-copy-r1)
   read_case_record "$rec"
   mkdir -p "$HOME_DIR/user-home/.config/treehouse"
@@ -1210,11 +1210,17 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
     mkdir -p "$provider/$n"
     git -C "$PROJECT_DIR" worktree add --quiet --detach "$provider/$n/project" "$INITIAL_SHA"
   done
-  for variant in meta-later meta-next marker-later marker-next leased-first unreadable-state \
-    dirty-first-meta-second dirty-first-marker-second dirty-first-inventory-second \
-    destroying-first-meta-second owner-first-meta-second locked-first-meta-second unknown-first-meta-second; do
+  variants='meta-later meta-next marker-later marker-next leased-first unreadable-state
+    dirty-first-meta-second dirty-first-marker-second dirty-first-inventory-second
+    destroying-first-meta-second owner-first-meta-second locked-first-meta-second unknown-first-meta-second'
+  if [ "$(uname -s)" = Linux ]; then
+    variants="$variants bridge-first-meta-second bridge-first-marker-second bridge-first-inventory-second"
+  fi
+  for variant in $variants; do
     rm -f "$HOME_DIR"/state/*.meta "$provider"/*/.fm-slot-owner
-    rm -f "$provider/1/project/dirty.txt"
+    rm -f "$provider/1/project/dirty.txt" "$CASE_DIR/process-pids"
+    bridge_pid=
+    process_pids=
     printf '{"worktrees":[{"name":"1","path":"%s","leased":%s},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
       "$provider/1/project" false "$provider/2/project" "$provider/3/project" \
       > "$provider/treehouse-state.json"
@@ -1224,10 +1230,10 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
       *) copy=$provider/1/project ;;
     esac
     case "$variant" in
-      meta-*|leased-first|unreadable-state|dirty-first-meta-second|destroying-first-meta-second|owner-first-meta-second|locked-first-meta-second|unknown-first-meta-second)
+      meta-*|leased-first|unreadable-state|dirty-first-meta-second|destroying-first-meta-second|owner-first-meta-second|locked-first-meta-second|unknown-first-meta-second|bridge-first-meta-second)
         fm_write_meta "$HOME_DIR/state/parked.meta" "window=firstmate:fm-parked" \
           "endpoint_task_id=parked" "worktree=$copy" "project=$PROJECT_DIR" "kind=scout" ;;
-      marker-*|dirty-first-marker-second|dirty-first-inventory-second)
+      marker-*|dirty-first-marker-second|dirty-first-inventory-second|bridge-first-marker-second|bridge-first-inventory-second)
         printf 'task=parked\nhome=%s\n' "$CASE_DIR/other-home" > "${copy%/project}/.fm-slot-owner" ;;
     esac
     case "$variant" in
@@ -1253,16 +1259,45 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
         printf '{"worktrees":[{"name":"1","path":"%s","reset_failed":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
           "$provider/1/project" "$provider/2/project" "$provider/3/project" \
           > "$provider/treehouse-state.json" ;;
+      bridge-first-*)
+        bridge_script="$CASE_DIR/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js"
+        mkdir -p "${bridge_script%/*}"
+        printf 'for ((i=0; i<120; i++)); do /bin/sleep 1; done\n' > "$bridge_script"
+        bridge_pid=$(python3 - "$provider/1/project" "$bridge_script" <<'PY'
+import subprocess, sys
+bridge = subprocess.Popen(["node", sys.argv[2]], executable="/bin/bash",
+                          cwd=sys.argv[1], start_new_session=True,
+                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)
+print(bridge.pid)
+PY
+        ) || fail 'could not start the detached bridge fixture'
+        process_pids="$CASE_DIR/process-pids"
+        printf '%s\n' "$bridge_pid" > "$process_pids"
+        for n in 1 2 3 4 5 6 7 8 9 10; do
+          [ "$(readlink "/proc/$bridge_pid/cwd")" = "$provider/1/project" ] \
+            || fail 'the bridge fixture did not stay inside the first copy'
+          hidden=$(FM_TEST_PROCESS_PIDS="$process_pids" PATH="$FAKEBIN_DIR:$PATH" \
+            bash -c '. "$1"; fm_agent_worktree_processes "$2"' _ \
+            "$ROOT/bin/fm-agent-process-lib.sh" "$provider/1/project") \
+            || fail 'the bridge fixture broke the worker absence proof'
+          [ -n "$hidden" ] || break
+          /bin/sleep 0.05
+        done
+        [ -z "$hidden" ] || fail 'the bridge fixture was not excluded from worker absence proof' ;;
     esac
-    if [ "$variant" = dirty-first-inventory-second ]; then
-      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
+    if [ "$variant" = dirty-first-inventory-second ] || [ "$variant" = bridge-first-inventory-second ]; then
+      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" FM_TEST_PROCESS_PIDS="$process_pids" PATH="$FAKEBIN_DIR:$PATH" \
         bash -c '. "$1"; fm_treehouse_pool_custody_check "$2" "$3" "$4" records' _ \
         "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home" 2>&1)
     else
-      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
+      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" FM_TEST_PROCESS_PIDS="$process_pids" PATH="$FAKEBIN_DIR:$PATH" \
         bash "$ROOT/bin/fm-treehouse-pool-check.sh" "$HOME_DIR" "$PROJECT_DIR" "$CASE_DIR/refusal" 2>&1)
     fi
     status=$?
+    if [ -n "$bridge_pid" ]; then
+      kill -- "-$bridge_pid" 2>/dev/null || true
+    fi
     case "$variant" in
       meta-later|marker-later)
         [ "$status" -eq 0 ] || fail "$variant: preflight refused a copy the provider would not allocate: $out" ;;

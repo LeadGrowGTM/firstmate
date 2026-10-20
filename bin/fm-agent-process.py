@@ -437,6 +437,20 @@ def worktree_processes(root, original, excluded_ancestors=()):
             print(pid)
 
 
+def pool_worktree_processes(root):
+    root = os.path.realpath(root)
+    with os.scandir('/proc') as inventory:
+        for entry in inventory:
+            if not entry.name.isdigit():
+                continue
+            try:
+                cwd = os.path.realpath(os.readlink(entry.path + '/cwd'))
+            except OSError:
+                continue
+            if cwd == root or cwd.startswith(root + '/'):
+                print(entry.name)
+
+
 try:
     mode, *args = sys.argv[1:]
     if sys.platform != 'linux':
@@ -445,6 +459,8 @@ try:
         root, pane, *ancestors = args
         worktree_processes(root, int(pane) if pane else 0,
                            tuple(int(a) for a in ancestors))
+    elif mode == 'pool-rooted':
+        pool_worktree_processes(args[0])
     elif mode == 'home-procevent':
         root, pid = args
         sys.exit(0 if home_procevent_listener(int(pid), os.path.realpath(root)) else 1)
