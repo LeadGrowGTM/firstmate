@@ -67,11 +67,9 @@ fm_pn_count() {
 
 # The matcher. Mode check prints "<line> <id>[,<id>...]" for every input line
 # holding a listed name and exits 1 when any matched; mode scrub prints the
-# input with every listed name replaced by its neutral id; mode audit reads
-# grep -n -H lines and prints per-id hit counts with scrubbed samples. Longest
-# names are
+# input with every listed name replaced by its neutral id. Longest names are
 # tried first so a name containing a shorter listed name is replaced whole.
-fm_pn_perl() {  # <check|scrub|audit> <list-file>
+fm_pn_perl() {  # <check|scrub> <list-file>
   perl -e '
     use strict; use warnings;
     my ($mode, $list) = @ARGV; @ARGV = ();
@@ -101,29 +99,6 @@ fm_pn_perl() {  # <check|scrub|audit> <list-file>
     }
     my $re = qr/(?|@{[join "|", @patterns]})/i;
     my $hit = 0;
-    if ($mode eq "audit") {
-      # Input lines are "path:line:content" from grep -n -H; report hit counts
-      # and a few samples per neutral id, with every name already scrubbed.
-      my (%n, %samples);
-      while (my $line = <STDIN>) {
-        chomp $line;
-        my %ids;
-        while ($line =~ /$re/g) { $ids{$id{lc $1}} = 1; }
-        next unless %ids;
-        (my $clean = $line) =~ s/$re/$id{lc $1}/g;
-        $clean = substr($clean, 0, 160);
-        for my $i (keys %ids) {
-          $n{$i}++;
-          push @{$samples{$i}}, $clean if @{$samples{$i} || []} < 4;
-        }
-      }
-      for my $name (@names) {
-        my $i = $id{lc $name};
-        printf "%s %d lines\n", $i, $n{$i} || 0;
-        print "    $_\n" for @{$samples{$i} || []};
-      }
-      exit 0;
-    }
     while (my $line = <STDIN>) {
       if ($mode eq "scrub") {
         $line =~ s/$re/$id{lc $1}/g;
@@ -302,6 +277,6 @@ fm_pn_dest_is_public() {  # <dest>
 # returns 3; returns 0 when the list has names.
 fm_pn_require_list() {  # <what>
   [ "$(fm_pn_count)" -gt 0 ] && return 0
-  echo "fm-private-names: refusing $1: the private-name list $FM_PN_LIST is missing or empty, so a public destination cannot be checked; run bin/fm-private-names.sh refresh in this home" >&2
+  echo "fm-private-names: refusing $1: the private-name list config/private-names is missing or empty, so a public destination cannot be checked; run bin/fm-private-names.sh refresh in this home" >&2
   return 3
 }

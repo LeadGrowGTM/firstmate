@@ -133,7 +133,8 @@ EOF
 
   out=$(FM_HOME=$home "$PN" refresh) || fail "refresh failed: $out"
   list=$(grep -v '^#' "$home/config/private-names")
-  assert_contains "$out" "names in $home/config/private-names" "refresh did not report the list path"
+  assert_contains "$out" "names in config/private-names" "refresh did not report the list location"
+  assert_not_contains "$out" "$home" "refresh printed the private home path"
   for name in acme-test quasar-mock zenith-sample nova-mock delta-fake hand-added-name bare-hand-name; do
     assert_not_contains "$out" "$name" "refresh output printed a listed name"
     assert_contains "$list" "$name" "refresh missed $name"
@@ -238,6 +239,25 @@ test_empty_list_on_a_public_repo_refuses() {
   out=$(printf 'clean\n' | FM_HOME=$home "$PN" check --repo "$ORIGIN" 2>&1)
   expect_code 3 "$?" "check with a missing list on a public destination"
   pass "a missing or empty list refuses public commits, pushes, and checks"
+}
+
+test_private_home_path_stays_out_of_guard_output() {
+  local d=$TMP_ROOT/acme-test-home out bad
+  make_home "$d"
+  printf 'example/public-repo public\n' >"$d/config/repo-visibility"
+  : >"$d/config/private-names"
+  out=$(printf 'clean\n' | FM_HOME=$d "$PN" check --repo example/public-repo 2>&1) &&
+    fail "an empty list passed the public check"
+  assert_contains "$out" "config/private-names" "the refusal omitted the fixed list location"
+  assert_not_contains "$out" "acme-test-home" "the refusal printed the private home path"
+  out=$(FM_HOME=$d "$PN" refresh 2>&1) || fail "refresh failed: $out"
+  assert_not_contains "$out" "acme-test-home" "refresh printed the private home path"
+  bad=$TMP_ROOT/blocked-acme-test-home
+  mkdir -p "$bad/data"
+  : >"$bad/config"
+  out=$(FM_HOME=$bad "$PN" refresh 2>&1) && fail "a blocked list write passed refresh"
+  assert_not_contains "$out" "blocked-acme-test-home" "failed refresh printed the private home path"
+  pass "guard refusals and refresh reports keep private home paths out of output"
 }
 
 test_pre_push_refuses_names_in_branch_message_patch_and_path() {
@@ -356,7 +376,8 @@ test_gate_remote_is_judged_by_origin_and_repo_hook_still_runs() {
 }
 
 test_gh_shim_refuses_or_rewrites_pr_text() {
-  local d=$TMP_ROOT/gh home out rc log
+  local d=$TMP_ROOT/gh home out rc log repo_arg flag action
+  local repo_words=()
   home=$d/home
   make_home "$home"
   make_repo "$d" "$home" public
@@ -425,6 +446,13 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   out=$(cd "$REPO" && in_pane "$HOOKS" gh pr new --repo example/public-repo --title Clean --body acme-test 2>&1) &&
     fail "the pr new alias passed a listed body"
   [ ! -s "$log" ] || fail "the real gh ran for a refused pr new"
+  for repo_arg in '-R example/public-repo' '--repo example/public-repo' '--repo=example/public-repo' '-Rexample/public-repo'; do
+    : >"$log"
+    read -r -a repo_words <<<"$repo_arg"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh "${repo_words[@]}" pr create --title 'Fix acme-test' --body Clean 2>&1) &&
+      fail "a global repo option bypassed the PR guard"
+    [ ! -s "$log" ] || fail "the real gh ran for a global repo option"
+  done
   for flag in --template --fill --fill-first --fill-verbose --recover; do
     : >"$log"
     out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean --body Clean "$flag" 2>&1) &&
@@ -435,6 +463,26 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean 2>&1) &&
     fail "an editor-supplied PR body reached gh"
   [ ! -s "$log" ] || fail "the real gh ran for an editor-supplied body"
+  for flag in --editor --web; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean --body Clean "$flag" 2>&1) &&
+      fail "a $flag PR escaped the guard"
+    [ ! -s "$log" ] || fail "the real gh ran for $flag"
+  done
+  for action in comment review edit; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh pr "$action" 7 --repo example/public-repo 2>&1) &&
+      fail "interactive pr $action reached gh"
+    [ ! -s "$log" ] || fail "the real gh ran for interactive pr $action"
+  done
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh pr comment 7 --repo example/public-repo --body Clean) ||
+    fail "a checked clean PR comment was refused"
+  assert_contains "$(cat "$log")" "[pr] [comment]" "the clean comment did not reach real gh"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh pr review 7 --repo example/public-repo --approve) ||
+    fail "a text-free PR approval was refused"
+  assert_contains "$(cat "$log")" "[pr] [review]" "the clean approval did not reach real gh"
 
   : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh issue list --search acme-test >/dev/null) || fail "a non-PR command was refused"
@@ -583,6 +631,34 @@ SH
   pass "the scrub tool dry-runs by default without printing names, and applies PR rewrites plus one evidence removal commit"
 }
 
+test_scrub_refreshes_registered_names() {
+  local d=$TMP_ROOT/scrub-stale home bad log out
+  home=$d/home
+  make_home "$home"
+  FAKEBIN=$(make_fake_gh "$d")
+  log=$d/gh.log
+  : >"$log"
+  printf '%s\t%s\t%s\t%s\n' 17 OPEN "$(b64 'Ship quasar-mate work')" "$(b64 'Clean body')" >"$d/prs.tsv"
+  printf '%s\n' '- quasar-mate - A made-up route. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)' \
+    >"$home/data/secondmates.md"
+  export FAKE_GH_LOG=$log FAKE_GH_PRS=$d/prs.tsv FAKE_GH_VIS=public
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo --no-evidence --apply 2>&1) ||
+    fail "a stale-list scrub failed: $out"
+  assert_contains "$(cat "$log")" "[pr] [edit] [17]" "the newly registered name remained in PR text"
+  assert_not_contains "$(cat "$log")" "quasar-mate" "the newly registered name reached the edit call"
+  assert_contains "$(cat "$home/config/private-names")" "quasar-mate" "the scrub did not refresh the list"
+  bad=$d/bad-home
+  mkdir -p "$bad/state" "$bad/data"
+  : >"$bad/config"
+  : >"$log"
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$bad "$SCRUB" --repo example/public-repo --no-evidence --apply 2>&1) &&
+    fail "the scrub proceeded after its list refresh failed"
+  assert_contains "$out" "cannot refresh" "the scrub did not explain the failed refresh"
+  assert_not_contains "$(cat "$log")" "[api] [--paginate]" "the scrub read PR text after refresh failed"
+  unset FAKE_GH_LOG FAKE_GH_PRS FAKE_GH_VIS
+  pass "the scrub tool refreshes registered names before editing public PR text"
+}
+
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard() {
   local d=$TMP_ROOT/keep home hooks repo
   home=$d/home
@@ -633,6 +709,7 @@ test_existing_tree_never_blocks_an_unrelated_push
 test_commit_message_is_refused_or_rewritten_on_a_public_repo
 test_private_repo_passes_untouched
 test_empty_list_on_a_public_repo_refuses
+test_private_home_path_stays_out_of_guard_output
 test_pre_push_refuses_names_in_branch_message_patch_and_path
 test_new_public_branch_scans_commits_from_other_remotes
 test_stale_registered_name_is_refreshed_before_commit
@@ -642,6 +719,7 @@ test_gh_shim_refuses_or_rewrites_pr_text
 test_no_mistakes_shim_checks_public_inputs
 test_visibility_asks_github_once_and_caches
 test_scrub_tool_dry_run_and_apply
+test_scrub_refreshes_registered_names
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard
 
 echo "# all fm-private-names tests passed"

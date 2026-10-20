@@ -811,7 +811,7 @@ The optional, gitignored `config/private-names.local` adds names by hand (`<kind
 A refresh in a second mate home on this machine also merges its primary's list from disk; it is deliberately not inherited config, because inherited config is pasted into the mate's instructions.
 
 Names match case-insensitively as whole words, so a name never matches inside a longer word, and each maps to a stable neutral id (`mate-1`, `client-1`, `private-1`) by its position in the list.
-Refusals, reports, and the audit print neutral ids and locations, never the matched name.
+Refusals and reports print neutral ids and locations, never the matched name.
 
 Every fleet launch's `state/<id>.git-hooks` (see "Commit attribution") carries the guard, including when `config/keep-ai-trailers` is set:
 
@@ -827,7 +827,7 @@ Only a public destination is checked, so a private repository passes untouched.
 Visibility comes from the optional, gitignored `config/repo-visibility` (`<owner/repo or remote> public` lines only), else GitHub is queried and public answers are cached in `state/repo-visibility.cache`; private and internal answers are queried each time, a local path is private, and an unknown network remote or a failed lookup counts as public.
 A missing or empty list refuses every public exit with a message naming the refresh command.
 `git --no-verify`, and tools that bypass git hooks or the shims, are not seen.
-The no-mistakes daemon can generate PR text that the shim cannot inspect before creation; the worker verifies and scrubs that PR immediately after creation as a backstop.
+The no-mistakes daemon can generate PR text that the shim cannot inspect before creation; the worker checks for the PR URL while the run continues, scrubs its text as soon as it appears, and repeats that readback after CI green.
 
 `bin/fm-private-names-scrub.sh --repo <owner/repo>` dry-runs by default: it lists PRs whose title or body holds a listed name and evidence-branch files whose path or content does, without printing a name.
 With `--apply` it rewrites those PR titles and bodies to neutral ids and removes those files from the evidence-branch tip in one ordinary fast-forward commit; it never force-pushes or rewrites history, so earlier commits and PR edit history stay readable on the forge.

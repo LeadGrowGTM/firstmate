@@ -77,7 +77,7 @@ if [ "$(fm_pn_visibility "$REPO")" = private ]; then
   echo "repository $REPO is private: nothing to scrub"
   exit 0
 fi
-fm_pn_require_list "the scrub" || exit 3
+"$SCRIPT_DIR/fm-private-names.sh" check </dev/null || exit $?
 GH=$(fm_pn_real_bin gh) || {
   echo "fm-private-names-scrub: gh is not installed" >&2
   exit 1
