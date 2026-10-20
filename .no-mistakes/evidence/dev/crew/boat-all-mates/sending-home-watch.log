@@ -1,0 +1,5 @@
+Real sending-home watch CLI with disposable homes
+armed: state/boat-mate-task.check.sh (controller /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5D66MN7AAGK3AYB6KYR4VAS/.watch-live.NtaUaY/controller)
+check registered: yes
+disarmed: state/boat-mate-task.check.sh
+check retired: yes
