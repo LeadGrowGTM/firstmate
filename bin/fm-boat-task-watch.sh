@@ -157,8 +157,9 @@ disarm() {  # <task-id>
   case "$poll_line" in "$poll_prefix"*"$poll_suffix") ;; *) die "check is not this watch: boat-$id" ;; esac
   controller_arg=${poll_line#"$poll_prefix"}
   controller_arg=${controller_arg%"$poll_suffix"}
-  [ -n "$controller_arg" ] && cmp -s "$shim" <(shim_content "$controller_arg" "$id") ||
+  if [ -z "$controller_arg" ] || ! cmp -s "$shim" <(shim_content "$controller_arg" "$id"); then
     die "check is not this watch: boat-$id"
+  fi
   "$SCRIPT_DIR/fm-check-unregister.sh" "boat-$id" >/dev/null || die 'could not retire the check'
   rm -f -- "$STATE/boat-$id.boat-watch"
   printf 'disarmed: state/boat-%s.check.sh\n' "$id"
