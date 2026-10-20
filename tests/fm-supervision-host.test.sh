@@ -1116,6 +1116,18 @@ test_branch_outcome_digest_judges_urgency_window_and_repeats() {
   add captain 'the worker is still blocked on the new credential' urgent
   assert_contains "$(judge)" "due=now" "once main processed the situation a re-report must wake it again"
 
+  # A row without a status identity has no provenance, so it never repeats.
+  home=$(make_home digest-judge-no-ident attended)
+  for n in 1 2; do
+    printf '{"seq":%s,"epoch":%s,"task":"demo","wake":"signal: demo.status","verdict":"captain","urgency":"urgent","summary":"blocked","silent":false,"statusEndpoint":5,"statusIdent":""}\n' \
+      "$n" "$(date +%s)" >> "$home/state/branch-outcomes.jsonl"
+  done
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" mark-read --through 1 >/dev/null || fail "fixture: presentation refused"
+  out=$(judge)
+  assert_contains "$out" "due=now" "a captain row without a status identity must not be suppressed as a repeat"
+  assert_contains "$out" "pending=2"$'\n' "the unidentified row must stay pending"
+  [ "$(printf '%s\n' "$out" | sed -n 's/^repeats=//p')" = "" ] || fail "a row without a status identity must never be named a repeat: $out"
+
   # A row whose window already closed is due now; an urgency off a captain row is refused.
   home=$(make_home digest-judge-old attended)
   printf '{"seq":1,"epoch":%s,"task":"demo","wake":"signal: demo.status","verdict":"captain","urgency":"digest","summary":"an old report","silent":false,"statusEndpoint":0,"statusIdent":"-"}\n' \
@@ -1272,6 +1284,37 @@ test_attended_digest_failure_at_park_start_wakes_main() {
   assert_no_re '^(signal:|stale:|check:|heartbeat)' "$home/host.out" "the startup digest failure must carry no watcher close"
   [ "$(engine_calls "$home")" -eq 0 ] || fail "the host ran an engine turn before handing the undecidable digest to main"
   pass "host: a held outcome with a malformed store tail wakes main at park start"
+}
+
+# The first cycle closes before the park ever probes it (a resurface of a
+# routine row the branch may take), while a held outcome is already overdue:
+# main hears the outcome with that close, before any engine turn.
+test_attended_digest_overdue_beside_a_closed_arm_wakes_main_first() {
+  local home real_jq
+  home=$(make_home attended-digest-overdue-closed attended)
+  printf '{"seq":1,"epoch":%s,"task":"demo","wake":"signal: demo.status","verdict":"captain","urgency":"digest","summary":"held by a host that died","silent":false,"statusEndpoint":0,"statusIdent":"-"}\n' \
+    $(( $(date +%s) - 7200 )) > "$home/state/branch-outcomes.jsonl"
+  append_status "$home" 'step one'
+  append_wake "$home/state" signal demo.status "working:$home/state/demo.status"
+  FM_STATE_OVERRIDE="$home/state" bash -c '. "$1"; fm_recovery_marker_publish "$2" downtime' _ "$ROOT/bin/fm-wake-lib.sh" "$home/state/.watcher-down" >/dev/null 2>&1 \
+    || fail "fixture: could not record watcher downtime"
+  # Hold the first digest judgment until the queued close has ended the arm.
+  real_jq=$(command -v jq)
+  cat > "$home/fakebin/jq" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  *'def situation'*)
+    [ -e "\$FM_HOME/jq-held" ] || { : > "\$FM_HOME/jq-held"; sleep 4; } ;;
+esac
+exec "$real_jq" "\$@"
+SH
+  chmod +x "$home/fakebin/jq"
+  start_host "$home"
+  wait_until 250 host_exited "$home" || fail "digest closed arm: main was not woken: $(cat "$home/state/.supervision-host.log")"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "digest closed arm: an engine turn ran before main heard the overdue outcome: $(cat "$home/state/.supervision-host.log")"
+  assert_re '^supervision-host: branch-outcome: captain outcomes the supervision session recorded for you are due \(store rows 1\); ' \
+    "$home/host.out" "the overdue outcome must reach main with the close"
+  pass "host: an overdue held outcome reaches main before the engine takes a close that was already waiting"
 }
 
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return() {
@@ -3441,6 +3484,7 @@ test_attended_digest_stays_quiet_once_main_drained_the_held_outcome
 test_attended_digest_takes_decision_closes_and_a_bad_config_restores_main
 test_attended_digest_overdue_at_park_start_wakes_main
 test_attended_digest_failure_at_park_start_wakes_main
+test_attended_digest_overdue_beside_a_closed_arm_wakes_main_first
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return
 test_quiet_record_without_its_daemon_is_a_present_captain
 test_attended_main_only_close_passes_straight_to_main

@@ -216,6 +216,7 @@ At startup, after every handled turn that recorded a captain outcome, and when a
 Nothing waits outside the store: every outcome is durable before the host judges it, the window's deadline comes from the rows' own timestamps so it survives a host restart, and any drain main runs for another reason presents the waiting outcomes too, which retires them from the next digest.
 A judgment that cannot be computed reads as due, so a fault wakes main rather than holding an outcome.
 The digest exit stops the parked cycle and hands main the same state as a handled close's exit.
+Due outcomes never wait behind another engine turn: when the cycle has already closed by the time they are due, that close goes to main with them, as a main-only pass-through does.
 While the digest is on, decision-owned signal closes join it ([Attended](#attended)); the decision stays open in the task's status log, so every main drain still lists it under `OPEN DECISIONS`.
 
 ### Presentation and acknowledgement

@@ -701,7 +701,7 @@ case "$CMD" in
         --argjson now "$NOW" --argjson window "$WINDOW" --arg pr "$PR_READY" '
         def urgency: (.urgency // "urgent") as $u
           | if $u == "pr-ready" then (if $pr == "urgent" then "urgent" else "digest" end) else $u end;
-        def situation: if (.statusIdent // "-") != "-" and (.statusEndpoint | type) == "number"
+        def situation: if ((.statusIdent // "-") | . != "-" and . != "") and (.statusEndpoint | type) == "number"
           then [.task, .statusEndpoint, .statusIdent, urgency] else null end;
         map(select(.verdict == "captain")) as $captain
         | [$captain[] | select(.seq <= $cursor and .seq > $processed) | situation | select(. != null)] as $held

@@ -87,7 +87,9 @@
 # "supervision-host: branch-outcome:" line naming the rows, without the close
 # it handled; otherwise it parks on the successor, and while rows wait for
 # their window the park also ends at the window's close, when the host asks
-# again and exits the same way if they are still due. Main drains, where the
+# again and exits the same way if they are still due; a close already waiting
+# when they come due goes to main with them rather than to the engine. Main
+# drains, where the
 # BRANCH OUTCOMES section (bin/fm-wake-drain.sh) presents every unread and
 # unprocessed captain outcome until main acknowledges it, so any drain main
 # runs in the meantime carries the waiting rows and an outcome is never held
@@ -706,6 +708,16 @@ digest_line() {  # <lead>
     || printf '; %s, so each captain outcome wakes you as it is recorded until it is fixed' "$FM_OUTCOME_DIGEST_PROBLEM"
 }
 
+# The branch-outcome line for a digest judged due now outside a handled turn:
+# the rows it names, or, when the judgment could not be computed, the store.
+digest_due_line() {
+  if [ -z "$DIGEST_PENDING" ]; then
+    printf 'branch-outcome: the outcome digest could not be judged; check the outcome store, then drain and acknowledge captain outcomes'
+  else
+    digest_line "captain outcomes the supervision session recorded for you are due"
+  fi
+}
+
 # From the park, when held outcomes came due: hand main the parked cycle's
 # state exactly as a handled close's branch-outcome exit does.
 digest_exit() {
@@ -714,10 +726,7 @@ digest_exit() {
   ARM_PID=
   ARM_OUT=
   ARM_TEXT=
-  if [ -z "$DIGEST_PENDING" ]; then
-    exit_to_main "branch-outcome: the outcome digest could not be judged; check the outcome store, then drain and acknowledge captain outcomes" "$HEALTH_NOTE"
-  fi
-  exit_to_main "$(digest_line "captain outcomes the supervision session recorded for you are due")" "$HEALTH_NOTE"
+  exit_to_main "$(digest_due_line)" "$HEALTH_NOTE"
 }
 
 stand_down() {  # <why>
@@ -1191,8 +1200,24 @@ while :; do
     exit 0
   fi
   # Attended: the close reaches main exactly as the plain arm delivers it,
-  # unless the supervision session may take it (attended_acceptor).
+  # unless the supervision session may take it (attended_acceptor). Held
+  # captain outcomes whose window passed while the arm was already closed
+  # never wait behind another engine turn: this close goes to main with them,
+  # as a main-only pass-through does.
   if ! fm_afk_contract_away_present "$STATE"; then
+    if [ -n "$DIGEST_DUE_ELAPSED" ]; then
+      park_elapsed
+      if [ "$PARK_ELAPSED" -ge "$DIGEST_DUE_ELAPSED" ]; then
+        DIGEST_DUE_ELAPSED=
+        digest_judge
+        if [ "$DIGEST_DUE" = now ]; then
+          log_line "pass-through	attended	digest-due	$(printf '%s\n' "$REASON" | head -n 1)"
+          leave_successor_for_main || true
+          emit "supervision-host: $(digest_due_line)"
+          exit 0
+        fi
+      fi
+    fi
     if ! attended_acceptor "$(printf '%s\n' "$REASON" | head -n 1)"; then
       log_line "pass-through	attended	$ATTENDED_WHY	$(printf '%s\n' "$REASON" | head -n 1)"
       if [ "$ATTENDED_WHY" = main-only ]; then
