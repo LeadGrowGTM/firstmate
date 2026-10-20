@@ -1,0 +1,24 @@
+SCENARIO decision: routine report attempt
+report refused: the claimed needs-decision signal for alpha requires a captain verdict
+state after refusal: no outcome or receipt
+recorded seq 1 [captain]; MAIN processes it from its next drain
+SCENARIO unkeyed blocker: digest urgency attempt
+report refused: the claimed blocked signal for beta requires a captain verdict with --urgency urgent
+recorded seq 2 [captain]; MAIN processes it from its next drain
+SCENARIO older blocker: current working report
+recorded seq 3 [routine]; it waits in the outcome store for MAIN
+durable outcomes: nwcdurable receipts: nwcSCENARIO digest: fresh held outcome
+due=later
+at=1792463662
+pending=1
+repeats=
+SCENARIO digest: urgent carries held
+due=now
+at=
+pending=1,2
+repeats=
+SCENARIO digest: acknowledged
+due=none
+at=
+pending=
+repeats=

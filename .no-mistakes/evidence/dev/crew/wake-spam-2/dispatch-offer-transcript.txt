@@ -1,0 +1,21 @@
+decision signal, digest disabled:
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+decision signal, digest enabled:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+decision-owned stale, digest enabled:
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0

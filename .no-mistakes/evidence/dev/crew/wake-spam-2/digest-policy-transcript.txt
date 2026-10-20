@@ -1,0 +1,15 @@
+window=0, new outcome:
+due=now
+at=
+pending=1
+repeats=
+window=0, same held situation repeated:
+due=none
+at=
+pending=
+repeats=2
+PR ready with urgent override:
+due=now
+at=
+pending=3
+repeats=2
