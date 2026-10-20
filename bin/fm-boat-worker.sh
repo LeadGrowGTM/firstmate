@@ -248,7 +248,10 @@ and steering paths generated in this brief. Route any decision to firstmate.
 RULES
 awk -v intent="$TMP/intent" -v spec="$TMP/spec" '
   $0 == "{TASK}" { while ((getline line < intent) > 0) print line; close(intent); next }
+  $0 == "Goal: {GOAL}" { print "Goal: Complete the one code-only task in the spec."; next }
   $0 == "{FIRSTMATE_SPEC}" { while ((getline line < spec) > 0) print line; close(spec); next }
+  $0 == "Off-limits: {OFF_LIMITS}" { print "Off-limits: Secrets, client data, pushes, merges, deploys, and captain contact."; next }
+  $0 == "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): {CONTRACTS}" { print "Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none"; next }
   { print }
 ' "$BRIEF" > "$TMP/brief"
 cat "$TMP/brief" > "$BRIEF"
