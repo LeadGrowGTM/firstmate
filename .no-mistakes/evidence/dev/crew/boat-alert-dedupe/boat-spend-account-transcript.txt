@@ -1,0 +1,6 @@
+over_ceiling | boat-spend: spend $35 is over the $30 ceiling
+higher_spend_same_condition | <silent>
+first_hard_read_failure | boat-spend: read failed: boat limits did not return readable JSON
+same_hard_read_failure | <silent>
+read_recovers_new_projection | boat-spend: spend $20 projects to $193.11 by period end, over the $30 ceiling
+projection_still_due_same_day | <silent>

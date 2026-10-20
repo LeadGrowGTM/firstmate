@@ -1,0 +1,9 @@
+first_restore | boat-spend: sandbox bx_ahnbu3qr has a restore error: Restore incomplete: restore handed over with 2/2 image file(s) missing
+unchanged_next_day | <silent>
+changed_restore | boat-spend: sandbox bx_ahnbu3qr has a restore error: Restore incomplete: restore handed over with 1/2 image file(s) missing
+clear_during_partial_read | boat-spend: read failed: unreadable auto-refill state
+return_during_partial_read | boat-spend: sandbox bx_ahnbu3qr has a restore error: Restore incomplete: restore handed over with 1/2 image file(s) missing
+unchanged_partial_read | <silent>
+new_refill_condition | boat-spend: auto-refill is enabled
+Boat calls: 21
+Commands used: --no-update billing status --json; --no-update limits --json; --no-update list --all --json
