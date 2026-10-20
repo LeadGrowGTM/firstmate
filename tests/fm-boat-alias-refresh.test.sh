@@ -945,10 +945,16 @@ SH
     assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the steer follows its task id'
   done
   assert_equals 7 "$(wc -l < "$ssh_log" | tr -d ' ')" "both steers reached the task box"
+  printf '%s\n' 'task-one bx_ahnbu3qr' 'task-two bx_bbbbbbbb' 'get bx_bbbbbbbb' '0 bx_bbbbbbbb' > "$fmhome/state/.boat-task-box"
+  printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+  boat_route boat-eng fm-remote-file.sh get data/task-one/report.md
+  expect_code 0 "$CODE" "the file read ignores a task named get"$'\n'"$ERR"
+  assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the file read follows its path'
   printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
   boat_route boat-eng fm-remote-delta-read.sh state/task-one.status 0 unused 0
-  expect_code 0 "$CODE" "the delta read reaches its task box"$'\n'"$ERR"
+  expect_code 0 "$CODE" "the delta read ignores a task named 0"$'\n'"$ERR"
   assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the delta read follows its path'
+  assert_equals 9 "$(wc -l < "$ssh_log" | tr -d ' ')" "both file reads reached the path box"
   ID=$saved_id
   pass "T15 a recorded task is reached on its own box"
 }

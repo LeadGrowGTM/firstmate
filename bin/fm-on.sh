@@ -149,12 +149,18 @@ if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
       die "unsafe task box record for $ROUTE"
     elif [ -f "$TASK_MAP" ]; then
       TASK_PATH=
+      TASK_ARGS=("$@")
       case "$COMMAND" in
-        fm-remote-file.sh) [ "${1:-}" != get ] || TASK_PATH=${2:-} ;;
-        fm-remote-delta-read.sh) TASK_PATH=${1:-} ;;
+        fm-remote-file.sh)
+          if [ "${1:-}" = get ]; then
+            TASK_PATH=${2:-}
+            TASK_ARGS=()
+          fi
+          ;;
+        fm-remote-delta-read.sh) TASK_PATH=${1:-}; TASK_ARGS=() ;;
       esac
       TASK_BOX=$(awk 'NF >= 2 { print $1, $2 }' "$TASK_MAP" | while read -r tid tbox; do
-        for arg in "$@"; do
+        for arg in "${TASK_ARGS[@]}"; do
           case "$arg" in
             "$tid") printf '%s\n' "$tbox" ;;
           esac
