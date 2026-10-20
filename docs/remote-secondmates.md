@@ -613,7 +613,7 @@ Without a fresh worker status declaration, dispatch refuses success and leaves t
 New resumes and pre-spawn timer extensions follow the [Boat timer and idle check rules](configuration.md#boat-idle-check).
 With more than one listed box, dispatch prefers a listed box that is already running and still has room under the three-worker cap, and it does not create boxes.
 An active sandbox that is not listed, or more active sandboxes than `expected_running`, is refused.
-A task stays on the box recorded for it, and a later command that names that task uses that box.
+A task stays on its recorded box; later commands naming its id, status file, or path under its data directory use that box.
 The account and monthly ceilings include the remaining timers of the other active listed boxes.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
@@ -651,7 +651,7 @@ It adds no automatic worker retry, merge path, or supervision loop.
 
 ### Sending from another home
 
-Each second mate home can send through the same controller home, but the shared lane accepts only allowlisted code-only projects under the existing Boat rules, currently firstmate and dev-loop.
+Each second mate home can send through the same controller home for projects allowed by the [code-only Boat overflow](#code-only-boat-overflow) lane.
 Adding a mate's projects to that allowlist and adding a client lane wait on the captain; the client lane would allow only Claude or Codex workers, refuse Grok and Muse, and use secrets only through `lg run` with a read-only identity for each box.
 The health second mate is excluded because its only project contains health data, which never leaves this machine.
 Alexander-media video renders stay on the PC.

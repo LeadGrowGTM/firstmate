@@ -9,9 +9,7 @@
 # (docs/remote-secondmates.md "Sending from another home"). The worker then
 # reports into the box's boat-eng home, which the sending home never reads.
 # FM_HOME is always the sending home here and must be set explicitly.
-# Shared-lane task status is readable by any fleet home: all homes run as one
-# Linux user with equal file access, and code-only tasks carry no client data.
-# Revisit this policy with a sender-only binding before any client lane opens.
+# Shared-lane status access follows docs/remote-secondmates.md "Sending from another home".
 #
 # arm, run after the send succeeded, refuses unless the controller's
 # state/.boat-task-box records the task, then writes state/boat-<task-id>.check.sh
