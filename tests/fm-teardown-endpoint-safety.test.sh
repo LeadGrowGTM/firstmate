@@ -1614,29 +1614,43 @@ test_retire_claim_archives_only_the_gone_agents_record() {
 }
 
 test_retire_claim_refuses_while_recorded_pr_is_open() {
-  local dir id=retire-open-pr rc before_meta before_claim
+  local dir id=retire-open-pr
   dir=$(make_retire_claim_case retire-open-pr "$id")
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$dir/home/state/$id.meta"
   add_retire_gh_pr_state "$dir" open
-  before_meta=$(cat "$dir/home/state/$id.meta")
-  before_claim=$(cat "$dir/pool/1/.fm-slot-owner")
-  set +e
-  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err"
-  rc=$?
-  set -e
-  [ "$rc" -ne 0 ] || fail "retire-claim with an open recorded PR unexpectedly succeeded"
+  assert_retire_refused_unchanged "$dir" "$id" "open recorded PR"
   assert_grep "recorded PR https://github.com/example/repo/pull/7 is not confirmed merged" \
     "$dir/retire.err" "retire-claim refusal did not name the recorded PR"
   assert_grep "nothing was changed" "$dir/retire.err" \
     "retire-claim refusal did not state that nothing was changed"
-  [ "$(cat "$dir/home/state/$id.meta")" = "$before_meta" ] \
-    || fail "refused retire-claim changed the task record"
-  [ "$(cat "$dir/pool/1/.fm-slot-owner")" = "$before_claim" ] \
-    || fail "refused retire-claim changed the slot owner"
-  if compgen -G "$dir/home/data/$id/retired-worktree-claim.*.meta" >/dev/null; then
-    fail "refused retire-claim archived the task record"
-  fi
   pass "retire-claim refuses while the recorded PR is open and changes nothing"
+}
+
+test_retire_claim_refuses_without_recorded_pr_merge_confirmation() {
+  local dir id scenario expected
+  for scenario in failed-lookup invalid-url; do
+    id=retire-pr-$scenario
+    dir=$(make_retire_claim_case "$id" "$id")
+    case "$scenario" in
+      failed-lookup)
+        printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$dir/home/state/$id.meta"
+        cat > "$dir/fakebin/gh-axi" <<'SH'
+#!/usr/bin/env bash
+echo 'error: PR state unavailable' >&2
+exit 1
+SH
+        chmod +x "$dir/fakebin/gh-axi"
+        expected='recorded PR https://github.com/example/repo/pull/7 is not confirmed merged'
+        ;;
+      invalid-url)
+        printf '%s\n' 'pr=not-a-pr-url' >> "$dir/home/state/$id.meta"
+        expected="recorded PR for $id cannot be verified as merged"
+        ;;
+    esac
+    assert_retire_refused_unchanged "$dir" "$id" "$scenario recorded PR"
+    assert_grep "$expected" "$dir/retire.err" "$scenario: wrong refusal"
+  done
+  pass "retire-claim retains task state when a recorded PR cannot be verified"
 }
 
 test_retire_claim_proceeds_when_recorded_pr_is_merged() {
@@ -2675,6 +2689,7 @@ test_recycled_slot_of_another_clone_is_already_gone
 test_absent_recorded_slot_still_holds_project_lock
 test_retire_claim_archives_only_the_gone_agents_record
 test_retire_claim_refuses_while_recorded_pr_is_open
+test_retire_claim_refuses_without_recorded_pr_merge_confirmation
 test_retire_claim_proceeds_when_recorded_pr_is_merged
 test_retire_claim_preserves_archives_across_task_id_reuse
 test_retire_claim_archives_without_spawn_generation
