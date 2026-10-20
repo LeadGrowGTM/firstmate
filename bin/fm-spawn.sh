@@ -1607,14 +1607,26 @@ spawn_abort_cleanup() {
   fi
   # Before identity delivery, a failed relaunch still uses the previous tab's
   # identity. Keep its record aligned with that pane; leave both tabs open.
+  # The prior pair is restored where the first Orca view line stood, so a
+  # preserved pr=/pr_head= block stays last: fm_pr_metadata_identity_parse
+  # refuses any other key after pr=.
   if [ -n "$ORCA_VIEW_HANDLE" ] && [ "$ORCA_VIEW_IDENTITY_SENT" != 1 ] &&
     [ "$RELAUNCH" -eq 1 ] &&
     [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
     orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
-    if ! { awk -F= '$1 !~ /^orca_view_(handle|session|owned)$/' "$STATE/$ID.meta" >"$orca_restore" &&
-      { [ -z "$ORCA_VIEW_PRIOR_HANDLE" ] ||
-        printf 'orca_view_handle=%s\norca_view_session=%s\n' \
-          "$ORCA_VIEW_PRIOR_HANDLE" "$ORCA_VIEW_PRIOR_SESSION" >>"$orca_restore"; } &&
+    if ! { awk -F= -v handle="$ORCA_VIEW_PRIOR_HANDLE" -v session="$ORCA_VIEW_PRIOR_SESSION" '
+      $1 == "orca_view_handle" || $1 == "orca_view_session" || $1 == "orca_view_owned" {
+        if (!moved) {
+          moved=1
+          if (handle != "") {
+            print "orca_view_handle=" handle
+            print "orca_view_session=" session
+          }
+        }
+        next
+      }
+      { print }
+    ' "$STATE/$ID.meta" >"$orca_restore" &&
       fm_backlog_atomic_transition publish "$orca_restore" "$STATE/$ID.meta" "task record" "$STATE"; }; then
       rm -f "$orca_restore"
       echo "warning: could not restore the prior Orca tab record after aborted relaunch of $ID" >&2
@@ -6025,11 +6037,14 @@ preserve_relaunch_meta() {
     echo "orca_view_handle=$ORCA_VIEW_PRIOR_HANDLE"
     echo "orca_view_session=$ORCA_VIEW_PRIOR_SESSION"
   fi
-  if [ "$RELAUNCH" -eq 1 ]; then
-    preserve_relaunch_meta
-  fi
+  # Preserved lines go last: a preserved pr= identity block must stay at the end
+  # of the record, because fm_pr_metadata_identity_parse refuses any other key
+  # after pr=.
   if [ "$SPAWN_CONTROL_PARENT" = 1 ] && [ -n "${FM_CONTROL_RELAUNCH_TX:-}" ]; then
     echo "control_relaunch_tx=$FM_CONTROL_RELAUNCH_TX"
+  fi
+  if [ "$RELAUNCH" -eq 1 ]; then
+    preserve_relaunch_meta
   fi
 } >"$SPAWN_META_PATH" || {
   echo "error: task record for $ID could not be prepared at $SPAWN_META_PATH" >&2
@@ -6389,8 +6404,12 @@ spawn_record_traceparent() {
   fi
   SPAWN_META_TMP="$STATE/.$ID.meta.trace.${BASHPID:-$$}"
   if [ ! -f "$meta" ] || [ ! -w "$meta" ] ||
-    ! awk -F= '$1 != "traceparent"' "$meta" >"$SPAWN_META_TMP" ||
-    ! printf 'traceparent=%s\n' "$SPAWN_TRACEPARENT" >>"$SPAWN_META_TMP" ||
+    ! awk -F= -v traceparent="$SPAWN_TRACEPARENT" '
+      $1 == "traceparent" { next }
+      $1 == "pr" && !inserted { print "traceparent=" traceparent; inserted=1 }
+      { print }
+      END { if (!inserted) print "traceparent=" traceparent }
+    ' "$meta" >"$SPAWN_META_TMP" ||
     ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$meta" "task record" "$STATE"; then
     status=1
     rm -f "$SPAWN_META_TMP" 2>/dev/null || true
