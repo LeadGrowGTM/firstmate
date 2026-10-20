@@ -226,7 +226,7 @@ fm_pn_cache_store() {  # <repo-id> <public|private>
 
 # Prints public or private for a destination; see VISIBILITY above.
 fm_pn_visibility() {  # <url|owner/repo|path>
-  local raw=$1 id gh answer
+  local raw=$1 id gh answer host=github.com api_id cache_id
   id=$(fm_pn_repo_id "$raw")
   if fm_pn_explicit_visibility "$id" "$raw"; then
     return 0
@@ -237,30 +237,46 @@ fm_pn_visibility() {  # <url|owner/repo|path>
       return 0
       ;;
   esac
-  case "$id" in
-    *://* | *@*:*)
-      echo public
-      return 0
+  api_id=$id
+  case "$raw" in
+    *://*)
+      host=${raw#*://}
+      host=${host#*@}
+      host=${host%%/*}
+      api_id=${raw#*://}
+      api_id=${api_id#*/}
+      ;;
+    *@*:*)
+      host=${raw#*@}
+      host=${host%%:*}
+      api_id=${raw#*:}
+      ;;
+    */*/*)
+      host=${raw%%/*}
+      api_id=${raw#*/}
       ;;
   esac
-  case "$id" in
+  api_id=${api_id%/}
+  api_id=${api_id%.git}
+  case "$api_id" in
     */*) ;;
     *)
-      # A bare relative path with no slash is a local directory remote.
-      echo private
+      case "$raw" in *://* | *@*:*) echo public ;; *) echo private ;; esac
       return 0
       ;;
   esac
-  if fm_pn_cached_visibility "$id"; then
+  cache_id=$id
+  [ "$host" = github.com ] || cache_id=$host/$api_id
+  if fm_pn_cached_visibility "$cache_id"; then
     return 0
   fi
   answer=
   if gh=$(fm_pn_real_bin gh); then
-    answer=$("$gh" api "repos/$id" --jq .visibility 2>/dev/null) || answer=
+    answer=$("$gh" api "repos/$api_id" --hostname "$host" --jq .visibility 2>/dev/null) || answer=
   fi
   case "$answer" in
     public)
-      fm_pn_cache_store "$id" public
+      fm_pn_cache_store "$cache_id" public
       echo public
       ;;
     private | internal) echo private ;;

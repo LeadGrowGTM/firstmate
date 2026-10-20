@@ -66,10 +66,18 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$REPO" in
-  */*) ;;
+  https://*/*)
+    GH_HOSTNAME=${REPO#https://}
+    GH_HOSTNAME=${GH_HOSTNAME%%/*}
+    GH_REPO=${REPO#https://"$GH_HOSTNAME"/}
+    GH_REPO=${GH_REPO%.git}
+    ;;
+  */*) GH_HOSTNAME=github.com; GH_REPO=$REPO ;;
   *) usage ;;
 esac
-EVIDENCE_REMOTE="https://github.com/$REPO.git"
+case "$GH_REPO" in */*) ;; *) usage ;; esac
+PR_REPO="$GH_HOSTNAME/$GH_REPO"
+EVIDENCE_REMOTE="https://$GH_HOSTNAME/$GH_REPO.git"
 if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE:-}" ]; then
   EVIDENCE_REMOTE=$FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE
 fi
@@ -101,11 +109,11 @@ PR_JQ='[.number, .state, (.title | @base64), ((.body // "") | @base64)] | @tsv'
 pr_rows() {
   local n
   if [ "${#PRS[@]}" -eq 0 ]; then
-    "$GH" api --paginate "repos/$REPO/pulls?state=all&per_page=100" --jq ".[] | $PR_JQ"
+    "$GH" api --paginate "repos/$GH_REPO/pulls?state=all&per_page=100" --hostname "$GH_HOSTNAME" --jq ".[] | $PR_JQ"
     return
   fi
   for n in "${PRS[@]}"; do
-    "$GH" pr view "$n" --repo "$REPO" --json number,state,title,body --jq "$PR_JQ" || return 1
+    "$GH" pr view "$n" --repo "$PR_REPO" --json number,state,title,body --jq "$PR_JQ" || return 1
   done
 }
 
@@ -128,7 +136,7 @@ scrub_prs() {
       continue
     fi
     fm_pn_scrub_stream <"$WORK/body" >"$WORK/body.scrubbed" || return 1
-    if "$GH" pr edit "$number" --repo "$REPO" \
+    if "$GH" pr edit "$number" --repo "$PR_REPO" \
       --title "$(fm_pn_scrub_string "$title")" --body-file "$WORK/body.scrubbed" >/dev/null; then
       echo "PR #$number ($state): rewrote $t_hits title and $b_hits body lines to neutral ids"
     else

@@ -91,7 +91,7 @@ make_repo() {  # <dir> <home> <public|private> -> sets REPO ORIGIN HOOKS
   if [ "$vis" = public ]; then
     printf '%s public\n' "$ORIGIN" >>"$home/config/repo-visibility"
   fi
-  "$STRIP" install "$HOOKS" "$REPO" --private-names "$home/config" "$home/state" ||
+  "$STRIP" install "$HOOKS" "$REPO" --private-names "$home/config" "$home/state" "$home" "$home/data" "$home/projects" ||
     fail "hook install failed"
 }
 
@@ -327,7 +327,7 @@ test_stale_registered_name_is_refreshed_before_commit() {
   make_repo "$d" "$home" public
   printf '%s\n' '- quasar-mate - A made-up route. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)' \
     >"$home/data/secondmates.md"
-  out=$(FM_HOME=$home in_pane "$HOOKS" commit_file "$REPO" fresh.txt plain "Route quasar-mate work" 2>&1) &&
+  out=$(unset FM_HOME FM_DATA_OVERRIDE FM_PROJECTS_OVERRIDE; in_pane "$HOOKS" commit_file "$REPO" fresh.txt plain "Route quasar-mate work" 2>&1) &&
     fail "a newly registered name passed the commit guard"
   assert_contains "$out" "mate-" "the stale-list refusal did not report a neutral id"
   assert_contains "$(cat "$home/config/private-names")" "quasar-mate" "the list was not refreshed"
@@ -376,10 +376,13 @@ test_gate_remote_is_judged_by_origin_and_repo_hook_still_runs() {
 }
 
 test_new_gate_and_unfetched_public_branches_skip_public_history() {
-  local d=$TMP_ROOT/gate-public-history home gate fork out
+  local d=$TMP_ROOT/gate-public-history home gate fork behind out
   home=$d/home
   make_home "$home"
   make_repo "$d" "$home" public
+  behind=$d/behind.git
+  git init -q --bare "$behind"
+  git -C "$REPO" -c core.hooksPath=/dev/null push -q "$behind" main
   commit_file "$REPO" existing.txt "acme-test was already published" "Published history" --no-verify
   git -C "$REPO" -c core.hooksPath=/dev/null push -q origin main
   git -C "$REPO" fetch -q origin
@@ -391,7 +394,8 @@ test_new_gate_and_unfetched_public_branches_skip_public_history() {
   git -C "$REPO" remote add no-mistakes "$gate"
   git -C "$REPO" remote add public-copy "$ORIGIN"
   git -C "$REPO" remote add fork "$fork"
-  printf '%s public\n' "$fork" >>"$home/config/repo-visibility"
+  git -C "$REPO" remote add behind "$behind"
+  printf '%s public\n%s public\n' "$fork" "$behind" >>"$home/config/repo-visibility"
   git -C "$REPO" checkout -q -b fm/clean-first
   in_pane "$HOOKS" commit_file "$REPO" fresh.txt "clean addition" "Clean first push"
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q no-mistakes HEAD 2>&1) ||
@@ -400,6 +404,9 @@ test_new_gate_and_unfetched_public_branches_skip_public_history() {
     fail "an unfetched public alias scanned already public history: $out"
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q fork HEAD:refs/heads/fm/clean-first 2>&1) ||
     fail "a separate public fork scanned already public history: $out"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q behind HEAD:refs/heads/fm/clean-first 2>&1) &&
+    fail "a fork behind origin accepted a newly exposed listed name"
+  assert_contains "$out" "mate-1" "the behind-fork refusal omitted the neutral id"
   assert_equals "$(git -C "$REPO" rev-parse HEAD)" "$(git -C "$gate" rev-parse refs/heads/fm/clean-first)" \
     "the clean branch did not reach the gate"
   git -C "$REPO" checkout -q -b fm/fork-secret
@@ -408,6 +415,49 @@ test_new_gate_and_unfetched_public_branches_skip_public_history() {
     fail "a new listed name reached the separate public fork"
   assert_contains "$out" "client-1" "the separate fork refusal omitted the neutral id"
   pass "new gate and unfetched fork branches skip published history while checking new commits"
+}
+
+test_merge_added_paths_and_lines_are_checked() {
+  local d=$TMP_ROOT/merge-path home out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  git -C "$REPO" checkout -q -b fm/merge-path
+  commit_file "$REPO" first.txt clean "First clean change"
+  git -C "$REPO" checkout -q -b fm/merge-side main
+  commit_file "$REPO" side.txt clean "Second clean change"
+  git -C "$REPO" checkout -q fm/merge-path
+  git -C "$REPO" merge -q --no-commit --no-ff fm/merge-side
+  printf 'Route zenith-sample\n' >"$REPO/route.txt"
+  git -C "$REPO" add route.txt
+  commit_file "$REPO" logs/acme-test.log clean "Merge clean work" --no-verify
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "a merge-added listed filename reached the public origin"
+  assert_contains "$out" "logs/mate-1.log" "the merge-added path was not scanned"
+  assert_contains "$out" "client-1" "the merge-added line was not scanned"
+  git -C "$ORIGIN" rev-parse -q --verify refs/heads/fm/merge-path >/dev/null &&
+    fail "the refused merge branch reached the public origin"
+  pass "a merge-added listed filename is refused before a public push"
+}
+
+test_unreadable_public_refs_refuse_push() {
+  local d=$TMP_ROOT/unknown-refs home out gate missing_origin
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  git -C "$REPO" checkout -q -b fm/clean-unknown
+  commit_file "$REPO" clean.txt clean "Clean change"
+  gate=$d/gate.git
+  missing_origin=$d/unreadable.git
+  git init -q --bare "$gate"
+  git -C "$REPO" remote add no-mistakes "$gate"
+  git -C "$REPO" remote set-url origin "$missing_origin"
+  printf '%s public\n' "$missing_origin" >>"$home/config/repo-visibility"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q no-mistakes HEAD 2>&1) &&
+    fail "a public push proceeded after its ref lookup failed"
+  assert_contains "$out" "cannot read public destination refs" "the push refusal omitted its reason"
+  assert_not_contains "$out" "$missing_origin" "the refusal printed the destination path"
+  pass "a failed public destination ref lookup refuses the push"
 }
 
 test_gh_shim_refuses_or_rewrites_pr_text() {
@@ -574,10 +624,12 @@ test_visibility_asks_github_once_and_caches() {
   : >"$count"
   export FAKE_GH_LOG=$d/gh.log FAKE_GH_COUNT=$count
   : >"$FAKE_GH_LOG"
-  out=$(cd "$REPO" && FAKE_GH_VIS=public in_pane "$HOOKS" gh pr create \
+  out=$(cd "$REPO" && GH_HOST=enterprise.example.invalid FAKE_GH_VIS=public in_pane "$HOOKS" gh pr create \
     --repo https://github.com/Example/Open.git --title 'Fix acme-test' --body ok 2>&1) &&
     fail "a public answer allowed a named PR"
   assert_contains "$out" "mate-1" "the public refusal omitted the neutral id"
+  assert_contains "$(cat "$FAKE_GH_LOG")" "[--hostname] [github.com]" \
+    "the visibility lookup used the ambient GitHub host"
   assert_contains "$(cat "$home/state/repo-visibility.cache")" "example/open public" \
     "the public answer was not persisted"
   out=$(cd "$REPO" && FAKE_GH_VIS=private in_pane "$HOOKS" gh pr create \
@@ -598,13 +650,21 @@ test_visibility_asks_github_once_and_caches() {
     --repo example/change --title 'Fix acme-test' --body ok 2>&1) &&
     fail "a former private result bypassed the public guard"
   assert_equals 5 "$(wc -l <"$count" | tr -d ' ')" "a private result was cached"
+  : >"$FAKE_GH_LOG"
+  out=$(cd "$REPO" && GH_HOST=other.example.invalid FAKE_GH_VIS=private in_pane "$HOOKS" gh pr create \
+    --repo https://forge.example.invalid/Example/Open.git --title 'Fix acme-test' --body ok 2>&1) ||
+    fail "an enterprise private destination refused a named PR: $out"
+  assert_contains "$(cat "$FAKE_GH_LOG")" "[--hostname] [forge.example.invalid]" \
+    "the visibility lookup used the ambient host instead of the destination"
+  assert_contains "$(cat "$FAKE_GH_LOG")" "[pr] [create]" \
+    "a public result from another host was reused for the private destination"
   out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create \
     --repo "$d/local.git" --title 'Fix acme-test' --body ok 2>&1) ||
     fail "a local destination refused a named PR: $out"
   out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create \
     --repo https://git.example.invalid/x/y.git --title 'Fix acme-test' --body ok 2>&1) &&
     fail "an unknown network destination allowed a named PR"
-  assert_equals 5 "$(wc -l <"$count" | tr -d ' ')" "local or unknown remotes queried GitHub"
+  assert_equals 7 "$(wc -l <"$count" | tr -d ' ')" "visibility did not query both network hosts"
   unset FAKE_GH_LOG FAKE_GH_COUNT
   pass "PR publication uses public visibility caching and checks fresh private answers"
 }
@@ -639,7 +699,7 @@ test_scrub_tool_dry_run_and_apply() {
   out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo \
     --evidence-branch other/evidence 2>&1) && fail "an alternate evidence branch was accepted"
 
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_SEAM=1 FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+  out=$(GH_HOST=enterprise.example.invalid PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_SEAM=1 FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
     "$SCRUB" --repo example/public-repo 2>&1) ||
     fail "dry run failed: $out"
   assert_contains "$out" "dry run" "the dry run did not say so"
@@ -651,13 +711,14 @@ test_scrub_tool_dry_run_and_apply() {
   assert_not_contains "$out" "acme-test" "the dry run printed a private name"
   assert_not_contains "$out" "zenith-sample" "the dry run printed a private name"
   assert_contains "$(cat "$log")" "[api] [--paginate]" "the scrub tool did not page through all pull requests"
+  assert_contains "$(cat "$log")" "[--hostname] [github.com]" "the scrub API used the ambient GitHub host"
   assert_not_contains "$(cat "$log")" "[edit]" "the dry run edited a PR"
   assert_equals "$old_tip" "$(git -C "$ev" rev-parse no-mistakes/evidence)" "the dry run moved the evidence branch"
 
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_SEAM=1 FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+  out=$(GH_HOST=enterprise.example.invalid PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_SEAM=1 FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
     "$SCRUB" --repo example/public-repo --apply 2>&1) ||
     fail "apply failed: $out"
-  assert_contains "$(cat "$log")" "[pr] [edit] [11] [--repo] [example/public-repo] [--title] [Ship the mate-1 lane]" \
+  assert_contains "$(cat "$log")" "[pr] [edit] [11] [--repo] [github.com/example/public-repo] [--title] [Ship the mate-1 lane]" \
     "apply did not rewrite PR 11's title"
   assert_contains "$(cat "$log")" $'Clean line\nRoutes to client-1' "apply did not rewrite PR 11's body"
   assert_not_contains "$(cat "$log")" "[edit] [12]" "apply edited a clean PR"
@@ -699,9 +760,12 @@ test_scrub_refreshes_registered_names() {
   printf '%s\n' '- quasar-mate - A made-up route. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)' \
     >"$home/data/secondmates.md"
   export FAKE_GH_LOG=$log FAKE_GH_PRS=$d/prs.tsv FAKE_GH_VIS=public
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo --no-evidence --apply 2>&1) ||
+  out=$(GH_HOST=other.example.invalid PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" \
+    --repo https://forge.example.invalid/example/public-repo --no-evidence --apply 2>&1) ||
     fail "a stale-list scrub failed: $out"
   assert_contains "$(cat "$log")" "[pr] [edit] [17]" "the newly registered name remained in PR text"
+  assert_contains "$(cat "$log")" "[--hostname] [forge.example.invalid]" "the URL host was not used for the PR API"
+  assert_contains "$(cat "$log")" "[--repo] [forge.example.invalid/example/public-repo]" "the URL host was not used for PR edits"
   assert_not_contains "$(cat "$log")" "quasar-mate" "the newly registered name reached the edit call"
   assert_contains "$(cat "$home/config/private-names")" "quasar-mate" "the scrub did not refresh the list"
   bad=$d/bad-home
@@ -723,7 +787,7 @@ test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard() {
   repo=$d/work
   hooks=$d/hooks
   fm_git_init_commit "$repo"
-  "$STRIP" install "$hooks" "$repo" --keep-ai-trailers --private-names "$home/config" "$home/state" ||
+  "$STRIP" install "$hooks" "$repo" --keep-ai-trailers --private-names "$home/config" "$home/state" "$home" "$home/data" "$home/projects" ||
     fail "keep-ai-trailers install failed"
   printf 'x\n' >"$repo/k.txt"
   git -C "$repo" add k.txt
@@ -773,6 +837,8 @@ test_stale_registered_name_is_refreshed_before_commit
 test_evidence_push_with_a_listed_name_is_refused
 test_gate_remote_is_judged_by_origin_and_repo_hook_still_runs
 test_new_gate_and_unfetched_public_branches_skip_public_history
+test_merge_added_paths_and_lines_are_checked
+test_unreadable_public_refs_refuse_push
 test_gh_shim_refuses_or_rewrites_pr_text
 test_no_mistakes_shim_checks_public_inputs
 test_visibility_asks_github_once_and_caches

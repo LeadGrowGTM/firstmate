@@ -327,19 +327,30 @@ ZERO_SHA=0000000000000000000000000000000000000000
 
 # Paths a commit adds, renames to, or copies to.
 new_paths() {  # <sha>
-  git diff-tree --root --no-commit-id --name-only -r -M -C --diff-filter=ACR "$1"
+  changed_paths "$1" ACR
+}
+
+changed_paths() {  # <sha> <filter>
+  if git rev-parse -q --verify "$1^" >/dev/null 2>&1; then
+    git diff --name-only -M -C --diff-filter="$2" "$1^" "$1"
+  else
+    git diff-tree --root --no-commit-id --name-only -r -M -C --diff-filter="$2" "$1"
+  fi
 }
 
 # The content of a commit's added lines, without the leading "+" or any diff
 # header, optionally for one path.
 added_lines() {  # <sha> [<path>]
-  git show --format= --no-color --no-ext-diff --unified=0 "$1" -- ${2:+"$2"} |
-    awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }'
+  if git rev-parse -q --verify "$1^" >/dev/null 2>&1; then
+    git diff --no-color --no-ext-diff --unified=0 "$1^" "$1" -- ${2:+"$2"}
+  else
+    git show --format= --no-color --no-ext-diff --unified=0 "$1" -- ${2:+"$2"}
+  fi | awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }'
 }
 
 cmd_pre_push() {
-  local remote=${1:-} url=${2:-} dest local_sha remote_ref remote_sha
-  local branch range commits rc=0 sha path ref effective_remote base_ref base_sha
+  local remote=${1:-} url=${2:-} dest local_sha remote_ref
+  local branch range commits rc=0 sha path remote_commit remote_refs known_shas=()
   [ -n "$remote" ] || usage
   dest=$url
   if [ "$remote" = no-mistakes ] || [ -z "$dest" ]; then
@@ -354,7 +365,16 @@ cmd_pre_push() {
     cat >/dev/null
     return 3
   fi
-  while read -r _ local_sha remote_ref remote_sha; do
+  remote_refs=$(git ls-remote "$dest" 2>/dev/null) || {
+    cat >/dev/null
+    echo "fm-private-names: cannot read public destination refs; refusing this push" >&2
+    return 1
+  }
+  while read -r remote_commit _; do
+    [ -n "$remote_commit" ] || continue
+    git cat-file -e "$remote_commit^{commit}" 2>/dev/null && known_shas+=("$remote_commit")
+  done <<<"$remote_refs"
+  while read -r _ local_sha remote_ref _; do
     [ -n "${local_sha:-}" ] || continue
     case "$local_sha" in *[!0]*) ;; *) continue ;; esac
     branch=${remote_ref#refs/heads/}
@@ -363,31 +383,7 @@ cmd_pre_push() {
       echo "fm-private-names: rename the branch before pushing, for example to: $(fm_pn_scrub_string "$branch")" >&2
       rc=1
     fi
-    if [ "${remote_sha:-$ZERO_SHA}" != "$ZERO_SHA" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
-      range=("$remote_sha..$local_sha")
-    else
-      range=("$local_sha" --not)
-      effective_remote=$remote
-      [ "$remote" != no-mistakes ] || effective_remote=origin
-      while IFS= read -r ref; do
-        [ -n "$ref" ] && range+=("$ref")
-      done < <(git for-each-ref --format='%(refname)' "refs/remotes/$effective_remote/")
-      if [ "${#range[@]}" -eq 2 ]; then
-        base_ref=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || base_ref=
-        if [ -z "$base_ref" ]; then
-          for ref in refs/remotes/origin/main refs/remotes/origin/master; do
-            if git show-ref --verify --quiet "$ref"; then
-              base_ref=$ref
-              break
-            fi
-          done
-        fi
-        if [ -n "$base_ref" ]; then
-          base_sha=$(git merge-base "$local_sha" "$base_ref" 2>/dev/null) || base_sha=
-          [ -z "$base_sha" ] || range+=("$base_sha")
-        fi
-      fi
-    fi
+    range=("$local_sha" --not "${known_shas[@]}")
     commits=$(git rev-list "${range[@]}" 2>/dev/null) || {
       echo "fm-private-names: cannot list the commits being pushed; refusing" >&2
       return 1
@@ -414,7 +410,7 @@ cmd_pre_push() {
         [ -n "$path" ] || continue
         added_lines "$sha" "$path" |
           report_hits "an added line of $(fm_pn_scrub_string "$path") in commit ${sha:0:12}" noline
-      done < <(git diff-tree --root --no-commit-id --name-only -r -M --diff-filter=d "$sha")
+      done < <(changed_paths "$sha" d)
     done
   done
   if [ "$rc" -ne 0 ]; then

@@ -5814,7 +5814,7 @@ FM_HOME="$FM_HOME" FM_CONFIG_OVERRIDE="$PRIVATE_NAMES_CONFIG" FM_STATE_OVERRIDE=
     echo "error: could not refresh the private-name list for $ID" >&2
     exit 1
   }
-GIT_HOOKS_ARGS=(--private-names "$PRIVATE_NAMES_CONFIG" "$STATE_REAL")
+GIT_HOOKS_ARGS=(--private-names "$PRIVATE_NAMES_CONFIG" "$STATE_REAL" "$FM_HOME" "$DATA" "$PROJECTS")
 [ "$KEEP_AI_TRAILERS" = 0 ] || GIT_HOOKS_ARGS+=(--keep-ai-trailers)
 "$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "$GIT_HOOKS_DIR" "$WT" "${GIT_HOOKS_ARGS[@]}" || {
   echo "error: could not install the AI-trailer strip and private-name hooks for $ID" >&2

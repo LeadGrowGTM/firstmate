@@ -7,7 +7,7 @@
 #       Commit-msg hook mode. Git passes the proposed message file as $1.
 #       Rewrites that file in place, then exits 0 so the commit proceeds.
 #   fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree> [--keep-ai-trailers]
-#                                  [--private-names <config-dir> <state-dir>]
+#                                  [--private-names <config-dir> <state-dir> <home-dir> <data-dir> <projects-dir>]
 #       Recreate <hooks-dir> as a core.hooksPath for this launch: a commit-msg
 #       hook that runs this strip (omitted with --keep-ai-trailers), plus one
 #       wrapper per client-side hook name
@@ -27,7 +27,7 @@
 #       project's git config; the caller prefixes the pane with
 #       GIT_CONFIG_COUNT / GIT_CONFIG_KEY_0 / GIT_CONFIG_VALUE_0.
 #       --private-names adds the private-name guard (bin/fm-private-names.sh,
-#       reading that home's config and state directories) to the commit-msg
+#       reading that home's config, state, data, and project directories) to the commit-msg
 #       and pre-push hooks before the repository's own hook runs, and writes
 #       gh, gh-axi, and no-mistakes shims into <hooks-dir>/bin for the caller to put first
 #       on the pane's PATH. The pre-push wrapper replays git's ref lines to
@@ -73,7 +73,7 @@ usage() {
 usage:
   fm-git-strip-ai-trailers.sh <msgfile>
   fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree> [--keep-ai-trailers]
-                                 [--private-names <config-dir> <state-dir>]
+                                 [--private-names <config-dir> <state-dir> <home-dir> <data-dir> <projects-dir>]
 EOF
   exit 2
 }
@@ -222,7 +222,8 @@ post-merge pre-push post-rewrite pre-auto-gc sendemail-validate'
 # state directories baked in; empty when the private-name guard is off.
 private_names_command() {  # <subcommand>
   [ -n "$PN_CONFIG" ] || return 0
-  printf 'FM_CONFIG_OVERRIDE=%s FM_STATE_OVERRIDE=%s %s %s' \
+  printf 'FM_HOME=%s FM_DATA_OVERRIDE=%s FM_PROJECTS_OVERRIDE=%s FM_CONFIG_OVERRIDE=%s FM_STATE_OVERRIDE=%s %s %s' \
+    "$(quote_for_hook "$PN_HOME")" "$(quote_for_hook "$PN_DATA")" "$(quote_for_hook "$PN_PROJECTS")" \
     "$(quote_for_hook "$PN_CONFIG")" "$(quote_for_hook "$PN_STATE")" \
     "$(quote_for_hook "$PN_GUARD")" "$1"
 }
@@ -300,6 +301,9 @@ install)
   KEEP_TRAILERS=0
   PN_CONFIG=
   PN_STATE=
+  PN_HOME=
+  PN_DATA=
+  PN_PROJECTS=
   PN_GUARD="$(cd "$(dirname "$SELF")" && pwd -P)/fm-private-names.sh"
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -308,10 +312,13 @@ install)
       shift
       ;;
     --private-names)
-      [ "$#" -ge 3 ] && [ -n "$2" ] && [ -n "$3" ] || usage
+      [ "$#" -ge 6 ] && [ -n "$2" ] && [ -n "$3" ] && [ -n "$4" ] && [ -n "$5" ] && [ -n "$6" ] || usage
       PN_CONFIG=$2
       PN_STATE=$3
-      shift 3
+      PN_HOME=$4
+      PN_DATA=$5
+      PN_PROJECTS=$6
+      shift 6
       ;;
     *) usage ;;
     esac
