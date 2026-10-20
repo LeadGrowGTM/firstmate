@@ -394,7 +394,7 @@ test_pi_extension_provider_and_old_pi_fall_back_to_the_model_listing() {
   printf 'openai-codex  gpt-5  128K\n' > "$CASE/pi-work/listed"
   # The earlier successful spawn already claims the case worktree, and every
   # task allocates its own copy, so the second launch needs a fresh worktree.
-  fm_git_worktree "$PROJ" "$CASE/wt-old" "wt-pi-listing-old"
+  git -C "$PROJ" worktree add --quiet -b wt-pi-listing-old "$CASE/wt-old"
   WT="$CASE/wt-old"
   out=$(spawn_ship "$id-old" --model openai-codex/gpt-5); rc=$?
   expect_code 0 "$rc" "a Pi without auth check should launch when the root lists the provider: $out"
@@ -410,7 +410,7 @@ test_a_pin_governs_only_its_own_runner() {
   expect_code 0 "$rc" "a codex spawn must ignore a Claude pin: $out"
   assert_not_contains "$out" "account=" "a codex spawn must not report a Claude pin"
   # Every task allocates its own copy, so the second launch needs a fresh worktree.
-  fm_git_worktree "$PROJ" "$CASE/wt-pi" "wt-scope-pi"
+  git -C "$PROJ" worktree add --quiet -b wt-scope-pi "$CASE/wt-pi"
   WT="$CASE/wt-pi"
   out=$(spawn_ship "$id-pi" --harness pi --model gpt-5.5); rc=$?
   expect_code 0 "$rc" "a Pi spawn must ignore a Claude pin: $out"
