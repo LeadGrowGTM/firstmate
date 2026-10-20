@@ -830,6 +830,7 @@ A missing or empty list refuses every public exit with a message naming the refr
 The no-mistakes daemon can generate PR text that the shim cannot inspect before creation; the worker checks for the PR URL while the run continues, scrubs its text as soon as it appears, and repeats that readback after CI green.
 
 `bin/fm-private-names-scrub.sh --repo <owner/repo>` dry-runs by default: it lists PRs whose title or body holds a listed name and evidence-branch files whose path or content does, without printing a name.
+The evidence scan always targets that repository's `no-mistakes/evidence` branch.
 With `--apply` it rewrites those PR titles and bodies to neutral ids and removes those files from the evidence-branch tip in one ordinary fast-forward commit; it never force-pushes or rewrites history, so earlier commits and PR edit history stay readable on the forge.
 The scripts' headers own the exact sources, flags, and exit codes, with coverage in [`tests/fm-private-names.test.sh`](../tests/fm-private-names.test.sh).
 

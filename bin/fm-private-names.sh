@@ -343,7 +343,7 @@ added_lines() {  # <sha> [<path>]
 
 cmd_pre_push() {
   local remote=${1:-} url=${2:-} dest local_sha remote_ref remote_sha
-  local branch range commits rc=0 sha path ref
+  local branch range commits rc=0 sha path ref effective_remote origin_dest base_ref base_sha
   [ -n "$remote" ] || usage
   dest=$url
   if [ "$remote" = no-mistakes ] || [ -z "$dest" ]; then
@@ -371,9 +371,29 @@ cmd_pre_push() {
       range=("$remote_sha..$local_sha")
     else
       range=("$local_sha" --not)
+      effective_remote=$remote
+      [ "$remote" != no-mistakes ] || effective_remote=origin
       while IFS= read -r ref; do
         [ -n "$ref" ] && range+=("$ref")
-      done < <(git for-each-ref --format='%(refname)' "refs/remotes/$remote/")
+      done < <(git for-each-ref --format='%(refname)' "refs/remotes/$effective_remote/")
+      if [ "${#range[@]}" -eq 2 ]; then
+        origin_dest=$(origin_url) || origin_dest=
+        if [ "$dest" = "$origin_dest" ]; then
+          base_ref=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || base_ref=
+          if [ -z "$base_ref" ]; then
+            for ref in refs/remotes/origin/main refs/remotes/origin/master; do
+              if git show-ref --verify --quiet "$ref"; then
+                base_ref=$ref
+                break
+              fi
+            done
+          fi
+          if [ -n "$base_ref" ]; then
+            base_sha=$(git merge-base "$local_sha" "$base_ref" 2>/dev/null) || base_sha=
+            [ -z "$base_sha" ] || range+=("$base_sha")
+          fi
+        fi
+      fi
     fi
     commits=$(git rev-list "${range[@]}" 2>/dev/null) || {
       echo "fm-private-names: cannot list the commits being pushed; refusing" >&2

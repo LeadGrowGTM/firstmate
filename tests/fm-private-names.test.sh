@@ -375,6 +375,29 @@ test_gate_remote_is_judged_by_origin_and_repo_hook_still_runs() {
   pass "a no-mistakes gate push is judged by origin, and the repository's pre-push still gets its ref lines"
 }
 
+test_new_gate_and_unfetched_public_branches_skip_public_history() {
+  local d=$TMP_ROOT/gate-public-history home gate out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  commit_file "$REPO" existing.txt "acme-test was already published" "Published history" --no-verify
+  git -C "$REPO" -c core.hooksPath=/dev/null push -q origin main
+  git -C "$REPO" fetch -q origin
+  gate=$d/gate.git
+  git init -q --bare "$gate"
+  git -C "$REPO" remote add no-mistakes "$gate"
+  git -C "$REPO" remote add public-copy "$ORIGIN"
+  git -C "$REPO" checkout -q -b fm/clean-first
+  in_pane "$HOOKS" commit_file "$REPO" fresh.txt "clean addition" "Clean first push"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q no-mistakes HEAD 2>&1) ||
+    fail "a clean first gate push scanned already public history: $out"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q public-copy HEAD:refs/heads/fm/clean-first 2>&1) ||
+    fail "an unfetched public alias scanned already public history: $out"
+  assert_equals "$(git -C "$REPO" rev-parse HEAD)" "$(git -C "$gate" rev-parse refs/heads/fm/clean-first)" \
+    "the clean branch did not reach the gate"
+  pass "new gate and unfetched public branches skip commits already public at origin"
+}
+
 test_gh_shim_refuses_or_rewrites_pr_text() {
   local d=$TMP_ROOT/gh home out rc log repo_arg flag action
   local repo_words=()
@@ -583,8 +606,13 @@ test_scrub_tool_dry_run_and_apply() {
   git -C "$seed" push -q "$ev" no-mistakes/evidence
   old_tip=$(git -C "$ev" rev-parse no-mistakes/evidence)
   export FAKE_GH_LOG=$log FAKE_GH_PRS=$d/prs.tsv FAKE_GH_VIS=public
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo \
+    --evidence-remote "$ev" 2>&1) && fail "an alternate evidence remote was accepted"
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo \
+    --evidence-branch other/evidence 2>&1) && fail "an alternate evidence branch was accepted"
 
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo --evidence-remote "$ev" 2>&1) ||
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+    "$SCRUB" --repo example/public-repo 2>&1) ||
     fail "dry run failed: $out"
   assert_contains "$out" "dry run" "the dry run did not say so"
   assert_contains "$out" "PR #11 (MERGED): title lines with a listed name: 1, body lines: 1" "the dry run missed PR 11"
@@ -598,7 +626,8 @@ test_scrub_tool_dry_run_and_apply() {
   assert_not_contains "$(cat "$log")" "[edit]" "the dry run edited a PR"
   assert_equals "$old_tip" "$(git -C "$ev" rev-parse no-mistakes/evidence)" "the dry run moved the evidence branch"
 
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo --evidence-remote "$ev" --apply 2>&1) ||
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+    "$SCRUB" --repo example/public-repo --apply 2>&1) ||
     fail "apply failed: $out"
   assert_contains "$(cat "$log")" "[pr] [edit] [11] [--repo] [example/public-repo] [--title] [Ship the mate-1 lane]" \
     "apply did not rewrite PR 11's title"
@@ -616,8 +645,8 @@ if [ "\$1" = clone ]; then exit 1; fi
 exec "$(command -v git)" "\$@"
 SH
   chmod +x "$FAKEBIN/git"
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo \
-    --pr 12 --evidence-remote "$ev" --apply 2>&1) &&
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+    "$SCRUB" --repo example/public-repo --pr 12 --apply 2>&1) &&
     fail "the scrub tool reported success after a clone failure"
   assert_contains "$out" "cannot clone" "the scrub tool did not report the clone failure"
   rm -f "$FAKEBIN/git"
@@ -715,6 +744,7 @@ test_new_public_branch_scans_commits_from_other_remotes
 test_stale_registered_name_is_refreshed_before_commit
 test_evidence_push_with_a_listed_name_is_refused
 test_gate_remote_is_judged_by_origin_and_repo_hook_still_runs
+test_new_gate_and_unfetched_public_branches_skip_public_history
 test_gh_shim_refuses_or_rewrites_pr_text
 test_no_mistakes_shim_checks_public_inputs
 test_visibility_asks_github_once_and_caches

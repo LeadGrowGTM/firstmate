@@ -4,8 +4,7 @@
 #
 # Usage:
 #   fm-private-names-scrub.sh --repo <owner/repo> [--pr <number>]...
-#       [--no-evidence] [--evidence-branch <name>] [--evidence-remote <url>]
-#       [--apply]
+#       [--no-evidence] [--apply]
 #
 # Default is a dry run: it prints what would change - PR numbers, how many
 # title and body lines hold a listed name, and evidence file paths rewritten to
@@ -13,15 +12,17 @@
 #   - every PR (open, merged, or closed; or only the --pr numbers) whose title
 #     or body holds a listed name gets gh pr edit with the title and body
 #     rewritten to neutral ids (mate-1, client-1, ...);
-#   - every file on the evidence branch tip (default no-mistakes/evidence)
+#   - every file on the no-mistakes/evidence branch tip
 #     whose path or content holds a listed name is removed by one ordinary
 #     commit on top of that tip, pushed as a fast-forward.
 # It never force-pushes and never rewrites history: earlier evidence commits
 # and PR edit history stay readable on the forge, so removing them needs the
 # forge's own support process. --pr limits the run to those PRs; pair it with
 # --no-evidence to scrub one PR, as a worker does after its pipeline opens one.
-# The evidence branch is read from a temporary bare clone of --evidence-remote
-# (default https://github.com/<owner/repo>.git) and removed afterwards.
+# The evidence branch is read from a temporary bare clone of the given
+# repository and removed afterwards.
+# For tests only, FM_TEST_SEAM=1 permits FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE
+# to point that clone at a local bare repository.
 #
 # The list, neutral ids, and visibility come from bin/fm-private-names-lib.sh:
 # a private repository is left untouched, and an absent or empty list refuses.
@@ -48,7 +49,6 @@ REPO=
 PRS=()
 EVIDENCE=1
 EVIDENCE_BRANCH=no-mistakes/evidence
-EVIDENCE_REMOTE=
 APPLY=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -60,8 +60,6 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --no-evidence) EVIDENCE=0; shift ;;
-    --evidence-branch) [ "$#" -ge 2 ] || usage; EVIDENCE_BRANCH=$2; shift 2 ;;
-    --evidence-remote) [ "$#" -ge 2 ] || usage; EVIDENCE_REMOTE=$2; shift 2 ;;
     --apply) APPLY=1; shift ;;
     -h | --help) usage ;;
     *) usage ;;
@@ -71,7 +69,10 @@ case "$REPO" in
   */*) ;;
   *) usage ;;
 esac
-[ -n "$EVIDENCE_REMOTE" ] || EVIDENCE_REMOTE="https://github.com/$REPO.git"
+EVIDENCE_REMOTE="https://github.com/$REPO.git"
+if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE:-}" ]; then
+  EVIDENCE_REMOTE=$FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE
+fi
 
 if [ "$(fm_pn_visibility "$REPO")" = private ]; then
   echo "repository $REPO is private: nothing to scrub"
