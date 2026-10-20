@@ -26,8 +26,10 @@
 # only where both list it and the box holds a clone whose origin is
 # github.com/<owner>/<project>. A gtm-client-* name is refused whatever the file
 # says, an unreadable or malformed file refuses every request, and a clone that
-# tracks clients/ or a dot-env file is refused at spawn. Adding a name is a
-# captain decision (R6), not something dispatch does.
+# tracks clients/ or contains a .env or .env.* file at any depth is refused at
+# spawn. Existing task cleanup validates the recorded project path without
+# requiring its name to remain listed. Adding a name is a captain decision
+# (R6), not something dispatch does.
 #
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project

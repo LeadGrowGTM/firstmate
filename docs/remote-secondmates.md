@@ -598,7 +598,7 @@ Firstmate excludes `local-only` work at intake.
 `config/boat-projects`, one `<project> [<github-owner>]` entry per line, decides which projects may run on Boat; [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) owns its format in its header.
 With no file the list is `firstmate` and `dev-loop`; a present file replaces those defaults, so list them explicitly to keep them available.
 The controller and the box each check their own copy, so list a project in both homes and clone it into the box home with the listed origin owner (LeadGrowGTM unless the entry names another).
-The worker always refuses client repository names (the pattern is in its header) and any clone that tracks `clients/` or a dot-env file, whatever the list says.
+The worker's header owns the client-name and clone-content guards, which apply regardless of the project list.
 Adding a project is the captain's decision under the Boat rules.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 Provision the dedicated `fm-code` Boat environment with GitHub access enabled and secrets, Boat credentials, and agent credentials disabled.
@@ -618,7 +618,7 @@ Without a fresh worker status declaration, dispatch refuses success and leaves t
 New resumes and pre-spawn timer extensions follow the [Boat timer and idle check rules](configuration.md#boat-idle-check).
 With more than one listed box, dispatch prefers a listed box that is already running and still has room under the three-worker cap, and it does not create boxes.
 An active sandbox that is not listed, or more active sandboxes than `expected_running`, is refused.
-A task stays on its recorded box; later commands naming its id, status file, or path under its data directory use that box.
+A task stays on its recorded box; later commands naming its id use that box, while file reads use it when the path operand is its status file or a path under its data directory.
 The account and monthly ceilings include the remaining timers of the other active listed boxes.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
