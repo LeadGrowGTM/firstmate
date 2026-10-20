@@ -937,6 +937,18 @@ SH
   boat_route boat-eng fm-crew-state.sh task-two
   expect_code 255 "$CODE" "an unrecorded task must not borrow another box"$'\n'"$ERR"
   assert_equals 5 "$(wc -l < "$ssh_log" | tr -d ' ')" "an unrecorded task was dialled"
+  printf '%s\n' 'task-one bx_ahnbu3qr' 'task-two bx_bbbbbbbb' > "$fmhome/state/.boat-task-box"
+  for steer in 'data/task-two/report.md please review' 'state/task-two.status'; do
+    printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+    boat_route boat-eng fm-send.sh task-one "$steer"
+    expect_code 0 "$CODE" "steer text must not select another task box: $steer"$'\n'"$ERR"
+    assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the steer follows its task id'
+  done
+  assert_equals 7 "$(wc -l < "$ssh_log" | tr -d ' ')" "both steers reached the task box"
+  printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+  boat_route boat-eng fm-remote-delta-read.sh state/task-one.status 0 unused 0
+  expect_code 0 "$CODE" "the delta read reaches its task box"$'\n'"$ERR"
+  assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the delta read follows its path'
   ID=$saved_id
   pass "T15 a recorded task is reached on its own box"
 }

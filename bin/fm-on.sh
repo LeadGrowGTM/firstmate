@@ -35,7 +35,7 @@
 # approved set from fm-boat-budget-lib.sh. The connection verifies the one id
 # in state/.boat-route-box, which fm-boat-send.sh writes when it selects a box.
 # A command argument that is a task id in state/.boat-task-box uses that
-# task's box instead, as does state/<id>.status or a path under data/<id>/.
+# task's box instead, as does a file-read path of state/<id>.status or under data/<id>/.
 # When that box is not the alias's current sandbox, the
 # alias is refreshed to it first, and the route record is updated only after
 # that refresh succeeds.
@@ -148,12 +148,20 @@ if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
     if [ -L "$TASK_MAP" ]; then
       die "unsafe task box record for $ROUTE"
     elif [ -f "$TASK_MAP" ]; then
+      TASK_PATH=
+      case "$COMMAND" in
+        fm-remote-file.sh) [ "${1:-}" != get ] || TASK_PATH=${2:-} ;;
+        fm-remote-delta-read.sh) TASK_PATH=${1:-} ;;
+      esac
       TASK_BOX=$(awk 'NF >= 2 { print $1, $2 }' "$TASK_MAP" | while read -r tid tbox; do
         for arg in "$@"; do
           case "$arg" in
-            "$tid"|"state/$tid.status"|"data/$tid/"*) printf '%s\n' "$tbox" ;;
+            "$tid") printf '%s\n' "$tbox" ;;
           esac
         done
+        case "$TASK_PATH" in
+          "state/$tid.status"|"data/$tid/"*) printf '%s\n' "$tbox" ;;
+        esac
       done | sort -u)
       case "$TASK_BOX" in
         *$'\n'*) die "command names tasks on different Boat boxes for $ROUTE" ;;

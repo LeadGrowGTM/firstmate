@@ -596,7 +596,7 @@ The box generates its own normal worker brief and operational paths, allocates i
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback, with the stale-record exception [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) owns in its header.
 Firstmate excludes `local-only` work at intake.
 `config/boat-projects`, one `<project> [<github-owner>]` entry per line, decides which projects may run on Boat; [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) owns its format in its header.
-With no file the list is `firstmate` and `dev-loop`.
+With no file the list is `firstmate` and `dev-loop`; a present file replaces those defaults, so list them explicitly to keep them available.
 The controller and the box each check their own copy, so list a project in both homes and clone it into the box home with the listed origin owner (LeadGrowGTM unless the entry names another).
 The worker always refuses client repository names (the pattern is in its header) and any clone that tracks `clients/` or a dot-env file, whatever the list says.
 Adding a project is the captain's decision under the Boat rules.
@@ -663,8 +663,8 @@ The allowlist is one list for the shared boxes, so each home's intake decides wh
 
 | Kind of home | Route | Projects it may send | Scheduled | Not sent, and why |
 | - | - | - | - | - |
-| Non-client home with its own code repos | the shared controller | its own listed code repos, plus `firstmate` and `dev-loop` | yes | anything that needs client data, secrets, or a GPU |
-| Client home | the shared controller | its listed non-client code repos, plus `firstmate` and `dev-loop` | yes | client repositories and any repo that tracks client files; they wait for a separate client lane |
+| Non-client home with its own code repos | the shared controller | its own listed code repos, plus `firstmate` and `dev-loop` when listed | yes | anything that needs client data, secrets, or a GPU |
+| Client home | the shared controller | its listed non-client code repos, plus `firstmate` and `dev-loop` when listed | yes | client repositories and any repo that tracks client files; they wait for a separate client lane |
 | Media home | the shared controller | its listed code, copy and script repos | yes | video renders, which stay on the PC |
 | Home whose project is personal data | none | none | no | excluded: no code-only task exists without the data, which never leaves the PC |
 
