@@ -788,7 +788,7 @@ The flag is a home-local supervision-noise preference and is not inherited by se
 
 The tracked `.no-mistakes.yaml` sets `test.evidence.store_in_repo: false`, `test.evidence.attach_media: false`, and `pr.publish_intent: false`, and pins `commands.lint` to `bin/fm-lint.sh`, the same owner CI invokes.
 This repository is public, so each run's test evidence stays on local disk under the no-mistakes home: nothing is published to the `no-mistakes/evidence` branch, no screenshots or recordings are uploaded to GitHub, and the PR body carries no Intent section.
-Evidence published before this setting stays on that branch until [`bin/fm-private-names-scrub.sh`](#private-names-configprivate-names) removes it.
+Evidence published before this setting stays on that branch; [`bin/fm-private-names-scrub.sh`](#private-names-configprivate-names) can remove files holding listed names from its current tip, but does not erase earlier commits.
 
 The worktree's `.no-mistakes/` stays local and CI rejects tracked entries under that path.
 The [`firstmate-coding-guidelines` skill](../.agents/skills/firstmate-coding-guidelines/SKILL.md#no-mistakes-test-configuration) owns why `commands.test` stays absent and targeted validation belongs to the evidence path.
@@ -801,39 +801,19 @@ Portable shard evidence and coverage rules are in [fm-test-portable-shards.md](f
 ## Private names (config/private-names)
 
 Private names - the names of this fleet's operator homes and the clients they serve - are refused at every public exit a fleet worker uses, without anyone remembering to check.
-The list is local, gitignored `config/private-names`, one `<kind> <name>` per line, and tracked code only reads it.
-`bin/fm-private-names.sh refresh` regenerates it from local records: second mate ids in `data/secondmates.md`, and `gtm-client-` project and repository names plus their client slugs from `data/projects.md`, each route's `projects:` field, project clones and their origins, and the same records in every second mate home on this machine.
-Every spawn runs that refresh first, and refresh only appends, so a name stays listed after its record is removed.
-A short name, a name with no letter, or a name on the tracked [`bin/fm-private-names-generic.txt`](../bin/fm-private-names-generic.txt) ordinary-word list stays registered in a context tier.
-Context-tier names match only `fm-homes/<name>`, `<name>.status`, `<name>.inbox`, `<name> mate`, `<name> home`, `<name> second mate`, and `@<name>`.
-All other names match as plain whole words, and the gitignored list records each entry's tier without keeping real names in tracked files.
-The optional, gitignored `config/private-names.local` adds names by hand (`<kind> <name>`, or a bare name) and cannot exclude registered names.
-A refresh in a second mate home on this machine merges its primary's list from disk and derives names from the primary's records; the list is deliberately not inherited config, because inherited config is pasted into the mate's instructions.
+`bin/fm-private-names.sh refresh` builds the gitignored `config/private-names` list from registered second mates and `gtm-client-` projects and client slugs; each worker launch refreshes it before installing guards.
+The list retains previously registered names, and the optional gitignored `config/private-names.local` can add names.
+Ordinary words and very short names receive narrower context matching; the [guard script](../bin/fm-private-names.sh) and [matching library](../bin/fm-private-names-lib.sh) own the exact sources, list format, matching rules, visibility rules, and neutral-id assignment.
 
-Names match case-insensitively as whole words, so a name never matches inside a longer word, and each maps to a stable neutral id (`mate-1`, `client-1`, `private-1`) by its position in the list.
-Refusals and reports print neutral ids and locations, never the matched name.
+Worker launches install commit and push hooks plus `gh`, `gh-axi`, and no-mistakes shims, including when `config/keep-ai-trailers` is set.
+For public destinations, they refuse listed names in outgoing commit messages, pushed branch names and changes, pull-request text, and no-mistakes intent or title inputs; `FM_PRIVATE_NAMES_MODE=rewrite` can replace names in commit messages and pull-request text with neutral ids.
+Private repositories pass untouched, while an unknown network destination is treated as public and a missing list refuses publication.
+Existing unchanged content does not block an unrelated push, and `git --no-verify` or tools that bypass the hooks and shims are outside the guard.
+The no-mistakes daemon can create a PR outside the shim, so the worker's delivery instructions require a PR readback and scrub as soon as its URL appears, then again after CI green.
 
-Firstmate itself never commits to or opens PRs on project repositories; its own changes ship through workers and the pipeline, which carry these guards, so the guards are installed in worker launches only.
-Every fleet launch's `state/<id>.git-hooks` (see "Commit attribution") carries the guard, including when `config/keep-ai-trailers` is set:
-
-- `commit-msg` refuses a listed name in a commit message;
-- `pre-push` refuses a listed name in a pushed branch name, an outgoing commit message, the content of added lines, or a path a commit adds or renames, and judges a push to the no-mistakes gate remote by the repository's `origin`;
-- `bin/gh` and `bin/gh-axi` shims, first on the pane's `PATH`, scan the title, body, merge subject, labels, body file or stdin, and head branch of `pr create`, `new`, `edit`, `comment`, `review`, and `merge` before the real tool runs.
-- `bin/no-mistakes` checks intent, PR title, and the current branch before `axi run` or `axi respond` reaches the real tool.
-
-Only outgoing content is judged: an existing tracked line or file path that already holds a listed name never blocks an unrelated commit, push, or pull request.
-
-Setting `FM_PRIVATE_NAMES_MODE=rewrite` on the command rewrites a commit message or pull-request text to neutral ids instead of refusing; a branch name or patch still refuses and suggests the neutral form.
-Only a public destination is checked, so a private repository passes untouched.
-Visibility comes from the optional, gitignored `config/repo-visibility` (`<owner/repo or remote> public` lines only), else GitHub is queried and public answers are cached in `state/repo-visibility.cache`; private and internal answers are queried each time, a local path is private, and an unknown network remote or a failed lookup counts as public.
-A missing or empty list refuses every public exit with a message naming the refresh command.
-`git --no-verify`, and tools that bypass git hooks or the shims, are not seen.
-The no-mistakes daemon can generate PR text that the shim cannot inspect before creation; the worker checks for the PR URL while the run continues, scrubs its text as soon as it appears, and repeats that readback after CI green.
-
-`bin/fm-private-names-scrub.sh --repo <owner/repo>` dry-runs by default: it lists PRs whose title or body holds a listed name and evidence-branch files whose path or content does, without printing a name.
-The evidence scan always targets that repository's `no-mistakes/evidence` branch.
-With `--apply` it rewrites those PR titles and bodies to neutral ids and removes those files from the evidence-branch tip in one ordinary fast-forward commit; it never force-pushes or rewrites history, so earlier commits and PR edit history stay readable on the forge.
-The scripts' headers own the exact sources, flags, and exit codes, with coverage in [`tests/fm-private-names.test.sh`](../tests/fm-private-names.test.sh).
+[`bin/fm-private-names-scrub.sh`](../bin/fm-private-names-scrub.sh) dry-runs by default and reports matching PRs and evidence-branch files using neutral ids.
+With `--apply`, it rewrites existing PR titles and bodies and removes matching files from the `no-mistakes/evidence` branch tip in one ordinary commit.
+It does not rewrite history: earlier evidence commits and PR edit history remain accessible; its header owns the exact options, and [`tests/fm-private-names.test.sh`](../tests/fm-private-names.test.sh) covers the guards and scrub tool.
 
 ## Captain Preferences (data/captain.md / data/captain-shared.md)
 

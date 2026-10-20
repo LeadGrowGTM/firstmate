@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep private names (operator home names and the clients they serve) off every
-# public exit: commits, pushes, and pull-request text created by firstmate and
-# its workers.
+# public exit installed for fleet workers: commits, pushes, and pull-request
+# text.
 #
 # Usage:
 #   fm-private-names.sh refresh
@@ -32,10 +32,11 @@
 #       outgoing content: each pushed branch name, every outgoing commit
 #       message, the content of added lines, and paths a commit adds or
 #       renames. The existing tree - unchanged lines and files a commit only
-#       modifies - is never judged. A push to the no-mistakes gate remote is
+#       modifies - is not judged as text; outgoing binary blobs are scanned.
+#       A push to the no-mistakes gate remote is
 #       judged by the repository's origin, because the gate forwards there.
 #   fm-private-names.sh gh-shim <gh|gh-axi> [<arg>...]
-#       PATH shim for gh and gh-axi. For pr create, edit, comment, review, and
+#       PATH shim for gh and gh-axi. For pr create, new, edit, comment, review, and
 #       merge against a public repository it scans the outgoing PR text - the
 #       --title, --body, --subject, and label values, any --body-file (or -F)
 #       content including stdin, and the head branch - before the real tool

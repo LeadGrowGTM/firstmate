@@ -9,7 +9,7 @@
 # "<kind> <name>" or "<kind>:context <name>", where kind is mate, client, or private; '#' lines and blank
 # lines are ignored. bin/fm-private-names.sh refresh is its only writer and
 # owns how names are derived from local records; config/private-names.local is
-# the operator's hand-edited input to that refresh. Tracked code only reads
+# the operator's hand-edited input to that refresh. Publishing guards read
 # the list. A name matches case-insensitively as a whole word, where a word
 # character is [A-Za-z0-9_], so a hyphen, slash, dot, or space ends a word and
 # a name never matches inside a longer word. Context-tier names match only in
