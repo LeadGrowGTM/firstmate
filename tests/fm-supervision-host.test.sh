@@ -1491,6 +1491,31 @@ test_parked_host_rejudges_when_the_digest_config_changes() {
   pass "host: a digest configuration change re-judges outcomes the host is already holding"
 }
 
+test_parked_host_rejudges_when_config_text_matches_absent_state() {
+  local home
+  home=$(make_home parked-config-absent-collision attended)
+  printf 'working [at=1]: the report is finished\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency digest --summary 'the requested report is finished' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 host_logged "$home" $'\tdigest\tdue=later\tpending=1\t' \
+    || fail "config state: the default window did not hold the outcome: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "config state: the held outcome woke main before the edit"
+  printf 'absent\n' > "$home/config/outcome-digest"
+  wait_until 150 host_exited "$home" \
+    || fail "config state: a file containing absent was mistaken for no file: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the invalid config must wake main"
+  assert_re '^supervision-host: branch-outcome: .*\(store rows 1\); ' "$home/host.out" \
+    "the invalid config must wake main for the held outcome"
+  assert_contains "$(cat "$home/host.out")" "config/outcome-digest holds 'absent'" \
+    "the config reader must identify the new file as invalid"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the config change waited for the old digest deadline"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the invalid config ran an engine turn"
+  pass "host: creating an invalid config whose text matches the absent state wakes main"
+}
+
 test_parked_host_rejudges_a_config_edit_during_judgment() {
   local home
   home=$(make_home parked-config-during-judgment attended)
@@ -3727,6 +3752,7 @@ test_attended_digest_overdue_beside_a_closed_arm_wakes_main_first
 test_report_binds_status_provenance_to_the_validated_span
 test_parked_host_wakes_when_an_acknowledged_repeat_becomes_due
 test_parked_host_rejudges_when_the_digest_config_changes
+test_parked_host_rejudges_when_config_text_matches_absent_state
 test_parked_host_rejudges_a_config_edit_during_judgment
 test_parked_host_rejudges_a_config_symlink_target
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return

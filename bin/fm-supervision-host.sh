@@ -682,8 +682,13 @@ turn_outcome_lookup_warning() {
 # The processed marker and digest configuration, compared as text so a rewrite
 # to the same bytes is not a change. Absent and unreadable stay distinct.
 digest_input_text() {  # <path>
+  local contents
   if [ -f "$1" ] && [ -r "$1" ]; then
-    cat "$1" 2>/dev/null || printf 'unreadable'
+    if contents=$(cat "$1" 2>/dev/null); then
+      printf 'present:%s' "$contents"
+    else
+      printf 'unreadable'
+    fi
   elif [ -e "$1" ] || [ -L "$1" ]; then
     printf 'unreadable'
   else
