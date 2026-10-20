@@ -91,7 +91,9 @@ make_settle_case() {
 Exercise settled-worktree detection for $id.
 
 ## Firstmate spec
-Record only the pane's stable worktree.
+Goal: Record only the pane's stable worktree.
+Off-limits: Changes outside this disposable test case.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use only the test's private project and state.
 EOF
   touch "$home/state/.last-watcher-beat"
   printf '%s\n' "$case_dir|$home|$proj|$wt|$stale|$fakebin|$countfile|$stale_reads"

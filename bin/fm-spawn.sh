@@ -4387,9 +4387,8 @@ else
     # rename-critical worktree-detection steps below; the persisted window= handle
     # stays $T (the name form), which is safe now that rename is disabled.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
-    # This spawn created the window: a refusal or failure before a worker is
-    # launched into it closes it again (spawn_abort_cleanup), so a same-id retry
-    # does not die on "window already exists".
+    # Track only the window this attempt created so abort cleanup can close it
+    # when no worker or retained task record claims it.
     TMUX_REBIND_ABORT_TARGET=$T
     WT_TARGET="$WID"
     # Only the displayed label changes; every script still addresses $T by
