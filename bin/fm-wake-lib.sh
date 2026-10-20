@@ -1946,6 +1946,94 @@ fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
   done
 }
 
+# Predict the pooled copy `treehouse get` hands out next when each preceding
+# copy's allocation state can be established. Sets FM_TREEHOUSE_NEXT_COPY to its
+# real path, or to empty when no listed copy is selectable.
+# Returns 1 when the choice cannot be proven, so callers keep refusing.
+fm_treehouse_next_copy() {  # <pool>
+  local state="$1/treehouse-state.json" path processes pool_processes listing leased dirty lock
+  FM_TREEHOUSE_NEXT_COPY=
+  [ -f "$state" ] && [ ! -L "$state" ] && command -v python3 >/dev/null 2>&1 || return 1
+  listing=$(python3 - "$state" <<'PY'
+import json, re, sys
+from datetime import datetime
+def valid_time(value):
+    if value is None:
+        return True
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})', value):
+        return False
+    try:
+        datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return False
+    return True
+try:
+    with open(sys.argv[1]) as f:
+        trees = json.load(f)["worktrees"]
+    if not isinstance(trees, list):
+        raise ValueError("invalid worktree list")
+    if any(isinstance(tree, dict) and any(not valid_time(tree.get(key)) for key in ("created_at", "leased_at")) for tree in trees):
+        raise ValueError("invalid timestamp")
+    for tree in trees:
+        if not isinstance(tree, dict) or tree.keys() - {"name", "path", "created_at", "destroying", "owner_pid", "owner_started_at", "leased", "lease_holder", "leased_at"}:
+            print("?")
+            continue
+        path = tree.get("path")
+        if (not isinstance(path, str) or not path.startswith("/") or "\n" in path or "\t" in path
+                or type(tree.get("destroying", False)) is not bool
+                or type(tree.get("leased", False)) is not bool
+                or type(tree.get("owner_pid", 0)) is not int
+                or type(tree.get("owner_started_at", 0)) is not int
+                or any(not isinstance(tree.get(key, ""), str) for key in ("name", "lease_holder"))
+                or tree.get("destroying") or tree.get("owner_pid", 0) or tree.get("owner_started_at", 0)):
+            print("?")
+            continue
+        print(f'{int(tree.get("leased", False))}\t{path}')
+except Exception:
+    sys.exit(1)
+PY
+  ) || return 1
+  while IFS=$'\t' read -r leased path; do
+    [ "$leased" != '?' ] || return 1
+    [ -n "$path" ] && [ -d "$path" ] || continue
+    path=$(CDPATH='' cd -- "$path" && pwd -P) || return 1
+    dirty=$(git -C "$path" status --porcelain --untracked-files=all 2>/dev/null) || return 1
+    [ -z "$dirty" ] || return 1
+    for lock in index.lock HEAD.lock; do
+      lock=$(git -C "$path" rev-parse --git-path "$lock" 2>/dev/null) || return 1
+      [ ! -e "$lock" ] && [ ! -L "$lock" ] || return 1
+    done
+    processes=$(fm_agent_worktree_processes "$path") || return 1
+    if [ "$(uname -s)" = Linux ]; then
+      pool_processes=$(python3 "$FM_WAKE_LIB_DIR/fm-agent-process.py" pool-rooted "$path") || return 1
+      if [ -z "$processes" ]; then
+        [ -z "$pool_processes" ] || return 1
+      else
+        [ -n "$pool_processes" ] || return 1
+      fi
+    fi
+    [ "$leased" = 0 ] || continue
+    [ -z "$processes" ] || continue
+    FM_TREEHOUSE_NEXT_COPY=$path
+    return 0
+  done <<EOF
+$listing
+EOF
+  return 0
+}
+
+# Refuse allocation for a reserved idle copy only when the provider would hand
+# that very copy out; a reservation on any other idle copy cannot be reset by
+# this spawn. An unprovable choice refuses, as the copy might be the one.
+fm_treehouse_reserved_blocks() {  # <reserved-copy> <message>
+  local reserved=$1 message=$2 pool
+  pool=$(dirname "$(dirname "$reserved")")
+  if fm_treehouse_next_copy "$pool" && ! _fm_treehouse_path_inside "$FM_TREEHOUSE_NEXT_COPY" "$reserved"; then
+    return 1
+  fi
+  printf '%s\n' "$message" >&2
+}
+
 # Stop before Treehouse can reset an idle copy whose durable reservation still
 # exists. Busy copies remain unavailable to Treehouse's process lease; the
 # selected copy is screened again by fm_worktree_custody_check before refresh.
@@ -2003,7 +2091,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
           return 1
         }
         [ -z "$processes" ] || continue
-        printf 'REFUSED: idle pool copy %s is still reserved by %s; relaunch that task or use guarded --retire-claim teardown before allocation.\n' "$path" "$meta" >&2
+        fm_treehouse_reserved_blocks "$path" "REFUSED: idle pool copy $path is still reserved by $meta; relaunch that task or use guarded --retire-claim teardown before allocation." || continue
         return 1
       done
     done
@@ -2036,7 +2124,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
         return 1
       }
       [ -n "$processes" ] && continue
-      printf 'REFUSED: idle pool slot %s still carries a slot claim; reconcile it before allocation\n' "$slot" >&2
+      fm_treehouse_reserved_blocks "$path" "REFUSED: idle pool slot $slot still carries a slot claim; reconcile it before allocation" || continue
       return 1
     done
     return 0
@@ -2059,8 +2147,7 @@ fm_treehouse_pool_custody_check() {  # <home> <project> <treehouse-home> [record
       return 1
     }
     [ -z "$processes" ] || continue
-    printf 'REFUSED: idle pool copy %s still carries task %s\047s slot claim; reconcile it before allocation\n' \
-      "$path" "$FM_TREEHOUSE_SLOT_OWNER_ID" >&2
+    fm_treehouse_reserved_blocks "$path" "REFUSED: idle pool copy $path still carries task $FM_TREEHOUSE_SLOT_OWNER_ID's slot claim; reconcile it before allocation" || continue
     return 1
   done <<EOF
 $inventory

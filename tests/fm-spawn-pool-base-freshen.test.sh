@@ -1192,6 +1192,139 @@ SH
   pass 'provider pool markers from sibling clones block both allocation preflights'
 }
 
+# The preflight screens the copy `treehouse get` would hand out next, not every
+# idle copy: a task record parked on one idle copy must not block a spawn that
+# the provider would serve from another, while the copy it would serve stays
+# protected.
+test_pool_preflight_screens_only_the_copy_to_be_allocated() {
+  local rec provider copy variant out status n variants bridge_pid bridge_script hidden process_pids
+  rec=$(make_case next-copy pool-next-copy-r1)
+  read_case_record "$rec"
+  mkdir -p "$HOME_DIR/user-home/.config/treehouse"
+  printf 'root = "%s"\n' "$CASE_DIR" > "$HOME_DIR/user-home/.config/treehouse/config.toml"
+  provider=$(FM_HOME="$HOME_DIR" HOME="$HOME_DIR/user-home" bash -c \
+    '. "$1"; fm_treehouse_pool_check "$2" "$3" "$4"; printf "%s" "$FM_TREEHOUSE_POOL_RESOLVED"' _ \
+    "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home") \
+    || fail 'the private provider pool could not be resolved'
+  for n in 1 2 3; do
+    mkdir -p "$provider/$n"
+    git -C "$PROJECT_DIR" worktree add --quiet --detach "$provider/$n/project" "$INITIAL_SHA"
+  done
+  variants='meta-later meta-next marker-later marker-next valid-created-meta-later leased-first unreadable-state
+    dirty-first-meta-second dirty-first-marker-second dirty-first-inventory-second
+    destroying-first-meta-second owner-first-meta-second locked-first-meta-second unknown-first-meta-second
+    bad-created-first-meta-second bad-created-first-marker-second bad-created-first-inventory-second
+    bad-leased-later-meta-second'
+  if [ "$(uname -s)" = Linux ]; then
+    variants="$variants bridge-first-meta-second bridge-first-marker-second bridge-first-inventory-second"
+  fi
+  for variant in $variants; do
+    rm -f "$HOME_DIR"/state/*.meta "$provider"/*/.fm-slot-owner
+    rm -f "$provider/1/project/dirty.txt" "$CASE_DIR/process-pids"
+    bridge_pid=
+    process_pids=
+    printf '{"worktrees":[{"name":"1","path":"%s","leased":%s},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+      "$provider/1/project" false "$provider/2/project" "$provider/3/project" \
+      > "$provider/treehouse-state.json"
+    case "$variant" in
+      meta-later|marker-later|valid-created-meta-later) copy=$provider/3/project ;;
+      leased-first|*-second) copy=$provider/2/project ;;
+      *) copy=$provider/1/project ;;
+    esac
+    case "$variant" in
+      meta-*|valid-created-meta-later|leased-first|unreadable-state|dirty-first-meta-second|destroying-first-meta-second|owner-first-meta-second|locked-first-meta-second|unknown-first-meta-second|bridge-first-meta-second|bad-created-first-meta-second|bad-leased-later-meta-second)
+        fm_write_meta "$HOME_DIR/state/parked.meta" "window=firstmate:fm-parked" \
+          "endpoint_task_id=parked" "worktree=$copy" "project=$PROJECT_DIR" "kind=scout" ;;
+      marker-*|dirty-first-marker-second|dirty-first-inventory-second|bridge-first-marker-second|bridge-first-inventory-second|bad-created-first-marker-second|bad-created-first-inventory-second)
+        printf 'task=parked\nhome=%s\n' "$CASE_DIR/other-home" > "${copy%/project}/.fm-slot-owner" ;;
+    esac
+    case "$variant" in
+      leased-first)
+        printf '{"worktrees":[{"name":"1","path":"%s","leased":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      unreadable-state)
+        printf 'not json\n' > "$provider/treehouse-state.json" ;;
+      dirty-first-*)
+        printf 'dirty\n' > "$provider/1/project/dirty.txt" ;;
+      destroying-first-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s","destroying":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      owner-first-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":1,"owner_started_at":1},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      locked-first-meta-second)
+        touch "$(git -C "$provider/1/project" rev-parse --git-path index.lock)" ;;
+      unknown-first-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s","reset_failed":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      bad-created-first-*)
+        printf '{"worktrees":[{"name":"1","path":"%s","created_at":"bad"},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      bad-leased-later-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s"},{"name":"2","path":"%s"},{"name":"3","path":"%s","leased_at":"bad"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      valid-created-meta-later)
+        printf '{"worktrees":[{"name":"1","path":"%s","created_at":"2026-10-20T00:00:00Z","leased_at":"2026-10-20T00:00:00.123456789+00:00"},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      bridge-first-*)
+        bridge_script="$CASE_DIR/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js"
+        mkdir -p "${bridge_script%/*}"
+        printf 'for ((i=0; i<120; i++)); do /bin/sleep 1; done\n' > "$bridge_script"
+        bridge_pid=$(python3 - "$provider/1/project" "$bridge_script" <<'PY'
+import subprocess, sys
+bridge = subprocess.Popen(["node", sys.argv[2]], executable="/bin/bash",
+                          cwd=sys.argv[1], start_new_session=True,
+                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)
+print(bridge.pid)
+PY
+        ) || fail 'could not start the detached bridge fixture'
+        process_pids="$CASE_DIR/process-pids"
+        printf '%s\n' "$bridge_pid" > "$process_pids"
+        for n in 1 2 3 4 5 6 7 8 9 10; do
+          [ "$(readlink "/proc/$bridge_pid/cwd")" = "$provider/1/project" ] \
+            || fail 'the bridge fixture did not stay inside the first copy'
+          hidden=$(FM_TEST_PROCESS_PIDS="$process_pids" PATH="$FAKEBIN_DIR:$PATH" \
+            bash -c '. "$1"; fm_agent_worktree_processes "$2"' _ \
+            "$ROOT/bin/fm-agent-process-lib.sh" "$provider/1/project") \
+            || fail 'the bridge fixture broke the worker absence proof'
+          [ -n "$hidden" ] || break
+          /bin/sleep 0.05
+        done
+        [ -z "$hidden" ] || fail 'the bridge fixture was not excluded from worker absence proof' ;;
+    esac
+    if [ "$variant" = dirty-first-inventory-second ] || [ "$variant" = bridge-first-inventory-second ] \
+      || [ "$variant" = bad-created-first-inventory-second ]; then
+      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" FM_TEST_PROCESS_PIDS="$process_pids" PATH="$FAKEBIN_DIR:$PATH" \
+        bash -c '. "$1"; fm_treehouse_pool_custody_check "$2" "$3" "$4" records' _ \
+        "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home" 2>&1)
+    else
+      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" FM_TEST_PROCESS_PIDS="$process_pids" PATH="$FAKEBIN_DIR:$PATH" \
+        bash "$ROOT/bin/fm-treehouse-pool-check.sh" "$HOME_DIR" "$PROJECT_DIR" "$CASE_DIR/refusal" 2>&1)
+    fi
+    status=$?
+    if [ -n "$bridge_pid" ]; then
+      kill -- "-$bridge_pid" 2>/dev/null || true
+    fi
+    case "$variant" in
+      meta-later|marker-later|valid-created-meta-later)
+        [ "$status" -eq 0 ] || fail "$variant: preflight refused a copy the provider would not allocate: $out" ;;
+      *)
+        [ "$status" -ne 0 ] || fail "$variant: preflight let the provider reset the reserved copy it would allocate"
+        assert_contains "$out" "${copy%/project}" "$variant: refusal did not name the reserved copy" ;;
+    esac
+    rm -f "$(git -C "$provider/1/project" rev-parse --git-path index.lock)"
+  done
+  pass 'pool preflight selects only a provably available copy'
+}
+
 test_state_override_pane_preflight_blocks_retained_claim() {
   local rec id=pool-override-new-r1 old=pool-override-old-r1 state provider out status survivor
   local before_head before_reflog before_status
@@ -1574,6 +1707,7 @@ test_returned_pool_copy_rechecks_process_evidence
 test_returned_pool_copy_accepts_unreadable_cwd_process
 test_returned_pool_copy_accepts_its_foreground_task_shell
 test_provider_pool_marker_from_sibling_clone_blocks_allocation
+test_pool_preflight_screens_only_the_copy_to_be_allocated
 test_state_override_pane_preflight_blocks_retained_claim
 test_linked_spawning_home_rejects_primary_before_refresh
 test_stale_pool_base_refreshes_before_branching
