@@ -477,6 +477,43 @@ TREEHOUSE_PROJECT_LOCK=
 TREEHOUSE_PROJECT_LOCK_HELD=0
 TREEHOUSE_SLOT_LOCK_REQUIRED=0
 TREEHOUSE_COPY_RETURNED=0
+# A plain directory has no Treehouse project identity. Lock resolution cannot
+# name it, and refusing there blocks cleanup that never had a slot.
+# A missing project still resolves and refuses.
+# A checkout still takes the lock, including one git can see through the
+# ambient GIT_DIR, because lock resolution uses that same git environment.
+# A worktree that is a checkout keeps the lock even when the project path is
+# not one, so resolution refuses instead of proceeding unlocked.
+teardown_path_is_git_checkout() {  # <path>
+  local path=$1
+  [ -n "$path" ] && [ -d "$path" ] || return 1
+  if [ -e "$path/.git" ] || [ -L "$path/.git" ]; then
+    return 0
+  fi
+  git -C "$path" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+# An unreadable secondmate parent binding cannot name the machine-local lock
+# anchor. Without --force the parent-binding refusal owns that case and must
+# stay reachable. --force still takes the lock whenever a checkout exists.
+teardown_parent_record_unreadable() {
+  local record="$FM_HOME/$SUB_HOME_PARENT_MARKER"
+  [ "$FORCE" != --force ] || return 1
+  [ -e "$record" ] || [ -L "$record" ] || return 1
+  if ! command -v fm_secondmate_parent_record_parse >/dev/null 2>&1; then
+    # shellcheck source=bin/fm-secondmate-parent-lib.sh
+    . "$SCRIPT_DIR/fm-secondmate-parent-lib.sh"
+  fi
+  fm_secondmate_parent_record_parse "$record" && return 1
+  return 0
+}
+teardown_project_needs_treehouse_lock() {  # <project> <worktree>
+  local project=$1 worktree=$2
+  teardown_parent_record_unreadable && return 1
+  [ -d "$project" ] || return 0
+  teardown_path_is_git_checkout "$project" && return 0
+  teardown_path_is_git_checkout "$worktree" && return 0
+  return 1
+}
 if [ -f "$META" ] && [ ! -L "$META" ]; then
   TEARDOWN_LOCK_KIND=$(fm_meta_get "$META" kind)
   [ -n "$TEARDOWN_LOCK_KIND" ] || TEARDOWN_LOCK_KIND=ship
@@ -487,7 +524,8 @@ if [ -f "$META" ] && [ ! -L "$META" ]; then
   if [ "$TEARDOWN_LOCK_KIND" != secondmate ] \
      && [ "$TEARDOWN_LOCK_BACKEND" != orca ] \
      && [ -n "$TEARDOWN_LOCK_WT" ] \
-     && { [ -d "$TEARDOWN_LOCK_WT" ] || [ -d "$TEARDOWN_LOCK_PROJECT" ]; }; then
+     && { [ -d "$TEARDOWN_LOCK_WT" ] || [ -d "$TEARDOWN_LOCK_PROJECT" ]; } \
+     && teardown_project_needs_treehouse_lock "$TEARDOWN_LOCK_PROJECT" "$TEARDOWN_LOCK_WT"; then
     TREEHOUSE_SLOT_LOCK_REQUIRED=1
     TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$TEARDOWN_LOCK_PROJECT") || {
       echo "REFUSED: cannot resolve the shared Treehouse project lock for ${TEARDOWN_LOCK_PROJECT:-<missing>}; nothing was changed" >&2
@@ -1284,7 +1322,8 @@ CLEANUP_RECOVERY=$TEARDOWN_CLEANUP_RECOVERY
 KIND=$TEARDOWN_META_KIND
 EXPECTED_TREEHOUSE_PROJECT_LOCK=
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] \
-   && [ -n "$WT" ] && { [ -d "$WT" ] || [ -d "$PROJ" ]; }; then
+   && [ -n "$WT" ] && { [ -d "$WT" ] || [ -d "$PROJ" ]; } \
+   && teardown_project_needs_treehouse_lock "$PROJ" "$WT"; then
   EXPECTED_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ") || {
     echo "REFUSED: cannot resolve the shared Treehouse project lock for ${PROJ:-<missing>}; nothing was changed" >&2
     exit 1
