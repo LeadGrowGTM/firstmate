@@ -1598,6 +1598,10 @@ spawn_abort_cleanup() {
             echo "backend=orca"
             echo "orca_worktree_id=$ORCA_WORKTREE_ID"
             [ -z "${ORCA_TERMINAL:-}" ] || echo "terminal=$ORCA_TERMINAL"
+            # A relaunch abort must not drop a registered PR identity: merge
+            # monitoring reads pr=/pr_head= from this record, and the parser
+            # refuses any other key after pr=, so the identity rides last.
+            grep -E '^pr=|^pr_head=' "$STATE/$ID.meta" 2>/dev/null || true
           } >"$SPAWN_META_TMP" 2>/dev/null &&
             fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE" ||
             true
@@ -1607,14 +1611,26 @@ spawn_abort_cleanup() {
   fi
   # Before identity delivery, a failed relaunch still uses the previous tab's
   # identity. Keep its record aligned with that pane; leave both tabs open.
+  # The prior pair is restored where the first Orca view line stood, so a
+  # preserved pr=/pr_head= block stays last: fm_pr_metadata_identity_parse
+  # refuses any other key after pr=.
   if [ -n "$ORCA_VIEW_HANDLE" ] && [ "$ORCA_VIEW_IDENTITY_SENT" != 1 ] &&
     [ "$RELAUNCH" -eq 1 ] &&
     [ "$(fm_meta_get "$STATE/$ID.meta" orca_view_handle)" = "$ORCA_VIEW_HANDLE" ]; then
     orca_restore="$STATE/.$ID.meta.orca-restore.${BASHPID:-$$}"
-    if ! { awk -F= '$1 !~ /^orca_view_(handle|session|owned)$/' "$STATE/$ID.meta" >"$orca_restore" &&
-      { [ -z "$ORCA_VIEW_PRIOR_HANDLE" ] ||
-        printf 'orca_view_handle=%s\norca_view_session=%s\n' \
-          "$ORCA_VIEW_PRIOR_HANDLE" "$ORCA_VIEW_PRIOR_SESSION" >>"$orca_restore"; } &&
+    if ! { awk -F= -v handle="$ORCA_VIEW_PRIOR_HANDLE" -v session="$ORCA_VIEW_PRIOR_SESSION" '
+      $1 == "orca_view_handle" || $1 == "orca_view_session" || $1 == "orca_view_owned" {
+        if (!moved) {
+          moved=1
+          if (handle != "") {
+            print "orca_view_handle=" handle
+            print "orca_view_session=" session
+          }
+        }
+        next
+      }
+      { print }
+    ' "$STATE/$ID.meta" >"$orca_restore" &&
       fm_backlog_atomic_transition publish "$orca_restore" "$STATE/$ID.meta" "task record" "$STATE"; }; then
       rm -f "$orca_restore"
       echo "warning: could not restore the prior Orca tab record after aborted relaunch of $ID" >&2

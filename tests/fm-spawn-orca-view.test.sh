@@ -364,7 +364,7 @@ SH
 # `untracked` the record names no tab, as for a secondmate launched before the
 # switch, whose hand-opened tab made the view session.
 relaunch_secondmate() {
-  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} harness=${6:-} prior_view=${7:-fmview-$2} sm
+  local name=$1 id=$2 switch=$3 untracked=${4:-} identity_mode=${5:-} harness=${6:-} prior_view=${7:-fmview-$2} with_pr=${8:-} sm
   local -a harness_args=()
   CASE_DIR="$TMP_ROOT/$name"
   HOME_DIR="$CASE_DIR/home"
@@ -426,6 +426,14 @@ SH
       echo "orca_view_owned=1"
     fi
   } > "$HOME_DIR/state/$id.meta"
+  if [ -n "$with_pr" ]; then
+    # A PR registered after launch: fm-pr-check strips any prior pr= lines and
+    # appends the identity last.
+    {
+      echo "pr=https://github.com/example/repo/pull/21"
+      echo "pr_head=0123456789abcdef0123456789abcdef01234567"
+    } >> "$HOME_DIR/state/$id.meta"
+  fi
   mkdir -p "$CASE_DIR/user-home"
   OUT=$(env PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_FAKE_DIR="$VIEW_DIR" FM_FAKE_VIEW_DIR="$VIEW_DIR" \
     FM_FAKE_BASE_SESSION=fmses \
@@ -475,6 +483,20 @@ test_aborted_relaunch_keeps_prior_tab_record() {
   assert_equals "pane=tab-0:leaf tab=tab-0 worktree=wt-1 endpoint=/hooks/endpoint.env env=production version=1" "$seen" \
     "the surviving pane keeps all six fields of the prior tab identity"
   pass "aborted relaunch leaves both tabs open"
+}
+
+test_aborted_relaunch_keeps_pr_identity_parseable() {
+  FM_FAKE_STAGE_FAIL=1 relaunch_secondmate relaunch-abort-pr sm-abort-pr on '' '' '' '' 1
+  [ "$STATUS" -ne 0 ] || fail "launch staging failure must abort the relaunch"
+  assert_equals term-0 "$(meta sm-abort-pr orca_view_handle)" "the prior tab is restored on the record"
+  assert_equals 0123456789abcdef0123456789abcdef01234567 "$(meta sm-abort-pr pr_head)" \
+    "the PR head survives the aborted relaunch"
+  (
+    # shellcheck source=../bin/fm-pr-lib.sh
+    . "$ROOT/bin/fm-pr-lib.sh"
+    fm_pr_metadata_identity_parse "$HOME_DIR/state/sm-abort-pr.meta"
+  ) || fail "aborted relaunch left a record the PR monitor identity parse refuses: $(tail -n 8 "$HOME_DIR/state/sm-abort-pr.meta" | tr '\n' ' ')"
+  pass "aborted relaunch restores the prior tab where it stood so the PR identity stays last"
 }
 
 test_post_export_abort_keeps_replacement_tab() {
@@ -772,6 +794,7 @@ test_missing_identity_keeps_fresh_spawn_unbadged
 test_respawn_replaces_the_previous_tab
 test_relaunch_replaces_the_tab
 test_aborted_relaunch_keeps_prior_tab_record
+test_aborted_relaunch_keeps_pr_identity_parseable
 test_post_export_abort_keeps_replacement_tab
 test_post_export_fresh_abort_keeps_only_tab
 test_cross_home_view_name_collision
