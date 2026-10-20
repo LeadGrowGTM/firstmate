@@ -2772,22 +2772,10 @@ case "$ARG3" in
   ;;
 esac
 
-if [ "$RAW_LAUNCH" = 1 ] && fm_muse_carries_client_data "$FM_HOME" "$DATA/$ID/brief.md"; then
-  raw_muse_word=0 raw_muse_off=0 raw_prev=
-  while IFS= read -r raw_line; do
-    read -r -a raw_words <<< "$raw_line"
-    for raw_word in "${raw_words[@]}"; do
-      [ "${raw_word##*/}" != muse ] || raw_muse_word=1
-      if [ "$raw_prev" = --contributor-mode ] && [ "$raw_word" = off ]; then
-        raw_muse_off=1
-      fi
-      raw_prev=$raw_word
-    done
-  done <<< "$ARG3"
-  if [ "$raw_muse_word" = 1 ] && [ "$raw_muse_off" = 0 ]; then
-    echo "error: a raw Muse launch carrying client data cannot guarantee --contributor-mode off; use the canonical muse harness" >&2
-    exit 1
-  fi
+if [ "$RAW_LAUNCH" = 1 ] && fm_muse_carries_client_data "$FM_HOME" "$DATA/$ID/brief.md" \
+  && [[ "${ARG3,,}" == *muse* ]]; then
+  echo "error: a raw Muse launch carrying client data cannot guarantee --contributor-mode off; use --harness muse" >&2
+  exit 1
 fi
 
 # muse, gemini, agy, and devin are verified as CREWMATE/SCOUT adapters only. A secondmate is
