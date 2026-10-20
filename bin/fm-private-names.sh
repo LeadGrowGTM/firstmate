@@ -429,50 +429,93 @@ cmd_gh_shim() {
     echo "fm-private-names: no real $tool found on PATH" >&2
     return 127
   }
-  local args=("$@") i=0 n=$# repo='' head='' body_file_idx=() text_idx=() dest action
-  local has_title=0 has_body=0 has_edit_option=0 no_text_action=0 opaque=0
-  while [ "$i" -lt "$n" ]; do
-    case "${args[i]}" in
-      --repo | -R) i=$((i + 2)) ;;
-      --repo=* | -R?* | -*) i=$((i + 1)) ;;
-      *) break ;;
+  local args=("$@") i=0 n=$# repo='' head='' body_file_idx=() body_file_prefix=() text_idx=() text_prefix=() dest action='' command=''
+  local has_title=0 has_body=0 has_edit_option=0 no_text_action=0 opaque=0 missing_value=0
+  local token option value prefix value_idx takes_value options=1
+  for ((i = 0; i < n; i++)); do
+    token=${args[i]}
+    if [ "$options" = 1 ] && [ "$token" = -- ]; then
+      options=0
+      continue
+    fi
+    option='' prefix='' value='' value_idx=$i takes_value=0
+    if [ "$options" = 1 ]; then
+      case "$token" in
+        --*=*) option=${token%%=*}; prefix=$option=; value=${token#*=} ;;
+        --*) option=$token ;;
+        -?*)
+          option=${token:0:2}
+          value=${token:2}
+          if [ -n "$value" ]; then
+            prefix=$option
+            if [ "${value:0:1}" = = ]; then
+              prefix+='='
+              value=${value#=}
+            fi
+          fi
+          ;;
+      esac
+    fi
+    if [ -z "$option" ]; then
+      if [ -z "$command" ]; then
+        command=$token
+      elif [ -z "$action" ]; then
+        action=$token
+      fi
+      continue
+    fi
+    case "$option" in
+      --repo | -R | --head | -H | --body-file | -F | --title | -t | --body | -b | \
+      --subject | --label | -l | --add-label | --remove-label | --base | -B | \
+      --assignee | --add-assignee | --remove-assignee | --reviewer | --add-reviewer | --remove-reviewer | \
+      --milestone | --project | -p | --add-project | --remove-project | \
+      --template | -T | --recover | --author-email | -A | --match-head-commit)
+        takes_value=1
+        ;;
+      -a | -r) [ "$action" != create ] || takes_value=1 ;;
+      -m) [ "$action" != create ] && [ "$action" != edit ] || takes_value=1 ;;
     esac
+    if [ "$takes_value" = 1 ] && [ -z "$prefix" ]; then
+      value_idx=$((i + 1))
+      value=${args[value_idx]:-}
+    fi
+    if [ "$takes_value" = 1 ] && [ "$value_idx" -ge "$n" ]; then
+      missing_value=1
+    fi
+    case "$option" in
+      --repo | -R) repo=$value ;;
+      --head | -H) head=$value ;;
+      --body-file | -F) body_file_idx+=("$value_idx"); body_file_prefix+=("$prefix"); has_body=1 ;;
+      --title | -t) text_idx+=("$value_idx"); text_prefix+=("$prefix"); has_title=1 ;;
+      --body | -b) text_idx+=("$value_idx"); text_prefix+=("$prefix"); has_body=1 ;;
+      --subject | --label | -l | --add-label)
+        text_idx+=("$value_idx"); text_prefix+=("$prefix"); has_edit_option=1 ;;
+      --remove-label | --base | -B | --assignee | --add-assignee | --remove-assignee | \
+      --reviewer | --add-reviewer | --remove-reviewer | --milestone | -m | --remove-milestone | \
+      --project | -p | --add-project | --remove-project) has_edit_option=1 ;;
+      --approve | --delete-last) no_text_action=1 ;;
+      -a) [ "$action" != review ] || no_text_action=1 ;;
+      --template | -T | --fill | -f | --fill-first | --fill-verbose | --recover | --editor | -e | --web | -w) opaque=1 ;;
+    esac
+    [ "$takes_value" = 0 ] || [ -n "$prefix" ] || i=$((i + 1))
   done
-  if [ "${args[i]:-}" != pr ]; then
+  if [ "$command" != pr ]; then
     exec "$real" "$@"
   fi
-  action=${args[i + 1]:-}
   case "$action" in
     create | new | edit | comment | review | merge) ;;
     *) exec "$real" "$@" ;;
   esac
-
-  for ((i = 0; i < n; i++)); do
-    case "${args[i]}" in
-      --repo | -R) repo=${args[i + 1]:-} ;;
-      --repo=*) repo=${args[i]#--repo=} ;;
-      -R?*) repo=${args[i]#-R}; repo=${repo#=} ;;
-      --head | -H) head=${args[i + 1]:-} ;;
-      --head=*) head=${args[i]#--head=} ;;
-      --body-file | -F) body_file_idx+=("$((i + 1))"); has_body=1 ;;
-      --body-file=*) body_file_idx+=("=$i"); has_body=1 ;;
-      --title | -t) text_idx+=("$((i + 1))"); has_title=1 ;;
-      --title=*) text_idx+=("$i"); has_title=1 ;;
-      --body | -b) text_idx+=("$((i + 1))"); has_body=1 ;;
-      --body=*) text_idx+=("$i"); has_body=1 ;;
-      --subject | --label | -l | --add-label) text_idx+=("$((i + 1))"); has_edit_option=1 ;;
-      --subject=* | --label=* | --add-label=*) text_idx+=("$i"); has_edit_option=1 ;;
-      --remove-label | --remove-label=* | --base | --base=* | --add-assignee | --add-assignee=* | --remove-assignee | --remove-assignee=* | --add-reviewer | --add-reviewer=* | --remove-reviewer | --remove-reviewer=* | --milestone | --milestone=* | --remove-milestone | --project | --project=* | --remove-project | --remove-project=*) has_edit_option=1 ;;
-      --approve | --delete-last) no_text_action=1 ;;
-      --template | --template=* | --fill | --fill-first | --fill-verbose | --recover | --recover=* | --editor | --web | -w) opaque=1 ;;
-    esac
-  done
   dest=$repo
   [ -n "$dest" ] || dest=$(origin_url) || dest=
   if [ -n "$dest" ] && ! fm_pn_dest_is_public "$dest"; then
     exec "$real" "$@"
   fi
   require_current_list "this pull-request text" || return 3
+  if [ "$missing_value" = 1 ]; then
+    echo "fm-private-names: missing pull-request option value; refusing" >&2
+    return 1
+  fi
   if [ "$opaque" = 1 ]; then
     echo "fm-private-names: refusing unchecked pull-request text source" >&2
     return 1
@@ -503,18 +546,12 @@ cmd_gh_shim() {
 
   # Stage stdin and body files as private temp copies so they are scanned and,
   # in rewrite mode, replaced by their scrubbed copy.
-  local idx src copy rc=0 copies=()
+  local idx src copy rc=0 copies=() j
   GH_SHIM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-private-names-gh.XXXXXX") || return 1
   trap 'rm -rf "$GH_SHIM_TMP"' EXIT
-  local prefix
-  for idx in "${body_file_idx[@]}"; do
-    prefix=
-    case "$idx" in
-      =*)
-        idx=${idx#=}
-        prefix=--body-file=
-        ;;
-    esac
+  for ((j = 0; j < ${#body_file_idx[@]}; j++)); do
+    idx=${body_file_idx[j]}
+    prefix=${body_file_prefix[j]}
     src=${args[idx]:-}
     src=${src#"$prefix"}
     copy=$GH_SHIM_TMP/body-$idx
@@ -530,8 +567,9 @@ cmd_gh_shim() {
     copies+=("$copy")
     report_hits "the pull-request body file" <"$copy" 2>/dev/null || rc=1
   done
-  for idx in "${text_idx[@]}"; do
-    printf '%s\n' "${args[idx]:-}" | report_hits "the pull-request text" 2>/dev/null || rc=1
+  for ((j = 0; j < ${#text_idx[@]}; j++)); do
+    idx=${text_idx[j]}
+    printf '%s\n' "${args[idx]#"${text_prefix[j]}"}" | report_hits "the pull-request text" 2>/dev/null || rc=1
   done
   if [ -n "$head" ] && ! printf '%s\n' "$head" | report_hits "the head branch name"; then
     echo "fm-private-names: refusing: the head branch name holds a listed private name; rename the branch, for example to: $(fm_pn_scrub_string "$head")" >&2
@@ -542,8 +580,9 @@ cmd_gh_shim() {
       for copy in "${copies[@]}"; do
         report_hits "the pull-request body file" <"$copy"
       done
-      for idx in "${text_idx[@]}"; do
-        printf '%s\n' "${args[idx]:-}" | report_hits "the pull-request text"
+      for ((j = 0; j < ${#text_idx[@]}; j++)); do
+        idx=${text_idx[j]}
+        printf '%s\n' "${args[idx]#"${text_prefix[j]}"}" | report_hits "the pull-request text"
       done
       echo "fm-private-names: refusing $tool pr $action on a public repository; reword it, or rerun with FM_PRIVATE_NAMES_MODE=rewrite to rewrite names to neutral ids" >&2
       return 1
@@ -553,8 +592,9 @@ cmd_gh_shim() {
         return 1
       fi
     done
-    for idx in "${text_idx[@]}"; do
-      args[idx]=$(fm_pn_scrub_string "${args[idx]:-}")
+    for ((j = 0; j < ${#text_idx[@]}; j++)); do
+      idx=${text_idx[j]}
+      args[idx]=${text_prefix[j]}$(fm_pn_scrub_string "${args[idx]#"${text_prefix[j]}"}")
     done
     echo "fm-private-names: rewrote listed private names in the pull-request text to neutral ids" >&2
   fi

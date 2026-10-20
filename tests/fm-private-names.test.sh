@@ -540,7 +540,42 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
       fail "a global repo option bypassed the PR guard"
     [ ! -s "$log" ] || fail "the real gh ran for a global repo option"
   done
-  for flag in --template --fill --fill-first --fill-verbose --recover; do
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo \
+    --title '--repo=example/private-repo' --body acme-test 2>&1) &&
+    fail "a title value changed the selected repository"
+  assert_contains "$out" "mate-1" "the body refusal omitted the neutral id"
+  [ ! -s "$log" ] || fail "the real gh ran after a title value changed the repository"
+
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo -t=acme-test -bClean 2>&1) &&
+    fail "an attached title reached gh"
+  [ ! -s "$log" ] || fail "the real gh ran for an attached title"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo -t=Clean -bzenith-sample 2>&1) &&
+    fail "an attached body reached gh"
+  [ ! -s "$log" ] || fail "the real gh ran for an attached body"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo -t=Clean "-F=$d/body.md" 2>&1) &&
+    fail "an attached body file reached gh"
+  [ ! -s "$log" ] || fail "the real gh ran for an attached body file"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo -t=Clean -bClean \
+    -H=fm/acme-test-branch 2>&1) && fail "an attached head branch reached gh"
+  [ ! -s "$log" ] || fail "the real gh ran for an attached head branch"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr edit 7 --repo example/public-repo -l=zenith-sample 2>&1) &&
+    fail "an attached label reached gh"
+  [ ! -s "$log" ] || fail "the real gh ran for an attached label"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo -- \
+    -t=acme-test -bClean 2>&1) && fail "options after -- supplied unchecked PR text"
+  [ ! -s "$log" ] || fail "the real gh ran with PR options after --"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo -t=Clean -bClean) ||
+    fail "clean attached PR text was refused"
+  assert_contains "$(cat "$log")" "[pr] [create]" "clean attached PR text did not reach gh"
+  for flag in --template --fill -f --fill-first --fill-verbose --recover; do
     : >"$log"
     out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean --body Clean "$flag" 2>&1) &&
       fail "an unchecked $flag PR source reached gh"
@@ -550,7 +585,7 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean 2>&1) &&
     fail "an editor-supplied PR body reached gh"
   [ ! -s "$log" ] || fail "the real gh ran for an editor-supplied body"
-  for flag in --editor --web; do
+  for flag in --editor -e --web -w; do
     : >"$log"
     out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean --body Clean "$flag" 2>&1) &&
       fail "a $flag PR escaped the guard"
@@ -582,6 +617,32 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   [ ! -s "$log" ] || fail "the real gh ran with an empty list"
   unset FAKE_GH_LOG FAKE_GH_VIS
   pass "the gh and gh-axi shims refuse or rewrite PR titles, bodies, and stdin, refuse a named head branch, and pass private repos"
+}
+
+test_gh_short_flags_select_the_public_destination() {
+  local d=$TMP_ROOT/gh-short-actions home out log flag action
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" private
+  FAKEBIN=$(make_fake_gh "$d")
+  log=$d/gh.log
+  export FAKE_GH_LOG=$log FAKE_GH_VIS=public
+  for flag in -m -r; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh pr merge 7 "$flag" --repo example/public-repo \
+      --body acme-test 2>&1) && fail "a merge flag hid the public destination"
+    assert_contains "$out" "mate-1" "the merge refusal omitted the neutral id"
+    assert_not_contains "$(cat "$log")" "[pr] [merge]" "the real gh ran after a merge flag"
+  done
+  for flag in -a -r; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh pr review 7 "$flag" --repo example/public-repo \
+      --body acme-test 2>&1) && fail "a review flag hid the public destination"
+    assert_contains "$out" "mate-1" "the review refusal omitted the neutral id"
+    assert_not_contains "$(cat "$log")" "[pr] [review]" "the real gh ran after a review flag"
+  done
+  unset FAKE_GH_LOG FAKE_GH_VIS
+  pass "merge and review short flags keep the public destination visible to the guard"
 }
 
 test_no_mistakes_shim_checks_public_inputs() {
@@ -840,6 +901,7 @@ test_new_gate_and_unfetched_public_branches_skip_public_history
 test_merge_added_paths_and_lines_are_checked
 test_unreadable_public_refs_refuse_push
 test_gh_shim_refuses_or_rewrites_pr_text
+test_gh_short_flags_select_the_public_destination
 test_no_mistakes_shim_checks_public_inputs
 test_visibility_asks_github_once_and_caches
 test_scrub_tool_dry_run_and_apply
