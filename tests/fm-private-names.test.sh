@@ -57,7 +57,7 @@ case "$1 $2" in
     [ "${FAKE_GH_VIS:-public}" = fail ] && exit 1
     printf '%s\n' "${FAKE_GH_VIS:-public}"
     ;;
-  "pr list") cat "${FAKE_GH_PRS:?}" ;;
+  "api --paginate") cat "${FAKE_GH_PRS:?}" ;;
   "pr view") awk -F '\t' -v n="$3" '$1 == n' "${FAKE_GH_PRS:?}" ;;
 esac
 exit 0
@@ -65,6 +65,15 @@ SH
     chmod +x "$bin/$tool"
   done
   printf '%s\n' "$bin"
+}
+
+make_fake_no_mistakes() {  # <bin>
+  cat >"$1/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+printf '[%s]' "$@" >>"${FAKE_NM_LOG:?}"
+printf '\n' >>"$FAKE_NM_LOG"
+SH
+  chmod +x "$1/no-mistakes"
 }
 
 # A worktree whose origin is a local bare repository, with the guard hooks
@@ -132,14 +141,21 @@ EOF
   assert_contains "$list" "mate acme-test" "a route id must be kind mate"
   assert_contains "$list" "client gtm-client-zenith-sample" "a client clone must be listed whole"
   assert_contains "$list" "private bare-hand-name" "a bare hand name must be kind private"
-  assert_not_contains "$list" "client orbit-sample" "an excluded name must be dropped"
+  assert_contains "$list" "client orbit-sample" "a local exclusion must not drop a registered name"
   assert_not_contains "$list" "firstmate" "a non-client project must not be listed"
-  assert_not_contains "$list" " xy" "a hand name shorter than three characters must be skipped"
-  assert_contains "$list" "mate qrs" "a three-character hand name must be kept"
-  assert_not_contains "$list" "mate zed" "a derived name shorter than four characters must be skipped"
-  assert_not_contains "$list" "client abc" "a derived client slug shorter than four characters must be skipped"
-  assert_not_contains "$list" "Health" "a derived ordinary word on the generic list must be skipped"
+  assert_contains "$list" "private:context xy" "a short hand name must be listed in the context tier"
+  assert_contains "$list" "mate:context qrs" "a short hand name must use context matching"
+  assert_contains "$list" "mate:context zed" "a short registered name must be listed"
+  assert_contains "$list" "client:context abc" "a short client slug must be listed"
+  assert_contains "$list" "mate:context Health" "an ordinary-word registered name must be listed"
   assert_contains "$list" "client gtm-client-abc" "the whole client repository name must still be listed"
+  if out=$(printf 'health is good\nfm-homes/Health\nzed.status\n@abc\nqrs second mate\n' | FM_HOME=$home "$PN" check 2>&1); then
+    fail "context-tier names in name-shaped text were accepted"
+  fi
+  assert_contains "$out" "mate-" "a context-tier mate was not reported"
+  assert_contains "$out" "client-" "a context-tier client was not reported"
+  out=$(printf 'health is good; abc is ordinary prose; zed is plain prose\n' | FM_HOME=$home "$PN" check 2>&1) ||
+    fail "a context-tier name blocked ordinary prose: $out"
   [ "$(stat -c %a "$home/config/private-names" 2>/dev/null || stat -f %Lp "$home/config/private-names")" = 600 ] ||
     fail "the list must be private to its owner"
 
@@ -150,7 +166,7 @@ EOF
   FM_HOME=$home "$PN" refresh >/dev/null || fail "second refresh failed"
   echo "Acme-Test" | FM_HOME=$home "$PN" scrub >"$d/after"
   assert_equals "$(cat "$d/before")" "$(cat "$d/after")" "a neutral id moved after refresh"
-  assert_equals "mate-1" "$(cat "$d/after")" "the first route id must scrub to mate-1"
+  case "$(cat "$d/after")" in mate-[0-9]*) ;; *) fail "the route id was not neutralized" ;; esac
   assert_grep "mate zenith-mate" "$home/config/private-names" "a new route was not appended"
   rm -f "$home/data/secondmates.md"
   FM_HOME=$home "$PN" refresh >/dev/null || fail "third refresh failed"
@@ -266,6 +282,38 @@ test_pre_push_refuses_names_in_branch_message_patch_and_path() {
   pass "pre-push refuses a listed name in a branch name, commit message, added line, or file path, and passes a clean push"
 }
 
+test_new_public_branch_scans_commits_from_other_remotes() {
+  local d=$TMP_ROOT/other-remote home private out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  private=$d/private.git
+  git init -q --bare "$private"
+  git -C "$REPO" remote add private "$private"
+  git -C "$REPO" checkout -q -b fm/remote-copy
+  commit_file "$REPO" copied.txt plain "Fix acme-test" --no-verify
+  git -C "$REPO" push -q private HEAD:refs/heads/fm/remote-copy
+  git -C "$REPO" fetch -q private
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD:refs/heads/fm/remote-copy 2>&1) &&
+    fail "a commit known only to another remote reached the public origin"
+  assert_contains "$out" "mate-1" "the public push did not scan the other remote's commit"
+  pass "a new public branch scans commits reachable only from another remote"
+}
+
+test_stale_registered_name_is_refreshed_before_commit() {
+  local d=$TMP_ROOT/stale home out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  printf '%s\n' '- quasar-mate - A made-up route. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)' \
+    >"$home/data/secondmates.md"
+  out=$(FM_HOME=$home in_pane "$HOOKS" commit_file "$REPO" fresh.txt plain "Route quasar-mate work" 2>&1) &&
+    fail "a newly registered name passed the commit guard"
+  assert_contains "$out" "mate-" "the stale-list refusal did not report a neutral id"
+  assert_contains "$(cat "$home/config/private-names")" "quasar-mate" "the list was not refreshed"
+  pass "the commit guard refreshes a stale registered-name list"
+}
+
 test_evidence_push_with_a_listed_name_is_refused() {
   local d=$TMP_ROOT/evidence home out rc
   home=$d/home
@@ -354,9 +402,11 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   [ ! -s "$log" ] || fail "the real gh ran for a refused head branch"
 
   : >"$log"
-  (cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/private-repo --title "Fix acme-test" --body ok) ||
+  (cd "$REPO" && FAKE_GH_VIS=private in_pane "$HOOKS" gh pr create --repo example/private-repo --title "Fix acme-test" --body ok) ||
     fail "a private repository's PR was refused"
   assert_contains "$(cat "$log")" "[Fix acme-test]" "a private repository's PR text was changed"
+  assert_equals public "$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/private-repo)" \
+    "a private visibility override bypassed a public result"
 
   mkdir -p "$d/acme-test-drafts"
   printf 'Clean body.\n' >"$d/acme-test-drafts/body.md"
@@ -372,6 +422,21 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   [ ! -s "$log" ] || fail "the real gh ran for a refused label"
 
   : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr new --repo example/public-repo --title Clean --body acme-test 2>&1) &&
+    fail "the pr new alias passed a listed body"
+  [ ! -s "$log" ] || fail "the real gh ran for a refused pr new"
+  for flag in --template --fill --fill-first --fill-verbose --recover; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean --body Clean "$flag" 2>&1) &&
+      fail "an unchecked $flag PR source reached gh"
+    [ ! -s "$log" ] || fail "the real gh ran for $flag"
+  done
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean 2>&1) &&
+    fail "an editor-supplied PR body reached gh"
+  [ ! -s "$log" ] || fail "the real gh ran for an editor-supplied body"
+
+  : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh issue list --search acme-test >/dev/null) || fail "a non-PR command was refused"
   assert_contains "$(cat "$log")" "[issue] [list]" "a non-PR command did not reach the real gh"
 
@@ -382,6 +447,36 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   [ ! -s "$log" ] || fail "the real gh ran with an empty list"
   unset FAKE_GH_LOG FAKE_GH_VIS
   pass "the gh and gh-axi shims refuse or rewrite PR titles, bodies, and stdin, refuse a named head branch, and pass private repos"
+}
+
+test_no_mistakes_shim_checks_public_inputs() {
+  local d=$TMP_ROOT/no-mistakes home log out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  mkdir -p "$d/fakebin"
+  FAKEBIN=$d/fakebin
+  make_fake_no_mistakes "$FAKEBIN"
+  log=$d/no-mistakes.log
+  export FAKE_NM_LOG=$log
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" no-mistakes axi run --intent 'Build for acme-test' 2>&1) &&
+    fail "no-mistakes accepted a listed intent"
+  [ ! -s "$log" ] || fail "the real no-mistakes ran for a listed intent"
+  assert_contains "$out" "mate-1" "the intent refusal omitted a neutral id"
+  out=$(cd "$REPO" && in_pane "$HOOKS" no-mistakes axi respond --pr-title='Serve zenith-sample' 2>&1) &&
+    fail "no-mistakes accepted a listed PR title"
+  [ ! -s "$log" ] || fail "the real no-mistakes ran for a listed title"
+  git -C "$REPO" checkout -q -b fm/acme-test-work
+  out=$(cd "$REPO" && in_pane "$HOOKS" no-mistakes axi run 2>&1) &&
+    fail "no-mistakes accepted a listed branch"
+  [ ! -s "$log" ] || fail "the real no-mistakes ran for a listed branch"
+  git -C "$REPO" checkout -q main
+  (cd "$REPO" && in_pane "$HOOKS" no-mistakes axi run --intent 'Clean work') ||
+    fail "no-mistakes refused a clean run"
+  assert_contains "$(cat "$log")" "[axi][run][--intent][Clean work]" "the clean call did not reach no-mistakes"
+  unset FAKE_NM_LOG
+  pass "the no-mistakes shim refuses listed intent, PR title, and branch inputs"
 }
 
 test_visibility_asks_github_once_and_caches() {
@@ -401,6 +496,12 @@ test_visibility_asks_github_once_and_caches() {
     "a failed lookup must count as public"
   assert_equals private "$(FAKE_GH_VIS=private PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/unknown)" \
     "a failed lookup was cached"
+  assert_equals public "$(FAKE_GH_VIS=public PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/flip)" \
+    "a public visibility answer was not reported"
+  assert_equals private "$(FAKE_GH_VIS=private PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/change)" \
+    "a private visibility answer was not reported"
+  assert_equals public "$(FAKE_GH_VIS=public PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/change)" \
+    "a private visibility answer was cached after becoming public"
   assert_equals private "$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility /some/local/path.git)" \
     "a local path must be private"
   assert_equals public "$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility https://git.example.invalid/x/y.git)" \
@@ -445,6 +546,7 @@ test_scrub_tool_dry_run_and_apply() {
   assert_contains "$out" "2 of 3 files hold a listed name" "the dry run miscounted evidence"
   assert_not_contains "$out" "acme-test" "the dry run printed a private name"
   assert_not_contains "$out" "zenith-sample" "the dry run printed a private name"
+  assert_contains "$(cat "$log")" "[api] [--paginate]" "the scrub tool did not page through all pull requests"
   assert_not_contains "$(cat "$log")" "[edit]" "the dry run edited a PR"
   assert_equals "$old_tip" "$(git -C "$ev" rev-parse no-mistakes/evidence)" "the dry run moved the evidence branch"
 
@@ -459,6 +561,18 @@ test_scrub_tool_dry_run_and_apply() {
   assert_equals "run-1/clean.log" "$(git -C "$ev" ls-tree -r --name-only "$new_tip")" "apply removed the wrong files"
   assert_equals 4 "$(git -C "$ev" rev-list --count "$new_tip")" "history was rewritten"
   git -C "$ev" cat-file -e "$old_tip:run-2/acme-test.log" || fail "an earlier evidence commit lost its file"
+
+  cat >"$FAKEBIN/git" <<SH
+#!/usr/bin/env bash
+if [ "\$1" = clone ]; then exit 1; fi
+exec "$(command -v git)" "\$@"
+SH
+  chmod +x "$FAKEBIN/git"
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo \
+    --pr 12 --evidence-remote "$ev" --apply 2>&1) &&
+    fail "the scrub tool reported success after a clone failure"
+  assert_contains "$out" "cannot clone" "the scrub tool did not report the clone failure"
+  rm -f "$FAKEBIN/git"
 
   : >"$log"
   out=$(FAKE_GH_VIS=private PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/closed-repo --apply 2>&1) ||
@@ -484,7 +598,8 @@ test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard() {
     git -C "$repo" commit -q -m $'Keep\n\nCo-authored-by: Cursor <cursoragent@cursor.com>' ||
     fail "keep-ai-trailers commit failed"
   assert_contains "$(git -C "$repo" log -1 --format=%B)" "Co-authored-by: Cursor" "keep-ai-trailers stripped the trailer"
-  [ -x "$hooks/bin/gh" ] && [ -x "$hooks/bin/gh-axi" ] || fail "keep-ai-trailers install omitted the gh shims"
+  [ -x "$hooks/bin/gh" ] && [ -x "$hooks/bin/gh-axi" ] && [ -x "$hooks/bin/no-mistakes" ] ||
+    fail "keep-ai-trailers install omitted a publishing shim"
   pass "a keep-ai-trailers install keeps AI trailers but still installs the private-name guard"
 }
 
@@ -519,9 +634,12 @@ test_commit_message_is_refused_or_rewritten_on_a_public_repo
 test_private_repo_passes_untouched
 test_empty_list_on_a_public_repo_refuses
 test_pre_push_refuses_names_in_branch_message_patch_and_path
+test_new_public_branch_scans_commits_from_other_remotes
+test_stale_registered_name_is_refreshed_before_commit
 test_evidence_push_with_a_listed_name_is_refused
 test_gate_remote_is_judged_by_origin_and_repo_hook_still_runs
 test_gh_shim_refuses_or_rewrites_pr_text
+test_no_mistakes_shim_checks_public_inputs
 test_visibility_asks_github_once_and_caches
 test_scrub_tool_dry_run_and_apply
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard

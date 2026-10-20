@@ -6,13 +6,15 @@
 # Usage: . bin/fm-private-names-lib.sh, then fm_pn_init <config-dir> <state-dir>.
 #
 # THE LIST. config/private-names holds one private name per line as
-# "<kind> <name>", where kind is mate, client, or private; '#' lines and blank
+# "<kind> <name>" or "<kind>:context <name>", where kind is mate, client, or private; '#' lines and blank
 # lines are ignored. bin/fm-private-names.sh refresh is its only writer and
 # owns how names are derived from local records; config/private-names.local is
 # the operator's hand-edited input to that refresh. Tracked code only reads
 # the list. A name matches case-insensitively as a whole word, where a word
 # character is [A-Za-z0-9_], so a hyphen, slash, dot, or space ends a word and
-# a name never matches inside a longer word.
+# a name never matches inside a longer word. Context-tier names match only in
+# fm-homes/<name>, <name>.status, <name>.inbox, <name> mate, <name> home,
+# <name> second mate, and @<name>.
 #
 # NEUTRAL IDS. Each listed name maps to "<kind>-<n>", where n counts entries of
 # that kind in list order (mate-1, mate-2, client-1, ...). Refresh only appends,
@@ -22,14 +24,13 @@
 #
 # VISIBILITY. Only a public destination is checked; a private one passes
 # untouched. fm_pn_visibility decides, in order:
-#   1. config/repo-visibility, an explicit local list of "<repo> public|private"
+#   1. config/repo-visibility, an explicit local list of "<repo> public"
 #      lines, where <repo> is a GitHub owner/repo or a literal remote URL or path;
 #   2. a local path or file:// URL is private (local disk is not a public exit);
 #   3. a GitHub URL or owner/repo asks GitHub once through the real gh
 #      (gh api repos/<owner>/<repo> --jq .visibility) and caches the answer in
-#      state/repo-visibility.cache: a public answer for 30 days, a private or
-#      internal one for 1 hour, so a repository flipped to public is checked
-#      again soon; a failed lookup is treated as public and is not cached;
+#      state/repo-visibility.cache for 30 days. Private and internal answers
+#      are never cached; a failed lookup is public and is not cached;
 #   4. any other network URL is public.
 # An absent or empty list on a public destination refuses rather than passing.
 
@@ -40,9 +41,7 @@ FM_PN_LOCAL=
 FM_PN_VISIBILITY=
 FM_PN_CACHE=
 FM_PN_PUBLIC_TTL=${FM_PN_PUBLIC_TTL:-2592000}
-FM_PN_PRIVATE_TTL=${FM_PN_PRIVATE_TTL:-3600}
-# Tracked list of ordinary English and Firstmate words that refresh never
-# derives as a private name; see its header for the rule.
+# Tracked list of ordinary words that refresh puts in the context tier.
 FM_PN_GENERIC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-private-names-generic.txt"
 # Marker file that identifies a gh shim directory, so the real-binary lookup
 # skips every shim directory on PATH, including a parent launch's.
@@ -76,21 +75,31 @@ fm_pn_perl() {  # <check|scrub|audit> <list-file>
   perl -e '
     use strict; use warnings;
     my ($mode, $list) = @ARGV; @ARGV = ();
-    my (%id, %seen, %count, @names);
+    my (%id, %seen, %count, @plain, @context, @names);
     open(my $fh, "<", $list) or die "fm-private-names: cannot read list\n";
     while (my $line = <$fh>) {
       $line =~ s/\r?\n\z//;
       next if $line =~ /^\s*(#|$)/;
       my ($kind, $name) = $line =~ /^\s*(\S+)\s+(.*?)\s*$/ or next;
+      my $context = $kind =~ s/:context\z//;
       next if $name eq "" || $seen{lc $name}++;
       $count{$kind}++;
       $id{lc $name} = "$kind-$count{$kind}";
       push @names, $name;
+      push @{$context ? \@context : \@plain}, $name;
     }
     close $fh;
     exit 0 unless @names;
-    my $alt = join "|", map { quotemeta } sort { length($b) <=> length($a) } @names;
-    my $re = qr/(?<![A-Za-z0-9_])($alt)(?![A-Za-z0-9_])/i;
+    my $plain = join "|", map { quotemeta } sort { length($b) <=> length($a) } @plain;
+    my $context = join "|", map { quotemeta } sort { length($b) <=> length($a) } @context;
+    my @patterns;
+    push @patterns, "(?<![A-Za-z0-9_])($plain)(?![A-Za-z0-9_])" if @plain;
+    if (@context) {
+      push @patterns, "(?<=fm-homes/)($context)(?![A-Za-z0-9_])";
+      push @patterns, "(?<=@)($context)(?![A-Za-z0-9_])";
+      push @patterns, "(?<![A-Za-z0-9_])($context)(?=\\.status\\b|\\.inbox\\b|\\s+(?:mate|home|second\\s+mate)\\b)";
+    }
+    my $re = qr/(?|@{[join "|", @patterns]})/i;
     my $hit = 0;
     if ($mode eq "audit") {
       # Input lines are "path:line:content" from grep -n -H; report hit counts
@@ -201,7 +210,7 @@ fm_pn_explicit_visibility() {  # <repo-id> <raw>
   [ -f "$FM_PN_VISIBILITY" ] || return 1
   while read -r key value _; do
     case "$key" in '' | '#'*) continue ;; esac
-    case "$value" in public | private) ;; *) continue ;; esac
+    [ "$value" = public ] || continue
     if [ "$key" = "$raw" ] || [ "$(fm_pn_repo_id "$key")" = "$id" ]; then
       printf '%s\n' "$value"
       return 0
@@ -211,15 +220,14 @@ fm_pn_explicit_visibility() {  # <repo-id> <raw>
 }
 
 fm_pn_cached_visibility() {  # <repo-id>
-  local id=$1 now key value at ttl
+  local id=$1 now key value at
   [ -f "$FM_PN_CACHE" ] || return 1
   now=$(date +%s)
   while read -r key value at; do
     [ "$key" = "$id" ] || continue
+    [ "$value" = public ] || continue
     case "$at" in '' | *[!0-9]*) continue ;; esac
-    ttl=$FM_PN_PRIVATE_TTL
-    [ "$value" = public ] && ttl=$FM_PN_PUBLIC_TTL
-    if [ $((now - at)) -lt "$ttl" ]; then
+    if [ $((now - at)) -lt "$FM_PN_PUBLIC_TTL" ]; then
       printf '%s\n' "$value"
       return 0
     fi
@@ -280,10 +288,7 @@ fm_pn_visibility() {  # <url|owner/repo|path>
       fm_pn_cache_store "$id" public
       echo public
       ;;
-    private | internal)
-      fm_pn_cache_store "$id" private
-      echo private
-      ;;
+    private | internal) echo private ;;
     *) echo public ;;
   esac
 }

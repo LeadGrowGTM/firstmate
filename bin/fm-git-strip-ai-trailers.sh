@@ -29,7 +29,7 @@
 #       --private-names adds the private-name guard (bin/fm-private-names.sh,
 #       reading that home's config and state directories) to the commit-msg
 #       and pre-push hooks before the repository's own hook runs, and writes
-#       gh and gh-axi shims into <hooks-dir>/bin for the caller to put first
+#       gh, gh-axi, and no-mistakes shims into <hooks-dir>/bin for the caller to put first
 #       on the pane's PATH. The pre-push wrapper replays git's ref lines to
 #       the repository's own pre-push hook after the guard reads them.
 #
@@ -275,7 +275,13 @@ install_hooks() {
   if [ -n "$PN_CONFIG" ]; then
     mkdir -p "$hooks_dir/bin" || return 1
     : >"$hooks_dir/bin/.fm-private-names-shim" || return 1
-    for tool in gh gh-axi; do
+    for tool in gh gh-axi no-mistakes; do
+      if [ "$tool" = no-mistakes ]; then
+        printf '%s\n' '#!/usr/bin/env bash' \
+          "exec env $(private_names_command no-mistakes-shim) \"\$@\"" |
+          write_executable "$hooks_dir/bin/$tool" || return 1
+        continue
+      fi
       printf '%s\n' '#!/usr/bin/env bash' \
         "exec env $(private_names_command gh-shim) $tool \"\$@\"" |
         write_executable "$hooks_dir/bin/$tool" || return 1

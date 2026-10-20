@@ -1,10 +1,6 @@
 # Ordinary English and Firstmate vocabulary that bin/fm-private-names.sh
-# refresh never derives as a private name, one case-insensitive word per line.
-# Rule: a word belongs here only when the audit (bin/fm-private-names.sh audit)
-# shows it used as an ordinary word or a Firstmate term, never as the name of a
-# home or client, and it is not a client name. A name that is private only in
-# some contexts stays out of this file and is dropped per home with "!<name>"
-# in the gitignored config/private-names.local instead.
+# refresh places in the context tier, one case-insensitive word per line.
+# This list contains ordinary words only, never real home or client names.
 agent
 boat
 branch

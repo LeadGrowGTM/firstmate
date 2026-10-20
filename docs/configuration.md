@@ -804,9 +804,10 @@ Private names - the names of this fleet's operator homes and the clients they se
 The list is local, gitignored `config/private-names`, one `<kind> <name>` per line, and tracked code only reads it.
 `bin/fm-private-names.sh refresh` regenerates it from local records: second mate ids in `data/secondmates.md`, and `gtm-client-` project and repository names plus their client slugs from `data/projects.md`, each route's `projects:` field, project clones and their origins, and the same records in every second mate home on this machine.
 Every spawn runs that refresh first, and refresh only appends, so a name stays listed after its record is removed.
-So that a hit is a real leak, refresh skips a derived name shorter than four characters or with no letter, and any derived name on the tracked [`bin/fm-private-names-generic.txt`](../bin/fm-private-names-generic.txt) list of ordinary English and Firstmate words.
-A word joins that list only when `bin/fm-private-names.sh audit` shows it used as an ordinary word rather than as a home or client name, and never when it is a client name.
-The optional, gitignored `config/private-names.local` adds names by hand (`<kind> <name>`, or a bare name) and drops a generated one with `!<name>`; a name that is private only in some contexts is dropped there, per home, rather than on the tracked list.
+A short name, a name with no letter, or a name on the tracked [`bin/fm-private-names-generic.txt`](../bin/fm-private-names-generic.txt) ordinary-word list stays registered in a context tier.
+Context-tier names match only `fm-homes/<name>`, `<name>.status`, `<name>.inbox`, `<name> mate`, `<name> home`, `<name> second mate`, and `@<name>`.
+All other names match as plain whole words, and the gitignored list records each entry's tier without keeping real names in tracked files.
+The optional, gitignored `config/private-names.local` adds names by hand (`<kind> <name>`, or a bare name) and cannot exclude registered names.
 A refresh in a second mate home on this machine also merges its primary's list from disk; it is deliberately not inherited config, because inherited config is pasted into the mate's instructions.
 
 Names match case-insensitively as whole words, so a name never matches inside a longer word, and each maps to a stable neutral id (`mate-1`, `client-1`, `private-1`) by its position in the list.
@@ -816,15 +817,17 @@ Every fleet launch's `state/<id>.git-hooks` (see "Commit attribution") carries t
 
 - `commit-msg` refuses a listed name in a commit message;
 - `pre-push` refuses a listed name in a pushed branch name, an outgoing commit message, the content of added lines, or a path a commit adds or renames, and judges a push to the no-mistakes gate remote by the repository's `origin`;
-- `bin/gh` and `bin/gh-axi` shims, first on the pane's `PATH`, scan the title, body, merge subject, labels, body file or stdin, and head branch of `pr create`, `edit`, `comment`, `review`, and `merge` before the real tool runs.
+- `bin/gh` and `bin/gh-axi` shims, first on the pane's `PATH`, scan the title, body, merge subject, labels, body file or stdin, and head branch of `pr create`, `new`, `edit`, `comment`, `review`, and `merge` before the real tool runs.
+- `bin/no-mistakes` checks intent, PR title, and the current branch before `axi run` or `axi respond` reaches the real tool.
 
 Only outgoing content is judged: an existing tracked line or file path that already holds a listed name never blocks an unrelated commit, push, or pull request.
 
 Setting `FM_PRIVATE_NAMES_MODE=rewrite` on the command rewrites a commit message or pull-request text to neutral ids instead of refusing; a branch name or patch still refuses and suggests the neutral form.
 Only a public destination is checked, so a private repository passes untouched.
-Visibility comes from the optional, gitignored `config/repo-visibility` (`<owner/repo or remote> public|private` lines), else GitHub asked once and cached in `state/repo-visibility.cache`; a local path is private, and an unknown network remote or a failed lookup counts as public.
+Visibility comes from the optional, gitignored `config/repo-visibility` (`<owner/repo or remote> public` lines only), else GitHub is queried and public answers are cached in `state/repo-visibility.cache`; private and internal answers are queried each time, a local path is private, and an unknown network remote or a failed lookup counts as public.
 A missing or empty list refuses every public exit with a message naming the refresh command.
-`git --no-verify`, and tools that bypass git hooks or the shims, are not seen; the no-mistakes pipeline opens its PR from its own daemon, so a worker reads that PR back through the scrub tool before reporting done.
+`git --no-verify`, and tools that bypass git hooks or the shims, are not seen.
+The no-mistakes daemon can generate PR text that the shim cannot inspect before creation; the worker verifies and scrubs that PR immediately after creation as a backstop.
 
 `bin/fm-private-names-scrub.sh --repo <owner/repo>` dry-runs by default: it lists PRs whose title or body holds a listed name and evidence-branch files whose path or content does, without printing a name.
 With `--apply` it rewrites those PR titles and bodies to neutral ids and removes those files from the evidence-branch tip in one ordinary fast-forward commit; it never force-pushes or rewrites history, so earlier commits and PR edit history stay readable on the forge.

@@ -5802,7 +5802,7 @@ EOF
 # homes are firstmate clones; a launch whose worktree is not git fails closed
 # rather than shipping a runtime that cannot strip.
 # The same directory carries the private-name guard on commit-msg and pre-push
-# and the gh/gh-axi shims in its bin/, for every launch whether or not the home
+# and the gh/gh-axi/no-mistakes shims in its bin/, for every launch whether or not the home
 # keeps AI trailers; bin/fm-private-names.sh owns the guard. The list is
 # refreshed from this home's records first, and a failed refresh leaves the
 # guard refusing public exits rather than passing them.
@@ -5810,8 +5810,10 @@ GIT_HOOKS_DIR="$STATE_REAL/$ID.git-hooks"
 PRIVATE_NAMES_CONFIG=$(CDPATH='' cd -- "$CONFIG" 2>/dev/null && pwd -P) || PRIVATE_NAMES_CONFIG=$CONFIG
 FM_HOME="$FM_HOME" FM_CONFIG_OVERRIDE="$PRIVATE_NAMES_CONFIG" FM_STATE_OVERRIDE="$STATE_REAL" \
   FM_DATA_OVERRIDE="$DATA" FM_PROJECTS_OVERRIDE="$PROJECTS" \
-  "$FM_ROOT/bin/fm-private-names.sh" refresh >/dev/null ||
-  echo "warning: could not refresh the private-name list; public pushes and pull requests from $ID will be refused until it is refreshed" >&2
+  "$FM_ROOT/bin/fm-private-names.sh" refresh >/dev/null || {
+    echo "error: could not refresh the private-name list for $ID" >&2
+    exit 1
+  }
 GIT_HOOKS_ARGS=(--private-names "$PRIVATE_NAMES_CONFIG" "$STATE_REAL")
 [ "$KEEP_AI_TRAILERS" = 0 ] || GIT_HOOKS_ARGS+=(--keep-ai-trailers)
 "$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "$GIT_HOOKS_DIR" "$WT" "${GIT_HOOKS_ARGS[@]}" || {
@@ -6360,7 +6362,7 @@ if [ "$KIND" = secondmate ]; then
 fi
 # Pane-scoped override: git in this worker reads our commit-msg strip and the
 # private-name hooks without rewriting the project's core.hooksPath, and gh or
-# gh-axi resolves to the private-name shims first. GIT_CONFIG_* takes
+# gh-axi and no-mistakes resolve to the private-name shims first. GIT_CONFIG_* takes
 # precedence over config files and is inherited by child git processes. An
 # export statement inside the pane command carries the override across every
 # step of a compound raw launch while firstmate's own git and gh are unchanged;

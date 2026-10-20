@@ -5,7 +5,7 @@
 # Usage:
 #   fm-private-names-scrub.sh --repo <owner/repo> [--pr <number>]...
 #       [--no-evidence] [--evidence-branch <name>] [--evidence-remote <url>]
-#       [--limit <n>] [--apply]
+#       [--apply]
 #
 # Default is a dry run: it prints what would change - PR numbers, how many
 # title and body lines hold a listed name, and evidence file paths rewritten to
@@ -49,7 +49,6 @@ PRS=()
 EVIDENCE=1
 EVIDENCE_BRANCH=no-mistakes/evidence
 EVIDENCE_REMOTE=
-LIMIT=1000
 APPLY=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -63,12 +62,6 @@ while [ "$#" -gt 0 ]; do
     --no-evidence) EVIDENCE=0; shift ;;
     --evidence-branch) [ "$#" -ge 2 ] || usage; EVIDENCE_BRANCH=$2; shift 2 ;;
     --evidence-remote) [ "$#" -ge 2 ] || usage; EVIDENCE_REMOTE=$2; shift 2 ;;
-    --limit)
-      [ "$#" -ge 2 ] || usage
-      case "$2" in '' | *[!0-9]*) usage ;; esac
-      LIMIT=$2
-      shift 2
-      ;;
     --apply) APPLY=1; shift ;;
     -h | --help) usage ;;
     *) usage ;;
@@ -107,8 +100,7 @@ PR_JQ='[.number, .state, (.title | @base64), ((.body // "") | @base64)] | @tsv'
 pr_rows() {
   local n
   if [ "${#PRS[@]}" -eq 0 ]; then
-    "$GH" pr list --repo "$REPO" --state all --limit "$LIMIT" \
-      --json number,state,title,body --jq ".[] | $PR_JQ"
+    "$GH" api --paginate "repos/$REPO/pulls?state=all&per_page=100" --jq ".[] | $PR_JQ"
     return
   fi
   for n in "${PRS[@]}"; do
@@ -148,13 +140,23 @@ scrub_prs() {
 }
 
 scrub_evidence() {
-  local bare=$WORK/evidence.git tip path removed=0 total=0 tree commit
+  local bare=$WORK/evidence.git tip path removed=0 total=0 tree commit branch_status
+  git ls-remote --exit-code "$EVIDENCE_REMOTE" "refs/heads/$EVIDENCE_BRANCH" >"$WORK/evidence-ref" 2>/dev/null
+  branch_status=$?
+  if [ "$branch_status" = 2 ] && [ ! -s "$WORK/evidence-ref" ]; then
+    echo "evidence branch $EVIDENCE_BRANCH: absent; nothing to scrub"
+    return 0
+  fi
+  if [ "$branch_status" -ne 0 ]; then
+    echo "fm-private-names-scrub: cannot check the evidence branch" >&2
+    return 1
+  fi
   # One full fetch of that branch alone: every file is read, so a lazy partial
   # clone would pay one network round trip per file.
   if ! git clone --quiet --bare --single-branch --branch "$EVIDENCE_BRANCH" \
     "$EVIDENCE_REMOTE" "$bare" 2>/dev/null; then
-    echo "evidence branch $EVIDENCE_BRANCH: not found or not readable; nothing to scrub"
-    return 0
+    echo "fm-private-names-scrub: cannot clone the evidence branch" >&2
+    return 1
   fi
   tip=$(git -C "$bare" rev-parse --verify "refs/heads/$EVIDENCE_BRANCH^{commit}") || return 1
   : >"$WORK/remove"
