@@ -1,0 +1,8 @@
+arm recorded task: exit=0 armed: state/boat-task-one.check.sh (controller /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZ6XZSTXXW4RW25VXSCF1E/.boat-live.chda13r7/controller)
+registered check and trust: present; check mode 0700
+repeat arm: exit=0 armed: state/boat-task-one.check.sh (controller /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZ6XZSTXXW4RW25VXSCF1E/.boat-live.chda13r7/controller)
+disarm edited check: exit=1 error: check is not this watch: boat-task-one
+edited check and trust: preserved
+disarm owned check: exit=0 disarmed: state/boat-task-one.check.sh
+owned check and trust: removed
+arm missing controller task: exit=1 error: controller has no Boat box recorded for task-two; send it first
