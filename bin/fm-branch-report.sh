@@ -124,25 +124,43 @@ if [ "$(turn_field unscoped)" != 1 ]; then
 fi
 
 if [ "$(turn_field posture)" = attended ]; then
-  CLAIMED_SIGNALS=$(awk -F '\t' -v seqs="$(turn_field rows)" -v key="$TASK.status" '
+  CLAIMED_SIGNAL=$(awk -F '\t' -v seqs="$(turn_field rows)" -v key="$TASK.status" '
     BEGIN { n = split(seqs, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
-    $2 in wanted && $3 == "signal" && $4 == key {
-      signal = 1
-      if ($5 ~ /^needs-decision:/) decision = 1
-    }
-    END { print decision + 0, signal + 0 }
+    $2 in wanted && $3 == "signal" && $4 == key { signal = 1 }
+    END { print signal + 0 }
   ' "$STATE/.wake-queue" 2>/dev/null) || refuse "the claimed wake rows could not be checked"
-  if [ "${CLAIMED_SIGNALS%% *}" = 1 ] && [ "$VERDICT" != captain ]; then
-    refuse "the claimed needs-decision signal for $TASK requires a captain verdict"
-  fi
-  if [ "${CLAIMED_SIGNALS##* }" = 1 ]; then
+  if [ "$CLAIMED_SIGNAL" = 1 ]; then
     case "$TASK" in *[!A-Za-z0-9._-]*) refuse "the claimed signal has an invalid task id" ;; esac
+    SPAN=$(awk -F '\t' -v key="span=$TASK" '$1 == key { print; n++ } END { if (n != 1) exit 1 }' "$TURN_FILE") \
+      || refuse "the claimed status lines for $TASK were not captured; hand this wake to MAIN"
+    IFS=$'\t' read -r _ SPAN_START SPAN_END SPAN_IDENT SPAN_EXTRA <<< "$SPAN"
+    case "$SPAN_START:$SPAN_END" in *[!0-9:]*|:*|*:) refuse "the claimed status span is invalid" ;; esac
+    [ "$SPAN_START" -le "$SPAN_END" ] && [ -n "$SPAN_IDENT" ] && [ -z "$SPAN_EXTRA" ] \
+      || refuse "the claimed status span is invalid"
     # shellcheck source=bin/fm-classify-lib.sh
     . "$SCRIPT_DIR/fm-classify-lib.sh"
-    if status_open_decisions "$STATE/$TASK.status" | awk -F '\t' '$2 == "blocked" { found = 1 } END { exit !found }'; then
-      [ "$VERDICT" = captain ] && [ "$URGENCY" = urgent ] \
-        || refuse "the claimed blocked signal for $TASK requires a captain verdict with --urgency urgent"
+    STATUS_FILE="$STATE/$TASK.status"
+    [ "$(_fm_open_decisions_file_ident "$STATUS_FILE" 2>/dev/null)" = "$SPAN_IDENT" ] \
+      || refuse "the claimed status file changed; hand this wake to MAIN"
+    # shellcheck source=bin/fm-wake-lib.sh
+    . "$SCRIPT_DIR/fm-wake-lib.sh"
+    FM_WAKE_UNREAD_LINES=
+    if [ "$SPAN_START" -lt "$SPAN_END" ]; then
+      fm_wake_unread_events "$STATUS_FILE" 0 "$SPAN_START" "$SPAN_END" \
+        || refuse "the claimed status lines could not be read; hand this wake to MAIN"
     fi
+    [ "$(_fm_open_decisions_file_ident "$STATUS_FILE" 2>/dev/null)" = "$SPAN_IDENT" ] \
+      || refuse "the claimed status file changed; hand this wake to MAIN"
+    while IFS= read -r STATUS_LINE || [ -n "$STATUS_LINE" ]; do
+      [ -n "$STATUS_LINE" ] || continue
+      status_line_verb "$STATUS_LINE" EVENT_VERB
+      case "$EVENT_VERB" in
+        needs-decision) [ "$VERDICT" = captain ] \
+          || refuse "the claimed needs-decision signal for $TASK requires a captain verdict" ;;
+        blocked) [ "$VERDICT" = captain ] && [ "$URGENCY" = urgent ] \
+          || refuse "the claimed blocked signal for $TASK requires a captain verdict with --urgency urgent" ;;
+      esac
+    done <<< "$FM_WAKE_UNREAD_LINES"
   fi
 fi
 

@@ -364,17 +364,25 @@ test_report_surface_enforces_actor_turn_and_scope() {
 }
 
 test_report_surface_requires_decision_and_blocker_handoffs() {
-  local home state out rc
+  local home state out rc old_size
   home="$TMP_ROOT/report-handoffs"
   state="$home/state"
   mkdir -p "$state"
+  record_span() {
+    local file="$state/$1.status" start=$2 end ident
+    end=$(wc -c < "$file")
+    ident=$(bash -c '. "$1"; _fm_open_decisions_file_ident "$2"' _ "$ROOT/bin/fm-classify-lib.sh" "$file") \
+      || fail "fixture: could not identify $file"
+    printf 'span=%s\t%s\t%s\t%s\n' "$1" "$start" "$end" "$ident" >> "$state/.supervision-host-turn"
+  }
   printf 'needs-decision [at=1]: which format?\n' > "$state/alpha.status"
-  append_wake "$state" signal alpha.status "needs-decision:$state/alpha.status"
+  append_wake "$state" signal alpha.status "signal: $state/alpha.status"
   printf 'turn=t1\nrows=1\ntasks=alpha\nunscoped=0\nwake=signal: alpha.status\nposture=attended\n' > "$state/.supervision-host-turn"
+  record_span alpha 0
 
   out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 "$REPORT" \
     --task alpha --verdict routine --summary quiet 2>&1); rc=$?
-  expect_code 3 "$rc" "an attended decision signal must refuse a routine report"
+  expect_code 3 "$rc" "a generic signal surfacing a new decision must refuse a routine report"
   assert_contains "$out" "requires a captain verdict" "a decision refusal must tell the branch how to re-report"
   [ ! -e "$state/branch-outcomes.jsonl" ] && [ ! -e "$state/.supervision-host-receipts" ] \
     || fail "a refused decision report recorded an outcome or receipt"
@@ -385,6 +393,7 @@ test_report_surface_requires_decision_and_blocker_handoffs() {
   printf 'blocked [at=2]: credential needed\n' > "$state/beta.status"
   append_wake "$state" signal beta.status "signal: $state/beta.status"
   printf 'turn=t2\nrows=2\ntasks=beta\nunscoped=0\nwake=signal: beta.status\nposture=attended\n' > "$state/.supervision-host-turn"
+  record_span beta 0
   for verdict in routine captain; do
     if [ "$verdict" = captain ]; then
       out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t2 "$REPORT" \
@@ -404,18 +413,20 @@ test_report_surface_requires_decision_and_blocker_handoffs() {
   expect_code 0 "$rc" "an urgent captain report must hand off a blocked signal"
   assert_contains "$out" 'recorded seq 2 [captain]' "the blocker handoff was not stored"
 
-  printf 'resolved [at=3]: credential supplied\nworking [at=4]: running\n' >> "$state/beta.status"
+  old_size=$(wc -c < "$state/beta.status")
+  printf 'working [at=4]: running\n' >> "$state/beta.status"
   append_wake "$state" signal beta.status "signal: $state/beta.status"
   printf 'turn=t3\nrows=1 3\ntasks=alpha beta\nunscoped=0\nwake=signal: beta.status\nposture=attended\n' > "$state/.supervision-host-turn"
+  record_span beta "$old_size"
   out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t3 "$REPORT" \
     --task beta --verdict routine --summary 'running again' 2>&1); rc=$?
-  expect_code 0 "$rc" "a routine signal after the blocker resolves must stay routine"
+  expect_code 0 "$rc" "a later routine signal must not inherit an older open blocker"
 
   printf 'turn=t4\nrows=1\ntasks=alpha\nunscoped=0\nwake=signal: alpha.status\nposture=away\n' > "$state/.supervision-host-turn"
   out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t4 "$REPORT" \
     --task alpha --verdict routine --summary 'handled while away' 2>&1); rc=$?
   expect_code 0 "$rc" "away decision reporting must keep its existing behavior"
-  pass "report surface: attended decision and blocker signals require durable captain handoffs"
+  pass "report surface: only newly surfaced decision and blocker lines require captain handoffs"
 }
 
 # The return brief is rendered after the record is archived, so a non-silent
@@ -1702,7 +1713,8 @@ SH
   turn_end "$home"
   wait_until 150 watcher_live "$home" || fail "restore failure: the Stop hook never started a watcher cycle"
   append_status "$home" 'first actionable wake'
-  wait_until 250 test -s "$home/stub-ready" || fail "restore failure: the engine did not reach its hold"
+  wait_until 250 test -s "$home/stub-ready" \
+    || fail "restore failure: the engine did not reach its hold: $(cat "$home/hook.err" "$home/state/.supervision-host.log" 2>/dev/null)"
   successor=$(cat "$home/state/.watch.lock/pid")
   append_status "$home" 'wake while the engine is handling'
   wait_until 250 bash -c '! kill -0 "$1" 2>/dev/null' _ "$successor" \

@@ -931,6 +931,7 @@ health_record() {  # <engine-error 0|1> <reports>
 handle_wake() {  # <reason-lines>
   local reason=$1 first scope status corrupted rows tasks unscoped rc turn readback
   local receipts usage result errors unacked mirror
+  local signal_keys status_key status_file status_spans span_start span_end span_ident
   LAST_TURN=
   ENGINE_ERROR=0
   HEALTH_NOTE=
@@ -986,12 +987,41 @@ handle_wake() {  # <reason-lines>
     HANDLE_WHY="the branch prompt or engine conversation could not be prepared"
     return 1
   fi
+  status_spans=
+  if [ "$TURN_POSTURE" = attended ]; then
+    rc=0
+    signal_keys=$(awk -F '\t' -v seqs="$rows" '
+      BEGIN { n = split(seqs, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
+      $2 in wanted && $3 == "signal" && $4 ~ /\.status$/ && !seen[$4]++ { print $4 }
+    ' "$STATE/.wake-queue") || rc=1
+    if [ -n "$signal_keys" ]; then
+      _fm_wake_require_classify || rc=1
+      while [ "$rc" -eq 0 ] && IFS= read -r status_key; do
+        fm_wake_status_key_map "$status_key" || { rc=1; break; }
+        status_file="$STATE/$status_key"
+        [ -f "$status_file" ] && [ -r "$status_file" ] && [ ! -L "$status_file" ] || { rc=1; break; }
+        span_start=$(status_presentation_cursor_offset "$status_file") || { rc=1; break; }
+        span_end=$(_fm_status_file_size "$status_file") || { rc=1; break; }
+        span_ident=$(_fm_open_decisions_file_ident "$status_file") || { rc=1; break; }
+        case "$span_start:$span_end" in *[!0-9:]*) rc=1; break ;; esac
+        [ "$span_start" -le "$span_end" ] && [ -n "$span_ident" ] || { rc=1; break; }
+        status_spans="${status_spans}span=${FM_WAKE_STATUS_KEY%.status}"$'\t'"${span_start}"$'\t'"${span_end}"$'\t'"${span_ident}"$'\n'
+      done <<EOF
+$signal_keys
+EOF
+    fi
+    if [ "$rc" -ne 0 ]; then
+      "$SCRIPT_DIR/fm-wake-grant.sh" release "$GEN" >/dev/null 2>&1 || true
+      HANDLE_WHY="the claimed status lines could not be captured"
+      return 1
+    fi
+  fi
   TURN_SEQ=$((TURN_SEQ + 1))
   turn="$GEN.$TURN_SEQ"
   LAST_TURN=$turn
   : > "$RECEIPTS"
-  printf 'turn=%s\nrows=%s\ntasks=%s\nunscoped=%s\nwake=%s\nposture=%s\n' \
-    "$turn" "$rows" "$tasks" "${unscoped:-0}" "$first" "$TURN_POSTURE" > "$TURN_FILE"
+  printf 'turn=%s\nrows=%s\ntasks=%s\nunscoped=%s\nwake=%s\nposture=%s\n%s' \
+    "$turn" "$rows" "$tasks" "${unscoped:-0}" "$first" "$TURN_POSTURE" "$status_spans" > "$TURN_FILE"
   readback=
   if [ "$TURN_POSTURE" = away ]; then
     readback=$(mktemp "$STATE/.supervision-host-readback.XXXXXX") || readback=
