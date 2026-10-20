@@ -898,13 +898,22 @@ test_teardown_stop() {
   expect_code 1 "$CODE" 'teardown of non-worker record'
   [ "$(grep -c '^teardown task-one$' "$FIXTURES/calls")" -eq 0 ] || fail 'non-worker record reached teardown'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-worker record stopped box'
-  new_case teardown-wrong-project
+  new_case teardown-client-project
   seed_receipt
-  seed_worker task-one ship other 'state: done complete'
+  seed_worker task-one ship gtm-client-other 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
-  expect_code 1 "$CODE" 'teardown of non-Boat project'
-  assert_no_grep '^teardown task-one$' "$FIXTURES/calls" 'non-Boat project reached teardown'
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-Boat project stopped box'
+  expect_code 1 "$CODE" 'teardown of client project'
+  ! grep -Fxq 'teardown task-one' "$FIXTURES/calls" || fail 'client project reached teardown'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'client project stopped box'
+  new_case teardown-removed-project
+  seed_receipt
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_worker task-one ship extra-repo 'state: done complete'
+  printf 'firstmate\n' > "$REMOTE_HOME/config/boat-projects"
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" "teardown after project removal: $OUT"
+  grep -Fxq 'teardown task-one' "$FIXTURES/calls" || fail 'removed project did not reach teardown'
+  assert_absent "$REMOTE_HOME/state/task-one.meta" 'removed project kept its task record'
   new_case teardown-short-project
   seed_receipt
   fm_write_meta "$REMOTE_HOME/state/task-one.meta" 'kind=ship' 'project=firstmate'
@@ -1215,6 +1224,20 @@ test_stale_records_and_retire_claim() {
   assert_absent "$REMOTE_HOME/state/stale-a.meta" 'retire-claim kept the worker record'
   [ -n "$(ls "$REMOTE_HOME/data/stale-a/"retired-boat-record.*.meta 2>/dev/null)" ] || fail 'retire-claim did not archive the worker record'
   assert_contains "$OUT" 'boat-tasks-remaining: no' 'retire-claim did not recount after retiring'
+  new_case retire-claim-removed-project
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_worker stale-a ship extra-repo 'state: working active'
+  printf 'done [at=1791892800]: finished\n' > "$REMOTE_HOME/state/stale-a.status"
+  printf 'firstmate\n' > "$REMOTE_HOME/config/boat-projects"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh retire-claim stale-a "$(cat "$FIXTURES/boot-id")"
+  expect_code 0 "$CODE" "retire-claim after project removal: $OUT"
+  assert_absent "$REMOTE_HOME/state/stale-a.meta" 'removed project kept its stale record'
+  new_case retire-claim-client-project
+  seed_worker stale-a ship gtm-client-other 'state: working active'
+  printf 'done [at=1791892800]: finished\n' > "$REMOTE_HOME/state/stale-a.status"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh retire-claim stale-a "$(cat "$FIXTURES/boot-id")"
+  expect_code 1 "$CODE" 'retire-claim of a client project must refuse'
+  [ -f "$REMOTE_HOME/state/stale-a.meta" ] || fail 'refused retire-claim removed a client project record'
   new_case retire-claim-live-refused
   seed_project firstmate
   seed_worker live-a ship firstmate 'state: working active'
@@ -1440,6 +1463,37 @@ test_project_list_and_cap_stop() {
   spawn_task
   expect_code 1 "$CODE" 'a listed clone that tracks client files must refuse'
   assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'a clone with client files spawned a worker'
+
+  new_case project-tracked-env-variant
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  printf 'fixture\n' > "$REMOTE_HOME/projects/extra-repo/.env.production"
+  git -C "$REMOTE_HOME/projects/extra-repo" add -f .env.production
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone tracking a dot-env variant must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'a tracked dot-env variant reached spawn'
+
+  new_case project-nested-env-variant
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  mkdir -p "$REMOTE_HOME/projects/extra-repo/config"
+  printf 'fixture\n' > "$REMOTE_HOME/projects/extra-repo/config/.env.local"
+  git -C "$REMOTE_HOME/projects/extra-repo" add -f config/.env.local
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone tracking a nested dot-env variant must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'a nested dot-env variant reached spawn'
+
+  new_case project-untracked-env-variant
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  mkdir -p "$REMOTE_HOME/projects/extra-repo/config"
+  printf 'fixture\n' > "$REMOTE_HOME/projects/extra-repo/config/.env.local"
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone containing an untracked dot-env variant must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'an untracked dot-env variant reached spawn'
 
   new_case endpoints-report
   run_entry "$REMOTE_HOME" fm-boat-worker.sh endpoints "$(cat "$FIXTURES/boot-id")"

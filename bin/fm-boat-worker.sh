@@ -116,6 +116,11 @@ boat_project_owner() { # <project-name>
   [ "$listed" -eq 1 ] && [ -n "$found" ] || return 1
   printf '%s\n' "$found"
 }
+boat_record_project_safe() {
+  local project=$1 name=${1#"$FM_HOME/projects/"}
+  case "$name" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*|gtm-client-*) return 1 ;; esac
+  [ "$project" = "$FM_HOME/projects/$name" ]
+}
 boat_runtime() {
   [ -z "${TMUX:-}" ] || die 'Boat worker commands must run outside tmux through the remote transport'
   # shellcheck source=bin/fm-backend.sh
@@ -215,8 +220,7 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = endpoints ] || [ "$1" = re
     kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
     project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
-    if [ "$project" != "$FM_HOME/projects/${project#"$FM_HOME/projects/"}" ] ||
-      ! boat_project_owner "${project#"$FM_HOME/projects/"}" >/dev/null; then
+    if ! boat_record_project_safe "$project"; then
       die 'task is not an allowed Boat worker'
     fi
     [ "$(fm_backend_of_meta "$FM_HOME/state/$ID.meta")" = tmux ] || die 'Boat teardown requires a tmux worker'
@@ -232,8 +236,7 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = endpoints ] || [ "$1" = re
     kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
     project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
-    if [ "$project" != "$FM_HOME/projects/${project#"$FM_HOME/projects/"}" ] ||
-      ! boat_project_owner "${project#"$FM_HOME/projects/"}" >/dev/null; then
+    if ! boat_record_project_safe "$project"; then
       die 'task is not an allowed Boat worker'
     fi
     windows=$(fm_backend_tmux_window_inventory '=firstmate') || windows_status=$?
@@ -325,8 +328,14 @@ case "$origin" in
   "https://github.com/$OWNER/$PROJECT.git"|"https://github.com/$OWNER/$PROJECT"|"git@github.com:$OWNER/$PROJECT.git") ;;
   *) die 'project origin is not the allowlisted fork' ;;
 esac
-[ -z "$(git -C "$REPO" ls-files -- 'clients' '.env' '**/.env')" ] || die 'project tracks client or secret files'
-[ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
+[ -z "$(git -C "$REPO" ls-files -- 'clients')" ] || die 'project tracks client or secret files'
+[ ! -e "$REPO/clients" ] || die 'project contains private client or secret paths'
+git -C "$REPO" ls-files -z > "$TMP/tracked" || die 'project tracked files unavailable'
+while IFS= read -r -d '' tracked; do
+  case "${tracked##*/}" in .env|.env.*) die 'project tracks client or secret files' ;; esac
+done < "$TMP/tracked"
+find "$REPO" -path "$REPO/.git" -prune -o \( -name .env -o -name '.env.*' \) -print -quit > "$TMP/contained-env" || die 'project secret scan failed'
+[ ! -s "$TMP/contained-env" ] || die 'project contains private client or secret paths'
 command -v gh-axi >/dev/null || die 'every worker requires gh-axi installed on the Boat box'
 # Ask the injected connection for public identity only, never inspect or stage
 # its credentials. A marker/base64 scalar avoids parsing arbitrary TOON fields.
