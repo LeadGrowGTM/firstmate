@@ -142,6 +142,16 @@ test_disarm() {
   expect_code 1 "$rc" "disarm refuses a replaced local check"
   assert_present "$SENDER/state/boat-t1.boat-watch" "disarm preserved the cursor"
   cp "$FIXTURES/owned-check" "$SENDER/state/boat-t1.check.sh"
+  printf '# local replacement\n' >> "$SENDER/state/boat-t1.check.sh"
+  FM_HOME="$SENDER" "$ROOT/bin/fm-check-register.sh" boat-t1 >/dev/null || fail "could not register the edited check"
+  rc=0
+  out=$(FM_HOME="$SENDER" "$WATCH" disarm t1 2>&1) || rc=$?
+  expect_code 1 "$rc" "disarm refuses an edited check with its header intact"
+  assert_present "$SENDER/state/boat-t1.check.sh" "disarm preserved the edited check"
+  assert_present "$SENDER/state/boat-t1.check-trust" "disarm preserved the edited check trust"
+  assert_present "$SENDER/state/boat-t1.boat-watch" "disarm preserved the edited check cursor"
+  cp "$FIXTURES/owned-check" "$SENDER/state/boat-t1.check.sh"
+  FM_HOME="$SENDER" "$ROOT/bin/fm-check-register.sh" boat-t1 >/dev/null || fail "could not restore the watch check"
   out=$(FM_HOME="$SENDER" "$WATCH" disarm t1) || fail "disarm: $out"
   assert_absent "$SENDER/state/boat-t1.check.sh" "disarm removes the shim"
   assert_absent "$SENDER/state/boat-t1.check-trust" "disarm removes the trust binding"

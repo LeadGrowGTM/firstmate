@@ -655,6 +655,8 @@ Each second mate home can send through the same controller home, but the shared 
 Adding a mate's projects to that allowlist and adding a client lane wait on the captain; the client lane would allow only Claude or Codex workers, refuse Grok and Muse, and use secrets only through `lg run` with a read-only identity for each box.
 The health second mate is excluded because its only project contains health data, which never leaves this machine.
 Alexander-media video renders stay on the PC.
+Shared-lane task status is readable by any home in this fleet because all homes run as one Linux user with equal file access on this machine and code-only tasks carry no client data, so a watch adds no new exposure.
+Revisit this policy with a sender-only binding before any client lane opens.
 One controller keeps one send lock, one environment receipt per box, one owner of the `boat-prove` alias, and one spend reservation, so several homes cannot resume or reserve the same box against each other.
 Give each task an id that is unique across homes, for example prefixed with the sending home's name, because the box refuses an id it already holds.
 After a send succeeds, arm a watch in the sending home so the box worker's reports wake that home:

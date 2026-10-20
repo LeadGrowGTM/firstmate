@@ -9,6 +9,9 @@
 # (docs/remote-secondmates.md "Sending from another home"). The worker then
 # reports into the box's boat-eng home, which the sending home never reads.
 # FM_HOME is always the sending home here and must be set explicitly.
+# Shared-lane task status is readable by any fleet home: all homes run as one
+# Linux user with equal file access, and code-only tasks carry no client data.
+# Revisit this policy with a sender-only binding before any client lane opens.
 #
 # arm, run after the send succeeded, refuses unless the controller's
 # state/.boat-task-box records the task, then writes state/boat-<task-id>.check.sh
@@ -49,12 +52,12 @@ valid_controller() {  # <controller-home>
 shim_content() {
   printf '%s\n' '#!/usr/bin/env bash' '# fm-boat-task-watch owned check' \
     "export FM_HOME=$(printf '%q' "$FM_HOME")" \
-    "exec $(printf '%q' "$SCRIPT_DIR/fm-boat-task-watch.sh") poll $(printf '%q' "$1") $(printf '%q' "$2")"
+    "exec $(printf '%q' "$SCRIPT_DIR/fm-boat-task-watch.sh") poll $1 $(printf '%q' "$2")"
 }
 [ -d "$STATE" ] && [ ! -L "$STATE" ] || die 'sending home state directory is unavailable'
 
 arm() {  # <controller-home> <task-id>
-  local controller=$1 id=$2 shim map tmp
+  local controller=$1 id=$2 shim map tmp controller_arg
   valid_controller "$controller" || die 'controller home must be an absolute directory with a state directory'
   [ "$(cd "$controller" && pwd -P)" != "$(cd "$FM_HOME" && pwd -P)" ] ||
     die 'the controller watches its own Boat tasks with fm-on.sh; arm only in another home'
@@ -63,12 +66,13 @@ arm() {  # <controller-home> <task-id>
     die "controller has no Boat box recorded for $id; send it first"
   fi
   shim="$STATE/boat-$id.check.sh"
+  controller_arg=$(printf '%q' "$controller")
   [ ! -L "$shim" ] || die 'unsafe check path'
-  if [ -e "$shim" ] && ! cmp -s "$shim" <(shim_content "$controller" "$id"); then
+  if [ -e "$shim" ] && ! cmp -s "$shim" <(shim_content "$controller_arg" "$id"); then
     die "check already exists and is not this watch: boat-$id"
   fi
   tmp=$(umask 077; mktemp "$STATE/.boat-watch-shim.XXXXXX") || die 'could not write the check'
-  if ! shim_content "$controller" "$id" > "$tmp" ||
+  if ! shim_content "$controller_arg" "$id" > "$tmp" ||
     ! chmod 0700 "$tmp" || ! mv -f -- "$tmp" "$shim"; then
     rm -f -- "$tmp"
     die 'could not write the check'
@@ -136,9 +140,17 @@ poll() {  # <controller-home> <task-id>
 }
 
 disarm() {  # <task-id>
-  local id=$1 shim="$STATE/boat-$1.check.sh"
+  local id=$1 shim="$STATE/boat-$1.check.sh" poll_line poll_prefix poll_suffix controller_arg
   [ -f "$shim" ] && [ ! -L "$shim" ] &&
     [ "$(sed -n '2p' "$shim")" = '# fm-boat-task-watch owned check' ] ||
+    die "check is not this watch: boat-$id"
+  poll_prefix="exec $(printf '%q' "$SCRIPT_DIR/fm-boat-task-watch.sh") poll "
+  poll_suffix=" $(printf '%q' "$id")"
+  poll_line=$(sed -n '4p' "$shim")
+  case "$poll_line" in "$poll_prefix"*"$poll_suffix") ;; *) die "check is not this watch: boat-$id" ;; esac
+  controller_arg=${poll_line#"$poll_prefix"}
+  controller_arg=${controller_arg%"$poll_suffix"}
+  [ -n "$controller_arg" ] && cmp -s "$shim" <(shim_content "$controller_arg" "$id") ||
     die "check is not this watch: boat-$id"
   "$SCRIPT_DIR/fm-check-unregister.sh" "boat-$id" >/dev/null || die 'could not retire the check'
   rm -f -- "$STATE/boat-$id.boat-watch"
