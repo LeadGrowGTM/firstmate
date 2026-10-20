@@ -649,6 +649,20 @@ After a definite spawn refusal, it stops a box resumed by this send only when a 
 The sender leaves an uncertain remote launch untouched for same-task reconciliation.
 It adds no automatic worker retry, merge path, or supervision loop.
 
+### Sending from another home
+
+Every other home on the machine, including each second mate, sends through the same controller home rather than registering a route of its own.
+One controller keeps one send lock, one environment receipt per box, one owner of the `boat-prove` alias, and one spend reservation, so several homes cannot resume or reserve the same box against each other.
+Give each task an id that is unique across homes, for example prefixed with the sending home's name, because the box refuses an id it already holds.
+After a send succeeds, arm a watch in the sending home so the box worker's reports wake that home:
+
+```sh
+FM_HOME=<sending-home> bin/fm-boat-task-watch.sh arm <controller-home> <task-id>
+```
+
+[`bin/fm-boat-task-watch.sh`](../bin/fm-boat-task-watch.sh) owns which status lines it reports and how; its header and `--help` are the reference.
+Supervise, steer, and tear down with the controller commands in this section, run as `FM_HOME=<controller-home>`, then retire the watch with `FM_HOME=<sending-home> bin/fm-boat-task-watch.sh disarm <task-id>`.
+
 ## Provision a route
 
 1. Create and fill the normal secondmate charter first.
