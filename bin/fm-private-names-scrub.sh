@@ -82,7 +82,15 @@ if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE:
   EVIDENCE_REMOTE=$FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE
 fi
 
-if [ "$(fm_pn_visibility "$REPO")" = private ]; then
+if [ "$APPLY" = 1 ]; then
+  VISIBILITY=$(fm_pn_visibility "$REPO" live) || {
+    echo "fm-private-names-scrub: cannot confirm repository visibility" >&2
+    exit 1
+  }
+else
+  VISIBILITY=$(fm_pn_visibility "$REPO")
+fi
+if [ "$VISIBILITY" = private ]; then
   echo "repository $REPO is private: nothing to scrub"
   exit 0
 fi

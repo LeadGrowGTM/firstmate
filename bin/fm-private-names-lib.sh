@@ -226,9 +226,9 @@ fm_pn_cache_store() {  # <repo-id> <public|private>
 
 # Prints public or private for a destination; see VISIBILITY above.
 fm_pn_visibility() {  # <url|owner/repo|path>
-  local raw=$1 id gh answer host=github.com api_id cache_id
+  local raw=$1 live=${2:-} id gh answer host=github.com api_id cache_id
   id=$(fm_pn_repo_id "$raw")
-  if fm_pn_explicit_visibility "$id" "$raw"; then
+  if [ "$live" != live ] && fm_pn_explicit_visibility "$id" "$raw"; then
     return 0
   fi
   case "$raw" in
@@ -267,7 +267,7 @@ fm_pn_visibility() {  # <url|owner/repo|path>
   esac
   cache_id=$id
   [ "$host" = github.com ] || cache_id=$host/$api_id
-  if fm_pn_cached_visibility "$cache_id"; then
+  if [ "$live" != live ] && fm_pn_cached_visibility "$cache_id"; then
     return 0
   fi
   answer=
@@ -280,7 +280,10 @@ fm_pn_visibility() {  # <url|owner/repo|path>
       echo public
       ;;
     private | internal) echo private ;;
-    *) echo public ;;
+    *)
+      if [ "$live" = live ]; then return 1; fi
+      echo public
+      ;;
   esac
 }
 

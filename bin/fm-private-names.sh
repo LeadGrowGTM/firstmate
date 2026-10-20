@@ -361,6 +361,17 @@ added_lines() {  # <sha> [<path>]
   fi | awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }'
 }
 
+binary_paths() {  # <sha>
+  local entry
+  if git rev-parse -q --verify "$1^" >/dev/null 2>&1; then
+    git diff --numstat --no-renames --diff-filter=AM -z "$1^" "$1"
+  else
+    git diff-tree --root --no-commit-id --numstat --no-renames --diff-filter=AM -r -z "$1"
+  fi | while IFS= read -r -d '' entry; do
+    case "$entry" in $'-\t-\t'*) printf '%s\0' "${entry#$'-\t-\t'}" ;; esac
+  done
+}
+
 cmd_pre_push() {
   local remote=${1:-} url=${2:-} dest local_sha remote_ref
   local branch range commits rc=0 sha path remote_commit remote_refs known_shas=()
@@ -410,20 +421,25 @@ cmd_pre_push() {
       # diff headers, and the paths of files it only modifies or deletes are
       # existing tree, never outgoing content. One pass over the whole commit;
       # only a hit pays for the per-file pass that locates it.
-      if { new_paths "$sha"
+      if ! { new_paths "$sha"
         added_lines "$sha"; } | report_hits "commit ${sha:0:12}" 2>/dev/null; then
-        continue
+        rc=1
+        while IFS= read -r path; do
+          printf '%s\n' "$path" |
+            report_hits "a file path added in commit ${sha:0:12} ($(fm_pn_scrub_string "$path"))" noline
+        done < <(new_paths "$sha")
+        while IFS= read -r path; do
+          [ -n "$path" ] || continue
+          added_lines "$sha" "$path" |
+            report_hits "an added line of $(fm_pn_scrub_string "$path") in commit ${sha:0:12}" noline
+        done < <(changed_paths "$sha" d)
       fi
-      rc=1
-      while IFS= read -r path; do
-        printf '%s\n' "$path" |
-          report_hits "a file path added in commit ${sha:0:12} ($(fm_pn_scrub_string "$path"))" noline
-      done < <(new_paths "$sha")
-      while IFS= read -r path; do
-        [ -n "$path" ] || continue
-        added_lines "$sha" "$path" |
-          report_hits "an added line of $(fm_pn_scrub_string "$path") in commit ${sha:0:12}" noline
-      done < <(changed_paths "$sha" d)
+      while IFS= read -r -d '' path; do
+        if ! (set -o pipefail; git cat-file blob "$sha:$path" |
+          report_hits "binary content of $(fm_pn_scrub_string "$path") in commit ${sha:0:12}" noline); then
+          rc=1
+        fi
+      done < <(binary_paths "$sha")
     done
   done
   if [ "$rc" -ne 0 ]; then
@@ -442,7 +458,7 @@ cmd_gh_shim() {
     echo "fm-private-names: no real $tool found on PATH" >&2
     return 127
   }
-  local args=("$@") i=0 n=$# repo='' head='' body_file_idx=() body_file_prefix=() text_idx=() text_prefix=() dest action='' command=''
+  local args=("$@") i=0 n=$# repo='' head='' body_file_idx=() body_file_prefix=() text_idx=() text_prefix=() dest action='' command='' target='' target_repo='' repo_id='' target_id=''
   local has_title=0 has_body=0 has_edit_option=0 no_text_action=0 opaque=0 missing_value=0
   local token option value prefix value_idx takes_value options=1
   for ((i = 0; i < n; i++)); do
@@ -474,6 +490,8 @@ cmd_gh_shim() {
         command=$token
       elif [ -z "$action" ]; then
         action=$token
+      elif [ -z "$target" ]; then
+        target=$token
       fi
       continue
     fi
@@ -482,7 +500,7 @@ cmd_gh_shim() {
       --subject | --label | -l | --add-label | --remove-label | --base | -B | \
       --assignee | --add-assignee | --remove-assignee | --reviewer | --add-reviewer | --remove-reviewer | \
       --milestone | --project | -p | --add-project | --remove-project | \
-      --template | -T | --recover | --author-email | -A | --match-head-commit)
+      --template | -T | --recover | --author-email | -A | --match-head-commit | --attach)
         takes_value=1
         ;;
       -a | -r) [ "$action" != create ] || takes_value=1 ;;
@@ -508,7 +526,7 @@ cmd_gh_shim() {
       --project | -p | --add-project | --remove-project) has_edit_option=1 ;;
       --approve | --delete-last) no_text_action=1 ;;
       -a) [ "$action" != review ] || no_text_action=1 ;;
-      --template | -T | --fill | -f | --fill-first | --fill-verbose | --recover | --editor | -e | --web | -w) opaque=1 ;;
+      --template | -T | --fill | -f | --fill-first | --fill-verbose | --recover | --editor | -e | --web | -w | --attach) opaque=1 ;;
     esac
     [ "$takes_value" = 0 ] || [ -n "$prefix" ] || i=$((i + 1))
   done
@@ -519,7 +537,32 @@ cmd_gh_shim() {
     create | new | edit | comment | review | merge) ;;
     *) exec "$real" "$@" ;;
   esac
-  dest=$repo
+  case "$target" in
+    https://*/*/*/pull/*)
+      case "${target##*/}" in '' | *[!0-9]*) ;; *) target_repo=${target%/pull/*} ;; esac
+      ;;
+    */*\#*)
+      case "${target#*#}" in '' | *[!0-9]*) ;; *) target_repo=${target%#*} ;; esac
+      ;;
+  esac
+  if [ -n "$target_repo" ] && [ -n "$repo" ]; then
+    case "$repo" in
+      https://*) repo_id=${repo#https://} ;;
+      */*/*) repo_id=$repo ;;
+      *) repo_id=github.com/$repo ;;
+    esac
+    case "$target_repo" in
+      https://*) target_id=${target_repo#https://} ;;
+      */*/*) target_id=$target_repo ;;
+      *) target_id=github.com/$target_repo ;;
+    esac
+    if [ "${repo_id,,}" != "${target_id,,}" ]; then
+      echo "fm-private-names: conflicting pull-request destinations; refusing" >&2
+      return 1
+    fi
+  fi
+  dest=$target_repo
+  [ -n "$dest" ] || dest=$repo
   [ -n "$dest" ] || dest=$(origin_url) || dest=
   if [ -n "$dest" ] && ! fm_pn_dest_is_public "$dest"; then
     exec "$real" "$@"

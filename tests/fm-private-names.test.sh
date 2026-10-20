@@ -323,6 +323,37 @@ test_pre_push_refuses_names_in_branch_message_patch_and_path() {
   pass "pre-push refuses a listed name in a branch name, commit message, added line, or file path, and passes a clean push"
 }
 
+test_pre_push_checks_binary_blobs() {
+  local d=$TMP_ROOT/binary-push home out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/binary-add
+  printf '\0acme-test\0' >"$REPO/payload.bin"
+  git -C "$REPO" add payload.bin
+  in_pane "$HOOKS" git -C "$REPO" commit -q -m "Add payload"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "a newly added binary blob holding a listed name was pushed"
+  assert_contains "$out" "binary content of payload.bin" "the binary refusal did not locate the blob"
+  assert_contains "$out" "mate-1" "the binary refusal omitted the neutral id"
+  assert_not_contains "$out" "acme-test" "the binary refusal printed the private name"
+  git -C "$ORIGIN" rev-parse -q --verify refs/heads/fm/binary-add >/dev/null &&
+    fail "the refused binary branch reached the remote"
+
+  git -C "$REPO" checkout -q -b fm/binary-modify main
+  printf '\0clean\0' >"$REPO/payload.bin"
+  git -C "$REPO" add payload.bin
+  in_pane "$HOOKS" git -C "$REPO" commit -q -m "Add clean payload"
+  in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD || fail "a clean binary blob was refused"
+  printf '\0zenith-sample\0' >"$REPO/payload.bin"
+  git -C "$REPO" add payload.bin
+  in_pane "$HOOKS" git -C "$REPO" commit -q -m "Update payload"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "a modified binary blob holding a listed name was pushed"
+  assert_contains "$out" "client-1" "the modified binary refusal omitted the neutral id"
+  pass "pre-push checks added and modified binary blobs without exposing matched names"
+}
+
 test_new_public_branch_scans_commits_from_other_remotes() {
   local d=$TMP_ROOT/other-remote home private out
   home=$d/home
@@ -640,6 +671,51 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   pass "the gh and gh-axi shims refuse or rewrite PR titles, bodies, and stdin, refuse a named head branch, and pass private repos"
 }
 
+test_gh_shim_uses_positional_pr_destination_and_refuses_attachments() {
+  local d=$TMP_ROOT/gh-target home log out action
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" private
+  FAKEBIN=$(make_fake_gh "$d")
+  log=$d/gh.log
+  export FAKE_GH_LOG=$log FAKE_GH_VIS=public
+  for action in comment edit review merge; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh pr "$action" \
+      https://github.com/example/public-repo/pull/7 --body acme-test 2>&1) &&
+      fail "pr $action sent listed text to a public URL from a private checkout"
+    assert_contains "$out" "mate-1" "the public URL refusal omitted the neutral id"
+    assert_not_contains "$(cat "$log")" "[pr] [$action]" "the real gh ran for a listed public URL"
+  done
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr comment example/public-repo#7 \
+    --body zenith-sample 2>&1) && fail "the shorthand PR target sent listed text to a public repo"
+  assert_contains "$out" "client-1" "the shorthand target refusal omitted the neutral id"
+  assert_not_contains "$(cat "$log")" "[pr] [comment]" "the real gh ran for a listed shorthand target"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr comment \
+    https://github.com/example/public-repo/pull/7 --repo example/private-repo --body Clean 2>&1) &&
+    fail "conflicting PR targets reached gh"
+  assert_contains "$out" "conflicting pull-request destinations" "the target conflict was not reported"
+  assert_not_contains "$(cat "$log")" "[pr] [comment]" "the real gh ran for conflicting targets"
+  printf 'acme-test\0' >"$d/attachment.png"
+  for action in comment edit; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh pr "$action" \
+      https://github.com/example/public-repo/pull/7 --body Clean --attach "$d/attachment.png" 2>&1) &&
+      fail "pr $action uploaded an unchecked attachment"
+    assert_contains "$out" "refusing unchecked" "the attachment refusal was not reported"
+    assert_not_contains "$(cat "$log")" "[pr] [$action]" "the real gh ran for an attachment"
+  done
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh pr comment \
+    https://github.com/example/public-repo/pull/7 --repo example/public-repo --body Clean) ||
+    fail "a clean comment with matching targets was refused"
+  assert_contains "$(cat "$log")" "[pr] [comment]" "the clean comment did not reach gh"
+  unset FAKE_GH_LOG FAKE_GH_VIS
+  pass "PR guards use positional destinations and refuse attachments on public repositories"
+}
+
 test_gh_short_flags_select_the_public_destination() {
   local d=$TMP_ROOT/gh-short-actions home out log flag action
   home=$d/home
@@ -831,6 +907,26 @@ SH
   pass "the scrub tool dry-runs by default without printing names, and applies PR rewrites plus one evidence removal commit"
 }
 
+test_scrub_apply_rechecks_live_visibility() {
+  local d=$TMP_ROOT/scrub-now-private home log out
+  home=$d/home
+  make_home "$home"
+  FAKEBIN=$(make_fake_gh "$d")
+  log=$d/gh.log
+  : >"$log"
+  printf '%s public %s\n' example/closed-repo "$(date +%s)" >"$home/state/repo-visibility.cache"
+  export FAKE_GH_LOG=$log FAKE_GH_VIS=private
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" \
+    --repo example/closed-repo --no-evidence --apply 2>&1) ||
+    fail "a now-private repository scrub failed: $out"
+  assert_contains "$out" "is private: nothing to scrub" "the now-private repository was not skipped"
+  assert_contains "$(cat "$log")" "[api] [repos/example/closed-repo]" "apply did not recheck visibility"
+  assert_not_contains "$(cat "$log")" "[api] [--paginate]" "apply read private PRs"
+  assert_not_contains "$(cat "$log")" "[pr] [edit]" "apply edited a private PR"
+  unset FAKE_GH_LOG FAKE_GH_VIS
+  pass "scrub apply bypasses stale public visibility before mutating a repository"
+}
+
 test_scrub_refreshes_registered_names() {
   local d=$TMP_ROOT/scrub-stale home bad log out
   home=$d/home
@@ -915,6 +1011,7 @@ test_private_repo_passes_untouched
 test_empty_list_on_a_public_repo_refuses
 test_private_home_path_stays_out_of_guard_output
 test_pre_push_refuses_names_in_branch_message_patch_and_path
+test_pre_push_checks_binary_blobs
 test_new_public_branch_scans_commits_from_other_remotes
 test_stale_registered_name_is_refreshed_before_commit
 test_evidence_push_with_a_listed_name_is_refused
@@ -923,10 +1020,12 @@ test_new_gate_and_unfetched_public_branches_skip_public_history
 test_merge_added_paths_and_lines_are_checked
 test_unreadable_public_refs_refuse_push
 test_gh_shim_refuses_or_rewrites_pr_text
+test_gh_shim_uses_positional_pr_destination_and_refuses_attachments
 test_gh_short_flags_select_the_public_destination
 test_no_mistakes_shim_checks_public_inputs
 test_visibility_asks_github_once_and_caches
 test_scrub_tool_dry_run_and_apply
+test_scrub_apply_rechecks_live_visibility
 test_scrub_refreshes_registered_names
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard
 
