@@ -57,7 +57,7 @@ shim_content() {
 [ -d "$STATE" ] && [ ! -L "$STATE" ] || die 'sending home state directory is unavailable'
 
 arm() {  # <controller-home> <task-id>
-  local controller=$1 id=$2 shim map tmp controller_arg
+  local controller=$1 id=$2 shim map tmp='' controller_arg
   valid_controller "$controller" || die 'controller home must be an absolute directory with a state directory'
   [ "$(cd "$controller" && pwd -P)" != "$(cd "$FM_HOME" && pwd -P)" ] ||
     die 'the controller watches its own Boat tasks with fm-on.sh; arm only in another home'
@@ -68,16 +68,21 @@ arm() {  # <controller-home> <task-id>
   shim="$STATE/boat-$id.check.sh"
   controller_arg=$(printf '%q' "$controller")
   [ ! -L "$shim" ] || die 'unsafe check path'
-  if [ -e "$shim" ] && ! cmp -s "$shim" <(shim_content "$controller_arg" "$id"); then
-    die "check already exists and is not this watch: boat-$id"
+  if [ -e "$shim" ]; then
+    cmp -s "$shim" <(shim_content "$controller_arg" "$id") ||
+      die "check already exists and is not this watch: boat-$id"
+  else
+    tmp=$(umask 077; mktemp "$STATE/.boat-watch-shim.XXXXXX") || die 'could not write the check'
+    if ! shim_content "$controller_arg" "$id" > "$tmp" ||
+      ! chmod 0700 "$tmp" || ! mv -f -- "$tmp" "$shim"; then
+      rm -f -- "$tmp"
+      die 'could not write the check'
+    fi
   fi
-  tmp=$(umask 077; mktemp "$STATE/.boat-watch-shim.XXXXXX") || die 'could not write the check'
-  if ! shim_content "$controller_arg" "$id" > "$tmp" ||
-    ! chmod 0700 "$tmp" || ! mv -f -- "$tmp" "$shim"; then
-    rm -f -- "$tmp"
-    die 'could not write the check'
-  fi
-  "$SCRIPT_DIR/fm-check-register.sh" "boat-$id" >/dev/null || { rm -f -- "$shim"; die 'could not register the check'; }
+  "$SCRIPT_DIR/fm-check-register.sh" "boat-$id" >/dev/null || {
+    [ -z "$tmp" ] || rm -f -- "$shim"
+    die 'could not register the check'
+  }
   printf 'armed: state/boat-%s.check.sh (controller %s)\n' "$id" "$controller"
 }
 

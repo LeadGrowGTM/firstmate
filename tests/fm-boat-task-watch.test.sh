@@ -78,6 +78,33 @@ test_arm() {
   pass "arm writes a bound shim only for a recorded task"
 }
 
+test_registration_failure() {
+  local fakebin="$TMP_ROOT/fail-register" real_mktemp out rc=0 before_inode
+  real_mktemp=$(command -v mktemp) || fail "mktemp is unavailable"
+  mkdir -p "$fakebin"
+  cat > "$fakebin/mktemp" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *'.fm-custom-check-trust.'*) exit 1 ;; esac
+exec "$TEST_REAL_MKTEMP" "$@"
+SH
+  chmod +x "$fakebin/mktemp"
+  before_inode=$(stat -c %i "$SENDER/state/boat-t1.check.sh")
+  cp "$SENDER/state/boat-t1.check-trust" "$FIXTURES/registered-trust"
+  out=$(PATH="$fakebin:$PATH" TEST_REAL_MKTEMP="$real_mktemp" FM_HOME="$SENDER" "$WATCH" arm "$CONTROLLER" t1 2>&1) || rc=$?
+  expect_code 1 "$rc" "repeat arm reports registration failure"
+  assert_contains "$out" "could not register the check" "repeat arm names registration failure"
+  assert_equals "$before_inode" "$(stat -c %i "$SENDER/state/boat-t1.check.sh")" "repeat arm preserved the existing check"
+  cmp -s "$SENDER/state/boat-t1.check-trust" "$FIXTURES/registered-trust" || fail "repeat arm changed the existing registration"
+  printf 't2 bx_bbbbbbbb\n' >> "$CONTROLLER/state/.boat-task-box"
+  rc=0
+  out=$(PATH="$fakebin:$PATH" TEST_REAL_MKTEMP="$real_mktemp" FM_HOME="$SENDER" "$WATCH" arm "$CONTROLLER" t2 2>&1) || rc=$?
+  expect_code 1 "$rc" "first arm reports registration failure"
+  assert_contains "$out" "could not register the check" "first arm names registration failure"
+  assert_absent "$SENDER/state/boat-t2.check.sh" "first arm removed only its new check"
+  assert_absent "$SENDER/state/boat-t2.check-trust" "first arm left no registration"
+  pass "registration failure preserves an existing watch and retires a new check"
+}
+
 test_new_lines_once() {
   local out
   printf 'working [at=1]: started\npaused [at=2]: waiting on validation\n' > "$STATUS_FILE"
@@ -160,6 +187,7 @@ test_disarm() {
 }
 
 test_arm
+test_registration_failure
 test_new_lines_once
 test_unreadable
 test_large_status
