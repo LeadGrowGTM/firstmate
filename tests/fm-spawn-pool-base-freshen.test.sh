@@ -1210,9 +1210,11 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
     mkdir -p "$provider/$n"
     git -C "$PROJECT_DIR" worktree add --quiet --detach "$provider/$n/project" "$INITIAL_SHA"
   done
-  variants='meta-later meta-next marker-later marker-next leased-first unreadable-state
+  variants='meta-later meta-next marker-later marker-next valid-created-meta-later leased-first unreadable-state
     dirty-first-meta-second dirty-first-marker-second dirty-first-inventory-second
-    destroying-first-meta-second owner-first-meta-second locked-first-meta-second unknown-first-meta-second'
+    destroying-first-meta-second owner-first-meta-second locked-first-meta-second unknown-first-meta-second
+    bad-created-first-meta-second bad-created-first-marker-second bad-created-first-inventory-second
+    bad-leased-later-meta-second'
   if [ "$(uname -s)" = Linux ]; then
     variants="$variants bridge-first-meta-second bridge-first-marker-second bridge-first-inventory-second"
   fi
@@ -1225,15 +1227,15 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
       "$provider/1/project" false "$provider/2/project" "$provider/3/project" \
       > "$provider/treehouse-state.json"
     case "$variant" in
-      meta-later|marker-later) copy=$provider/3/project ;;
+      meta-later|marker-later|valid-created-meta-later) copy=$provider/3/project ;;
       leased-first|*-second) copy=$provider/2/project ;;
       *) copy=$provider/1/project ;;
     esac
     case "$variant" in
-      meta-*|leased-first|unreadable-state|dirty-first-meta-second|destroying-first-meta-second|owner-first-meta-second|locked-first-meta-second|unknown-first-meta-second|bridge-first-meta-second)
+      meta-*|valid-created-meta-later|leased-first|unreadable-state|dirty-first-meta-second|destroying-first-meta-second|owner-first-meta-second|locked-first-meta-second|unknown-first-meta-second|bridge-first-meta-second|bad-created-first-meta-second|bad-leased-later-meta-second)
         fm_write_meta "$HOME_DIR/state/parked.meta" "window=firstmate:fm-parked" \
           "endpoint_task_id=parked" "worktree=$copy" "project=$PROJECT_DIR" "kind=scout" ;;
-      marker-*|dirty-first-marker-second|dirty-first-inventory-second|bridge-first-marker-second|bridge-first-inventory-second)
+      marker-*|dirty-first-marker-second|dirty-first-inventory-second|bridge-first-marker-second|bridge-first-inventory-second|bad-created-first-marker-second|bad-created-first-inventory-second)
         printf 'task=parked\nhome=%s\n' "$CASE_DIR/other-home" > "${copy%/project}/.fm-slot-owner" ;;
     esac
     case "$variant" in
@@ -1257,6 +1259,18 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
         touch "$(git -C "$provider/1/project" rev-parse --git-path index.lock)" ;;
       unknown-first-meta-second)
         printf '{"worktrees":[{"name":"1","path":"%s","reset_failed":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      bad-created-first-*)
+        printf '{"worktrees":[{"name":"1","path":"%s","created_at":"bad"},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      bad-leased-later-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s"},{"name":"2","path":"%s"},{"name":"3","path":"%s","leased_at":"bad"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      valid-created-meta-later)
+        printf '{"worktrees":[{"name":"1","path":"%s","created_at":"2026-10-20T00:00:00Z","leased_at":"2026-10-20T00:00:00.123456789+00:00"},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
           "$provider/1/project" "$provider/2/project" "$provider/3/project" \
           > "$provider/treehouse-state.json" ;;
       bridge-first-*)
@@ -1286,7 +1300,8 @@ PY
         done
         [ -z "$hidden" ] || fail 'the bridge fixture was not excluded from worker absence proof' ;;
     esac
-    if [ "$variant" = dirty-first-inventory-second ] || [ "$variant" = bridge-first-inventory-second ]; then
+    if [ "$variant" = dirty-first-inventory-second ] || [ "$variant" = bridge-first-inventory-second ] \
+      || [ "$variant" = bad-created-first-inventory-second ]; then
       out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" FM_TEST_PROCESS_PIDS="$process_pids" PATH="$FAKEBIN_DIR:$PATH" \
         bash -c '. "$1"; fm_treehouse_pool_custody_check "$2" "$3" "$4" records' _ \
         "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home" 2>&1)
@@ -1299,7 +1314,7 @@ PY
       kill -- "-$bridge_pid" 2>/dev/null || true
     fi
     case "$variant" in
-      meta-later|marker-later)
+      meta-later|marker-later|valid-created-meta-later)
         [ "$status" -eq 0 ] || fail "$variant: preflight refused a copy the provider would not allocate: $out" ;;
       *)
         [ "$status" -ne 0 ] || fail "$variant: preflight let the provider reset the reserved copy it would allocate"

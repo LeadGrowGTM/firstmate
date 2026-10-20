@@ -1956,12 +1956,25 @@ fm_treehouse_next_copy() {  # <pool>
   FM_TREEHOUSE_NEXT_COPY=
   [ -f "$state" ] && [ ! -L "$state" ] && command -v python3 >/dev/null 2>&1 || return 1
   listing=$(python3 - "$state" <<'PY'
-import json, sys
+import json, re, sys
+from datetime import datetime
+def valid_time(value):
+    if value is None:
+        return True
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})', value):
+        return False
+    try:
+        datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return False
+    return True
 try:
     with open(sys.argv[1]) as f:
         trees = json.load(f)["worktrees"]
     if not isinstance(trees, list):
         raise ValueError("invalid worktree list")
+    if any(isinstance(tree, dict) and any(not valid_time(tree.get(key)) for key in ("created_at", "leased_at")) for tree in trees):
+        raise ValueError("invalid timestamp")
     for tree in trees:
         if not isinstance(tree, dict) or tree.keys() - {"name", "path", "created_at", "destroying", "owner_pid", "owner_started_at", "leased", "lease_holder", "leased_at"}:
             print("?")
@@ -1972,7 +1985,7 @@ try:
                 or type(tree.get("leased", False)) is not bool
                 or type(tree.get("owner_pid", 0)) is not int
                 or type(tree.get("owner_started_at", 0)) is not int
-                or any(not isinstance(tree.get(key, ""), str) for key in ("name", "created_at", "lease_holder", "leased_at"))
+                or any(not isinstance(tree.get(key, ""), str) for key in ("name", "lease_holder"))
                 or tree.get("destroying") or tree.get("owner_pid", 0) or tree.get("owner_started_at", 0)):
             print("?")
             continue
