@@ -112,13 +112,15 @@ test_refresh_derives_names_from_local_records() {
   cat >"$home/data/secondmates.md" <<EOF
 # Secondmates
 - acme-test - Runs a made-up domain. (home: $mate; scope: made-up work; projects: firstmate, gtm-client-quasar-mock; added 2026-01-01)
+- zed - A three-letter id. (home: /nonexistent; scope: x; projects: gtm-client-abc; added 2026-01-01)
+- Health - An ordinary-word id. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)
 EOF
   printf '%s\n' '- gtm-client-orbit-sample [direct-PR] - A made-up client (added 2026-01-01)' \
     '- firstmate - The shared repo (added 2026-01-01)' >"$home/data/projects.md"
   printf '%s\n' '- gtm-client-nova-mock - Made up (added 2026-01-01)' >"$mate/data/projects.md"
   fm_git_init_commit "$home/projects/plain-project"
   git -C "$home/projects/plain-project" remote add origin https://github.com/example/gtm-client-delta-fake.git
-  printf '%s\n' 'client hand-added-name' 'bare-hand-name' '!orbit-sample' 'xy' >"$home/config/private-names.local"
+  printf '%s\n' 'client hand-added-name' 'bare-hand-name' '!orbit-sample' 'xy' 'mate qrs' >"$home/config/private-names.local"
 
   out=$(FM_HOME=$home "$PN" refresh) || fail "refresh failed: $out"
   list=$(grep -v '^#' "$home/config/private-names")
@@ -132,7 +134,12 @@ EOF
   assert_contains "$list" "private bare-hand-name" "a bare hand name must be kind private"
   assert_not_contains "$list" "client orbit-sample" "an excluded name must be dropped"
   assert_not_contains "$list" "firstmate" "a non-client project must not be listed"
-  assert_not_contains "$list" " xy" "a name shorter than three characters must be skipped"
+  assert_not_contains "$list" " xy" "a hand name shorter than three characters must be skipped"
+  assert_contains "$list" "mate qrs" "a three-character hand name must be kept"
+  assert_not_contains "$list" "mate zed" "a derived name shorter than four characters must be skipped"
+  assert_not_contains "$list" "client abc" "a derived client slug shorter than four characters must be skipped"
+  assert_not_contains "$list" "Health" "a derived ordinary word on the generic list must be skipped"
+  assert_contains "$list" "client gtm-client-abc" "the whole client repository name must still be listed"
   [ "$(stat -c %a "$home/config/private-names" 2>/dev/null || stat -f %Lp "$home/config/private-names")" = 600 ] ||
     fail "the list must be private to its owner"
 
@@ -250,7 +257,7 @@ test_pre_push_refuses_names_in_branch_message_patch_and_path() {
   in_pane "$HOOKS" commit_file "$REPO" logs/acme-test.log "nothing private" "Add a log"
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
   fail "a file path holding a listed name was pushed"
-  assert_contains "$out" "a file path in commit" "the refusal must locate the file path"
+  assert_contains "$out" "a file path added in commit" "the refusal must locate the file path"
   assert_contains "$out" "logs/mate-1.log" "the refusal must print the path with neutral ids"
 
   in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/clean-4 main
@@ -350,6 +357,19 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   (cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/private-repo --title "Fix acme-test" --body ok) ||
     fail "a private repository's PR was refused"
   assert_contains "$(cat "$log")" "[Fix acme-test]" "a private repository's PR text was changed"
+
+  mkdir -p "$d/acme-test-drafts"
+  printf 'Clean body.\n' >"$d/acme-test-drafts/body.md"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create --repo example/public-repo --title Clean \
+    --body-file "$d/acme-test-drafts/body.md" 2>&1) ||
+    fail "a clean body file was refused because its own path holds a listed name: $out"
+  assert_contains "$(cat "$log")" "Clean body." "the clean body did not reach the real gh"
+
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr edit 7 --repo example/public-repo --add-label zenith-sample 2>&1) &&
+    fail "a label holding a listed name was accepted"
+  [ ! -s "$log" ] || fail "the real gh ran for a refused label"
 
   : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh issue list --search acme-test >/dev/null) || fail "a non-PR command was refused"
@@ -468,8 +488,33 @@ test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard() {
   pass "a keep-ai-trailers install keeps AI trailers but still installs the private-name guard"
 }
 
+test_existing_tree_never_blocks_an_unrelated_push() {
+  local d=$TMP_ROOT/existing home out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  # Content that was already public before the guard: pushed without hooks.
+  printf '%s\n' one "routes to acme-test" three four five >"$REPO/notes.md"
+  mkdir -p "$REPO/zenith-sample"
+  printf 'old\n' >"$REPO/zenith-sample/readme.txt"
+  git -C "$REPO" add notes.md zenith-sample/readme.txt
+  git -C "$REPO" commit -q -m "Existing content"
+  git -C "$REPO" push -q origin main
+  git -C "$REPO" fetch -q origin
+
+  in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/unrelated
+  sed -i.bak 's/^three$/three changed/' "$REPO/notes.md" && rm -f "$REPO/notes.md.bak"
+  printf 'new\n' >"$REPO/zenith-sample/readme.txt"
+  git -C "$REPO" add notes.md zenith-sample/readme.txt
+  in_pane "$HOOKS" git -C "$REPO" commit -q -m "Touch unrelated lines" || fail "an unrelated commit was refused"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) ||
+    fail "an existing tracked line or path holding a listed name blocked an unrelated push: $out"
+  pass "an existing tracked line or file path holding a listed name never blocks an unrelated push"
+}
+
 test_refresh_derives_names_from_local_records
 test_secondmate_refresh_merges_the_primary_list
+test_existing_tree_never_blocks_an_unrelated_push
 test_commit_message_is_refused_or_rewritten_on_a_public_repo
 test_private_repo_passes_untouched
 test_empty_list_on_a_public_repo_refuses

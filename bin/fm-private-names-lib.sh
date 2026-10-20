@@ -10,8 +10,9 @@
 # lines are ignored. bin/fm-private-names.sh refresh is its only writer and
 # owns how names are derived from local records; config/private-names.local is
 # the operator's hand-edited input to that refresh. Tracked code only reads
-# the list. A name matches case-insensitively on word boundaries, where a word
-# character is [A-Za-z0-9_], so a hyphen, slash, dot, or space ends a word.
+# the list. A name matches case-insensitively as a whole word, where a word
+# character is [A-Za-z0-9_], so a hyphen, slash, dot, or space ends a word and
+# a name never matches inside a longer word.
 #
 # NEUTRAL IDS. Each listed name maps to "<kind>-<n>", where n counts entries of
 # that kind in list order (mate-1, mate-2, client-1, ...). Refresh only appends,
@@ -40,6 +41,9 @@ FM_PN_VISIBILITY=
 FM_PN_CACHE=
 FM_PN_PUBLIC_TTL=${FM_PN_PUBLIC_TTL:-2592000}
 FM_PN_PRIVATE_TTL=${FM_PN_PRIVATE_TTL:-3600}
+# Tracked list of ordinary English and Firstmate words that refresh never
+# derives as a private name; see its header for the rule.
+FM_PN_GENERIC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-private-names-generic.txt"
 # Marker file that identifies a gh shim directory, so the real-binary lookup
 # skips every shim directory on PATH, including a parent launch's.
 FM_PN_SHIM_MARKER=.fm-private-names-shim
@@ -64,9 +68,11 @@ fm_pn_count() {
 
 # The matcher. Mode check prints "<line> <id>[,<id>...]" for every input line
 # holding a listed name and exits 1 when any matched; mode scrub prints the
-# input with every listed name replaced by its neutral id. Longest names are
+# input with every listed name replaced by its neutral id; mode audit reads
+# grep -n -H lines and prints per-id hit counts with scrubbed samples. Longest
+# names are
 # tried first so a name containing a shorter listed name is replaced whole.
-fm_pn_perl() {  # <check|scrub> <list-file>
+fm_pn_perl() {  # <check|scrub|audit> <list-file>
   perl -e '
     use strict; use warnings;
     my ($mode, $list) = @ARGV; @ARGV = ();
@@ -86,6 +92,29 @@ fm_pn_perl() {  # <check|scrub> <list-file>
     my $alt = join "|", map { quotemeta } sort { length($b) <=> length($a) } @names;
     my $re = qr/(?<![A-Za-z0-9_])($alt)(?![A-Za-z0-9_])/i;
     my $hit = 0;
+    if ($mode eq "audit") {
+      # Input lines are "path:line:content" from grep -n -H; report hit counts
+      # and a few samples per neutral id, with every name already scrubbed.
+      my (%n, %samples);
+      while (my $line = <STDIN>) {
+        chomp $line;
+        my %ids;
+        while ($line =~ /$re/g) { $ids{$id{lc $1}} = 1; }
+        next unless %ids;
+        (my $clean = $line) =~ s/$re/$id{lc $1}/g;
+        $clean = substr($clean, 0, 160);
+        for my $i (keys %ids) {
+          $n{$i}++;
+          push @{$samples{$i}}, $clean if @{$samples{$i} || []} < 4;
+        }
+      }
+      for my $name (@names) {
+        my $i = $id{lc $name};
+        printf "%s %d lines\n", $i, $n{$i} || 0;
+        print "    $_\n" for @{$samples{$i} || []};
+      }
+      exit 0;
+    }
     while (my $line = <STDIN>) {
       if ($mode eq "scrub") {
         $line =~ s/$re/$id{lc $1}/g;

@@ -804,17 +804,21 @@ Private names - the names of this fleet's operator homes and the clients they se
 The list is local, gitignored `config/private-names`, one `<kind> <name>` per line, and tracked code only reads it.
 `bin/fm-private-names.sh refresh` regenerates it from local records: second mate ids in `data/secondmates.md`, and `gtm-client-` project and repository names plus their client slugs from `data/projects.md`, each route's `projects:` field, project clones and their origins, and the same records in every second mate home on this machine.
 Every spawn runs that refresh first, and refresh only appends, so a name stays listed after its record is removed.
-The optional, gitignored `config/private-names.local` adds names by hand (`<kind> <name>`, or a bare name) and drops a generated one with `!<name>`; use that for a generated id that is an ordinary word, since a listed word refuses ordinary prose too.
+So that a hit is a real leak, refresh skips a derived name shorter than four characters or with no letter, and any derived name on the tracked [`bin/fm-private-names-generic.txt`](../bin/fm-private-names-generic.txt) list of ordinary English and Firstmate words.
+A word joins that list only when `bin/fm-private-names.sh audit` shows it used as an ordinary word rather than as a home or client name, and never when it is a client name.
+The optional, gitignored `config/private-names.local` adds names by hand (`<kind> <name>`, or a bare name) and drops a generated one with `!<name>`; a name that is private only in some contexts is dropped there, per home, rather than on the tracked list.
 A refresh in a second mate home on this machine also merges its primary's list from disk; it is deliberately not inherited config, because inherited config is pasted into the mate's instructions.
 
-Names match case-insensitively on word boundaries, and each maps to a stable neutral id (`mate-1`, `client-1`, `private-1`) by its position in the list.
-Refusals and reports print neutral ids and locations, never the matched name.
+Names match case-insensitively as whole words, so a name never matches inside a longer word, and each maps to a stable neutral id (`mate-1`, `client-1`, `private-1`) by its position in the list.
+Refusals, reports, and the audit print neutral ids and locations, never the matched name.
 
 Every fleet launch's `state/<id>.git-hooks` (see "Commit attribution") carries the guard, including when `config/keep-ai-trailers` is set:
 
 - `commit-msg` refuses a listed name in a commit message;
-- `pre-push` refuses a listed name in a pushed branch name, an outgoing commit message, or the outgoing patch's added lines and file paths, and judges a push to the no-mistakes gate remote by the repository's `origin`;
-- `bin/gh` and `bin/gh-axi` shims, first on the pane's `PATH`, scan `pr create`, `edit`, `comment`, `review`, and `merge` arguments, body files, and the head branch before the real tool runs.
+- `pre-push` refuses a listed name in a pushed branch name, an outgoing commit message, the content of added lines, or a path a commit adds or renames, and judges a push to the no-mistakes gate remote by the repository's `origin`;
+- `bin/gh` and `bin/gh-axi` shims, first on the pane's `PATH`, scan the title, body, merge subject, labels, body file or stdin, and head branch of `pr create`, `edit`, `comment`, `review`, and `merge` before the real tool runs.
+
+Only outgoing content is judged: an existing tracked line or file path that already holds a listed name never blocks an unrelated commit, push, or pull request.
 
 Setting `FM_PRIVATE_NAMES_MODE=rewrite` on the command rewrites a commit message or pull-request text to neutral ids instead of refusing; a branch name or patch still refuses and suggests the neutral form.
 Only a public destination is checked, so a private repository passes untouched.
