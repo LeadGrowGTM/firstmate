@@ -1210,24 +1210,24 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
     mkdir -p "$provider/$n"
     git -C "$PROJECT_DIR" worktree add --quiet --detach "$provider/$n/project" "$INITIAL_SHA"
   done
-  printf '{"worktrees":[{"name":"1","path":"%s","leased":%s},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
-    "$provider/1/project" false "$provider/2/project" "$provider/3/project" \
-    > "$provider/treehouse-state.json"
-  for variant in meta-later meta-next marker-later marker-next leased-first unreadable-state; do
+  for variant in meta-later meta-next marker-later marker-next leased-first unreadable-state \
+    dirty-first-meta-second dirty-first-marker-second dirty-first-inventory-second \
+    destroying-first-meta-second owner-first-meta-second locked-first-meta-second unknown-first-meta-second; do
     rm -f "$HOME_DIR"/state/*.meta "$provider"/*/.fm-slot-owner
+    rm -f "$provider/1/project/dirty.txt"
     printf '{"worktrees":[{"name":"1","path":"%s","leased":%s},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
       "$provider/1/project" false "$provider/2/project" "$provider/3/project" \
       > "$provider/treehouse-state.json"
     case "$variant" in
       meta-later|marker-later) copy=$provider/3/project ;;
-      leased-first) copy=$provider/2/project ;;
+      leased-first|*-second) copy=$provider/2/project ;;
       *) copy=$provider/1/project ;;
     esac
     case "$variant" in
-      meta-*|leased-first|unreadable-state)
+      meta-*|leased-first|unreadable-state|dirty-first-meta-second|destroying-first-meta-second|owner-first-meta-second|locked-first-meta-second|unknown-first-meta-second)
         fm_write_meta "$HOME_DIR/state/parked.meta" "window=firstmate:fm-parked" \
           "endpoint_task_id=parked" "worktree=$copy" "project=$PROJECT_DIR" "kind=scout" ;;
-      marker-*)
+      marker-*|dirty-first-marker-second|dirty-first-inventory-second)
         printf 'task=parked\nhome=%s\n' "$CASE_DIR/other-home" > "${copy%/project}/.fm-slot-owner" ;;
     esac
     case "$variant" in
@@ -1237,9 +1237,31 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
           > "$provider/treehouse-state.json" ;;
       unreadable-state)
         printf 'not json\n' > "$provider/treehouse-state.json" ;;
+      dirty-first-*)
+        printf 'dirty\n' > "$provider/1/project/dirty.txt" ;;
+      destroying-first-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s","destroying":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      owner-first-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s","owner_pid":1,"owner_started_at":1},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
+      locked-first-meta-second)
+        touch "$(git -C "$provider/1/project" rev-parse --git-path index.lock)" ;;
+      unknown-first-meta-second)
+        printf '{"worktrees":[{"name":"1","path":"%s","reset_failed":true},{"name":"2","path":"%s"},{"name":"3","path":"%s"}]}\n' \
+          "$provider/1/project" "$provider/2/project" "$provider/3/project" \
+          > "$provider/treehouse-state.json" ;;
     esac
-    out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
-      bash "$ROOT/bin/fm-treehouse-pool-check.sh" "$HOME_DIR" "$PROJECT_DIR" "$CASE_DIR/refusal" 2>&1)
+    if [ "$variant" = dirty-first-inventory-second ]; then
+      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
+        bash -c '. "$1"; fm_treehouse_pool_custody_check "$2" "$3" "$4" records' _ \
+        "$ROOT/bin/fm-wake-lib.sh" "$HOME_DIR" "$PROJECT_DIR" "$HOME_DIR/user-home" 2>&1)
+    else
+      out=$(HOME="$HOME_DIR/user-home" FM_HOME="$HOME_DIR" PATH="$FAKEBIN_DIR:$PATH" \
+        bash "$ROOT/bin/fm-treehouse-pool-check.sh" "$HOME_DIR" "$PROJECT_DIR" "$CASE_DIR/refusal" 2>&1)
+    fi
     status=$?
     case "$variant" in
       meta-later|marker-later)
@@ -1248,8 +1270,9 @@ test_pool_preflight_screens_only_the_copy_to_be_allocated() {
         [ "$status" -ne 0 ] || fail "$variant: preflight let the provider reset the reserved copy it would allocate"
         assert_contains "$out" "${copy%/project}" "$variant: refusal did not name the reserved copy" ;;
     esac
+    rm -f "$(git -C "$provider/1/project" rev-parse --git-path index.lock)"
   done
-  pass 'pool preflight refuses only the reserved copy the provider would allocate next'
+  pass 'pool preflight selects only a provably available copy'
 }
 
 test_state_override_pane_preflight_blocks_retained_claim() {

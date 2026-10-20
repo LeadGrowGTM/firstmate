@@ -1946,31 +1946,53 @@ fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
   done
 }
 
-# Predict the pooled copy `treehouse get` hands out next: the first listed copy
-# that is not leased and has no process inside it, which is how the provider
-# chooses among idle copies. Sets FM_TREEHOUSE_NEXT_COPY to its real path, or to
-# empty when every copy is taken and the provider would create a new one.
+# Predict the pooled copy `treehouse get` hands out next when each preceding
+# copy's allocation state can be established. Sets FM_TREEHOUSE_NEXT_COPY to its
+# real path, or to empty when every copy is taken and the provider would create
+# a new one.
 # Returns 1 when the choice cannot be proven, so callers keep refusing.
 fm_treehouse_next_copy() {  # <pool>
-  local pool=$1 state="$1/treehouse-state.json" path processes listing
+  local state="$1/treehouse-state.json" path processes listing leased dirty lock
   FM_TREEHOUSE_NEXT_COPY=
   [ -f "$state" ] && [ ! -L "$state" ] && command -v python3 >/dev/null 2>&1 || return 1
   listing=$(python3 - "$state" <<'PY'
 import json, sys
 try:
     with open(sys.argv[1]) as f:
-        trees = json.load(f).get("worktrees") or []
+        trees = json.load(f)["worktrees"]
+    if not isinstance(trees, list):
+        raise ValueError("invalid worktree list")
     for tree in trees:
-        if not tree.get("leased"):
-            print(tree["path"])
+        if not isinstance(tree, dict) or tree.keys() - {"name", "path", "created_at", "destroying", "owner_pid", "owner_started_at", "leased", "lease_holder", "leased_at"}:
+            print("?")
+            continue
+        path = tree.get("path")
+        if (not isinstance(path, str) or not path.startswith("/") or "\n" in path or "\t" in path
+                or type(tree.get("destroying", False)) is not bool
+                or type(tree.get("leased", False)) is not bool
+                or type(tree.get("owner_pid", 0)) is not int
+                or type(tree.get("owner_started_at", 0)) is not int
+                or any(not isinstance(tree.get(key, ""), str) for key in ("name", "created_at", "lease_holder", "leased_at"))
+                or tree.get("destroying") or tree.get("owner_pid", 0) or tree.get("owner_started_at", 0)):
+            print("?")
+            continue
+        print(f'{int(tree.get("leased", False))}\t{path}')
 except Exception:
     sys.exit(1)
 PY
   ) || return 1
-  while IFS= read -r path; do
+  while IFS=$'\t' read -r leased path; do
+    [ "$leased" != '?' ] || return 1
     [ -n "$path" ] && [ -d "$path" ] || continue
     path=$(CDPATH='' cd -- "$path" && pwd -P) || return 1
+    dirty=$(git -C "$path" status --porcelain --untracked-files=all 2>/dev/null) || return 1
+    [ -z "$dirty" ] || return 1
+    for lock in index.lock HEAD.lock; do
+      lock=$(git -C "$path" rev-parse --git-path "$lock" 2>/dev/null) || return 1
+      [ ! -e "$lock" ] && [ ! -L "$lock" ] || return 1
+    done
     processes=$(fm_agent_worktree_processes "$path") || return 1
+    [ "$leased" = 0 ] || continue
     [ -z "$processes" ] || continue
     FM_TREEHOUSE_NEXT_COPY=$path
     return 0
