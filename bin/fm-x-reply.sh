@@ -238,6 +238,23 @@ if [ -z "$TEXT" ]; then
   exit 2
 fi
 
+# Every reply is public, so a listed private name (bin/fm-private-names.sh)
+# refuses before it is posted or previewed; refusals name only neutral ids.
+# An attached image is not scanned. A home with no registered names has
+# nothing to check; a list that exists but cannot be checked refuses.
+PN_RC=0
+PN_OUT=$(printf '%s\n' "$TEXT" | "$FM_ROOT/bin/fm-private-names.sh" check 2>&1) || PN_RC=$?
+if [ "$PN_RC" -eq 3 ] &&
+  ! awk 'NF >= 2 && $1 !~ /^#/ { found = 1 } END { exit !found }' \
+    "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/private-names" 2>/dev/null; then
+  PN_RC=0
+fi
+if [ "$PN_RC" -ne 0 ]; then
+  [ -z "$PN_OUT" ] || printf '%s\n' "$PN_OUT" >&2
+  echo "fm-x-reply: refusing this public reply: replace listed private names with their neutral ids" >&2
+  exit 1
+fi
+
 # The endpoint is the only behavioral difference between an answer and a
 # follow-up; everything below (split, payload, dry-run, post) is shared.
 if [ "$FOLLOWUP" = 1 ]; then

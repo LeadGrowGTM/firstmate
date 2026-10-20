@@ -805,11 +805,22 @@ Private names - the names of this fleet's operator homes and the clients they se
 The list retains previously registered names, and the optional gitignored `config/private-names.local` can add names.
 Ordinary words and very short names receive narrower context matching; the [guard script](../bin/fm-private-names.sh) and [matching library](../bin/fm-private-names-lib.sh) own the exact sources, list format, matching rules, visibility rules, and neutral-id assignment.
 
-Worker launches install commit and push hooks plus `gh`, `gh-axi`, and no-mistakes shims, including when `config/keep-ai-trailers` is set.
-For public destinations, they refuse listed names in outgoing commit messages, pushed branch names and changes, pull-request text, and no-mistakes intent or title inputs; `FM_PRIVATE_NAMES_MODE=rewrite` can replace names in commit messages and pull-request text with neutral ids.
+Worker launches install commit and push hooks plus `git`, `gh`, `gh-axi`, and no-mistakes shims, including when `config/keep-ai-trailers` is set.
+For public destinations, every check runs before the text leaves the machine and refuses listed names in:
+
+- outgoing commit messages, annotated tag messages, pushed branch and tag names, added lines, added or renamed paths, and binary content;
+- `gh` and `gh-axi` text: pull-request titles, bodies, comments, reviews, and close or reopen comments; issue text; release titles, notes, and assets; labels; repository settings; workflow inputs; and `gh api` writes;
+- no-mistakes intent, PR title, fix instructions, added findings, and reasons, and every run for a public origin starts with `--no-publish-intent`.
+
+`FM_PRIVATE_NAMES_MODE=rewrite` can replace names in commit messages and pull-request text with neutral ids; every other hit refuses.
+Text `gh` would collect in an editor, a browser, a prompt, or a template is refused on public destinations, and so are `git push --no-verify`, a push under another `core.hooksPath`, and making a repository public.
 Private repositories pass untouched, while an unknown network destination is treated as public and a missing list refuses publication.
-Existing unchanged content does not block an unrelated push, and `git --no-verify` or tools that bypass the hooks and shims are outside the guard.
-The no-mistakes daemon can create a PR outside the shim, so the worker's delivery instructions require a PR readback and scrub as soon as its URL appears, then again after CI green.
+Existing unchanged content does not block an unrelated push.
+
+The no-mistakes pipeline commits its own fixes and pushes from its run worktree, outside every worker hook.
+The trusted `gates` entry in this repository's `.no-mistakes.yaml` runs `bin/fm-private-names.sh gate` after lint, before the push step, against the list of every home on this machine whose clones push through that gate; each refresh records its home in the per-user `${XDG_STATE_HOME:-~/.local/state}/firstmate/private-names-gates` index for that lookup.
+Text the pipeline writes after that gate - the push step's commit subject and the PR title and body it drafts - cannot be checked before publication, so the worker's delivery instructions read the PR back and scrub it as soon as its URL appears, then again after CI green, as a backstop only.
+Firstmate itself never commits to or opens pull requests on project repositories; its own changes ship through workers and the pipeline, which carry these guards, so the guards are installed in worker launches only.
 
 [`bin/fm-private-names-scrub.sh`](../bin/fm-private-names-scrub.sh) dry-runs by default and reports matching PRs and evidence-branch files using neutral ids.
 With `--apply`, it rewrites existing PR titles and bodies and removes matching files from the `no-mistakes/evidence` branch tip in one ordinary commit.

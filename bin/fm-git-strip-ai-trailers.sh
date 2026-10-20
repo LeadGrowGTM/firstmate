@@ -29,7 +29,7 @@
 #       --private-names adds the private-name guard (bin/fm-private-names.sh,
 #       reading that home's config, state, data, and project directories) to the commit-msg
 #       and pre-push hooks before the repository's own hook runs, and writes
-#       gh, gh-axi, and no-mistakes shims into <hooks-dir>/bin for the caller to put first
+#       git, gh, gh-axi, and no-mistakes shims into <hooks-dir>/bin for the caller to put first
 #       on the pane's PATH. The pre-push wrapper replays git's ref lines to
 #       the repository's own pre-push hook after the guard reads them.
 #
@@ -228,9 +228,25 @@ private_names_command() {  # <subcommand>
     "$(quote_for_hook "$PN_GUARD")" "$1"
 }
 
+# The first git on PATH that is not in a private-name shim directory.
+real_git_path() {
+  local dir old_ifs=$IFS
+  IFS=:
+  for dir in $PATH; do
+    IFS=$old_ifs
+    [ -n "$dir" ] && [ ! -e "$dir/.fm-private-names-shim" ] || continue
+    if [ -x "$dir/git" ] && [ ! -d "$dir/git" ]; then
+      printf '%s\n' "$dir/git"
+      return 0
+    fi
+  done
+  IFS=$old_ifs
+  return 1
+}
+
 # shellcheck disable=SC2016 # hook bodies are written literally for git to run
 install_hooks() {
-  local hooks_dir=$1 wt=$2 name tool
+  local hooks_dir=$1 wt=$2 name tool real_git
   [ -n "$hooks_dir" ] && [ -n "$wt" ] || usage
   [ -d "$wt" ] || {
     echo "error: worktree is not a directory: $wt" >&2
@@ -276,6 +292,51 @@ install_hooks() {
   if [ -n "$PN_CONFIG" ]; then
     mkdir -p "$hooks_dir/bin" || return 1
     : >"$hooks_dir/bin/.fm-private-names-shim" || return 1
+    real_git=$(real_git_path) || {
+      echo "error: no git found on PATH" >&2
+      return 1
+    }
+    # git push --no-verify, or a push under another core.hooksPath, would skip
+    # the pre-push guard; refuse both, and run every other git call unchanged.
+    {
+      printf '%s\n' '#!/usr/bin/env bash' \
+        "real=$(quote_for_hook "$real_git")" \
+        "hooks=$(quote_for_hook "$hooks_dir")"
+      cat <<'GIT'
+args=("$@")
+n=$#
+i=0
+other_hooks=0
+while [ "$i" -lt "$n" ]; do
+  a=${args[i]}
+  case "$a" in
+    -c)
+      i=$((i + 1))
+      v=${args[i]:-}
+      case "${v,,}" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
+      ;;
+    -C | --git-dir | --work-tree | --namespace | --super-prefix | --config-env) i=$((i + 1)) ;;
+    -*) ;;
+    *) break ;;
+  esac
+  i=$((i + 1))
+done
+if [ "${args[i]:-}" = push ]; then
+  for a in "${args[@]:i+1}"; do
+    [ "$a" = -- ] && break
+    if [ "$a" = --no-verify ]; then
+      echo "fm-private-names: git push --no-verify would skip the private-name check; push without it" >&2
+      exit 1
+    fi
+  done
+  if [ "$other_hooks" = 1 ]; then
+    echo "fm-private-names: git push under another core.hooksPath would skip the private-name check" >&2
+    exit 1
+  fi
+fi
+exec "$real" "$@"
+GIT
+    } | write_executable "$hooks_dir/bin/git" || return 1
     for tool in gh gh-axi no-mistakes; do
       if [ "$tool" = no-mistakes ]; then
         printf '%s\n' '#!/usr/bin/env bash' \

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep private names (operator home names and the clients they serve) off every
-# public exit installed for fleet workers: commits, pushes, and pull-request
-# text.
+# public exit installed for fleet workers: commits, pushes, GitHub text, and the
+# no-mistakes pipeline's own push.
 #
 # Usage:
 #   fm-private-names.sh refresh
@@ -18,6 +18,7 @@
 #       config/private-names.local adds names by hand as "<kind> <name>" or a
 #       bare name (kind private). Short, number-only, and ordinary-word names
 #       are listed in the context tier and match only name-shaped contexts.
+#       Refresh also records this home in the gate index read by gate.
 #   fm-private-names.sh check [--repo <dest>] [<file>...]
 #       Scan the files (or stdin). Prints "<line> <neutral-id>" per hit, never
 #       the name. Exit 0 clean or private destination, 1 a listed name, 3 the
@@ -29,22 +30,40 @@
 #       Git commit-msg hook. Checked when this repository's origin is public.
 #   fm-private-names.sh pre-push <remote> <url>
 #       Git pre-push hook. Reads git's ref lines on stdin and scans only
-#       outgoing content: each pushed branch name, every outgoing commit
-#       message, the content of added lines, and paths a commit adds or
-#       renames. The existing tree - unchanged lines and files a commit only
-#       modifies - is not judged as text; outgoing binary blobs are scanned.
-#       A push to the no-mistakes gate remote is
-#       judged by the repository's origin, because the gate forwards there.
+#       outgoing content: each pushed branch or tag name, annotated tag
+#       messages, and for every commit the destination does not already have
+#       its message, the content of added lines, paths it adds or renames, and
+#       its binary blobs. The existing tree - unchanged lines and files a
+#       commit only modifies - is not judged as text. A push to the
+#       no-mistakes gate remote is judged by the repository's origin, because
+#       the gate forwards there.
 #   fm-private-names.sh gh-shim <gh|gh-axi> [<arg>...]
-#       PATH shim for gh and gh-axi. For pr create, new, edit, comment, review, and
-#       merge against a public repository it scans the outgoing PR text - the
-#       --title, --body, --subject, and label values, any --body-file (or -F)
-#       content including stdin, and the head branch - before the real tool
-#       runs; other option values, such as a body file's own path, are not
-#       judged, and everything else runs the real tool unchanged.
+#       PATH shim for gh and gh-axi. Against a public repository it scans,
+#       before the real tool runs: pull-request titles, bodies, labels, merge
+#       subjects, body files and stdin, and the head branch (pr create, new,
+#       edit, comment, review, merge); every argument and text file of pr close
+#       and reopen, issue create, edit, comment, close, reopen, and develop,
+#       release create, edit, and upload (assets by content), label create and
+#       edit, repo create, edit, rename, and fork, and workflow run; and the
+#       endpoint, fields, field files, and --input of gh api writes (a method
+#       other than GET or HEAD, fields or input without one, or a GraphQL
+#       mutation). Text from an editor, browser, prompt, template, or
+#       attachment is refused, as is making a repository public; the
+#       destination and file paths are not judged; read-only commands run
+#       unchanged.
 #   fm-private-names.sh no-mistakes-shim [<arg>...]
-#       PATH shim for no-mistakes; checks intent, PR title, and branch inputs
-#       before the real tool runs for a public origin.
+#       PATH shim for no-mistakes. For a public origin it checks the intent, PR
+#       title, fix instructions, added findings, reasons, and current branch
+#       before the real tool runs, and adds --no-publish-intent to axi run.
+#   fm-private-names.sh gate
+#       no-mistakes pipeline gate (this repository's trusted .no-mistakes.yaml
+#       runs it after lint). In the run worktree it looks up the homes whose
+#       clones push through this gate in the per-user index refresh writes
+#       (${XDG_STATE_HOME:-~/.local/state}/firstmate/private-names-gates/<id>)
+#       and checks, against each home's list, everything the push would newly
+#       expose plus uncommitted and untracked changes. A hit writes one
+#       ask-user finding with neutral ids to $NO_MISTAKES_FINDINGS_FILE, which
+#       parks the run before push. No registered home means nothing to check.
 #
 # Refusal and rewrite. A hit refuses (exit 1) and names only neutral ids. With
 # FM_PRIVATE_NAMES_MODE=rewrite set, the commit-msg hook rewrites the message
@@ -56,9 +75,13 @@
 # FM_DATA_OVERRIDE / FM_PROJECTS_OVERRIDE like every other fleet script;
 # bin/fm-git-strip-ai-trailers.sh bakes them into each launch's hooks and shims.
 # bin/fm-private-names-lib.sh owns matching, neutral ids, and visibility.
-# Accepted residual: git --no-verify skips both hooks, and a tool that writes
-# commits or calls the GitHub API without git hooks or the gh shim is not seen;
-# the no-mistakes pipeline's own PR is read back by bin/fm-private-names-scrub.sh.
+# Worker launches also get a git shim that refuses git push --no-verify and a
+# push under another core.hooksPath (bin/fm-git-strip-ai-trailers.sh writes it).
+# Accepted residual: a process that runs git or gh by absolute path, rewrites
+# the git environment, or calls the GitHub API directly is not seen, and text
+# the no-mistakes pipeline writes after its gate (the push step's commit subject
+# and the PR text it drafts) is read back by bin/fm-private-names-scrub.sh
+# after creation, as a backstop only.
 set -u
 unset CDPATH
 
@@ -195,7 +218,49 @@ cmd_refresh() {
   }
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$out" 2>/dev/null || return 1
+  register_gates || echo "fm-private-names: warning: could not record this home for its no-mistakes gates" >&2
   echo "private-names: $(fm_pn_count) names in config/private-names"
+}
+
+# Record this home against every local no-mistakes gate its clones push
+# through, so the pipeline's own private-names gate (see cmd_gate) finds this
+# home's list from the gate's run worktree, which carries no FM_HOME. One file
+# per gate id, one tab-separated "home config state data projects" line per
+# home; a home rewrites only its own line.
+register_gates() {
+  local index dir url id file tmp line
+  index=$(fm_pn_gate_index) || return 1
+  [ -d "$PROJECTS" ] || return 0
+  line=$(printf '%s\t%s\t%s\t%s\t%s' "$(abs_dir "$FM_HOME")" "$(abs_dir "$CONFIG")" \
+    "$(abs_dir "$STATE")" "$(abs_dir "$DATA")" "$(abs_dir "$PROJECTS")")
+  for dir in "$PROJECTS"/*/; do
+    [ -d "$dir" ] || continue
+    url=$(git -C "$dir" remote get-url no-mistakes 2>/dev/null) || continue
+    case "$url" in /*.git) ;; *) continue ;; esac
+    [ -d "$url" ] || continue
+    id=${url%.git}
+    id=${id##*/}
+    case "$id" in '' | *[!A-Za-z0-9_-]*) continue ;; esac
+    mkdir -p "$index" && chmod 700 "$index" 2>/dev/null || return 1
+    file=$index/$id
+    tmp=$(mktemp "$index/.$id.XXXXXX") || return 1
+    {
+      [ -f "$file" ] && awk -F '\t' -v c="$(abs_dir "$CONFIG")" '$2 != c' "$file"
+      printf '%s\n' "$line"
+    } >"$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
+    chmod 600 "$tmp" 2>/dev/null || true
+    mv "$tmp" "$file" || {
+      rm -f "$tmp"
+      return 1
+    }
+  done
+}
+
+abs_dir() {  # <dir>
+  (CDPATH='' cd -- "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"
 }
 
 source_newer_in_home() {  # <data-dir> <projects-dir>
@@ -374,8 +439,7 @@ binary_paths() {  # <sha>
 }
 
 cmd_pre_push() {
-  local remote=${1:-} url=${2:-} dest local_sha remote_ref
-  local branch range commits rc=0 sha path remote_commit remote_refs known_shas=()
+  local remote=${1:-} url=${2:-} dest
   [ -n "$remote" ] || usage
   dest=$url
   if [ "$remote" = no-mistakes ] || [ -z "$dest" ]; then
@@ -390,6 +454,15 @@ cmd_pre_push() {
     cat >/dev/null
     return 3
   fi
+  scan_outgoing "$dest"
+}
+
+# Scan git pre-push ref lines on stdin bound for public <dest>: each pushed
+# ref name and annotated tag message, then every commit <dest> does not
+# already have - its message, added and renamed paths, added lines, and
+# binary blob content. 0 clean, 1 a listed name or an unreadable destination.
+scan_outgoing() {  # <dest>
+  local dest=$1 local_sha remote_ref branch range commits rc=0 sha path remote_commit remote_refs known_shas=()
   remote_refs=$(git ls-remote "$dest" 2>/dev/null) || {
     cat >/dev/null
     echo "fm-private-names: cannot read public destination refs; refusing this push" >&2
@@ -406,6 +479,11 @@ cmd_pre_push() {
     branch=${branch#refs/tags/}
     if ! printf '%s\n' "$branch" | report_hits "the pushed ref name"; then
       echo "fm-private-names: rename the branch before pushing, for example to: $(fm_pn_scrub_string "$branch")" >&2
+      rc=1
+    fi
+    # An annotated tag carries its own message, which no commit check sees.
+    if [ "$(git cat-file -t "$local_sha" 2>/dev/null)" = tag ] &&
+      ! git cat-file tag "$local_sha" | sed '1,/^$/d' | report_hits "the tag message"; then
       rc=1
     fi
     range=("$local_sha" --not "${known_shas[@]}")
@@ -531,13 +609,22 @@ cmd_gh_shim() {
     esac
     [ "$takes_value" = 0 ] || [ -n "$prefix" ] || i=$((i + 1))
   done
-  if [ "$command" != pr ]; then
+  if [ "$command" = api ]; then
+    gh_api_guard "$tool" "$real" "$@"
+    return
+  fi
+  if [ "$command" = pr ]; then
+    case "$action" in
+      create | new | edit | comment | review | merge) ;;
+      close | reopen) gh_write_guard "$tool" "$real" "$command" "$action" "$@"; return ;;
+      *) exec "$real" "$@" ;;
+    esac
+  elif gh_writes_text "$command" "$action"; then
+    gh_write_guard "$tool" "$real" "$command" "$action" "$@"
+    return
+  else
     exec "$real" "$@"
   fi
-  case "$action" in
-    create | new | edit | comment | review | merge) ;;
-    *) exec "$real" "$@" ;;
-  esac
   case "$target" in
     https://*/*/*/pull/*)
       case "${target##*/}" in '' | *[!0-9]*) ;; *) target_repo=${target%/pull/*} ;; esac
@@ -658,21 +745,345 @@ cmd_gh_shim() {
   "$real" "${args[@]}"
 }
 
+# gh commands other than the PR text paths above that publish text to a
+# repository: issues, releases, labels, repository settings, and workflow
+# inputs. Read-only commands are not listed and run unchanged.
+gh_writes_text() {  # <command> <action>
+  case "$1 $2" in
+    "issue create" | "issue new" | "issue edit" | "issue comment" | "issue close" | \
+    "issue reopen" | "issue develop" | \
+    "release create" | "release new" | "release edit" | "release upload" | \
+    "label create" | "label edit" | \
+    "repo create" | "repo new" | "repo edit" | "repo rename" | "repo fork" | \
+    "workflow run") return 0 ;;
+  esac
+  return 1
+}
+
+# Stage a text-file argument (a path, or - for stdin) as a private copy under
+# GH_SHIM_TMP and print the copy's path.
+gh_stage_file() {  # <path|-> <tag>
+  local src=$1 copy=$GH_SHIM_TMP/$2
+  if [ "$src" = - ]; then
+    cat >"$copy" || return 1
+  else
+    cat -- "$src" >"$copy" 2>/dev/null || return 1
+  fi
+  printf '%s\n' "$copy"
+}
+
+gh_shim_tmp() {
+  [ -n "${GH_SHIM_TMP:-}" ] && return 0
+  GH_SHIM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-private-names-gh.XXXXXX") || return 1
+  trap 'rm -rf "$GH_SHIM_TMP"' EXIT
+}
+
+# Guard one text-writing gh command (see gh_writes_text, plus pr close and
+# reopen comments). On a public destination every argument except the
+# destination and file paths is scanned, text files and release assets are
+# scanned by content, text gh would collect in an editor, browser, or prompt
+# is refused, and the real tool runs only when nothing matched. Never rewrites.
+gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
+  local tool=$1 real=$2 command=$3 action=$4
+  shift 4
+  local args=("$@") n=$# i token option value prefix value_idx options=1 dest='' target='' rc=0 takes_value
+  local positional=() texts=() files=() opaque=0 has_title=0 has_body=0 has_notes=0 has_flag=0
+  local visibility='' make_public=0 copy j
+  gh_shim_tmp || return 1
+  for ((i = 0; i < n; i++)); do
+    token=${args[i]}
+    if [ "$options" = 1 ] && [ "$token" = -- ]; then
+      options=0
+      continue
+    fi
+    if [ "$options" = 0 ] || [ "${token:0:1}" != - ] || [ "$token" = - ]; then
+      positional+=("$i")
+      continue
+    fi
+    option=$token prefix='' value='' value_idx=''
+    case "$token" in
+      --*=*) option=${token%%=*}; prefix=$option=; value=${token#*=}; value_idx=$i ;;
+      --*) ;;
+      -??*)
+        option=${token:0:2}
+        prefix=$option
+        value=${token:2}
+        if [ "${value:0:1}" = = ]; then
+          prefix+='='
+          value=${value#=}
+        fi
+        value_idx=$i
+        ;;
+    esac
+    takes_value=0
+    case "$option" in
+      -R | --repo | -F | --body-file | --notes-file | -t | --title | -b | --body | -n | --notes | \
+      --comment | --description | -l | --label | --add-label | --remove-label | \
+      -a | --assignee | --add-assignee | --remove-assignee | -m | --milestone | --project | \
+      --add-project | --remove-project | --target | --discussion-category | --notes-start-tag | \
+      --name | --base | -B | --branch-repo | --color | -f | --raw-field | --field | -r | --ref | \
+      --visibility | --homepage | --fork-name | --org | --default-branch | --source | --remote | \
+      --license | --gitignore | --team | --template | --add-topic | --remove-topic | --reason)
+        takes_value=1 ;;
+      -c) [ "$command" = release ] || takes_value=1 ;;
+      -d) case "$command" in label | repo) takes_value=1 ;; esac ;;
+      -p) [ "$command" != issue ] || takes_value=1 ;;
+    esac
+    if [ "$takes_value" = 1 ] && [ -z "$value_idx" ]; then
+      value_idx=$((i + 1))
+      value=${args[value_idx]:-}
+      i=$value_idx
+    fi
+    [ "$option" = -R ] || [ "$option" = --repo ] || has_flag=1
+    case "$option" in
+      -R | --repo) dest=$value; continue ;;
+      -F | --body-file | --notes-file)
+        copy=$(gh_stage_file "$value" "file-$value_idx") || {
+          echo "fm-private-names: cannot read the text file" >&2
+          return 1
+        }
+        args[value_idx]=$prefix$copy
+        files+=("$copy")
+        if [ "$option" = --notes-file ] || [ "$command" = release ]; then
+          has_notes=1
+        else
+          has_body=1
+        fi
+        continue
+        ;;
+      -t | --title) has_title=1 ;;
+      -b | --body) has_body=1 ;;
+      -n | --notes | --generate-notes | --notes-from-tag) has_notes=1 ;;
+      --visibility) visibility=$value ;;
+      --public) visibility=public ;;
+      --private) visibility=private ;;
+      --internal) visibility=internal ;;
+      -e | --editor | -w | --web | -T | --recover | --attach | --edit-last) opaque=1 ;;
+      --template) [ "$command" = repo ] || opaque=1 ;;
+    esac
+    [ -n "$value_idx" ] && texts+=("${args[value_idx]#"$prefix"}")
+    texts+=("$option")
+  done
+  case "$command $action" in
+    "repo edit") [ "$visibility" = public ] && make_public=1 ;;
+  esac
+  if [ "$make_public" = 1 ]; then
+    echo "fm-private-names: refusing to make a repository public from a fleet worker" >&2
+    return 1
+  fi
+  for i in "${positional[@]}"; do
+    token=${args[i]}
+    case "$token" in
+      https://*/*/*/pull/* | https://*/*/*/issues/*) target=${token%/pull/*}; target=${target%/issues/*} ;;
+      */*\#*) target=${token%#*} ;;
+    esac
+  done
+  case "$command $action" in
+    "repo create" | "repo new")
+      [ -n "${positional[0]:-}" ] && target=${args[${positional[0]}]}
+      if [ "$visibility" != public ]; then
+        exec "$real" "${args[@]}"
+      fi
+      ;;
+    "repo edit" | "repo rename" | "repo fork")
+      [ "$action" = edit ] && [ -n "${positional[0]:-}" ] && case "${args[${positional[0]}]}" in */*) target=${args[${positional[0]}]} ;; esac
+      ;;
+  esac
+  if [ -n "$target" ]; then
+    dest=$target
+  elif [ -z "$dest" ]; then
+    dest=$(origin_url) || dest=
+  fi
+  if [ -n "$dest" ] && [ "$command $action" != "repo create" ] && [ "$command $action" != "repo new" ] &&
+    ! fm_pn_dest_is_public "$dest"; then
+    exec "$real" "${args[@]}"
+  fi
+  require_current_list "this $tool $command $action" || return 3
+  if [ "$opaque" = 1 ]; then
+    echo "fm-private-names: refusing unchecked $command text source (editor, browser, template, or attachment) on a public repository" >&2
+    return 1
+  fi
+  case "$command $action" in
+    "issue create" | "issue new")
+      { [ "$has_title" = 1 ] && [ "$has_body" = 1 ]; } || {
+        echo "fm-private-names: refusing issue creation: title and body must be supplied as checked arguments" >&2
+        return 1
+      } ;;
+    "issue comment")
+      [ "$has_body" = 1 ] || { echo "fm-private-names: refusing interactive issue text" >&2; return 1; } ;;
+    "issue edit" | "repo edit")
+      [ "$has_flag" = 1 ] || { echo "fm-private-names: refusing interactive $command text" >&2; return 1; } ;;
+    "release create" | "release new")
+      [ "$has_notes" = 1 ] || {
+        echo "fm-private-names: refusing release creation: notes must be supplied as checked arguments or --generate-notes" >&2
+        return 1
+      } ;;
+  esac
+  for i in "${positional[@]}"; do
+    token=${args[i]}
+    case "$command $action" in
+      "release create" | "release new" | "release upload")
+        # Assets after the tag: scan the file content and any display label.
+        if [ "$i" != "${positional[0]}" ] && [ -f "${token%%#*}" ]; then
+          value="release asset $(fm_pn_scrub_string "${token%%#*}")"
+          report_hits "$value" noline <"${token%%#*}" || rc=1
+          case "$token" in *\#*) texts+=("${token#*#}") ;; esac
+          continue
+        fi
+        ;;
+    esac
+    texts+=("$token")
+  done
+  for copy in "${files[@]}"; do
+    report_hits "the $command text file" <"$copy" || rc=1
+  done
+  for j in "${texts[@]}"; do
+    printf '%s\n' "$j" | report_hits "the $command text" || rc=1
+  done
+  if [ "$rc" -ne 0 ]; then
+    echo "fm-private-names: refusing $tool $command $action on a public repository; replace the listed names with their neutral ids" >&2
+    return 1
+  fi
+  "$real" "${args[@]}"
+}
+
+# Guard gh api. A write - a method other than GET or HEAD, fields or --input
+# without a method, or a GraphQL mutation - to a public repository endpoint,
+# or to any endpoint not under repos/<owner>/<repo>, has its endpoint, every
+# field value (and @file content), and --input content scanned first.
+gh_api_guard() {  # <tool> <real> <arg>...
+  local tool=$1 real=$2
+  shift 2
+  local args=("$@") n=$# i token option value prefix value_idx endpoint='' method='' host='' fields=0 input=0
+  local texts=() files=() copy rc=0 j rest owner repo dest='' seen_api=0 mutation=0
+  gh_shim_tmp || return 1
+  for ((i = 0; i < n; i++)); do
+    token=${args[i]}
+    if [ "${token:0:1}" != - ] || [ "$token" = - ]; then
+      if [ "$seen_api" = 0 ] && [ "$token" = api ]; then
+        seen_api=1
+      elif [ -z "$endpoint" ] && [ "$seen_api" = 1 ]; then
+        endpoint=$token
+      fi
+      continue
+    fi
+    option=$token prefix='' value='' value_idx=''
+    case "$token" in
+      --*=*) option=${token%%=*}; prefix=$option=; value=${token#*=}; value_idx=$i ;;
+      --*) ;;
+      -??*) option=${token:0:2}; prefix=$option; value=${token:2}; value_idx=$i ;;
+    esac
+    case "$option" in
+      -X | --method | -f | --raw-field | -F | --field | --input | --hostname | -H | --header | \
+      -q | --jq | -t | --template | --cache | -p | --preview | -R | --repo)
+        if [ -z "$value_idx" ]; then
+          value_idx=$((i + 1))
+          value=${args[value_idx]:-}
+          i=$value_idx
+        fi
+        ;;
+    esac
+    case "$option" in
+      -X | --method) method=$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]') ;;
+      --hostname) host=$value ;;
+      -f | --raw-field) fields=1; texts+=("${value#*=}") ;;
+      -F | --field)
+        fields=1
+        case "${value#*=}" in
+          @*)
+            copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
+              echo "fm-private-names: cannot read the api field file" >&2
+              return 1
+            }
+            args[value_idx]=$prefix${value%%=*}=@$copy
+            files+=("$copy")
+            ;;
+          *) texts+=("${value#*=}") ;;
+        esac
+        ;;
+      --input)
+        input=1
+        copy=$(gh_stage_file "$value" "input-$value_idx") || {
+          echo "fm-private-names: cannot read the api input" >&2
+          return 1
+        }
+        args[value_idx]=$prefix$copy
+        files+=("$copy")
+        ;;
+    esac
+  done
+  if [ "$endpoint" = graphql ]; then
+    for j in "${texts[@]}"; do
+      printf '%s\n' "$j" | grep -q -i -E '^[[:space:]]*mutation\b' && mutation=1
+    done
+    for copy in "${files[@]}"; do
+      grep -q -i -E '(^|["{[:space:]])mutation\b' "$copy" && mutation=1
+    done
+    [ "$mutation" = 1 ] || exec "$real" "${args[@]}"
+  else
+    case "$method" in
+      '') [ "$fields" = 1 ] || [ "$input" = 1 ] || exec "$real" "${args[@]}" ;;
+      GET | HEAD) exec "$real" "${args[@]}" ;;
+    esac
+    rest=${endpoint#/}
+    case "$rest" in
+      repos/*/*)
+        rest=${rest#repos/}
+        owner=${rest%%/*}
+        rest=${rest#*/}
+        repo=${rest%%/*}
+        repo=${repo%%\?*}
+        if [ "$owner" = '{owner}' ] || [ "$repo" = '{repo}' ]; then
+          dest=$(origin_url) || dest=
+        elif [ -z "$host" ] || [ "$host" = github.com ]; then
+          dest=$owner/$repo
+        else
+          dest=$host/$owner/$repo
+        fi
+        ;;
+    esac
+    if [ -n "$dest" ] && ! fm_pn_dest_is_public "$dest"; then
+      exec "$real" "${args[@]}"
+    fi
+  fi
+  require_current_list "this $tool api write" || return 3
+  printf '%s\n' "$endpoint" | report_hits "the api endpoint" || rc=1
+  for copy in "${files[@]}"; do
+    report_hits "the api input" <"$copy" || rc=1
+  done
+  for j in "${texts[@]}"; do
+    printf '%s\n' "$j" | report_hits "an api field" || rc=1
+  done
+  if [ "$rc" -ne 0 ]; then
+    echo "fm-private-names: refusing $tool api write to a public destination; replace the listed names with their neutral ids" >&2
+    return 1
+  fi
+  "$real" "${args[@]}"
+}
+
 cmd_no_mistakes_shim() {
-  local real dest branch i arg check_branch=0 rc=0
+  local real dest branch i arg check_branch=0 rc=0 run=0 has_no_publish=0
   local args=("$@") text_idx=()
   real=$(fm_pn_real_bin no-mistakes) || {
     echo "fm-private-names: no real no-mistakes found on PATH" >&2
     return 127
   }
   if [ "${args[0]:-}" = axi ]; then
-    case "${args[1]:-}" in run | respond) check_branch=1 ;; esac
+    case "${args[1]:-}" in
+      run) check_branch=1 run=1 ;;
+      respond) check_branch=1 ;;
+    esac
   fi
+  # Every text the pipeline agent can carry into a commit or the PR body:
+  # intent, PR title, fix instructions, operator-added findings, and reasons.
   for ((i = 0; i < ${#args[@]}; i++)); do
     arg=${args[i]}
     case "$arg" in
-      --intent | --title | --pr-title) text_idx+=("$((i + 1))"); check_branch=1 ;;
-      --intent=* | --title=* | --pr-title=*) text_idx+=("$i"); check_branch=1 ;;
+      --intent | --title | --pr-title | --instructions | --add-finding | --reason)
+        text_idx+=("$((i + 1))"); check_branch=1 ;;
+      --intent=* | --title=* | --pr-title=* | --instructions=* | --add-finding=* | --reason=*)
+        text_idx+=("$i"); check_branch=1 ;;
+      --no-publish-intent | --no-publish-intent=true) has_no_publish=1 ;;
     esac
   done
   [ "$check_branch" = 1 ] || exec "$real" "$@"
@@ -680,6 +1091,10 @@ cmd_no_mistakes_shim() {
   [ -n "$dest" ] || exec "$real" "$@"
   fm_pn_dest_is_public "$dest" || exec "$real" "$@"
   require_current_list "this no-mistakes run" || return 3
+  # A run for a public origin never publishes its intent in the PR body.
+  if [ "$run" = 1 ] && [ "$has_no_publish" = 0 ]; then
+    args+=(--no-publish-intent)
+  fi
   for i in "${text_idx[@]}"; do
     printf '%s\n' "${args[i]:-}" | report_hits "the no-mistakes text" || rc=1
   done
@@ -688,7 +1103,77 @@ cmd_no_mistakes_shim() {
     printf '%s\n' "$branch" | report_hits "the current branch name" || rc=1
   fi
   [ "$rc" = 0 ] || return 1
-  exec "$real" "$@"
+  exec "$real" "${args[@]}"
+}
+
+# ---------------------------------------------------------------- pipeline gate
+
+# The no-mistakes pipeline commits its own fixes and pushes from a run
+# worktree outside every worker hook, so this gate runs inside that worktree
+# after lint, before the push step. It finds the homes registered for this
+# gate (see register_gates) and checks, against each home's list, everything
+# the push would newly expose plus the not-yet-committed changes the push
+# step will commit. A hit parks the run with neutral ids only.
+cmd_gate() {
+  local common id file rc=0 out home config state data projects
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || {
+    echo "fm-private-names: the gate must run inside a git worktree" >&2
+    return 1
+  }
+  id=${common%/}
+  id=${id%.git}
+  id=${id##*/}
+  file=$(fm_pn_gate_index)/$id
+  if [ ! -f "$file" ]; then
+    echo "fm-private-names: no firstmate home on this machine pushes through this gate; nothing to check"
+    return 0
+  fi
+  out=$(
+    while IFS=$'\t' read -r home config state data projects; do
+      [ -n "$home" ] || continue
+      FM_HOME=$home FM_CONFIG_OVERRIDE=$config FM_STATE_OVERRIDE=$state \
+        FM_DATA_OVERRIDE=$data FM_PROJECTS_OVERRIDE=$projects "$0" gate-check 2>&1 || echo "rc=$?"
+    done <"$file"
+  )
+  case "$out" in *rc=*) rc=1 ;; esac
+  out=$(printf '%s\n' "$out" | grep -v '^rc=')
+  [ -z "$out" ] || printf '%s\n' "$out" >&2
+  [ "$rc" -eq 0 ] && return 0
+  if [ -n "${NO_MISTAKES_FINDINGS_FILE:-}" ]; then
+    printf '%s\n' "$out" | perl -MJSON::PP -e '
+      local $/; my $text = <STDIN>; $text =~ s/\s+\z//;
+      $text = "fm-private-names: the private-name check could not complete" if $text eq "";
+      print JSON::PP->new->canonical->encode({ findings => [ {
+        id => "private-names", severity => "error", action => "ask-user",
+        description => "Listed private names (neutral ids below) would be published by this push; replace them with their neutral ids:\n$text" } ] });
+    ' >"$NO_MISTAKES_FINDINGS_FILE" && return 0
+  fi
+  return 1
+}
+
+# One home's check for cmd_gate, with that home's paths in the environment.
+cmd_gate_check() {
+  local dest branch sha rc=0 path label
+  dest=$(origin_url) || dest=
+  [ -n "$dest" ] || return 0
+  fm_pn_dest_is_public "$dest" || return 0
+  require_current_list "this pipeline push" || return 3
+  sha=$(git rev-parse -q --verify HEAD) || return 1
+  branch=$(git symbolic-ref --short -q HEAD) || branch=
+  printf 'HEAD %s refs/heads/%s %s\n' "$sha" "${branch:-HEAD}" "$ZERO_SHA" |
+    scan_outgoing "$dest" || rc=1
+  # Uncommitted changes the push step will commit: added lines, added or
+  # renamed paths, and untracked files with their content.
+  git diff --no-color --no-ext-diff --unified=0 HEAD |
+    awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }' |
+    report_hits "an uncommitted change" noline || rc=1
+  git diff --name-only -M --diff-filter=ACR HEAD | report_hits "an uncommitted file path" noline || rc=1
+  while IFS= read -r -d '' path; do
+    printf '%s\n' "$path" | report_hits "an untracked file path" noline || rc=1
+    label="untracked file $(fm_pn_scrub_string "$path")"
+    report_hits "$label" noline <"$path" || rc=1
+  done < <(git ls-files --others --exclude-standard -z)
+  return "$rc"
 }
 
 CMD=${1:-}
@@ -701,6 +1186,8 @@ case "$CMD" in
   pre-push) cmd_pre_push "$@" ;;
   gh-shim) cmd_gh_shim "$@" ;;
   no-mistakes-shim) cmd_no_mistakes_shim "$@" ;;
+  gate) cmd_gate "$@" ;;
+  gate-check) cmd_gate_check "$@" ;;
   -h | --help | '') usage ;;
   *) usage ;;
 esac

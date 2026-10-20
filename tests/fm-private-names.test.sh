@@ -18,6 +18,8 @@ PN="$ROOT/bin/fm-private-names.sh"
 SCRUB="$ROOT/bin/fm-private-names-scrub.sh"
 STRIP="$ROOT/bin/fm-git-strip-ai-trailers.sh"
 TMP_ROOT=$(fm_test_tmproot fm-private-names)
+# refresh records each home in a per-user gate index; keep it inside the test.
+export XDG_STATE_HOME=$TMP_ROOT/xdg-state
 BASE_PATH=$PATH
 # Replaced by a fake gh in the cases that drive one.
 FAKEBIN=$TMP_ROOT/no-fakebin
@@ -122,7 +124,7 @@ test_refresh_derives_names_from_local_records() {
 # Secondmates
 - acme-test - Runs a made-up domain. (home: $mate; scope: made-up work; projects: firstmate, gtm-client-quasar-mock; added 2026-01-01)
 - zed - A three-letter id. (home: /nonexistent; scope: x; projects: gtm-client-abc; added 2026-01-01)
-- Health - An ordinary-word id. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)
+- Boat - An ordinary-word id. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)
 EOF
   printf '%s\n' '- gtm-client-orbit-sample [direct-PR] - A made-up client (added 2026-01-01)' \
     '- firstmate - The shared repo (added 2026-01-01)' >"$home/data/projects.md"
@@ -148,14 +150,14 @@ EOF
   assert_contains "$list" "mate:context qrs" "a short hand name must use context matching"
   assert_contains "$list" "mate:context zed" "a short registered name must be listed"
   assert_contains "$list" "client:context abc" "a short client slug must be listed"
-  assert_contains "$list" "mate:context Health" "an ordinary-word registered name must be listed"
+  assert_contains "$list" "mate:context Boat" "an ordinary-word registered name must be listed"
   assert_contains "$list" "client gtm-client-abc" "the whole client repository name must still be listed"
-  if out=$(printf 'health is good\nfm-homes/Health\nzed.status\n@abc\nqrs second mate\n' | FM_HOME=$home "$PN" check 2>&1); then
+  if out=$(printf 'boat is good\nfm-homes/boat\nzed.status\n@abc\nqrs second mate\n' | FM_HOME=$home "$PN" check 2>&1); then
     fail "context-tier names in name-shaped text were accepted"
   fi
   assert_contains "$out" "mate-" "a context-tier mate was not reported"
   assert_contains "$out" "client-" "a context-tier client was not reported"
-  out=$(printf 'health is good; abc is ordinary prose; zed is plain prose\n' | FM_HOME=$home "$PN" check 2>&1) ||
+  out=$(printf 'boat is good; abc is ordinary prose; zed is plain prose\n' | FM_HOME=$home "$PN" check 2>&1) ||
     fail "a context-tier name blocked ordinary prose: $out"
   [ "$(stat -c %a "$home/config/private-names" 2>/dev/null || stat -f %Lp "$home/config/private-names")" = 600 ] ||
     fail "the list must be private to its owner"
@@ -1002,6 +1004,203 @@ test_existing_tree_never_blocks_an_unrelated_push() {
   pass "an existing tracked line or file path holding a listed name never blocks an unrelated push"
 }
 
+test_tag_messages_and_no_verify_pushes_are_refused() {
+  local d=$TMP_ROOT/tags home out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  git -C "$REPO" tag -a v1 -m "Release for acme-test"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin v1 2>&1) &&
+    fail "an annotated tag message holding a listed name was pushed"
+  assert_contains "$out" "the tag message" "the tag refusal must locate the tag message"
+  assert_contains "$out" "mate-1" "the tag refusal must name the neutral id"
+  assert_not_contains "$out" "acme-test" "the tag refusal printed the private name"
+  git -C "$REPO" tag -a v2 -m "Clean release"
+  in_pane "$HOOKS" git -C "$REPO" push -q origin v2 || fail "a clean annotated tag was refused"
+
+  in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/clean-tag main
+  commit_file "$REPO" bypass.txt "names acme-test" "Clean subject"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push --no-verify -q origin HEAD 2>&1) &&
+    fail "git push --no-verify skipped the private-name check"
+  assert_contains "$out" "--no-verify" "the no-verify refusal was not explained"
+  out=$(in_pane "$HOOKS" git -C "$REPO" -c core.hooksPath=/dev/null push -q origin HEAD 2>&1) &&
+    fail "a push under another core.hooksPath skipped the private-name check"
+  assert_contains "$out" "core.hooksPath" "the hooksPath refusal was not explained"
+  [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/clean-tag)" ] || fail "a refused push reached the public origin"
+  in_pane "$HOOKS" git -C "$REPO" status --short >/dev/null || fail "the git shim broke an ordinary command"
+  pass "annotated tag messages are checked, and git push --no-verify or another hooksPath is refused"
+}
+
+test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
+  local d=$TMP_ROOT/gh-write home log out cmd
+  local -a call
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" private
+  FAKEBIN=$(make_fake_gh "$d")
+  log=$d/gh.log
+  export FAKE_GH_LOG=$log FAKE_GH_VIS=private
+  printf 'example/public-repo public\n' >>"$home/config/repo-visibility"
+  printf 'Notes for zenith-sample.\n' >"$d/notes.md"
+  printf 'asset names acme-test\0' >"$d/asset.bin"
+  for cmd in \
+    "issue create --title Fix --body acme-test" \
+    "issue create --title acme-test --body-file $d/notes.md" \
+    "issue comment 3 --body-file $d/notes.md" \
+    "issue edit 3 --title zenith-sample" \
+    "issue close 3 --comment acme-test" \
+    "pr close 7 -c acme-test" \
+    "pr reopen 7 --comment=acme-test" \
+    "release create v1 --notes acme-test" \
+    "release create v1 --notes-file $d/notes.md" \
+    "release create v1 $d/asset.bin --notes Clean" \
+    "release edit v1 --title zenith-sample" \
+    "label create acme-test --description Clean" \
+    "label edit bug -d zenith-sample" \
+    "repo edit example/public-repo --description acme-test" \
+    "workflow run ci.yml -f who=acme-test"; do
+    read -r -a call <<<"$cmd"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh "${call[@]}" --repo example/public-repo 2>&1) &&
+      fail "gh $cmd published a listed name"
+    assert_not_contains "$out" "acme-test" "the refusal of gh $cmd printed a private name"
+    assert_not_contains "$out" "zenith-sample" "the refusal of gh $cmd printed a private name"
+    assert_not_contains "$(cat "$log")" "[${call[0]}] [${call[1]}]" "the real gh ran for gh $cmd"
+  done
+  for cmd in "issue create --title Clean" "issue comment 3" "release create v1" "issue create --title Clean --body Clean --web"; do
+    read -r -a call <<<"$cmd"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh "${call[@]}" --repo example/public-repo 2>&1) &&
+      fail "gh $cmd let text be collected outside the check"
+    assert_not_contains "$(cat "$log")" "[${call[0]}] [${call[1]}]" "the real gh ran for gh $cmd"
+  done
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh repo edit example/public-repo --visibility public 2>&1) &&
+    fail "a worker made a repository public"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh issue create --title Clean --body Clean --repo example/public-repo) ||
+    fail "a clean public issue was refused"
+  assert_contains "$(cat "$log")" "[issue] [create]" "the clean issue did not reach gh"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh release create v1 --notes Clean --repo example/public-repo -d) ||
+    fail "a clean draft release was refused"
+  assert_contains "$(cat "$log")" "[release] [create]" "the clean release did not reach gh"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh issue comment 3 --body acme-test --repo example/private-repo) ||
+    fail "a private repository's issue comment was refused"
+  assert_contains "$(cat "$log")" "[acme-test]" "the private comment did not reach gh unchanged"
+  unset FAKE_GH_LOG FAKE_GH_VIS
+  pass "gh issue, release, label, repo, workflow, and PR close text is checked on public repositories"
+}
+
+test_gh_api_writes_are_checked() {
+  local d=$TMP_ROOT/gh-api home log out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" private
+  FAKEBIN=$(make_fake_gh "$d")
+  log=$d/gh.log
+  export FAKE_GH_LOG=$log FAKE_GH_VIS=private
+  printf 'example/public-repo public\n' >>"$home/config/repo-visibility"
+  printf '{"body":"names zenith-sample"}\n' >"$d/input.json"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api -X POST repos/example/public-repo/issues -f title=acme-test 2>&1) &&
+    fail "a gh api POST published a listed field"
+  assert_contains "$out" "mate-1" "the api refusal omitted the neutral id"
+  assert_not_contains "$(cat "$log")" "[title=acme-test]" "the real gh ran for a listed api field"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/public-repo/issues/3/comments -F "body=@$d/input.json" 2>&1) &&
+    fail "an api field file with a listed name was sent"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api --method PATCH repos/example/public-repo/pulls/7 --input "$d/input.json" 2>&1) &&
+    fail "an api --input with a listed name was sent"
+  assert_not_contains "$(cat "$log")" "[PATCH]" "the real gh ran for a listed api input"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=mutation { addComment(input: {body: "acme-test"}) { clientMutationId } }' 2>&1) &&
+    fail "a GraphQL mutation with a listed name was sent"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=query { repository(owner: "o", name: "acme-test") { id } }' >/dev/null) ||
+    fail "a read-only GraphQL query was refused"
+  assert_contains "$(cat "$log")" "[graphql]" "the read-only query did not reach gh"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh api repos/example/public-repo/issues >/dev/null) || fail "a gh api read was refused"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh api -X POST repos/example/private-repo/issues -f title=acme-test >/dev/null) ||
+    fail "a private repository's api write was refused"
+  assert_contains "$(cat "$log")" "[title=acme-test]" "the private api write did not reach gh"
+  unset FAKE_GH_LOG FAKE_GH_VIS
+  pass "gh api writes to public or unknown destinations have their endpoint, fields, and input checked"
+}
+
+test_no_mistakes_shim_checks_instructions_and_withholds_intent() {
+  local d=$TMP_ROOT/no-mistakes-more home log out
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  mkdir -p "$d/fakebin"
+  FAKEBIN=$d/fakebin
+  make_fake_no_mistakes "$FAKEBIN"
+  log=$d/no-mistakes.log
+  export FAKE_NM_LOG=$log
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" no-mistakes axi respond --action fix --instructions 'Rename acme-test' 2>&1) &&
+    fail "no-mistakes accepted listed fix instructions"
+  assert_contains "$out" "mate-1" "the instructions refusal omitted a neutral id"
+  out=$(cd "$REPO" && in_pane "$HOOKS" no-mistakes axi respond --action fix \
+    --add-finding='{"id":"x","description":"zenith-sample"}' 2>&1) && fail "no-mistakes accepted a listed added finding"
+  [ ! -s "$log" ] || fail "the real no-mistakes ran for listed fix text"
+  (cd "$REPO" && in_pane "$HOOKS" no-mistakes axi run --intent 'Clean work') || fail "a clean run was refused"
+  assert_contains "$(cat "$log")" "[--no-publish-intent]" "a public run was started without --no-publish-intent"
+  unset FAKE_NM_LOG
+  pass "the no-mistakes shim checks fix instructions and findings and never publishes intent on a public origin"
+}
+
+test_pipeline_gate_checks_what_the_push_would_publish() {
+  local d=$TMP_ROOT/gate-check home clone gate run findings out index
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  gate=$d/nm/abc123def456.git
+  git init -q --bare "$gate"
+  git -C "$gate" remote add origin "$ORIGIN"
+  git -C "$gate" fetch -q origin
+  clone=$home/projects/sample
+  git clone -q "$ORIGIN" "$clone"
+  git -C "$clone" remote add no-mistakes "$gate"
+  FM_HOME=$home "$PN" refresh >/dev/null || fail "refresh failed"
+  index=$XDG_STATE_HOME/firstmate/private-names-gates/abc123def456
+  [ -f "$index" ] || fail "refresh did not record its home for the gate"
+  assert_contains "$(cat "$index")" "$(cd "$home/config" && pwd -P)" "the gate index does not name the home's config"
+
+  git -C "$gate" branch fm/work refs/remotes/origin/main
+  run=$d/run
+  git -C "$gate" worktree add -q "$run" fm/work
+  findings=$d/findings.json
+  : >"$findings"
+  (cd "$run" && NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1) || fail "a clean gate run failed"
+  [ ! -s "$findings" ] || fail "a clean gate run wrote findings"
+
+  commit_file "$run" fix.txt clean "Fix for acme-test"
+  : >"$findings"
+  (cd "$run" && NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1) || fail "the gate did not report through its findings file"
+  out=$(cat "$findings")
+  assert_contains "$out" '"id":"private-names"' "the gate wrote no private-names finding"
+  assert_contains "$out" "mate-1" "the gate finding omitted the neutral id"
+  assert_not_contains "$out" "acme-test" "the gate finding printed the private name"
+  git -C "$run" reset -q --hard HEAD~1
+
+  printf 'serves zenith-sample\n' >"$run/pending.txt"
+  : >"$findings"
+  (cd "$run" && NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1)
+  assert_contains "$(cat "$findings")" "client-1" "the gate missed an untracked file the push step would commit"
+  rm -f "$run/pending.txt"
+
+  rm -f "$index"
+  out=$(cd "$run" && "$PN" gate 2>&1) || fail "an unregistered gate failed instead of passing"
+  assert_contains "$out" "nothing to check" "an unregistered gate did not say why it passed"
+  pass "the pipeline gate checks commits, uncommitted and untracked changes against every registered home"
+}
+
 test_refresh_derives_names_from_local_records
 test_secondmate_refresh_merges_the_primary_list
 test_secondmate_commit_refreshes_new_parent_records
@@ -1028,5 +1227,10 @@ test_scrub_tool_dry_run_and_apply
 test_scrub_apply_rechecks_live_visibility
 test_scrub_refreshes_registered_names
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard
+test_tag_messages_and_no_verify_pushes_are_refused
+test_gh_shim_guards_issue_release_label_repo_and_workflow_text
+test_gh_api_writes_are_checked
+test_no_mistakes_shim_checks_instructions_and_withholds_intent
+test_pipeline_gate_checks_what_the_push_would_publish
 
 echo "# all fm-private-names tests passed"

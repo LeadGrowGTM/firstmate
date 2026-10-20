@@ -56,6 +56,14 @@ fm_pn_init() {  # <config-dir> <state-dir>
   FM_PN_CACHE=$FM_PN_STATE/repo-visibility.cache
 }
 
+# Per-user directory that maps each local no-mistakes gate id to the homes
+# whose clones push through it (written by refresh, read by the gate check).
+fm_pn_gate_index() {
+  local root=${XDG_STATE_HOME:-${HOME:-}/.local/state}
+  [ -n "$root" ] && [ "$root" != /.local/state ] || return 1
+  printf '%s\n' "$root/firstmate/private-names-gates"
+}
+
 # Number of names in the list; 0 when the list is absent or unreadable.
 fm_pn_count() {
   [ -f "$FM_PN_LIST" ] && [ -r "$FM_PN_LIST" ] || {

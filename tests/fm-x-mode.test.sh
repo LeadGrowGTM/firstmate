@@ -3198,7 +3198,25 @@ test_reply_usage_error
 test_reply_help_mentions_image
 test_reply_whitespace_text_rejected
 test_reply_rejects_flag_like_arguments
+test_reply_refuses_listed_private_names() {
+  local home out rc
+  home="$TMP_ROOT/reply-private-name"; mkdir -p "$home/config"
+  printf '%s\n' 'mate acme-test' 'client zenith-sample' > "$home/config/private-names"
+  out=$(PATH="$BASE_PATH" FM_HOME="$home" FMX_DRY_RUN=1 \
+    "$ROOT/bin/fm-x-reply.sh" "req-pn" "Shipped the fix for Zenith-Sample." 2>&1); rc=$?
+  expect_code 1 "$rc" "a reply with a listed private name"
+  assert_contains "$out" "client-1" "the reply refusal must name the neutral id"
+  case "$out" in *Zenith-Sample*|*zenith-sample*) fail "the reply refusal printed the private name" ;; esac
+  [ ! -e "$home/state/x-outbox/req-pn.json" ] || fail "a refused reply was still recorded for posting"
+  out=$(PATH="$BASE_PATH" FM_HOME="$home" FMX_DRY_RUN=1 \
+    "$ROOT/bin/fm-x-reply.sh" "req-pn-ok" "Shipped the fix for client-1." 2>/dev/null); rc=$?
+  expect_code 0 "$rc" "a clean reply"
+  assert_present "$home/state/x-outbox/req-pn-ok.json" "a clean reply must still be previewed"
+  pass "fm-x-reply refuses a public reply holding a listed private name, naming only neutral ids"
+}
+
 test_reply_dry_run_records_not_posts
+test_reply_refuses_listed_private_names
 test_reply_dry_run_needs_no_token
 test_reply_dry_run_from_env_file
 test_reply_empty_env_dry_run_overrides_env_file
