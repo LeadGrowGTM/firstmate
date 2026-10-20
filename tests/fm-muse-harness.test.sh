@@ -178,7 +178,9 @@ make_spawn_case() {
 Exercise Muse dispatch.
 
 ## Firstmate spec
-Verify the Muse harness behavior under test.
+Goal: Verify the Muse harness behavior under test.
+Off-limits: Nothing beyond the spawn under test.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): none
 EOF
   fm_git_worktree "$proj" "$wt" "fm/$id"
   touch "$home/state/.last-watcher-beat"
@@ -307,6 +309,49 @@ EOF
   assert_contains "$launch" 'encode launch-brief' "muse launch did not deliver the brief positionally"
   assert_grep 'harness=muse' "$home/state/$id.meta" "muse harness was not recorded in meta"
   pass "muse spawn launches with autonomy, privacy control, and a positional brief"
+}
+
+test_spawn_contributor_off_for_client_brief() {
+  local rec case_dir home proj wt fakebin id launch
+  rec=$(make_spawn_case client-brief)
+  IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+  printf 'client-data: yes\n' >> "$home/data/$id/brief.md"
+  run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off >/dev/null \
+    || fail "muse spawn for a client-marked brief failed"
+  launch=$(cat "$home/launch.log")
+  assert_contains "$launch" '--contributor-mode off ' "client-marked muse launch omitted contributor-mode off"
+  pass "muse spawn adds contributor-mode off for a client-marked brief"
+}
+
+test_spawn_contributor_off_for_client_home() {
+  local rec case_dir home proj wt fakebin id launch client_home
+  rec=$(make_spawn_case client-home)
+  IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+  client_home="$case_dir/ikeuchi"
+  mv "$home" "$client_home"
+  home=$client_home
+  run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off >/dev/null \
+    || fail "muse spawn from a client home failed"
+  launch=$(cat "$home/launch.log")
+  assert_contains "$launch" '--contributor-mode off ' "client-home muse launch omitted contributor-mode off"
+  pass "muse spawn adds contributor-mode off from a client home"
+}
+
+test_spawn_no_contributor_flag_for_non_client() {
+  local rec case_dir home proj wt fakebin id launch
+  rec=$(make_spawn_case non-client)
+  IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+  run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off >/dev/null \
+    || fail "non-client muse spawn failed"
+  launch=$(cat "$home/launch.log")
+  assert_not_contains "$launch" '--contributor-mode' "non-client muse launch changed contributor mode"
+  pass "muse spawn leaves contributor mode unchanged for a non-client launch"
 }
 
 test_spawn_maps_effort_and_model() {
@@ -1035,6 +1080,9 @@ test_detects_versioned_process_ancestor
 test_detection_is_anchored
 test_spawn_clears_inherited_foreign_harness_markers
 test_spawn_launch_shape
+test_spawn_contributor_off_for_client_brief
+test_spawn_contributor_off_for_client_home
+test_spawn_no_contributor_flag_for_non_client
 test_spawn_maps_effort_and_model
 test_spawn_refuses_without_credential
 test_spawn_refuses_caller_only_environment_credential

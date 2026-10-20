@@ -459,6 +459,9 @@
 #     __ROVOBIN__   resolved, rovo-verified executable for a rovo launch
 #     __DEVINBIN__ resolved Devin executable
 #     __DEVINCONFIG__ private per-task Devin config with lifecycle hooks
+#     __MUSECONTRIBUTORFLAG__ `--contributor-mode off ` on a muse launch that
+#                  carries client data (bin/fm-muse-client-lib.sh owns the
+#                  client-home list and the brief marker), empty otherwise
 #     __AGYBIN__    resolved, agy-verified executable for an agy launch
 # Verified per-harness turn-end hooks are installed automatically where enabled; some live outside the worktree.
 # Kimi uses one surgically installed Firstmate region in $HOME/.kimi-code/config.toml,
@@ -628,6 +631,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
 # shellcheck source=bin/fm-exclude-tools-lib.sh
 . "$SCRIPT_DIR/fm-exclude-tools-lib.sh"
+# shellcheck source=bin/fm-muse-client-lib.sh
+. "$SCRIPT_DIR/fm-muse-client-lib.sh"
 if ! LAUNCH_ENV_ENABLED=$(fm_config_source_present "$CONFIG/launch-env-allowlist"); then
   exit 1
 fi
@@ -2620,7 +2625,7 @@ launch_template() {
   # inherited marker. The clearing stays on the cursor and muse templates as the
   # verified launch behavior their evidence records, not as the only thing
   # standing between a retained marker and a misidentified worker.
-  muse) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS XDG_CONFIG_HOME=__MUSECONFIG__ XDG_DATA_HOME=__MUSEDATA__ MUSE_EXPERIMENTAL_FOREIGN_PERSONAL_CONTEXT_KILL=on __MUSEBIN__ --yolo __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  muse) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS XDG_CONFIG_HOME=__MUSECONFIG__ XDG_DATA_HOME=__MUSEDATA__ MUSE_EXPERIMENTAL_FOREIGN_PERSONAL_CONTEXT_KILL=on __MUSEBIN__ --yolo __MUSECONTRIBUTORFLAG____MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   # rovo (Atlassian Rovo CLI): a positional brief is dead-on-arrival - rovo
   # loads, never enters a working state, and drops back to an idle shell within
   # about 10-15 seconds (confirmed live four times over a raw PTY and once under
@@ -3263,6 +3268,12 @@ case "$LAUNCH" in
     fi
     exit 1
   fi
+  # Client-data launches run with contributor mode off for this run only.
+  # bin/fm-muse-client-lib.sh owns the client-home list and brief marker.
+  # The brief is the task's source brief at $DATA/$ID/brief.md; the global
+  # ~/.config/muse/settings.json is never touched by this substitution.
+  MUSE_CONTRIBUTOR_FLAG=$(fm_muse_contributor_flag "$FM_HOME" "$DATA/$ID/brief.md")
+  LAUNCH=${LAUNCH//__MUSECONTRIBUTORFLAG__/$MUSE_CONTRIBUTOR_FLAG}
   LAUNCH=${LAUNCH//__MUSEBIN__/$(shell_quote "$MUSE_BIN")}
   LAUNCH=${LAUNCH//__MUSECONFIG__/$(shell_quote "$MUSE_CONFIG_HOME")}
   LAUNCH=${LAUNCH//__MUSEDATA__/$(shell_quote "$MUSE_DATA_HOME")}
