@@ -631,23 +631,35 @@ test_relaunch_preserves_durable_task_metadata() {
 }
 
 test_relaunch_keeps_the_pr_identity_record_parseable() {
-  local dir out rc
-  dir=$(new_case pr-order rl20)
-  add_ship_task "$dir" rl20 claude
-  {
-    printf '%s\n' 'pr=https://github.com/example/repo/pull/20'
-    printf '%s\n' 'pr_head=0123456789abcdef0123456789abcdef01234567'
-  } >> "$dir/home/state/rl20.meta"
+  local dir out rc mode traceparent
+  for mode in off on; do
+    dir=$(new_case "pr-order-$mode" rl20)
+    add_ship_task "$dir" rl20 claude
+    {
+      printf '%s\n' 'pr=https://github.com/example/repo/pull/20'
+      printf '%s\n' 'pr_head=0123456789abcdef0123456789abcdef01234567'
+    } >> "$dir/home/state/rl20.meta"
+    if [ "$mode" = on ]; then
+      printf '%s\n' "$$" > "$dir/home/state/.lock"
+      printf '%s on\n' "$$" > "$dir/home/state/.trace-context-effective"
+    fi
 
-  out=$(run_control "$dir" rl20 relaunch --note "continuing review work"); rc=$?
-  expect_code 0 "$rc" "relaunch should succeed on a task that already has a PR"$'\n'"$out"
-  [ -n "$(meta_field "$dir" rl20 control_relaunch_tx)" ] \
-    || fail "the relaunch transaction must still be recorded"
-  (
-    # shellcheck source=../bin/fm-pr-lib.sh
-    . "$ROOT/bin/fm-pr-lib.sh"
-    fm_pr_metadata_identity_parse "$dir/home/state/rl20.meta"
-  ) || fail "relaunch left a record the PR monitor identity parse refuses: $(tail -n 8 "$dir/home/state/rl20.meta" | tr "\n" " ")"
+    out=$(run_control "$dir" rl20 relaunch --note "continuing review work"); rc=$?
+    expect_code 0 "$rc" "relaunch should succeed on a task that already has a PR with tracing $mode"$'\n'"$out"
+    [ -n "$(meta_field "$dir" rl20 control_relaunch_tx)" ] \
+      || fail "the relaunch transaction must still be recorded"
+    traceparent=$(meta_field "$dir" rl20 traceparent)
+    if [ "$mode" = on ]; then
+      fm_trace_context_valid "$traceparent" || fail "traced relaunch did not record a valid trace carrier"
+    else
+      [ -z "$traceparent" ] || fail "untraced relaunch recorded a trace carrier"
+    fi
+    (
+      # shellcheck source=../bin/fm-pr-lib.sh
+      . "$ROOT/bin/fm-pr-lib.sh"
+      fm_pr_metadata_identity_parse "$dir/home/state/rl20.meta"
+    ) || fail "relaunch with tracing $mode left a record the PR monitor identity parse refuses: $(tail -n 8 "$dir/home/state/rl20.meta" | tr "\n" " ")"
+  done
   pass "fm-control relaunch: the PR identity stays last so merge monitoring keeps parsing the record"
 }
 
