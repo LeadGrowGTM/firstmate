@@ -106,7 +106,10 @@ forge_home() {
   mkdir -p "$home/forge" "$home/root/bin" "$home/wt"
   printf '#!/bin/sh\nexit 0\n' > "$home/root/bin/fm-guard.sh"
   chmod +x "$home/root/bin/fm-guard.sh"
-  printf 'worktree=%s/wt\nkind=ship\n' "$home" > "$home/state/delivery.meta"
+  # Sweep and teardown resolve the recorded project through git, so the
+  # fixture records a real checkout like every spawn-written meta does.
+  fm_git_init_commit "$home/wt"
+  printf 'worktree=%s/wt\nkind=ship\nproject=%s/wt\nwindow=firstmate:fm-delivery\n' "$home" "$home" > "$home/state/delivery.meta"
   chmod 600 "$home/state/delivery.meta"
   record "$home" delivery 8 open mergeable
   printf '%s\n' "$HEAD_A" > "$home/forge/head"
@@ -968,7 +971,9 @@ test_unmeasured_url_does_not_starve_the_tail() {
   for cycle in 0 1 2 3 4 5; do
     at=$(jq -nr --arg now "$NOW" --argjson cycle "$cycle" '(($now | fromdateiso8601) + $cycle * 300) | todateiso8601')
     started=$(/bin/date +%s)
-    out=$(with_home "$home" env FM_CONTRIBUTIONS_NOW="$at" FM_CONTRIBUTIONS_BUDGET=20 FORGE_LATENCY=3 "$ROOT/bin/fm-contributions.sh" poll) \
+    # Three sequential latency-injected read waves must land unambiguously
+    # inside the asserted [9,23] budget window on a one-second clock.
+    out=$(with_home "$home" env FM_CONTRIBUTIONS_NOW="$at" FM_CONTRIBUTIONS_BUDGET=20 FORGE_LATENCY=4 "$ROOT/bin/fm-contributions.sh" poll) \
       || fail 'sustained slow-read poll failed'
     elapsed=$(( $(/bin/date +%s) - started ))
     [ "$elapsed" -ge 9 ] && [ "$elapsed" -le 23 ] \
