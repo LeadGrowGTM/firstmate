@@ -4,10 +4,12 @@
 #        fm-boat-worker.sh spawn <box-instance> < request.json
 #        fm-boat-worker.sh teardown <task-id> <box-instance>
 #        fm-boat-worker.sh idle <box-instance>
+#        fm-boat-worker.sh endpoints <box-instance>
 #        fm-boat-worker.sh retire-claim <task-id> <box-instance>
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
-#   id: safe task id; project: firstmate|dev-loop; kind: ship|scout;
+#   id: safe task id; project: a name allowed by config/boat-projects (below);
+#   kind: ship|scout;
 #   mode: direct-PR|no-mistakes for ship, "scout" for scout;
 #   intent, spec: nonempty task text, already labelled code-only by firstmate;
 #   harness: claude|codex|grok; model: concrete nonempty model; effort:
@@ -16,6 +18,17 @@
 # No other keys (including git_name, git_email, env, secrets, home, origin,
 # yolo, flags) are accepted.
 # Git identity never comes from the controller.
+#
+# Allowed projects: config/boat-projects in the home running the command, one
+# entry per line as `<project> [<github-owner>]` (owner defaults to LeadGrowGTM;
+# `#` comments and blank lines ignored); with no file, firstmate and dev-loop.
+# This is the single owner of which projects may run on Boat. The controller
+# validates against its own copy and the box against its own, so a project runs
+# only where both list it and the box holds a clone whose origin is
+# github.com/<owner>/<project>. A gtm-client-* name is refused whatever the file
+# says, an unreadable or malformed file refuses every request, and a clone that
+# tracks clients/ or a dot-env file is refused at spawn. Adding a name is a
+# captain decision (R6), not something dispatch does.
 #
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project
@@ -42,6 +55,9 @@
 # unknown transport completion
 # must be reconciled before reusing its id or rewriting its briefs.
 # idle reports whether any worker records or endpoints remain under that lock.
+# endpoints reports only whether a live fm-* worker window exists under that
+# lock, as `boat-endpoints-live: yes|no`; fm-boat-send.sh uses it before
+# stopping a box it resumed after a three-worker cap refusal.
 # Before spawn, intake adds a missing backlog item through fm-tasks-axi.sh;
 # an existing item must be dispatchable and match kind and project before its
 # brief can be rewritten. Ordinary spawn owns its In flight transition.
@@ -73,6 +89,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+# boat_project_owner <name>: prints the GitHub owner allowed for <name> on Boat,
+# or returns 1 when <name> may not run here (see "Allowed projects" above).
+boat_project_owner() { # <project-name>
+  local name=$1 file line entry owner extra listed=0 found=''
+  case "$name" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*|gtm-client-*) return 1 ;; esac
+  file="${FM_HOME:-}/config/boat-projects"
+  if [ -z "${FM_HOME:-}" ] || { [ ! -e "$file" ] && [ ! -L "$file" ]; }; then
+    [ "$name" = firstmate ] || [ "$name" = dev-loop ] || return 1
+    printf 'LeadGrowGTM\n'
+    return 0
+  fi
+  [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(wc -c < "$file")" -le 4096 ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    case "$line" in ''|'#'*) continue ;; esac
+    entry='' owner='' extra=''
+    read -r entry owner extra <<< "$line"
+    [ -n "$entry" ] && [ -z "$extra" ] || return 1
+    case "$entry" in *[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) return 1 ;; esac
+    owner=${owner:-LeadGrowGTM}
+    case "$owner" in *[!A-Za-z0-9-]*|-*) return 1 ;; esac
+    listed=1
+    [ "$entry" != "$name" ] || found=$owner
+  done < "$file"
+  [ "$listed" -eq 1 ] && [ -n "$found" ] || return 1
+  printf '%s\n' "$found"
+}
 boat_runtime() {
   [ -z "${TMUX:-}" ] || die 'Boat worker commands must run outside tmux through the remote transport'
   # shellcheck source=bin/fm-backend.sh
@@ -148,16 +191,16 @@ case "${1:-}" in
   validate) [ "$#" -eq 1 ] || die 'one operation required' ;;
   spawn) [ "$#" -eq 2 ] || die 'box instance required' ;;
   teardown) [ "$#" -eq 3 ] || die 'task id and box instance required' ;;
-  idle) [ "$#" -eq 2 ] || die 'box instance required' ;;
+  idle|endpoints) [ "$#" -eq 2 ] || die 'box instance required' ;;
   retire-claim|--retire-claim) [ "$#" -eq 3 ] || die 'task id and box instance required' ;;
-  *) die 'expected validate, spawn, teardown, idle, or retire-claim' ;;
+  *) die 'expected validate, spawn, teardown, idle, endpoints, or retire-claim' ;;
 esac
 if [ "$1" != validate ]; then
   expected_instance=${!#}
   [[ "$expected_instance" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die 'invalid box instance'
   [ "$(cat /proc/sys/kernel/random/boot_id)" = "$expected_instance" ] || die 'Boat instance changed; action refused'
 fi
-if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" = --retire-claim ]; then
+if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = endpoints ] || [ "$1" = retire-claim ] || [ "$1" = --retire-claim ]; then
   FM_HOME=${FM_HOME:?FM_HOME is required}
   [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
     [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] || die 'not the purpose-built boat-eng home'
@@ -172,7 +215,10 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" =
     kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
     project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
-    case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
+    if [ "$project" != "$FM_HOME/projects/${project#"$FM_HOME/projects/"}" ] ||
+      ! boat_project_owner "${project#"$FM_HOME/projects/"}" >/dev/null; then
+      die 'task is not an allowed Boat worker'
+    fi
     [ "$(fm_backend_of_meta "$FM_HOME/state/$ID.meta")" = tmux ] || die 'Boat teardown requires a tmux worker'
     if [ "$kind" = scout ] && ! "$SCRIPT_DIR/fm-captain-hold.sh" verify "$ID" >&2; then
       die "scout completion inventory required; after reviewing unresolved calls, run from the controller: fm-on.sh boat-eng fm-captain-hold.sh complete $ID --none (or list the held task ids instead of --none)"
@@ -186,7 +232,10 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" =
     kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
     project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
-    case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
+    if [ "$project" != "$FM_HOME/projects/${project#"$FM_HOME/projects/"}" ] ||
+      ! boat_project_owner "${project#"$FM_HOME/projects/"}" >/dev/null; then
+      die 'task is not an allowed Boat worker'
+    fi
     windows=$(fm_backend_tmux_window_inventory '=firstmate') || windows_status=$?
     case "${windows_status:-0}" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
     boat_record_not_counted "$ID" "$windows" || die 'task has a live endpoint or a fresh nonterminal status; retire-claim refused'
@@ -199,6 +248,16 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" =
     cp -- "$FM_HOME/state/$ID.meta" "$archive" || die 'could not archive the worker record'
     rm -f -- "$FM_HOME/state/$ID.meta"
     printf 'retired boat record: %s (archived %s)\n' "$ID" "$archive"
+  fi
+  if [ "$1" = endpoints ]; then
+    windows=$(fm_backend_tmux_window_inventory '=firstmate') || windows_status=$?
+    case "${windows_status:-0}" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
+    if printf '%s\n' "$windows" | grep -q '^fm-'; then
+      printf 'boat-endpoints-live: yes\n'
+    else
+      printf 'boat-endpoints-live: no\n'
+    fi
+    exit 0
   fi
   COUNT=$(boat_worker_count) || exit 1
   if [ "$COUNT" -ne 0 ]; then
@@ -222,13 +281,15 @@ jq -es '
   length == 1 and (.[0] | type == "object" and
   (keys == ["effort","harness","id","intent","kind","mode","model","project","spec"]) and
   (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
-  (.project == "firstmate" or .project == "dev-loop") and
+  (.project | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
   ((.kind == "ship" and (.mode == "direct-PR" or .mode == "no-mistakes")) or
    (.kind == "scout" and .mode == "scout")) and
   (.intent | text) and (.spec | text) and (.model | text) and
   (.harness == "claude" or .harness == "codex" or .harness == "grok") and
   (.effort | IN("low","medium","high","xhigh","max","ultra")))
 ' "$TMP/request" >/dev/null 2>&1 || die 'invalid code-only Boat request'
+OWNER=$(boat_project_owner "$(jq -r .project "$TMP/request")") ||
+  die 'invalid code-only Boat request: project is not allowed on Boat'
 [ "$1" = spawn ] || exit 0
 FM_HOME=${FM_HOME:?FM_HOME is required}
 [ "$(cd "$FM_HOME" && pwd -P)" = "$FM_HOME" ] || die 'overflow home must be canonical'
@@ -261,7 +322,7 @@ REPO="$FM_HOME/projects/$PROJECT"
 [ -d "$REPO" ] && [ ! -L "$REPO" ] && [ "$(cd "$REPO" && pwd -P)" = "$REPO" ] || die 'project clone is unavailable or unsafe'
 origin=$(git -C "$REPO" remote get-url origin) || die 'project origin unavailable'
 case "$origin" in
-  "https://github.com/LeadGrowGTM/$PROJECT.git"|"https://github.com/LeadGrowGTM/$PROJECT"|"git@github.com:LeadGrowGTM/$PROJECT.git") ;;
+  "https://github.com/$OWNER/$PROJECT.git"|"https://github.com/$OWNER/$PROJECT"|"git@github.com:$OWNER/$PROJECT.git") ;;
   *) die 'project origin is not the allowlisted fork' ;;
 esac
 [ -z "$(git -C "$REPO" ls-files -- 'clients' '.env' '**/.env')" ] || die 'project tracks client or secret files'

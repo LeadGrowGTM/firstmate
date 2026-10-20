@@ -177,6 +177,9 @@ SH
 cat > "$BIN/fm-boat-alias-refresh.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'alias %s\n' "$*" >> "$FIXTURES/calls"
+if [ -d "$FIXTURES/multi" ] && [ "$1" = --park ]; then
+  case "${2:-}" in bx_*) [ "${3:-}" = boat-prove ] && [ "$#" -eq 3 ] || exit 97; exit 0 ;; esac
+fi
 if [ -d "$FIXTURES/multi" ] && [ "$1" != --park ]; then
   case "$1" in bx_*)
     [ "$2" = boat-prove ] || exit 97
@@ -211,6 +214,10 @@ if [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = i
   status=$?
   [ ! -e "$FIXTURES/rotate-after-idle" ] || printf '%s\n' '33333333-3333-4333-8333-333333333333' > "$FIXTURES/boot-id"
   exit "$status"
+fi
+if [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = endpoints ]; then
+  FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" endpoints "$4"
+  exit $?
 fi
 if [ "${1:-}" = boat-eng ] && [ "${2:-}" = fm-boat-worker.sh ] && [ "${3:-}" = teardown ]; then
   FM_HOME="$FIXTURE_REMOTE_HOME" "$BIN/fm-boat-worker.sh" teardown "$4" "$5"
@@ -1383,6 +1390,102 @@ prime_multi_box() { # id state usage-seconds boot ready-boot
     > "$FIXTURES/multi/$id.usage.json"
 }
 
+test_project_list_and_cap_stop() {
+  new_case project-list
+  mkdir -p "$REMOTE_HOME/config" "$LOCAL_HOME/config"
+  printf 'gtm-client-acme\nextra-repo\n# a comment\n\nlead-haven MitchellkellerLG\n' > "$LOCAL_HOME/config/boat-projects"
+  set_json request '.project = "gtm-client-acme"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a client repository must never be allowed, whatever the list says'
+  set_json request '.project = "firstmate"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a project missing from a present list must be refused'
+  set_json request '.project = "extra-repo"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 0 "$CODE" "a project named in config/boat-projects must validate: $OUT"
+  set_json request '.project = "lead-haven"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 0 "$CODE" "a project with its own GitHub owner must validate: $OUT"
+  printf 'extra repo with spaces\n' > "$LOCAL_HOME/config/boat-projects"
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a malformed project list must refuse every request'
+  printf '# only comments\n' > "$LOCAL_HOME/config/boat-projects"
+  set_json request '.project = "firstmate"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a present list that names nothing must refuse'
+
+  new_case project-owner-origin
+  mkdir -p "$REMOTE_HOME/config"
+  printf 'firstmate\nlead-haven MitchellkellerLG\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project lead-haven
+  set_json request '.project = "lead-haven"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone whose origin owner differs from the list must refuse'
+  assert_contains "$OUT" 'project origin is not the allowlisted fork' 'owner mismatch explanation'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'an owner mismatch spawned a worker'
+  git -C "$REMOTE_HOME/projects/lead-haven" remote set-url origin https://github.com/MitchellkellerLG/lead-haven.git
+  spawn_task
+  expect_code 0 "$CODE" "a listed project at its listed owner must dispatch: $OUT"
+  assert_grep 'spawn task-one ' "$FIXTURES/calls" 'the listed project did not reach spawn'
+
+  new_case project-clone-guard
+  mkdir -p "$REMOTE_HOME/config"
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  mkdir -p "$REMOTE_HOME/projects/extra-repo/clients/acme"
+  printf 'x\n' > "$REMOTE_HOME/projects/extra-repo/clients/acme/list.csv"
+  git -C "$REMOTE_HOME/projects/extra-repo" add clients
+  git -C "$REMOTE_HOME/projects/extra-repo" commit -qm clients
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a listed clone that tracks client files must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'a clone with client files spawned a worker'
+
+  new_case endpoints-report
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh endpoints "$(cat "$FIXTURES/boot-id")"
+  expect_code 0 "$CODE" "endpoints report on an empty box: $OUT"
+  assert_equals 'boat-endpoints-live: no' "$OUT" 'an empty box reported a live endpoint'
+  printf 'fm-worker-a\n' > "$FIXTURES/windows"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh endpoints "$(cat "$FIXTURES/boot-id")"
+  assert_equals 'boat-endpoints-live: yes' "$OUT" 'a live worker window was not reported'
+
+  new_case cap-stops-resumed-box
+  seed_project firstmate
+  seed_worker worker-a ship firstmate 'state: working active'
+  seed_worker worker-b scout dev-loop 'state: working active'
+  seed_worker worker-c ship dev-loop 'state: paused waiting'
+  : > "$FIXTURES/use-real-worker"
+  send_task
+  expect_code 75 "$CODE" "a full resumed box keeps the capacity exit: $OUT"
+  assert_grep 'on boat-eng fm-boat-worker.sh endpoints' "$FIXTURES/calls" 'the cap refusal did not check live endpoints'
+  assert_grep 'boat --no-update stop bx_ahnbu3qr --json' "$FIXTURES/calls" 'a box this send resumed was left running after the cap refusal'
+  assert_absent "$LOCAL_HOME/state/.boat-environment" 'the stopped box kept its environment receipt'
+
+  new_case cap-keeps-box-with-live-endpoint
+  seed_project firstmate
+  seed_worker worker-a ship firstmate 'state: working active'
+  seed_worker worker-b scout dev-loop 'state: working active'
+  seed_worker worker-c ship dev-loop 'state: paused waiting'
+  printf 'fm-worker-a\n' > "$FIXTURES/windows"
+  : > "$FIXTURES/use-real-worker"
+  send_task
+  expect_code 75 "$CODE" 'a full box with a live endpoint keeps the capacity exit'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a box with a live worker window was stopped'
+
+  new_case cap-on-running-box-no-stop
+  seed_project firstmate
+  cp "$FIXTURES/ready.json" "$FIXTURES/info.json"
+  seed_receipt
+  seed_worker worker-a ship firstmate 'state: working active'
+  seed_worker worker-b scout dev-loop 'state: working active'
+  seed_worker worker-c ship dev-loop 'state: paused waiting'
+  : > "$FIXTURES/use-real-worker"
+  send_task
+  expect_code 75 "$CODE" 'a full already running box keeps the capacity exit'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'a box this send did not resume was stopped'
+  pass 'config/boat-projects owns the project allowlist and a cap refusal stops only a box this send resumed with no live endpoint'
+}
+
 test_budget_caps() {
   local end
   new_case budget-absent-keeps-twenty
@@ -1541,6 +1644,25 @@ test_budget_caps() {
   assert_no_grep 'boat --no-update resume bx_bbbbbbbb' "$FIXTURES/calls" 'the full running box was resumed'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'moving to another box stopped the full one'
 
+  new_case budget-full-resumed-box-stops
+  printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
+  printf '%s\n' 'bx_aaaaaaaa' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
+  prime_multi_box bx_aaaaaaaa stopped 1000 66666666-6666-4666-8666-666666666666 22222222-2222-4222-8222-222222222222
+  prime_multi_box bx_bbbbbbbb stopped 1000 77777777-7777-4777-8777-777777777777 88888888-8888-4888-8888-888888888888
+  printf '%s\n' 75 > "$FIXTURES/transport.code.22222222-2222-4222-8222-222222222222"
+  # The box-side endpoint query runs the real worker, which reads this box's instance.
+  printf '%s\n' 22222222-2222-4222-8222-222222222222 > "$FIXTURES/boot-id"
+  jq -n '{pageInfo:{hasMore:false},sandboxes:[
+      {id:"bx_aaaaaaaa",state:"stopped"},
+      {id:"bx_bbbbbbbb",state:"stopped"}]}' > "$FIXTURES/list.json"
+  send_task
+  expect_code 0 "$CODE" "a full resumed box is stopped and the next box takes the task: $OUT"
+  assert_grep 'boat --no-update stop bx_aaaaaaaa --json' "$FIXTURES/calls" 'the full box this send resumed was left running'
+  assert_grep 'boat --no-update resume bx_bbbbbbbb --environment fm-code --ttl 3600 --json' \
+    "$FIXTURES/calls" 'the next box was not resumed'
+  assert_grep 'spawn 88888888-8888-4888-8888-888888888888' "$FIXTURES/calls" 'the next box did not receive the worker'
+  assert_no_grep 'boat --no-update stop bx_bbbbbbbb' "$FIXTURES/calls" 'the box that took the task was stopped'
+
   new_case budget-account-counts-other-timers
   printf '%s\n' '{"expected_running":2}' > "$LOCAL_HOME/config/boat-spend.json"
   printf '%s\n' 'bx_aaaaaaaa' 'bx_bbbbbbbb' > "$LOCAL_HOME/config/boat-box-id"
@@ -1622,6 +1744,7 @@ test_budget_caps() {
 test_budget_caps
 test_box_config_and_environment
 test_brief_placeholder_fill
+test_project_list_and_cap_stop
 test_independent_resume_before_refusal
 test_instance_changes_at_action_boundary
 test_same_id_orphan_retry

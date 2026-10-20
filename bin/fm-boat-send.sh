@@ -66,7 +66,11 @@
 # On transport failure, remote completion is unknown: reconcile the SAME task
 # with fm-on.sh boat-eng fm-crew-state.sh <id>, never automatically resend.
 # A definite spawn refusal stops a box this send resumed only after the
-# remote worker lock confirms that no task records or endpoints remain.
+# remote worker lock confirms that no task records or endpoints remain. The
+# three-worker cap refusal (worker exit 75) is the one exception: retained
+# records fill the box but need no running box, so a box this send resumed is
+# stopped once the worker lock reports no live endpoint (fm-boat-worker.sh
+# endpoints), and with several listed boxes the send then tries the next one.
 # Pre-resume refusals never request a stop; stop authority follows only this
 # invocation's successful resume, not an earlier stopped-state observation.
 # Status, steering, and reports use existing fm-on.sh commands against boat-eng;
@@ -393,6 +397,15 @@ dispatch_prepared_box() {
     ID=$(jq -r .id "$TMP/request")
     grep -Fxq "boat-started: $ID (fresh worker status)" "$TMP/dispatch" ||
       die "worker start unconfirmed for $ID; reconcile with fm-on.sh boat-eng fm-crew-state.sh $ID before retry"
+  fi
+  if [ "$DISPATCH_STATUS" -eq 75 ] && [ "$STATE" = stopped ]; then
+    live=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh endpoints "$instance") || live=unknown
+    if [ "$live" = 'boat-endpoints-live: no' ]; then
+      stop_current_instance || die "Boat three-worker cap reached on $BOX; dispatch refused (current-instance stop unavailable)"
+      printf 'error: Boat three-worker cap reached on %s; stopped it\n' "$BOX" >&2
+      [ "$MULTI" -eq 1 ] && return 0
+      exit 75
+    fi
   fi
   if [ "$DISPATCH_STATUS" -ne 0 ] && [ "$DISPATCH_STATUS" -ne 255 ] && [ "$STATE" = stopped ]; then
     remaining=$("$SCRIPT_DIR/fm-on.sh" "$ROUTE" fm-boat-worker.sh idle "$instance") || remaining=unknown
