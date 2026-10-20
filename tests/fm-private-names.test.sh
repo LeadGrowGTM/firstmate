@@ -376,7 +376,7 @@ test_gate_remote_is_judged_by_origin_and_repo_hook_still_runs() {
 }
 
 test_new_gate_and_unfetched_public_branches_skip_public_history() {
-  local d=$TMP_ROOT/gate-public-history home gate out
+  local d=$TMP_ROOT/gate-public-history home gate fork out
   home=$d/home
   make_home "$home"
   make_repo "$d" "$home" public
@@ -384,18 +384,30 @@ test_new_gate_and_unfetched_public_branches_skip_public_history() {
   git -C "$REPO" -c core.hooksPath=/dev/null push -q origin main
   git -C "$REPO" fetch -q origin
   gate=$d/gate.git
+  fork=$d/fork.git
   git init -q --bare "$gate"
+  git init -q --bare "$fork"
+  git -C "$REPO" -c core.hooksPath=/dev/null push -q "$fork" main
   git -C "$REPO" remote add no-mistakes "$gate"
   git -C "$REPO" remote add public-copy "$ORIGIN"
+  git -C "$REPO" remote add fork "$fork"
+  printf '%s public\n' "$fork" >>"$home/config/repo-visibility"
   git -C "$REPO" checkout -q -b fm/clean-first
   in_pane "$HOOKS" commit_file "$REPO" fresh.txt "clean addition" "Clean first push"
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q no-mistakes HEAD 2>&1) ||
     fail "a clean first gate push scanned already public history: $out"
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q public-copy HEAD:refs/heads/fm/clean-first 2>&1) ||
     fail "an unfetched public alias scanned already public history: $out"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q fork HEAD:refs/heads/fm/clean-first 2>&1) ||
+    fail "a separate public fork scanned already public history: $out"
   assert_equals "$(git -C "$REPO" rev-parse HEAD)" "$(git -C "$gate" rev-parse refs/heads/fm/clean-first)" \
     "the clean branch did not reach the gate"
-  pass "new gate and unfetched public branches skip commits already public at origin"
+  git -C "$REPO" checkout -q -b fm/fork-secret
+  commit_file "$REPO" new.txt "Route zenith-sample" "New private name" --no-verify
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q fork HEAD 2>&1) &&
+    fail "a new listed name reached the separate public fork"
+  assert_contains "$out" "client-1" "the separate fork refusal omitted the neutral id"
+  pass "new gate and unfetched fork branches skip published history while checking new commits"
 }
 
 test_gh_shim_refuses_or_rewrites_pr_text() {
@@ -449,8 +461,10 @@ test_gh_shim_refuses_or_rewrites_pr_text() {
   (cd "$REPO" && FAKE_GH_VIS=private in_pane "$HOOKS" gh pr create --repo example/private-repo --title "Fix acme-test" --body ok) ||
     fail "a private repository's PR was refused"
   assert_contains "$(cat "$log")" "[Fix acme-test]" "a private repository's PR text was changed"
-  assert_equals public "$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/private-repo)" \
-    "a private visibility override bypassed a public result"
+  : >"$log"
+  out=$(cd "$REPO" && FAKE_GH_VIS=public in_pane "$HOOKS" gh pr create --repo example/private-repo \
+    --title "Fix acme-test" --body ok 2>&1) && fail "a private visibility override bypassed a public result"
+  assert_not_contains "$(cat "$log")" "[pr] [create]" "the real gh ran despite the public result"
 
   mkdir -p "$d/acme-test-drafts"
   printf 'Clean body.\n' >"$d/acme-test-drafts/body.md"
@@ -551,34 +565,48 @@ test_no_mistakes_shim_checks_public_inputs() {
 }
 
 test_visibility_asks_github_once_and_caches() {
-  local d=$TMP_ROOT/vis home count
+  local d=$TMP_ROOT/vis home count out
   home=$d/home
   make_home "$home"
+  make_repo "$d" "$home" private
   FAKEBIN=$(make_fake_gh "$d")
   count=$d/count
   : >"$count"
   export FAKE_GH_LOG=$d/gh.log FAKE_GH_COUNT=$count
-  assert_equals public "$(FAKE_GH_VIS=public PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility https://github.com/Example/Open.git)" \
-    "a public answer was not reported"
-  assert_equals public "$(FAKE_GH_VIS=private PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/open)" \
-    "a cached public answer was not reused"
+  : >"$FAKE_GH_LOG"
+  out=$(cd "$REPO" && FAKE_GH_VIS=public in_pane "$HOOKS" gh pr create \
+    --repo https://github.com/Example/Open.git --title 'Fix acme-test' --body ok 2>&1) &&
+    fail "a public answer allowed a named PR"
+  assert_contains "$out" "mate-1" "the public refusal omitted the neutral id"
+  assert_contains "$(cat "$home/state/repo-visibility.cache")" "example/open public" \
+    "the public answer was not persisted"
+  out=$(cd "$REPO" && FAKE_GH_VIS=private in_pane "$HOOKS" gh pr create \
+    --repo example/open --title 'Fix acme-test' --body ok 2>&1) &&
+    fail "a cached public answer allowed a named PR"
   assert_equals 1 "$(wc -l <"$count" | tr -d ' ')" "visibility asked GitHub more than once"
-  assert_equals public "$(FAKE_GH_VIS=fail PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/unknown)" \
-    "a failed lookup must count as public"
-  assert_equals private "$(FAKE_GH_VIS=private PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/unknown)" \
-    "a failed lookup was cached"
-  assert_equals public "$(FAKE_GH_VIS=public PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/flip)" \
-    "a public visibility answer was not reported"
-  assert_equals private "$(FAKE_GH_VIS=private PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/change)" \
-    "a private visibility answer was not reported"
-  assert_equals public "$(FAKE_GH_VIS=public PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility example/change)" \
-    "a private visibility answer was cached after becoming public"
-  assert_equals private "$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility /some/local/path.git)" \
-    "a local path must be private"
-  assert_equals public "$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$PN" visibility https://git.example.invalid/x/y.git)" \
-    "an unknown network remote must count as public"
+  out=$(cd "$REPO" && FAKE_GH_VIS=fail in_pane "$HOOKS" gh pr create \
+    --repo example/unknown --title 'Fix acme-test' --body ok 2>&1) &&
+    fail "a failed lookup allowed a named PR"
+  out=$(cd "$REPO" && FAKE_GH_VIS=private in_pane "$HOOKS" gh pr create \
+    --repo example/unknown --title 'Fix acme-test' --body ok 2>&1) ||
+    fail "a failed lookup was cached as public: $out"
+  assert_equals 3 "$(wc -l <"$count" | tr -d ' ')" "a failed lookup was cached"
+  out=$(cd "$REPO" && FAKE_GH_VIS=private in_pane "$HOOKS" gh pr create \
+    --repo example/change --title 'Fix acme-test' --body ok 2>&1) ||
+    fail "a private destination refused a named PR: $out"
+  out=$(cd "$REPO" && FAKE_GH_VIS=public in_pane "$HOOKS" gh pr create \
+    --repo example/change --title 'Fix acme-test' --body ok 2>&1) &&
+    fail "a former private result bypassed the public guard"
+  assert_equals 5 "$(wc -l <"$count" | tr -d ' ')" "a private result was cached"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create \
+    --repo "$d/local.git" --title 'Fix acme-test' --body ok 2>&1) ||
+    fail "a local destination refused a named PR: $out"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh pr create \
+    --repo https://git.example.invalid/x/y.git --title 'Fix acme-test' --body ok 2>&1) &&
+    fail "an unknown network destination allowed a named PR"
+  assert_equals 5 "$(wc -l <"$count" | tr -d ' ')" "local or unknown remotes queried GitHub"
   unset FAKE_GH_LOG FAKE_GH_COUNT
-  pass "visibility asks GitHub once, caches the answer, and counts a failed lookup or unknown host as public"
+  pass "PR publication uses public visibility caching and checks fresh private answers"
 }
 
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
@@ -611,7 +639,7 @@ test_scrub_tool_dry_run_and_apply() {
   out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home "$SCRUB" --repo example/public-repo \
     --evidence-branch other/evidence 2>&1) && fail "an alternate evidence branch was accepted"
 
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_SEAM=1 FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
     "$SCRUB" --repo example/public-repo 2>&1) ||
     fail "dry run failed: $out"
   assert_contains "$out" "dry run" "the dry run did not say so"
@@ -626,7 +654,7 @@ test_scrub_tool_dry_run_and_apply() {
   assert_not_contains "$(cat "$log")" "[edit]" "the dry run edited a PR"
   assert_equals "$old_tip" "$(git -C "$ev" rev-parse no-mistakes/evidence)" "the dry run moved the evidence branch"
 
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_SEAM=1 FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
     "$SCRUB" --repo example/public-repo --apply 2>&1) ||
     fail "apply failed: $out"
   assert_contains "$(cat "$log")" "[pr] [edit] [11] [--repo] [example/public-repo] [--title] [Ship the mate-1 lane]" \
@@ -645,7 +673,7 @@ if [ "\$1" = clone ]; then exit 1; fi
 exec "$(command -v git)" "\$@"
 SH
   chmod +x "$FAKEBIN/git"
-  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
+  out=$(PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home FM_TEST_SEAM=1 FM_TEST_PRIVATE_NAMES_EVIDENCE_REMOTE=$ev \
     "$SCRUB" --repo example/public-repo --pr 12 --apply 2>&1) &&
     fail "the scrub tool reported success after a clone failure"
   assert_contains "$out" "cannot clone" "the scrub tool did not report the clone failure"

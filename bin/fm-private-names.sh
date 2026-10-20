@@ -18,8 +18,6 @@
 #       config/private-names.local adds names by hand as "<kind> <name>" or a
 #       bare name (kind private). Short, number-only, and ordinary-word names
 #       are listed in the context tier and match only name-shaped contexts.
-#   fm-private-names.sh count
-#       Print how many names the list holds.
 #   fm-private-names.sh check [--repo <dest>] [<file>...]
 #       Scan the files (or stdin). Prints "<line> <neutral-id>" per hit, never
 #       the name. Exit 0 clean or private destination, 1 a listed name, 3 the
@@ -27,8 +25,6 @@
 #   fm-private-names.sh scrub [<file>...]
 #       Print the files (or stdin) with every listed name rewritten to its
 #       neutral id (mate-1, client-1, ...).
-#   fm-private-names.sh visibility <dest>
-#       Print public or private for a GitHub owner/repo, remote URL, or path.
 #   fm-private-names.sh commit-msg <msgfile>
 #       Git commit-msg hook. Checked when this repository's origin is public.
 #   fm-private-names.sh pre-push <remote> <url>
@@ -343,7 +339,7 @@ added_lines() {  # <sha> [<path>]
 
 cmd_pre_push() {
   local remote=${1:-} url=${2:-} dest local_sha remote_ref remote_sha
-  local branch range commits rc=0 sha path ref effective_remote origin_dest base_ref base_sha
+  local branch range commits rc=0 sha path ref effective_remote base_ref base_sha
   [ -n "$remote" ] || usage
   dest=$url
   if [ "$remote" = no-mistakes ] || [ -z "$dest" ]; then
@@ -377,21 +373,18 @@ cmd_pre_push() {
         [ -n "$ref" ] && range+=("$ref")
       done < <(git for-each-ref --format='%(refname)' "refs/remotes/$effective_remote/")
       if [ "${#range[@]}" -eq 2 ]; then
-        origin_dest=$(origin_url) || origin_dest=
-        if [ "$dest" = "$origin_dest" ]; then
-          base_ref=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || base_ref=
-          if [ -z "$base_ref" ]; then
-            for ref in refs/remotes/origin/main refs/remotes/origin/master; do
-              if git show-ref --verify --quiet "$ref"; then
-                base_ref=$ref
-                break
-              fi
-            done
-          fi
-          if [ -n "$base_ref" ]; then
-            base_sha=$(git merge-base "$local_sha" "$base_ref" 2>/dev/null) || base_sha=
-            [ -z "$base_sha" ] || range+=("$base_sha")
-          fi
+        base_ref=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || base_ref=
+        if [ -z "$base_ref" ]; then
+          for ref in refs/remotes/origin/main refs/remotes/origin/master; do
+            if git show-ref --verify --quiet "$ref"; then
+              base_ref=$ref
+              break
+            fi
+          done
+        fi
+        if [ -n "$base_ref" ]; then
+          base_sha=$(git merge-base "$local_sha" "$base_ref" 2>/dev/null) || base_sha=
+          [ -z "$base_sha" ] || range+=("$base_sha")
         fi
       fi
     fi
@@ -609,13 +602,8 @@ CMD=${1:-}
 [ "$#" -gt 0 ] && shift
 case "$CMD" in
   refresh) cmd_refresh "$@" ;;
-  count) fm_pn_count ;;
   check) cmd_check "$@" ;;
   scrub) cmd_scrub "$@" ;;
-  visibility)
-    [ "$#" -eq 1 ] || usage
-    fm_pn_visibility "$1"
-    ;;
   commit-msg) cmd_commit_msg "$@" ;;
   pre-push) cmd_pre_push "$@" ;;
   gh-shim) cmd_gh_shim "$@" ;;
