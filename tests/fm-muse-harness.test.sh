@@ -367,6 +367,59 @@ EOF
   pass "raw Muse launches carrying client data are refused before provisioning"
 }
 
+test_spawn_raw_muse_wrapper_policy() {
+  local wrapper rec case_dir home proj wt fakebin id out status client_home launch
+  for wrapper in env command nohup absolute; do
+    rec=$(make_spawn_case "raw-wrapper-client-$wrapper")
+    IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+    client_home="$case_dir/ikeuchi"
+    mv "$home" "$client_home"
+    home=$client_home
+    case "$wrapper" in
+      env) launch='env FOO=bar muse --yolo' ;;
+      command) launch='command muse --yolo' ;;
+      nohup) launch='nohup muse --yolo' ;;
+      absolute) launch='/usr/bin/muse --yolo' ;;
+    esac
+    out=$(FM_TEST_MUSE_LAUNCH="$launch" \
+      run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off)
+    status=$?
+    expect_code 1 "$status" "raw Muse $wrapper wrapper from client home must be refused"
+    assert_contains "$out" 'raw Muse launch carrying client data' "raw Muse $wrapper refusal lacks a clear reason"
+    assert_absent "$home/state/$id.meta" "raw Muse $wrapper refusal still launched a worker"
+
+    rec=$(make_spawn_case "raw-wrapper-non-client-$wrapper")
+    IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+    out=$(FM_TEST_MUSE_LAUNCH="$launch" \
+      run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off)
+    status=$?
+    expect_code 0 "$status" "raw Muse $wrapper wrapper from non-client home must remain allowed: $out"
+  done
+  pass "raw Muse wrappers are refused only for client launches"
+}
+
+test_spawn_raw_client_launch_with_off_or_other_agent() {
+  local launch rec case_dir home proj wt fakebin id out status client_home
+  for launch in 'env FOO=bar muse --yolo --contributor-mode off' 'other-agent --yolo'; do
+    rec=$(make_spawn_case "raw-client-allowed-${launch%% *}")
+    IFS='|' read -r case_dir home proj wt fakebin id <<EOF
+$rec
+EOF
+    client_home="$case_dir/ikeuchi"
+    mv "$home" "$client_home"
+    home=$client_home
+    out=$(FM_TEST_MUSE_LAUNCH="$launch" \
+      run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off)
+    status=$?
+    expect_code 0 "$status" "raw client launch with contributor mode off or no Muse word must remain allowed: $out"
+  done
+  pass "client raw launches with contributor mode off or no Muse word remain allowed"
+}
+
 test_spawn_no_contributor_flag_for_non_client() {
   local rec case_dir home proj wt fakebin id launch
   rec=$(make_spawn_case non-client)
@@ -1109,6 +1162,8 @@ test_spawn_launch_shape
 test_spawn_contributor_off_for_client_brief
 test_spawn_contributor_off_for_client_home
 test_spawn_refuses_raw_client_launches
+test_spawn_raw_muse_wrapper_policy
+test_spawn_raw_client_launch_with_off_or_other_agent
 test_spawn_no_contributor_flag_for_non_client
 test_spawn_maps_effort_and_model
 test_spawn_refuses_without_credential
