@@ -1948,8 +1948,7 @@ fm_worktree_custody_check() {  # <state-dir> <own-meta> <worktree> <task-id>
 
 # Predict the pooled copy `treehouse get` hands out next when each preceding
 # copy's allocation state can be established. Sets FM_TREEHOUSE_NEXT_COPY to its
-# real path, or to empty when every copy is taken and the provider would create
-# a new one.
+# real path, or to empty when no listed copy is selectable.
 # Returns 1 when the choice cannot be proven, so callers keep refusing.
 fm_treehouse_next_copy() {  # <pool>
   local state="$1/treehouse-state.json" path processes pool_processes listing leased dirty lock
