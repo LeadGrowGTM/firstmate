@@ -57,16 +57,13 @@
 # PATH. An evaluation that read everything is recorded and the next one is due
 # 86400 seconds later; polls inside that day stay silent. Spend, the active
 # sandbox count, auto-refill, a trial or plan end, and a read failure are
-# reported again at every due evaluation. A box condition, keyed by box id,
-# kind, and detail, is reported once, and again only when that detail changes
-# or the condition clears and later returns. Kinds are health, restore error,
+# reported once per distinct condition, and again when they clear and return.
+# A box condition is keyed by box id, kind, and detail. Kinds are health, restore error,
 # unfinished disk restore, size, missing auto-stop, and stopped-disk expiry.
-# The reported set lives in state/.boat-spend-alerted. A full read replaces
-# that set with the box conditions still present; a read that could not see
-# everything only adds conditions it actually saw, so a gap is not treated as
-# a clear. An evaluation that could not read everything is not recorded, so
-# the next poll tries again, and its line is printed at most once per 86400
-# seconds until a read succeeds. Each Boat call is bounded to 9 seconds so the
+# The reported set lives in state/.boat-spend-alerted. A full read clears
+# conditions no longer present; a partial read retains previously seen
+# conditions it cannot prove cleared. An evaluation that could not read
+# everything is not recorded, so the next poll tries again. Each Boat call is bounded to 9 seconds so the
 # whole evaluation finishes inside the watcher's per-check bound.
 # docs/configuration.md owns the config schema.
 set -u
@@ -202,8 +199,7 @@ read_failure_text() {  # <what> <status>
 # findings <config> <limits> <list> <billing> <now>
 # One JSON object. "status" is "ok" when every consumed field was readable and
 # "blind" otherwise. "findings" is the list, from one jq program so the
-# arithmetic has one owner. A "once" finding is a box condition keyed by id,
-# kind, and detail; a "repeat" finding is reported at every due evaluation.
+# arithmetic has one owner. Each finding is keyed by id, kind, and detail.
 # Every unreadable field lands in the one last finding.
 findings() {
   jq -nr --argjson cfg "$1" --argjson limits "$2" --argjson list "$3" \
@@ -215,9 +211,8 @@ findings() {
       ([$n[0], $n[1], 1, 0, 0, 0, 0, 0] | mktime);
     def strs: type == "array" and all(.[]; type == "string");
     def has_state: type == "object" and (.state | type) == "string";
-    def again($text): {scope: "repeat", text: $text};
     def once($id; $kind; $detail; $text):
-      {scope: "once", id: $id, kind: $kind, detail: $detail, text: $text};
+      {id: $id, kind: $kind, detail: $detail, text: $text};
     $limits.activeStates as $states |
     (if $states | strs then $states else [] end) as $active |
     ($list.sandboxes | if type == "array" then . else [] end) as $boxes |
@@ -249,13 +244,13 @@ findings() {
            ($used / $spd) as $spent |
            (((if ($day | type) == "number" then $day else 0 end) / $spd) * (($horizon - $now) / 86400)) as $more |
            if $spent > $cfg.ceiling_usd
-           then again("spend $\($spent | usd) is over the $\($cfg.ceiling_usd) ceiling")
+           then once("account"; "spend"; "over"; "spend $\($spent | usd) is over the $\($cfg.ceiling_usd) ceiling")
            elif ($spent + $more) > $cfg.ceiling_usd
-           then again("spend $\($spent | usd) projects to $\(($spent + $more) | usd) by period end, over the $\($cfg.ceiling_usd) ceiling")
+           then once("account"; "spend"; "projected"; "spend $\($spent | usd) projects to $\(($spent + $more) | usd) by period end, over the $\($cfg.ceiling_usd) ceiling")
            else empty end
          else empty end),
         (if ($live | length) > $cfg.expected_running
-         then again("\($live | length) sandboxes active, expected \($cfg.expected_running) (\([$live[] | .id] | join(",")))")
+         then once("account"; "running"; ""; "\($live | length) sandboxes active, expected \($cfg.expected_running) (\([$live[] | .id] | join(",")))")
          else empty end),
         ([$live[] | select(.type as $t | $cfg.allowed_sizes | index($t) | not)] | .[] |
           once(.id; "size"; (.type // "unknown");
@@ -263,14 +258,14 @@ findings() {
         ([$live[] | select(.archiveAfter == null and (.id as $i | $cfg.always_on | index($i) | not))] | .[] |
           once(.id; "no-stop"; "";
             "sandbox \(.id) has no auto-stop deadline and is not on the always-on list")),
-        (if $billing.prepaid.enabled == true then again("auto-refill is enabled") else empty end),
+        (if $billing.prepaid.enabled == true then once("account"; "refill"; ""; "auto-refill is enabled") else empty end),
         ([$trial_end, $period_end] | map(select(. != null and . >= $now and . <= $now + $warn_days * 86400)) | min |
-          if . != null then again("trial or plan ends \(strftime("%Y-%m-%d")) UTC, within \($warn_days) days") else empty end),
+          if . != null then once("account"; "period"; (strftime("%Y-%m-%d")); "trial or plan ends \(strftime("%Y-%m-%d")) UTC, within \($warn_days) days") else empty end),
         ($boxes[] | select(.health != null and .health != "ok") |
           once(.id; "health"; .health; "sandbox \(.id) health is \(.health)")),
         ($boxes[] | select(.error != null and .error != "") |
           (.error[0:80]) as $err |
-          once(.id; "restore-error"; $err; "sandbox \(.id) has a restore error: \($err)")),
+          once(.id; "restore-error"; .error; "sandbox \(.id) has a restore error: \($err)")),
         ($live[] | select(.hydrated == false) |
           once(.id; "restore-incomplete"; ""; "sandbox \(.id) has not finished restoring its disk")),
         ($boxes[] | select(.state == "stopped") |
@@ -286,7 +281,7 @@ findings() {
               "stopped sandbox \(.id) disk expires \($disk_day) UTC, within \($warn_days) days")
             else empty end
           end),
-        (if ($unread | length) > 0 then again("read failed: unreadable \($unread | join(", "))") else empty end)
+        (if ($unread | length) > 0 then once("account"; "read"; ($unread | join(", ")); "read failed: unreadable \($unread | join(", "))") else empty end)
       ]
     }'
 }
@@ -352,28 +347,33 @@ alerted_write() {  # <json array of {id,kind,detail}>
 }
 
 # publish_alerts <replace|keep>
-# Fills EVAL_LINE with the findings that should wake this evaluation. "replace"
-# forgets box conditions a full read no longer sees. "keep" only adds, because
-# a partial read cannot prove a condition cleared. The line is set before the
-# record is written, so a failed write repeats the alert instead of losing it.
 publish_alerts() {
-  local mode=$1 prev next
+  local mode=$1 prev result
   prev=$(alerted_keys)
-  next=$(jq -c --argjson prev "$prev" --arg mode "$mode" '
+  result=$(jq -c --argjson prev "$prev" --arg mode "$mode" --argjson max "$MAX_LINE" '
     def norm: {id, kind, detail};
     (if type == "array" then . else [] end) as $f |
     ($prev | if type == "array" then map(select(type == "object") | norm) else [] end) as $seen |
-    [$f[] | select(.scope == "once") | norm] | unique_by(tojson) as $cur |
-    (if $mode == "replace" then $cur else ($seen + $cur | unique_by(tojson)) end) as $next |
-    [$f[] as $item |
-      if $item.scope == "repeat" then $item.text
-      elif any($seen[]; . == ($item | norm)) then empty
-      else $item.text end
-    ] as $texts |
-    {next: $next, line: ($texts | join("; "))}
+    [$f[] | norm] as $cur |
+    (if $mode == "replace"
+     then [$seen[] as $key | select(any($cur[]; . == $key)) | $key]
+     else [$seen[] as $key | select($key.kind != "read" or any($cur[]; . == $key)) | $key]
+     end) as $base |
+    [$f[] as $item | select(any($seen[]; . == ($item | norm)) | not) | $item] as $pending |
+    (reduce $pending[] as $item ({line: "", sent: []};
+      (if .line == "" then $item.text else .line + "; " + $item.text end) as $candidate |
+      if .line == "" or ("boat-spend: " + $candidate | utf8bytelength) <= $max
+      then {line: $candidate, sent: (.sent + [$item | norm])}
+      else . end)) as $out |
+    {next: ($base + $out.sent | unique_by(tojson)), line: $out.line,
+     omitted: (($pending | length) > ($out.sent | length))}
   ' <<<"$EVAL_FINDINGS") || return 1
-  EVAL_LINE=$(jq -r '.line' <<<"$next") || return 1
-  alerted_write "$(jq -c '.next' <<<"$next")"
+  EVAL_LINE=$(jq -r '.line' <<<"$result") || return 1
+  EVAL_NEXT=$(jq -c '.next' <<<"$result") || return 1
+  if [ -n "$EVAL_LINE" ] && [ "$(jq -r '.omitted' <<<"$result")" = true ] \
+    && [ $((${#EVAL_LINE} + ${#FM_LINE_CAP_SUFFIX} + 12)) -le "$MAX_LINE" ]; then
+    EVAL_LINE="$EVAL_LINE$FM_LINE_CAP_SUFFIX"
+  fi
 }
 
 # evaluate <now>
@@ -384,12 +384,12 @@ publish_alerts() {
 EVAL_LINE=
 EVAL_MODE=hard
 EVAL_FINDINGS='[]'
+EVAL_NEXT='[]'
 evaluate() {
   local now=$1 cfg limits list billing rc found status findings
   EVAL_LINE=
   EVAL_MODE=hard
   EVAL_FINDINGS='[]'
-  command -v jq >/dev/null 2>&1 || { EVAL_LINE="read failed: jq is missing"; return 1; }
   if ! config_normalized; then
     EVAL_LINE="config/boat-spend.json is invalid: $CONFIG_PROBLEM"
     return 1
@@ -420,24 +420,31 @@ evaluate() {
 }
 
 run_check() {
-  local now
+  local now mode
   [ -f "$CONFIG" ] || return 0
   now=$(now_epoch)
   record_due "$RECORD" "$now" || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    if [ ! -f "$FAILURE_RECORD" ]; then
+      report "read failed: jq is missing"
+      record_write "$FAILURE_RECORD" "$now" || true
+    fi
+    return 0
+  fi
+  rm -f -- "$FAILURE_RECORD"
   if evaluate "$now"; then
-    record_write "$RECORD" "$now" || true
-    rm -f -- "$FAILURE_RECORD"
-    publish_alerts replace || true
-    [ -n "$EVAL_LINE" ] || return 0
+    mode=replace
   else
-    record_due "$FAILURE_RECORD" "$now" || return 0
-    record_write "$FAILURE_RECORD" "$now" || true
-    if [ "$EVAL_MODE" = blind ]; then
-      publish_alerts keep || true
-      [ -n "$EVAL_LINE" ] || return 0
+    mode=keep
+    if [ "$EVAL_MODE" = hard ]; then
+      EVAL_FINDINGS=$(jq -nc --arg text "$EVAL_LINE" \
+        '[{id:"account",kind:"read",detail:$text,text:$text}]') || return 1
     fi
   fi
-  report "$EVAL_LINE"
+  publish_alerts "$mode" || return 1
+  [ -z "$EVAL_LINE" ] || report "$EVAL_LINE"
+  alerted_write "$EVAL_NEXT" || true
+  [ "$mode" != replace ] || record_write "$RECORD" "$now" || true
 }
 
 SHIM_TMP=

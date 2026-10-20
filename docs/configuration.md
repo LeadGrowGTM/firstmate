@@ -2291,11 +2291,11 @@ Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
 
 - That writes `state/boat-spend.check.sh` and binds its bytes with `bin/fm-check-register.sh`, so the existing watcher polls it and turns its one line into a `check:` wake; no separate schedule is involved.
 - An evaluation that read everything is recorded, and the next one is due 24 hours later.
-  Spend, the active-sandbox count, auto-refill, a trial or plan end, and a read failure are reported again at each due evaluation.
-  A box condition is reported once for that box, kind, and detail, and again only when the detail changes or the condition clears and later returns.
-  `bin/fm-boat-spend-check.sh` owns that split and the record of conditions already reported.
+  Every condition is reported once, then again only when it changes to a distinct condition or clears and later returns.
+  Spend uses the over-ceiling or projected-over-ceiling state, rather than a changing dollar amount, as its identity; a restore error uses its full error text even though the displayed text is shortened.
+  `bin/fm-boat-spend-check.sh` records only conditions included in the emitted line, so alerts omitted by the line cap remain pending.
 - An evaluation that could not see everything is not recorded, so the next watcher poll tries again and a passing failure does not cost the day's check.
-  Its line is printed at most once per 24 hours while the failure lasts, and that limit is lifted as soon as a read succeeds.
+  An unchanged failure stays silent while a newly observed condition can still alert.
 - Each Boat call is bounded to 9 seconds so the three together fit inside `FM_CHECK_TIMEOUT`.
 - Registering the check is a reason to watch on the same terms as the [watched-tool check](#watched-tool-updates-configwatched-toolsjson), and `bin/fm-boat-spend-check.sh disarm` removes the shim, its trust binding, and the check records.
 
