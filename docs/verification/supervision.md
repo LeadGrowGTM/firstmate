@@ -740,7 +740,7 @@ tests/fm-host-mirror.test.sh
 
 ### Attended posture
 
-This supports [Postures](../supervision-host.md#postures) and [Captain outcomes](../supervision-host.md#captain-outcomes): on a Claude primary the attended engine keeps routine outcomes off main, a captain outcome reaches main once and waits in the drain until acknowledged, a fresh captain outcome is never hidden behind a routine backlog, and the first drain after a return does not replay the away window.
+This pre-digest run supports the attended host's routine-outcome filtering, durable captain-outcome presentation, and away-return drain in [Postures](../supervision-host.md#postures) and [Captain outcomes](../supervision-host.md#captain-outcomes); its immediate captain wake predates the current digest policy.
 It was measured on 2026-09-25 on macOS arm64 with Claude Code 2.1.283 as primary and engine (`sonnet`) and Pi 0.82.0 workers on `openai-codex/gpt-5.6-sol`, in a disposable lab home on a private tmux socket.
 The routine backlog and most of the away window's rows were appended to the store through `bin/fm-branch-outcome.sh append` to reach the shape of a real long window; the engine recorded the rest, including every captain outcome that woke main.
 

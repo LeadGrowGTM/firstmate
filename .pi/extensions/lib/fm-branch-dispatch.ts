@@ -200,7 +200,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
 // One attended exception, for the supervision host only (`decisionDigest`,
 // which bin/fm-branch-dispatch.mjs passes while the host's captain-outcome
 // digest is on): a decision-owned SIGNAL row is claimed like any task-local
-// row and is not listed in needsDecisionKeys, so the branch reports it as a
+// row and is not listed in needsDecisionKeys, so the branch can report it as a
 // captain outcome the digest batches (docs/supervision-host.md "Captain
 // outcomes"). The branch cannot answer it (bin/fm-lease-lib.sh refuses its
 // decision answer while attended), and main's drain folds the decision from

@@ -419,8 +419,8 @@ While the home runs the host, main's lease-checked commands also take the per-ta
 ## Captain-outcome digest (config/outcome-digest)
 
 The optional local, gitignored `config/outcome-digest` sets how the attended supervision host batches the captain outcomes its engine records; [Captain outcomes](supervision-host.md#captain-outcomes) owns the behavior.
-It is read at every wake, and it is local to each home and not inherited.
-The file holds blank lines, `#` comments, and at most these settings, one per line:
+It is read for each attended close and digest judgment, and it is local to each home and not inherited.
+Each nonblank, noncomment line must be one of these settings:
 
 - `window=<minutes>`, from 0 to 1440, default 60: how long a non-urgent captain outcome may wait before it wakes main; `window=0` turns the digest off, so each new captain outcome is due immediately unless it repeats a situation main already holds, and decision closes stay main's.
 - `pr-ready=urgent|digest`, default `digest`: whether a captain outcome reporting work ready for review, merge, or landing wakes main at once or waits for the window.
