@@ -1847,6 +1847,7 @@ test_successor_close_during_main_turn_is_delivered_at_the_next_turn_end() {
 assert_turn_end_resurface() {  # <name> <main-row: yes|no>
   local home successor drained
   home=$(make_primary_home "$1")
+  digest_off "$home"
   ln -s "$ROOT/.agents" "$home/.agents"
   printf 'project=demo\nwindow=fm-other\nharness=claude\n' > "$home/state/other.meta"
   start_hook_session "$home"
