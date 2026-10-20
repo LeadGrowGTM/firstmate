@@ -1,0 +1,23 @@
+REAL RELAUNCH RECORD: labpr
+fallback_reason="Continue waiting in the disposable lab without project edits."
+spawn_gen=s1792498371.1902689.7876
+tmux_socket=/tmp/fml.5U39hb/tmux-1000/fm-lab
+control_relaunch_tx=1895103.20261020T121249Z.3980
+pr=https://github.com/example/repo/pull/20
+pr_head=0123456789abcdef0123456789abcdef01234567
+PR identity parsed: https://github.com/example/repo/pull/20
+Trace carrier: absent
+
+REAL RELAUNCH RECORD: labtrace
+spawn_gen=s1792498500.2190256.27114
+tmux_socket=/tmp/fml.5U39hb/tmux-1000/fm-lab
+control_relaunch_tx=2186057.20261020T121458Z.13037
+traceparent=00-cba1bb26cb7c5433befda4ff70f832bd-00e2bd3ceb06edca-01
+pr=https://github.com/example/repo/pull/21
+pr_head=0123456789abcdef0123456789abcdef01234567
+PR identity parsed: https://github.com/example/repo/pull/21
+Trace carrier: valid
+
+Current private session panes:
+node node 0
+fm-labtrace grok 0

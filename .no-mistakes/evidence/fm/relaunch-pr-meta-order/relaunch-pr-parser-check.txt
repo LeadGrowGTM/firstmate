@@ -1,0 +1,15 @@
+Spawned task record with PR identity:
+realized_effort=default
+spawn_gen=s1792498276.1713420.31086
+tmux_socket=/tmp/fml.5U39hb/tmux-1000/fm-lab
+pr=https://github.com/example/repo/pull/20
+pr_head=0123456789abcdef0123456789abcdef01234567
+parser: accepted https://github.com/example/repo/pull/20
+
+Record with injected trailing transaction:
+spawn_gen=s1792498276.1713420.31086
+tmux_socket=/tmp/fml.5U39hb/tmux-1000/fm-lab
+pr=https://github.com/example/repo/pull/20
+pr_head=0123456789abcdef0123456789abcdef01234567
+control_relaunch_tx=late
+parser: rejected trailing field
