@@ -922,10 +922,21 @@ SH
   expect_code 0 "$CODE" "a recorded task connects to its own box"$'\n'"$ERR"
   assert_equals 2 "$(wc -l < "$ssh_log" | tr -d ' ')" "the task box must be dialled"
   assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" 'the route follows the task box'
+  for task_path in state/task-one.status data/task-one/report.md data/task-one/nested/report.md; do
+    printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+    boat_route boat-eng fm-remote-file.sh get "$task_path"
+    expect_code 0 "$CODE" "the task path reaches its recorded box: $task_path"$'\n'"$ERR"
+    assert_equals 'bx_ahnbu3qr' "$(tr -d '\n' < "$fmhome/state/.boat-route-box")" "the task path follows its recorded box"
+  done
+  for task_path in state/task-one.status.extra data/task-one-other/report.md; do
+    printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
+    boat_route boat-eng fm-remote-file.sh get "$task_path"
+    expect_code 255 "$CODE" "a different path must not borrow the task box: $task_path"$'\n'"$ERR"
+  done
   printf '%s\n' 'bx_bbbbbbbb' > "$fmhome/state/.boat-route-box"
   boat_route boat-eng fm-crew-state.sh task-two
   expect_code 255 "$CODE" "an unrecorded task must not borrow another box"$'\n'"$ERR"
-  assert_equals 2 "$(wc -l < "$ssh_log" | tr -d ' ')" "an unrecorded task was dialled"
+  assert_equals 5 "$(wc -l < "$ssh_log" | tr -d ' ')" "an unrecorded task was dialled"
   ID=$saved_id
   pass "T15 a recorded task is reached on its own box"
 }

@@ -35,7 +35,8 @@
 # approved set from fm-boat-budget-lib.sh. The connection verifies the one id
 # in state/.boat-route-box, which fm-boat-send.sh writes when it selects a box.
 # A command argument that is a task id in state/.boat-task-box uses that
-# task's box instead. When that box is not the alias's current sandbox, the
+# task's box instead, as does state/<id>.status or a path under data/<id>/.
+# When that box is not the alias's current sandbox, the
 # alias is refreshed to it first, and the route record is updated only after
 # that refresh succeeds.
 #
@@ -149,7 +150,9 @@ if [ "$ROUTE" = boat-eng ] || [ "$HOST" = boat-prove ]; then
     elif [ -f "$TASK_MAP" ]; then
       TASK_BOX=$(awk 'NF >= 2 { print $1, $2 }' "$TASK_MAP" | while read -r tid tbox; do
         for arg in "$@"; do
-          [ "$arg" = "$tid" ] && printf '%s\n' "$tbox"
+          case "$arg" in
+            "$tid"|"state/$tid.status"|"data/$tid/"*) printf '%s\n' "$tbox" ;;
+          esac
         done
       done | sort -u)
       case "$TASK_BOX" in

@@ -651,7 +651,10 @@ It adds no automatic worker retry, merge path, or supervision loop.
 
 ### Sending from another home
 
-Every other home on the machine, including each second mate, sends through the same controller home rather than registering a route of its own.
+Each second mate home can send through the same controller home, but the shared lane accepts only allowlisted code-only projects under the existing Boat rules, currently firstmate and dev-loop.
+Adding a mate's projects to that allowlist and adding a client lane wait on the captain; the client lane would allow only Claude or Codex workers, refuse Grok and Muse, and use secrets only through `lg run` with a read-only identity for each box.
+The health second mate is excluded because its only project contains health data, which never leaves this machine.
+Alexander-media video renders stay on the PC.
 One controller keeps one send lock, one environment receipt per box, one owner of the `boat-prove` alias, and one spend reservation, so several homes cannot resume or reserve the same box against each other.
 Give each task an id that is unique across homes, for example prefixed with the sending home's name, because the box refuses an id it already holds.
 After a send succeeds, arm a watch in the sending home so the box worker's reports wake that home:

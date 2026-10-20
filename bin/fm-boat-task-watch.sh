@@ -4,7 +4,7 @@
 #        fm-boat-task-watch.sh poll <controller-home> <task-id>
 #        fm-boat-task-watch.sh disarm <task-id>
 #
-# Every second mate home sends Boat work through one shared controller home,
+# Eligible second mate homes send code-only Boat work through one shared controller home,
 # FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < request.json
 # (docs/remote-secondmates.md "Sending from another home"). The worker then
 # reports into the box's boat-eng home, which the sending home never reads.
@@ -17,14 +17,13 @@
 # check: wake in the sending home; no new schedule or loop exists.
 #
 # poll reads the remote status through the controller with
-# fm-on.sh boat-eng fm-remote-file.sh get state/<task-id>.status and prints one
+# fm-on.sh boat-eng fm-remote-delta-read.sh state/<task-id>.status <offset>
+# <prefix-sha256> 0 and prints one
 # `boat-task <task-id>: <status line>` per new done, failed, blocked,
-# needs-decision, or resolved line. Other lines only advance the cursor
-# state/boat-<task-id>.boat-watch. A remote file shorter than the cursor is read
-# again from its start. An unreadable remote (box stopped, unreachable, or
-# status gone) prints nothing, except one line once it has stayed unreadable
-# for FM_BOAT_WATCH_LOST_SECS (default 1800) after a last seen line that was not
-# done or failed. Neither poll nor fm-on.sh resumes, stops, or extends a box.
+# needs-decision, or resolved line. Other lines only advance the byte and
+# prefix-sha256 cursor in state/boat-<task-id>.boat-watch. A continuity break
+# restarts from the beginning. An unreadable remote prints nothing.
+# Neither poll nor fm-on.sh resumes, stops, or extends a box.
 # FM_BOAT_WATCH_ON replaces fm-on.sh for tests only.
 #
 # disarm, run after FM_HOME=<controller-home> bin/fm-boat-send.sh --teardown
@@ -47,6 +46,11 @@ valid_controller() {  # <controller-home>
   case "$1" in /*) ;; *) return 1 ;; esac
   [ -d "$1" ] && [ ! -L "$1" ] && [ -d "$1/state" ] && [ ! -L "$1/state" ]
 }
+shim_content() {
+  printf '%s\n' '#!/usr/bin/env bash' '# fm-boat-task-watch owned check' \
+    "export FM_HOME=$(printf '%q' "$FM_HOME")" \
+    "exec $(printf '%q' "$SCRIPT_DIR/fm-boat-task-watch.sh") poll $(printf '%q' "$1") $(printf '%q' "$2")"
+}
 [ -d "$STATE" ] && [ ! -L "$STATE" ] || die 'sending home state directory is unavailable'
 
 arm() {  # <controller-home> <task-id>
@@ -60,10 +64,11 @@ arm() {  # <controller-home> <task-id>
   fi
   shim="$STATE/boat-$id.check.sh"
   [ ! -L "$shim" ] || die 'unsafe check path'
+  if [ -e "$shim" ] && ! cmp -s "$shim" <(shim_content "$controller" "$id"); then
+    die "check already exists and is not this watch: boat-$id"
+  fi
   tmp=$(umask 077; mktemp "$STATE/.boat-watch-shim.XXXXXX") || die 'could not write the check'
-  if ! printf '%s\n' '#!/usr/bin/env bash' \
-    "export FM_HOME=$(printf '%q' "$FM_HOME")" \
-    "exec $(printf '%q' "$SCRIPT_DIR/fm-boat-task-watch.sh") poll $(printf '%q' "$controller") $(printf '%q' "$id")" > "$tmp" ||
+  if ! shim_content "$controller" "$id" > "$tmp" ||
     ! chmod 0700 "$tmp" || ! mv -f -- "$tmp" "$shim"; then
     rm -f -- "$tmp"
     die 'could not write the check'
@@ -73,46 +78,49 @@ arm() {  # <controller-home> <task-id>
 }
 
 poll() {  # <controller-home> <task-id>
-  local controller=$1 id=$2 cursor seen=0 lost_since='' lost_reported=0 last_verb='' tmp rc=0 now lines
-  local lost_secs=${FM_BOAT_WATCH_LOST_SECS:-1800} line verb tail_tmp
-  case "$lost_secs" in ''|*[!0-9]*|0) die 'FM_BOAT_WATCH_LOST_SECS must be a whole number of seconds above 0' ;; esac
+  local controller=$1 id=$2 cursor offset=0 prefix tmp payload rc=0 status from to from_hash to_hash bytes line verb restarted=0
+  local empty_hash=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
   valid_controller "$controller" || return 0
   cursor="$STATE/boat-$id.boat-watch"
   [ ! -L "$cursor" ] || die 'unsafe cursor path'
   if [ -f "$cursor" ]; then
-    seen=$(sed -n 's/^lines=\([0-9][0-9]*\)$/\1/p' "$cursor")
-    lost_since=$(sed -n 's/^lost_since=\([0-9][0-9]*\)$/\1/p' "$cursor")
-    lost_reported=$(sed -n 's/^lost_reported=\([01]\)$/\1/p' "$cursor")
-    last_verb=$(sed -n 's/^last_verb=\([a-z-]*\)$/\1/p' "$cursor")
+    offset=$(sed -n 's/^offset=\([0-9][0-9]*\)$/\1/p' "$cursor")
+    prefix=$(sed -n 's/^prefix_sha256=\([a-f0-9]\{64\}\)$/\1/p' "$cursor")
   fi
-  seen=${seen:-0}
-  lost_reported=${lost_reported:-0}
+  offset=${offset:-0}
+  prefix=${prefix:-$empty_hash}
   tmp=$(mktemp "${TMPDIR:-/tmp}/fm-boat-watch.XXXXXX")
-  tail_tmp=$(mktemp "${TMPDIR:-/tmp}/fm-boat-watch.XXXXXX")
+  payload=$(mktemp "${TMPDIR:-/tmp}/fm-boat-watch.XXXXXX")
   # shellcheck disable=SC2064 # Expand the temporary paths now.
-  trap "rm -f -- '$tmp' '$tail_tmp'" EXIT
-  env -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_ROOT_OVERRIDE \
-    FM_HOME="$controller" "${FM_BOAT_WATCH_ON:-$SCRIPT_DIR/fm-on.sh}" boat-eng \
-    fm-remote-file.sh get "state/$id.status" > "$tmp" 2>/dev/null < /dev/null || rc=$?
-  now=$(date +%s)
-  if [ "$rc" -ne 0 ]; then
-    if [ -z "$lost_since" ]; then
-      lost_since=$now
-    elif [ "$lost_reported" -eq 0 ] && [ $((now - lost_since)) -ge "$lost_secs" ]; then
-      case "$last_verb" in
-        done|failed) ;;
-        *)
-          printf 'boat-task %s: status unreadable for %s min (box stopped or unreachable); last seen: %s; inspect with FM_HOME=%s bin/fm-on.sh boat-eng fm-crew-state.sh %s\n' \
-            "$id" "$(((now - lost_since) / 60))" "${last_verb:-nothing}" "$controller" "$id"
-          lost_reported=1
-          ;;
-      esac
+  trap "rm -f -- '$tmp' '$payload'" EXIT
+  while :; do
+    rc=0
+    env -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_ROOT_OVERRIDE \
+      FM_HOME="$controller" "${FM_BOAT_WATCH_ON:-$SCRIPT_DIR/fm-on.sh}" boat-eng \
+      fm-remote-delta-read.sh "state/$id.status" "$offset" "$prefix" 0 > "$tmp" 2>/dev/null < /dev/null || rc=$?
+    [ "$rc" -eq 0 ] || break
+    [ "$(sed -n '1p' "$tmp")" = schema=fm-remote-delta.v1 ] || break
+    status=$(sed -n '2s/^status=//p' "$tmp")
+    if [ "$status" = continuity-broken ]; then
+      [ "$restarted" -eq 0 ] || break
+      offset=0
+      prefix=$empty_hash
+      printf 'offset=%s\nprefix_sha256=%s\n' "$offset" "$prefix" > "$cursor.tmp" && mv -f -- "$cursor.tmp" "$cursor"
+      restarted=1
+      continue
     fi
-  else
-    # Count only complete lines, so a line still being appended is read whole next time.
-    lines=$(wc -l < "$tmp" | tr -d ' ')
-    [ "$lines" -ge "$seen" ] || seen=0
-    head -n "$lines" "$tmp" | tail -n "+$((seen + 1))" > "$tail_tmp"
+    [ "$status" = delta ] && [ "$(sed -n '3p' "$tmp")" = "path=state/$id.status" ] || break
+    from=$(sed -n '4s/^from_offset=//p' "$tmp")
+    to=$(sed -n '5s/^to_offset=//p' "$tmp")
+    from_hash=$(sed -n '6s/^from_prefix_sha256=//p' "$tmp")
+    to_hash=$(sed -n '7s/^to_prefix_sha256=//p' "$tmp")
+    bytes=$(sed -n '9s/^payload_bytes=//p' "$tmp")
+    case "$to$bytes" in ''|*[!0-9]*) break ;; esac
+    [ "$from" = "$offset" ] && [ "$from_hash" = "$prefix" ] &&
+      [ "$to" -eq $((offset + bytes)) ] && [ "$bytes" -gt 0 ] &&
+      [ "${#to_hash}" -eq 64 ] || break
+    tail -n +12 "$tmp" > "$payload"
+    [ "$(LC_ALL=C wc -c < "$payload" | tr -d ' ')" -eq "$bytes" ] || break
     while IFS= read -r line; do
       case "$line" in *': '*) ;; *) continue ;; esac
       verb=''
@@ -120,18 +128,18 @@ poll() {  # <controller-home> <task-id>
       case "$verb" in
         done|failed|blocked|needs-decision|resolved) printf 'boat-task %s: %s\n' "$id" "$line" ;;
       esac
-      case "$verb" in working|paused|done|failed|blocked|needs-decision|resolved) last_verb=$verb ;; esac
-    done < "$tail_tmp"
-    seen=$lines
-    lost_since=''
-    lost_reported=0
-  fi
-  printf 'lines=%s\nlost_since=%s\nlost_reported=%s\nlast_verb=%s\n' \
-    "$seen" "$lost_since" "$lost_reported" "$last_verb" > "$cursor.tmp" && mv -f -- "$cursor.tmp" "$cursor"
+    done < "$payload"
+    offset=$to
+    prefix=$to_hash
+    printf 'offset=%s\nprefix_sha256=%s\n' "$offset" "$prefix" > "$cursor.tmp" && mv -f -- "$cursor.tmp" "$cursor"
+  done
 }
 
 disarm() {  # <task-id>
-  local id=$1
+  local id=$1 shim="$STATE/boat-$1.check.sh"
+  [ -f "$shim" ] && [ ! -L "$shim" ] &&
+    [ "$(sed -n '2p' "$shim")" = '# fm-boat-task-watch owned check' ] ||
+    die "check is not this watch: boat-$id"
   "$SCRIPT_DIR/fm-check-unregister.sh" "boat-$id" >/dev/null || die 'could not retire the check'
   rm -f -- "$STATE/boat-$id.boat-watch"
   printf 'disarmed: state/boat-%s.check.sh\n' "$id"
