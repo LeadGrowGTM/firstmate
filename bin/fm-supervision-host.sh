@@ -297,7 +297,7 @@ READY_LINE=
 DIGEST_DUE_ELAPSED=
 DIGEST_DUE=
 DIGEST_PENDING=
-# Processed marker and config/outcome-digest as of the last digest judgment.
+# Processed marker and config/outcome-digest before the last digest judgment.
 # A change while parked is judged again even when no deadline is armed.
 DIGEST_INPUTS_SEEN=0
 DIGEST_MARKER_SNAPSHOT=
@@ -682,7 +682,7 @@ turn_outcome_lookup_warning() {
 # The processed marker and digest configuration, compared as text so a rewrite
 # to the same bytes is not a change. Absent and unreadable stay distinct.
 digest_input_text() {  # <path>
-  if [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ]; then
+  if [ -f "$1" ] && [ -r "$1" ]; then
     cat "$1" 2>/dev/null || printf 'unreadable'
   elif [ -e "$1" ] || [ -L "$1" ]; then
     printf 'unreadable'
@@ -715,6 +715,7 @@ digest_inputs_changed() {
 # park boundary uses. The policy is reloaded on every ask.
 digest_judge() {
   local out at
+  digest_inputs_remember
   DIGEST_DUE=now
   DIGEST_PENDING=
   DIGEST_DUE_ELAPSED=
@@ -723,7 +724,6 @@ digest_judge() {
   if ! out=$("$SCRIPT_DIR/fm-branch-outcome.sh" digest --window "$FM_OUTCOME_DIGEST_WINDOW" \
       --pr-ready "$FM_OUTCOME_DIGEST_PR_READY" --now $((HOST_STARTED + PARK_ELAPSED)) 2>/dev/null); then
     log_line "digest	undecidable"
-    digest_inputs_remember
     return 0
   fi
   DIGEST_DUE=$(printf '%s\n' "$out" | sed -n 's/^due=//p')
@@ -740,7 +740,6 @@ digest_judge() {
     *) DIGEST_DUE=now ;;
   esac
   log_line "digest	due=$DIGEST_DUE	pending=${DIGEST_PENDING:-none}	repeats=$(printf '%s\n' "$out" | sed -n 's/^repeats=//p')"
-  digest_inputs_remember
 }
 
 # The branch-outcome line for rows the digest judged due now.

@@ -1491,6 +1491,69 @@ test_parked_host_rejudges_when_the_digest_config_changes() {
   pass "host: a digest configuration change re-judges outcomes the host is already holding"
 }
 
+test_parked_host_rejudges_a_config_edit_during_judgment() {
+  local home
+  home=$(make_home parked-config-during-judgment attended)
+  printf 'window=60\n' > "$home/config/outcome-digest"
+  printf 'working [at=1]: the report is finished\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency digest --summary 'the requested report is finished' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  cat > "$home/fakebin/jq" <<'SH'
+#!/usr/bin/env bash
+previous=
+for arg in "$@"; do
+  if [ "$previous" = --argjson ] && [ "$arg" = processed ]; then
+    : > "$FM_HOME/digest-jq-entered"
+    while [ ! -e "$FM_HOME/digest-jq-release" ]; do sleep 0.1; done
+    break
+  fi
+  previous=$arg
+done
+exec "$FM_TEST_DIGEST_JQ_REAL" "$@"
+SH
+  chmod +x "$home/fakebin/jq"
+  echo 0 > "$home/park-clock"
+  FM_TEST_DIGEST_JQ_REAL=$(command -v jq) FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 test -e "$home/digest-jq-entered" \
+    || fail "config judgment: the digest did not reach its decision: $(cat "$home/state/.supervision-host.log")"
+  printf 'window=0\n' > "$home/config/outcome-digest"
+  : > "$home/digest-jq-release"
+  wait_until 150 host_exited "$home" \
+    || fail "config judgment: the edit made during judgment was forgotten: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the mid-judgment edit must wake main"
+  assert_re '^supervision-host: branch-outcome: .*\(store rows 1\); ' "$home/host.out" \
+    "the mid-judgment edit must wake main for the held outcome"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the edit waited for the old digest deadline"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the config edit ran an engine turn"
+  pass "host: an outcome-digest edit during judgment remains visible to the parked host"
+}
+
+test_parked_host_rejudges_a_config_symlink_target() {
+  local home
+  home=$(make_home parked-config-symlink attended)
+  printf 'window=60\n' > "$home/config/outcome-policy"
+  ln -s outcome-policy "$home/config/outcome-digest"
+  printf 'working [at=1]: the report is finished\n' > "$home/state/demo.status"
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict captain \
+    --urgency digest --summary 'the requested report is finished' --wake 'signal: demo.status' >/dev/null \
+    || fail "fixture: could not record the held outcome"
+  echo 0 > "$home/park-clock"
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" start_host "$home"
+  wait_until 150 host_logged "$home" $'\tdigest\tdue=later\tpending=1\t' \
+    || fail "config symlink: the linked policy did not hold the outcome: $(cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "config symlink: the held outcome woke main before the edit"
+  printf 'window=0\n' > "$home/config/outcome-policy"
+  wait_until 150 host_exited "$home" \
+    || fail "config symlink: the target edit was not detected: $(cat "$home/state/.supervision-host.log")"
+  expect_code 0 "$(cat "$home/host.rc")" "the symlink target edit must wake main"
+  assert_re '^supervision-host: branch-outcome: .*\(store rows 1\); ' "$home/host.out" \
+    "the target edit must wake main for the held outcome"
+  [ "$(cat "$home/park-clock")" = 0 ] || fail "the target edit waited for the old digest deadline"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "the target edit ran an engine turn"
+  pass "host: editing a readable outcome-digest symlink target re-judges the parked outcome"
+}
+
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return() {
   local home drained
   home=$(make_home attended-go-away attended)
@@ -3664,6 +3727,8 @@ test_attended_digest_overdue_beside_a_closed_arm_wakes_main_first
 test_report_binds_status_provenance_to_the_validated_span
 test_parked_host_wakes_when_an_acknowledged_repeat_becomes_due
 test_parked_host_rejudges_when_the_digest_config_changes
+test_parked_host_rejudges_a_config_edit_during_judgment
+test_parked_host_rejudges_a_config_symlink_target
 test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return
 test_quiet_record_without_its_daemon_is_a_present_captain
 test_attended_main_only_close_passes_straight_to_main
