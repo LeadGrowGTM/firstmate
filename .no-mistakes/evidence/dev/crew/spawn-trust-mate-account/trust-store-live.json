@@ -1,0 +1,8 @@
+{
+  "command": "bin/fm-claude-trust.sh --secondmate-home <disposable-home> lab-sm",
+  "pinnedHomeTrusted": true,
+  "unrelatedPinnedEntryPreserved": true,
+  "ambientStoreUnchanged": true,
+  "wrongIdRefused": true,
+  "wrongIdMessage": "error: refusing to pre-register Claude trust: '/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BRR25K0KWDN0YWR9HCMJFA/.fm-trust-live.Z2Msom/secondmate' is marked for secondmate 'lab-sm', not 'wrong-id'"
+}
