@@ -26,6 +26,10 @@
 # needs-decision, or resolved line. Other lines only advance the byte and
 # prefix-sha256 cursor in state/boat-<task-id>.boat-watch. A continuity break
 # restarts from the beginning. An unreadable remote prints nothing.
+# Like bin/fm-boat-spend-check.sh, this custom check can lose one wake if the
+# watcher stops after poll prints a line but before it queues the wake.
+# The done line remains visible through the controller's crew state, so the
+# loss delays rather than hides the result; a generic watcher fix is separate work.
 # Neither poll nor fm-on.sh resumes, stops, or extends a box.
 # FM_BOAT_WATCH_ON replaces fm-on.sh for tests only.
 #
