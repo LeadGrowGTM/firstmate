@@ -1,0 +1,16 @@
+Primary state:
+
+
+
+
+
+
+                                                                                                    ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "write a test for fm-spawn.sh"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M5B6DTVMEKHKCQF31QP4KHJ3  ◆ Sonnet 5.5
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+Host startup:
+supervision-host stood down: this session does not own supervision
+host_rc=0

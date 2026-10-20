@@ -1,0 +1,31 @@
+PR policy and elapsed window:
+1
+due=later
+at=1792458834
+pending=1
+repeats=
+due=now
+at=
+pending=1
+repeats=
+due=now
+at=
+pending=1
+repeats=
+Presented same situation is suppressed until it changes:
+2
+due=none
+at=
+pending=
+repeats=2
+3
+due=now
+at=
+pending=3
+repeats=2
+Acknowledgment allows a later report of same status to be due:
+4
+due=now
+at=
+pending=4
+repeats=

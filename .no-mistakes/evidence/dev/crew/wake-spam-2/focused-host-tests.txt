@@ -1,0 +1,7 @@
+ok - host: attended captain outcomes the digest holds wake main once, at their window's close
+ok - host: an urgent captain outcome wakes main at once and carries the held ones
+ok - host: outcomes a main drain already presented never wake main at their window's close
+ok - host: the digest takes attended decision closes into the digest, and a malformed config restores main's per-outcome wakes
+ok - host: captain outcomes already due when a park starts wake main at once
+ok - host: a held outcome with a malformed store tail wakes main at park start
+ok - host: a changed branch prompt opens a new attended engine conversation before a decision wake

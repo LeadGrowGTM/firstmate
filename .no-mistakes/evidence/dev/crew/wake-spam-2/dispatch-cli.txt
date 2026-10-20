@@ -1,0 +1,29 @@
+Append decision signal and a stale decision row through production wake queue
+Without digest:
+eligible=0
+status=unsafe
+corrupted=0
+rows=
+tasks=
+unscoped=0
+With digest:
+eligible=1
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+Stale decision with digest:
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0
+Signal shadowed by stale decision with digest:
+eligible=0
+status=safe
+corrupted=0
+rows=1
+tasks=demo
+unscoped=0

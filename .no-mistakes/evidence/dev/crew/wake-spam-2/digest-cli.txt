@@ -1,0 +1,39 @@
+Scenario: routine progress does not cause a captain digest wake
+1
+due=none
+at=
+pending=
+repeats=
+Scenario: decision-owned signal routes to branch only when digest is enabled
+eligible=0
+status=unsafe
+corrupted=1
+rows=
+tasks=
+unscoped=0
+eligible=0
+status=unsafe
+corrupted=1
+rows=
+tasks=
+unscoped=0
+Scenario: captain digest batches, urgent outcome wakes with pending rows
+2
+due=later
+at=1792458772
+pending=2
+repeats=
+3
+due=now
+at=
+pending=2,3
+repeats=
+Scenario: captain outcomes remain available to the drain until acknowledged
+{"seq":1,"verdict":"routine","urgency":null,"summary":"still working","unread":true}
+{"seq":2,"verdict":"captain","urgency":"digest","summary":"decision requested","unread":true}
+{"seq":3,"verdict":"captain","urgency":"urgent","summary":"credential needed now","unread":true}
+{"seq":2,"verdict":"captain","urgency":"digest","summary":"decision requested","unread":false}
+{"seq":3,"verdict":"captain","urgency":"urgent","summary":"credential needed now","unread":false}
+Scenario: malformed append fails closed and cannot silently skip held outcomes
+error: refusing the digest decision because the outcome store is malformed or non-sequential
+malformed_digest_rc=1
