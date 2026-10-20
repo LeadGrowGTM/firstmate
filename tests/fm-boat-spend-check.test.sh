@@ -23,6 +23,10 @@
 #      once a day, and arm and disarm bind and remove the shim.
 #   7. "boat_bin" selects the CLI only as an absolute path to an executable
 #      file, and FM_BOAT_BIN wins over it.
+#   8. A box condition alerts on first sight, stays silent while unchanged
+#      across a later due run, alerts when its detail changes, stays silent
+#      when it clears, and alerts again when it returns. The remembered set
+#      survives a new run of the check. Spend still alerts on each due run.
 # shellcheck disable=SC2016  # literal dollar amounts in expected report lines
 set -u
 
@@ -418,6 +422,42 @@ test_only_the_three_read_commands_are_passed() {
   assert_equals 3 "$seen" "every alert path should still make only the three reads"
 }
 
+test_box_condition_alerts_once_per_distinct_detail() {
+  local home out
+  home=$(make_world dedupe-restore)
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: restore handed over with 2/2 image file(s) missing"'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: Restore incomplete: restore handed over with 2/2 image file(s) missing' \
+    "$out" "first sighting alerts"
+  assert_present "$home/state/.boat-spend-alerted" "the remembered set is stored under state"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  [ -z "$out" ] || fail "the same restore error should stay silent on the next due run: $out"
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: restore handed over with 1/2 image file(s) missing"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 172800)))
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: Restore incomplete: restore handed over with 1/2 image file(s) missing' \
+    "$out" "changed error text alerts"
+  set_json "$home" list '.sandboxes[0].error = null'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 259200)))
+  [ -z "$out" ] || fail "a cleared restore error should be silent: $out"
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: restore handed over with 2/2 image file(s) missing"'
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 345600)))
+  assert_equals 'boat-spend: sandbox bx_one has a restore error: Restore incomplete: restore handed over with 2/2 image file(s) missing' \
+    "$out" "a cleared condition alerts again when it returns"
+}
+
+test_spend_cap_still_alerts_when_a_known_box_error_does_not() {
+  local home out
+  home=$(make_world dedupe-spend)
+  set_json "$home" limits '.creditUsedSeconds = 3500000'
+  set_json "$home" list '.sandboxes[0].error = "Restore incomplete: two image files missing"'
+  out=$(run_check "$home")
+  assert_equals 'boat-spend: spend $35 is over the $30 ceiling; sandbox bx_one has a restore error: Restore incomplete: two image files missing' \
+    "$out" "first run reports the spend cap and the restore error"
+  out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+  assert_equals 'boat-spend: spend $35 is over the $30 ceiling' \
+    "$out" "the spend cap alerts again while the unchanged restore error stays quiet"
+}
+
 test_daily_gate_and_persistent_condition() {
   local home out
   home=$(make_world gate)
@@ -442,10 +482,12 @@ test_arm_runs_through_the_registered_shim_and_disarm_removes_it() {
   out=$(env -u FM_HOME FM_BOAT_BIN="$FAKE_BOAT" FIXTURES="$home/fixtures" FM_BOAT_SPEND_NOW="$NOW" "$home/state/boat-spend.check.sh" 2>&1) \
     || fail "registered shim failed: $out"
   assert_equals 'boat-spend: auto-refill is enabled' "$out" "shim did not run the check in the pinned home"
+  assert_present "$home/state/.boat-spend-alerted" "a completed check should remember which box conditions it reported"
   env FM_HOME="$home" "$CHECK" disarm >/dev/null
   assert_absent "$home/state/boat-spend.check.sh" "disarm left the shim"
   assert_absent "$home/state/boat-spend.check-trust" "disarm left the trust binding"
   assert_absent "$home/state/.boat-spend-check" "disarm left the record"
+  assert_absent "$home/state/.boat-spend-alerted" "disarm left the remembered box conditions"
   home=$(make_world disarm-failed)
   : > "$home/fixtures/timeout"
   run_check "$home" >/dev/null
@@ -514,6 +556,8 @@ test_missing_active_states_is_not_guessed
 test_absent_config_is_off
 test_dispatch_reservation_keys_are_accepted
 test_only_the_three_read_commands_are_passed
+test_box_condition_alerts_once_per_distinct_detail
+test_spend_cap_still_alerts_when_a_known_box_error_does_not
 test_daily_gate_and_persistent_condition
 test_arm_runs_through_the_registered_shim_and_disarm_removes_it
 pass "fm-boat-spend-check"
