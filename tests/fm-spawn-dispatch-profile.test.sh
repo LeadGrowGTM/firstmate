@@ -74,6 +74,29 @@ make_spawn_case() {
   printf '%s\n' "$case_dir|$home|$proj|$wt|$fakebin|$launchlog"
 }
 
+# make_batch_case <name> <harness> <id1> <id2>
+# A batch allocates one isolated copy per pair, so each task needs its own
+# worktree; the single-copy fake would pile every pair onto one copy and trip
+# the custody guard. The indexed pane-path mode serves each pair its own copy
+# in pair order, exactly like a real pool would.
+make_batch_case() {
+  local name=$1 harness=$2 case_dir home proj fakebin launchlog
+  shift 2
+  case_dir="$TMP_ROOT/$name"
+  home="$case_dir/home"
+  proj="$case_dir/project"
+  launchlog="$case_dir/launch.log"
+  fakebin=$(make_spawn_fakebin "$case_dir/fake")
+  fm_test_spawn_home "$home" "$harness"
+  fm_git_worktree "$proj" "$case_dir/wt-1" "wt-$name-1"
+  git -C "$proj" worktree add --quiet -b "wt-$name-2" "$case_dir/wt-2"
+  printf '%s\n' "$case_dir/wt-1" "$case_dir/wt-2" > "$case_dir/pane-paths"
+  for id in "$@"; do
+    fm_test_spawn_brief "$home" "$id"
+  done
+  printf '%s\n' "$case_dir|$home|$proj|$case_dir/wt-1|$fakebin|$launchlog"
+}
+
 enable_dispatch_profile() {
   local home=$1
   printf '%s\n' '{"rules":[{"when":"current events","use":{"harness":"grok","model":"grok-4","effort":"high"}}],"default":{"harness":"codex","model":"gpt-5","effort":"medium"}}' \
@@ -1236,10 +1259,11 @@ test_native_pi_ultra_is_explicit_and_model_scoped() {
 
 test_batch_preserves_native_ultra() {
   local rec id1=ultra-batch-a id2=ultra-batch-b out launch
-  rec=$(make_spawn_case ultra-batch pi "$id1" "$id2")
+  rec=$(make_batch_case ultra-batch pi "$id1" "$id2")
   read_case_record "$rec"
   enable_dispatch_profile "$HOME_DIR"
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+  out=$(FM_FAKE_PANE_PATHS_FILE="$CASE_DIR/pane-paths" FM_FAKE_PANE_INDEX_FILE="$CASE_DIR/pane-index" \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
     "$id1=$PROJ_DIR" "$id2=$PROJ_DIR" --harness pi --model codex-native/gpt-6-astra --effort ultra)
   expect_code 0 "$?" "native Ultra batch failed: $out"
   assert_meta_profile "$HOME_DIR/state/$id1.meta" pi codex-native/gpt-6-astra ultra
@@ -1778,11 +1802,12 @@ test_batch_forwards_shared_profile_flags() {
   local rec id1 id2 out status
   id1="profile-batch-a-z9"
   id2="profile-batch-b-z10"
-  rec=$(make_spawn_case profile-batch claude "$id1" "$id2")
+  rec=$(make_batch_case profile-batch claude "$id1" "$id2")
   read_case_record "$rec"
   enable_dispatch_profile "$HOME_DIR"
 
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+  out=$(FM_FAKE_PANE_PATHS_FILE="$CASE_DIR/pane-paths" FM_FAKE_PANE_INDEX_FILE="$CASE_DIR/pane-index" \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
     "$id1=$PROJ_DIR" "$id2=$PROJ_DIR" --harness codex --model gpt-5 --effort high)
   status=$?
   expect_code 0 "$status" "batch spawn with shared profile flags should succeed"
@@ -1797,10 +1822,11 @@ test_batch_forwards_leading_option_fallback_reason() {
   local rec id1 id2 out status id reason='--quota exhausted'
   id1="profile-batch-reason-a"
   id2="profile-batch-reason-b"
-  rec=$(make_spawn_case profile-batch-reason codex "$id1" "$id2")
+  rec=$(make_batch_case profile-batch-reason codex "$id1" "$id2")
   read_case_record "$rec"
   printf '%s\n' '{"default":{"harness":"codex","model":"gpt-6.1-sol","effort":"high"}}' > "$HOME_DIR/config/crew-dispatch.json"
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
+  out=$(FM_FAKE_PANE_PATHS_FILE="$CASE_DIR/pane-paths" FM_FAKE_PANE_INDEX_FILE="$CASE_DIR/pane-index" \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
     "$id1=$PROJ_DIR" "$id2=$PROJ_DIR" --harness codex --model gpt-6.1-sol --effort high "--fallback-reason=$reason")
   status=$?
   expect_code 0 "$status" "batch fallback reason should reach each task"$'\n'"$out"
@@ -2417,12 +2443,17 @@ SH
 }
 
 test_claude_plugin_directories_invalid_file_is_skipped() {
-  local rec id out status bad
+  local rec id out status bad n=0
   id="profile-claude-plugins-invalid-z42"
   rec=$(make_spawn_case profile-claude-plugins-invalid claude "$id")
   read_case_record "$rec"
   mkdir -p "$HOME_DIR/config"
   for bad in '[]' '["relative"]' '["/missing/plugin"]' '{"path":"/tmp"}' '{not-json'; do
+    # Every task allocates its own copy, so each launch in this loop needs a
+    # fresh worktree instead of piling onto the first launch's claim.
+    n=$((n + 1))
+    git -C "$PROJ_DIR" worktree add --quiet -b "wt-plugins-invalid-$n" "$CASE_DIR/wt-$n"
+    WT_DIR="$CASE_DIR/wt-$n"
     printf '%s\n' "$bad" > "$HOME_DIR/config/claude-plugin-dirs.json"
     out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
     status=$?

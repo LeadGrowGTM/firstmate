@@ -39,6 +39,9 @@ Promote the selected scout.
 
 ## Firstmate spec
 Verify promotion preserves the behavior under test.
+Goal: Promote the selected scout without blocking on parent bindings.
+Off-limits: Changes outside this disposable test case.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract only with this fixture's private project and state.
 EOF
 }
 
@@ -749,6 +752,9 @@ test_secondmate_teardown_requires_parent_binding() {
   parent=$(make_home teardown-parent)
   child=$(make_home teardown-child)
   printf '%s\n' mate > "$child/.fm-secondmate-home"
+  # Teardown resolves the recorded project through git for its shared slot
+  # lock, so the fixture project must be a real checkout, not a bare home dir.
+  fm_git_init_commit "$child"
   seed_commitment "$parent" pf-teardown req-teardown x secondmate:mate work-child
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
   fm_write_meta "$child/state/work-child.meta" \
@@ -773,6 +779,8 @@ test_secondmate_teardown_requires_parent_binding() {
     || fail "home-seed validation rejected a punctuation-bearing operational registry record"
   registry_before=$(cat "$parent/data/secondmates.md")
   marker_before=$(cat "$child/.fm-secondmate-home")
+  # Teardown resolves the recorded project through git for its shared slot lock.
+  fm_git_init_commit "$child"
   seed_commitment "$parent" pf-teardown-valid req-teardown-valid x secondmate:mate work-child
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
   fm_write_meta "$child/state/work-child.meta" \
@@ -882,6 +890,8 @@ test_secondmate_teardown_resolves_parent_from_durable_record_when_env_lost() {
 
   assert_local_secondmate_parent_record "$child" "$parent_resolved"
 
+  # Teardown resolves the recorded project through git for its shared slot lock.
+  fm_git_init_commit "$child"
   seed_commitment "$parent" pf-durable req-durable x secondmate:mate work-child
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
   fm_write_meta "$child/state/work-child.meta" \
@@ -917,6 +927,8 @@ test_secondmate_teardown_durable_record_missing_parent_registration_still_refuse
   make_fake_curl "$child" >/dev/null
   fm_fake_exit0 "$child/fakebin" tmux treehouse no-mistakes gh gh-axi
   assert_local_secondmate_parent_record "$child" "$parent_resolved"
+  # Teardown resolves the recorded project through git for its shared slot lock.
+  fm_git_init_commit "$child"
   fm_write_meta "$child/state/work-child.meta" \
     "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
     "worktree=$child" "project=$child" "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
@@ -1014,9 +1026,13 @@ test_secondmate_teardown_rejects_unsafe_durable_parent_records() {
     child=$(cd "$child" && pwd -P)
     make_fake_curl "$child" >/dev/null
     fm_fake_exit0 "$child/fakebin" tmux treehouse no-mistakes gh gh-axi
+    # An unparseable parent record also breaks root-home resolution, so no
+    # existing copy can satisfy the slot lock: name copies that do not exist,
+    # leaving the unsafe record itself as the only thing the refusal can name.
     fm_write_meta "$child/state/work-child.meta" \
       "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
-      "worktree=$child" "project=$child" "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+      "worktree=$child/no-such-copy" "project=$child/no-such-project" \
+      "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
     parent_record="$child/.fm-secondmate-parent"
     case "$case_name" in
       symlink)
@@ -1078,11 +1094,14 @@ test_secondmate_teardown_rejects_nul_bearing_durable_parent_record() {
   fm_fake_exit0 "$child/fakebin" tmux treehouse no-mistakes gh gh-axi
   assert_local_secondmate_parent_record "$child" "$parent_resolved"
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
-  fm_git_init_commit "$child/projects/worktree"
   printf 'manual\n' > "$child/config/backlog-backend"
+  # A NUL-bearing record is unparseable, which also breaks root-home
+  # resolution, so no existing copy can satisfy the slot lock: name copies
+  # that do not exist, leaving the corrupt record itself as the refusal's
+  # subject.
   fm_write_meta "$child/state/work-child.meta" \
     "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
-    "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
+    "worktree=$child/no-such-copy" "project=$child/no-such-project" \
     "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
   pre=${parent_resolved%??????}
   suf=${parent_resolved#"$pre"}
@@ -1179,6 +1198,8 @@ test_secondmate_parent_binding_matches_literal_id() {
   parent=$(make_home teardown-literal-parent)
   child=$(make_home teardown-literal-child)
   printf '%s\n' 'mate.id' > "$child/.fm-secondmate-home"
+  # Teardown resolves the recorded project through git for its shared slot lock.
+  fm_git_init_commit "$child"
   printf -- '- mateXid - synthetic (home: %s; scope: synthetic; projects: ; added 2026-07-30)\n' \
     "$child" > "$parent/data/secondmates.md"
   seed_commitment "$parent" pf-teardown-literal req-teardown-literal x secondmate:mate.id work-literal
@@ -1507,6 +1528,8 @@ test_dropped_baton_now_surfaces_open_loop() {
   child=$(cd "$child" && pwd -P)
   make_fake_curl "$child" >/dev/null
   fm_fake_exit0 "$child/fakebin" tmux treehouse no-mistakes gh gh-axi
+  # Teardown resolves the recorded project through git for its shared slot lock.
+  fm_git_init_commit "$child"
   log="$TMP_ROOT/curl.log"; : > "$log"
 
   seed_repro_commitment "$parent" public-final-pi-rearm-repro req-pirearm \
@@ -1557,6 +1580,8 @@ test_control_registered_followon_is_guarded() {
   child=$(cd "$child" && pwd -P)
   make_fake_curl "$child" >/dev/null
   fm_fake_exit0 "$child/fakebin" tmux treehouse no-mistakes gh gh-axi
+  # Teardown resolves the recorded project through git for its shared slot lock.
+  fm_git_init_commit "$child"
   seed_repro_commitment "$parent" public-final-pi-rearm-ship req-pirearm2 \
     secondmate:mate pi-rearm-loop-fix-r1
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"

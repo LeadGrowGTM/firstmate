@@ -108,7 +108,25 @@ fm_test_fake_tmux_spawn() {
 #!/usr/bin/env bash
 set -u
 case "$*" in
-  *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
+  *"#{pane_current_path}"*)
+    if [ -n "${FM_FAKE_PANE_PATHS_FILE:-}" ]; then
+      # Indexed mode: a batch starts one `treehouse get` per pair, so each
+      # pair settles into its own copy from this newline-separated list.
+      # Falls back to the single path when the list is exhausted.
+      fm_fake_pane_index=$(cat "${FM_FAKE_PANE_INDEX_FILE:-/dev/null}" 2>/dev/null || echo 0)
+      case "$fm_fake_pane_index" in ''|*[!0-9-]*) fm_fake_pane_index=0 ;; esac
+      if [ "$fm_fake_pane_index" -ge 0 ] 2>/dev/null; then
+        fm_fake_pane_path=$(sed -n "$((fm_fake_pane_index + 1))p" "$FM_FAKE_PANE_PATHS_FILE" 2>/dev/null)
+      else
+        fm_fake_pane_path=
+      fi
+      [ -n "$fm_fake_pane_path" ] || fm_fake_pane_path=${FM_FAKE_PANE_PATH:-}
+      printf '%s\n' "$fm_fake_pane_path"
+    else
+      printf '%s\n' "${FM_FAKE_PANE_PATH:-}"
+    fi
+    exit 0
+    ;;
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
@@ -120,6 +138,17 @@ case "${1:-}" in
     ;;
   has-session|new-session|new-window|kill-window|set-window-option) exit 0 ;;
   send-keys)
+    case "$*" in
+      *fm-treehouse-pool-check.sh*)
+        # The per-pair `treehouse get` line advances indexed pane-path mode to
+        # the next copy; single-path fakes never set the index file.
+        if [ -n "${FM_FAKE_PANE_INDEX_FILE:-}" ]; then
+          fm_fake_pane_index=$(cat "$FM_FAKE_PANE_INDEX_FILE" 2>/dev/null || echo -1)
+          case "$fm_fake_pane_index" in ''|*[!0-9-]*) fm_fake_pane_index=-1 ;; esac
+          printf '%s\n' "$((fm_fake_pane_index + 1))" > "$FM_FAKE_PANE_INDEX_FILE"
+        fi
+        ;;
+    esac
     if [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
       prev=
       for a in "$@"; do

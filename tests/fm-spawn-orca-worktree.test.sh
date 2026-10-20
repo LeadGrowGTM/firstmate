@@ -98,6 +98,9 @@ Exercise an Orca-backed spawn for $id.
 
 ## Firstmate spec
 Confirm the launch enters the worktree Orca created for it.
+Goal: Enter the worktree Orca created for $id.
+Off-limits: Changes outside this disposable test case.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract only with this fixture's private project and state.
 EOF
   fb=$(make_orca_fakebin "$case_dir")
 
@@ -136,6 +139,9 @@ Exercise a relaunch attempt against a recorded Orca task.
 
 ## Firstmate spec
 Confirm the relaunch is refused before any worktree re-entry logic runs.
+Goal: Refuse the relaunch for $id before worktree re-entry.
+Off-limits: Changes outside this disposable test case.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Exercise the relaunch interface using the fixture's stubbed endpoint.
 EOF
   {
     echo "window=fm-$id"

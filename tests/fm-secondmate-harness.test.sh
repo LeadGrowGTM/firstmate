@@ -1127,6 +1127,9 @@ Exercise an ordinary crew launch.
 
 ## Firstmate spec
 Verify secondmate harness settings do not affect it.
+Goal: Launch an ordinary crew task with secondmate harness settings present.
+Off-limits: Changes outside this disposable test case.
+Contracts and gates (follow them; spawned inside a pipeline, move only through its states): Use the test's delivery contract only with this fixture's private project and state.
 EOF
   : > "$launchlog"
   PATH="$fakebin:$BASE_PATH" TMUX="fake,1,0" CLAUDECODE=1 \
