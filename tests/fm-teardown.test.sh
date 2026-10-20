@@ -38,6 +38,8 @@
 #   (o) fm-pr-check rerun after HEAD moved                      -> no stale pr_head
 #   (p) fm-pr-check when local HEAD lags                        -> record remote PR head
 #   (q) no-mistakes + NO pr= recorded, PR discovered by branch  -> ALLOW  (yolo/no-CI merge)
+#   (q6) no-mistakes + recorded pr= still OPEN, branch pushed    -> REFUSE (open-PR guard)
+#   (q7) no-mistakes + recorded pr= merged, branch pushed        -> ALLOW  (no regression)
 #   (q2) no-mistakes + squash-merged, local followed pipeline rebase -> ALLOW
 #   (q3) no-mistakes + squash-merged, same file, different content   -> REFUSE
 #   (q4) no-mistakes + squash-merged rebased local plus extra commit -> REFUSE
@@ -280,6 +282,24 @@ SH
   chmod +x "$case_dir/fakebin/gh-axi" "$case_dir/fakebin/gh"
 }
 
+# Override GitHub lookups to report PR 7 as still open. Mirrors
+# add_gh_pr_merged_for_head's gh-axi shape with an open state, so the
+# recorded-pr= guard reads it as not confirmed merged.
+add_gh_pr_open() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/gh-axi" <<'SH'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "pr list")
+    printf '%s\n' "count: 1 (showing first 1)" "pull_requests[1]{number,state}:" "  7,open" ; exit 0 ;;
+  "pr view")
+    printf '%s\n' "pull_request:" "  number: 7" "  state: open" ; exit 0 ;;
+esac
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/gh-axi"
+}
+
 # Squash-merged history whose pipeline rebased the branch onto a newer main that
 # edited the same shared file. A local copy left behind by that rebase holds
 # different content for the shared file, so its per-commit patch ids against the
@@ -414,6 +434,17 @@ echo "error: gh unavailable" >&2
 exit 1
 SH
   chmod +x "$case_dir/fakebin/gh-axi" "$case_dir/fakebin/gh"
+}
+
+# Override fakebin/gerrit-axi so change 12345 reads as MERGED.
+add_gerrit_merged() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/gerrit-axi" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"ok":true,"changes":[{"change":12345,"status":"MERGED"}]}'
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/gerrit-axi"
 }
 
 # Override fakebin/treehouse so `treehouse return --force <wt>` fails with a
@@ -714,6 +745,8 @@ test_teardown_closes_the_backlog_item_itself() {
   case_dir=$(make_case tasks-axi-close)
   write_meta "$case_dir" no-mistakes ship
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$case_dir/state/task-x1.meta"
+  # The recorded PR must read as merged or ordinary teardown refuses it.
+  add_gh_pr_merged_for_head "$case_dir" "$(git -C "$case_dir/wt" rev-parse HEAD)"
   seed_backlog_in_flight "$case_dir"
 
   out=$(run_teardown "$case_dir") || fail "teardown failed with a real backlog"
@@ -737,6 +770,8 @@ test_teardown_closes_a_gerrit_task_with_its_change_url_as_a_note() {
   case_dir=$(make_case tasks-axi-close-gerrit)
   write_meta "$case_dir" no-mistakes ship
   printf 'pr=%s\n' "$gerrit_url" >> "$case_dir/state/task-x1.meta"
+  # The recorded change must read as merged or ordinary teardown refuses it.
+  add_gerrit_merged "$case_dir"
   seed_backlog_in_flight "$case_dir"
   # Pin the refusal tasks-axi applies to a --pr link that is not a canonical
   # GitHub pull request, so this case keeps reproducing whatever the installed
@@ -768,6 +803,8 @@ SH
   case_dir=$(make_case tasks-axi-close-github-under-refusal)
   write_meta "$case_dir" no-mistakes ship
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$case_dir/state/task-x1.meta"
+  # The recorded PR must read as merged or ordinary teardown refuses it.
+  add_gh_pr_merged_for_head "$case_dir" "$(git -C "$case_dir/wt" rev-parse HEAD)"
   seed_backlog_in_flight "$case_dir"
   cp "$TMP_ROOT/tasks-axi-close-gerrit/fakebin/tasks-axi" "$case_dir/fakebin/tasks-axi"
   out=$(run_teardown "$case_dir" 2>&1) || fail "teardown of a landed GitHub task failed: $out"
@@ -782,6 +819,8 @@ test_teardown_manual_backend_leaves_the_backlog_to_the_operator() {
   case_dir=$(make_case tasks-axi-manual-optout)
   write_meta "$case_dir" no-mistakes ship
   printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$case_dir/state/task-x1.meta"
+  # The recorded PR must read as merged or ordinary teardown refuses it.
+  add_gh_pr_merged_for_head "$case_dir" "$(git -C "$case_dir/wt" rev-parse HEAD)"
   printf '%s\n' manual > "$case_dir/config/backlog-backend"
   seed_backlog_in_flight "$case_dir"
 
@@ -948,6 +987,63 @@ test_no_pr_recorded_discovers_merged_pr_by_branch_allows() {
   assert_grep 'https://github.com/example/repo/pull/7' "$case_dir/data/backlog.md" \
     "no-pr-branch-discovery: resolved PR URL was not recorded on completion"
   pass "teardown discovers a merged PR by branch name and tears down when no pr= was ever recorded"
+}
+
+test_recorded_open_pr_refuses_ordinary_teardown() {
+  local case_dir rc head
+  case_dir=$(make_case recorded-open-pr)
+  write_meta "$case_dir" no-mistakes ship
+  # A pushed branch with an open PR: reachable from a remote-tracking branch,
+  # so the landed-work check alone would allow teardown and delete the record
+  # the later merge needs. The recorded-pr= guard must refuse first.
+  wt_commit_file "$case_dir" feature.txt hello "add feature"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin fm/task-x1
+  head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  append_pr_meta_url "$case_dir"
+  add_gh_pr_open "$case_dir"
+  seed_backlog_in_flight "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "recorded-open-pr: ordinary teardown should refuse while the recorded PR is open"
+  grep -Fq "recorded PR https://github.com/example/repo/pull/7 is not confirmed merged" "$case_dir/stderr" \
+    || fail "recorded-open-pr: refusal did not name the PR URL: $(cat "$case_dir/stderr")"
+  grep -Fq "nothing was changed" "$case_dir/stderr" \
+    || fail "recorded-open-pr: refusal did not state that nothing was changed"
+  assert_refusal_retained_task_state "$case_dir" recorded-open-pr "$head"
+  [ "$(backlog_row_state "$case_dir")" = "in_flight" ] \
+    || fail "recorded-open-pr: refusal closed the backlog item"
+  pass "ordinary teardown refuses while a recorded PR is open and changes nothing"
+}
+
+test_recorded_merged_pr_still_tears_down() {
+  local case_dir rc head
+  case_dir=$(make_case recorded-merged-pr)
+  write_meta "$case_dir" no-mistakes ship
+  # Same setup as the open-PR refusal, but the recorded PR reads as merged:
+  # teardown must proceed and land the backlog close.
+  wt_commit_file "$case_dir" feature.txt hello "add feature"
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin fm/task-x1
+  head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  append_pr_meta_url "$case_dir"
+  add_gh_pr_merged_for_head "$case_dir" "$head"
+  seed_backlog_in_flight "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "recorded-merged-pr: teardown should succeed when the recorded PR is merged: $(cat "$case_dir/stderr")"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "recorded-merged-pr: teardown printed a REFUSED line"
+  [ "$(backlog_row_state "$case_dir")" = "done" ] \
+    || fail "recorded-merged-pr: teardown did not close the backlog item"
+  pass "ordinary teardown still succeeds when the recorded PR is merged"
 }
 
 test_squash_merged_pr_allows_replayed_unpushed_patch() {
@@ -4675,6 +4771,8 @@ test_teardown_retains_v1_journal_when_workspace_query_ambiguous
 test_squash_merged_branch_deleted_allows
 test_squash_merged_pr_allows_when_head_ancestor_of_pr_head
 test_no_pr_recorded_discovers_merged_pr_by_branch_allows
+test_recorded_open_pr_refuses_ordinary_teardown
+test_recorded_merged_pr_still_tears_down
 test_squash_merged_pr_allows_replayed_unpushed_patch
 test_merged_pr_with_later_local_commit_refuses
 test_squash_merged_rebased_branch_allows

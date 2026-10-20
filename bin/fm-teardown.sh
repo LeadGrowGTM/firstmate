@@ -64,6 +64,12 @@
 # accepting unlanded edits to the same paths. Teardown still accepts a merged PR
 # whose head contains the current local work (ancestor or equivalent patch ids),
 # or a clean content-in-default tree match. Anything else refuses.
+# Before any of that, a recorded pr= the forge confirms is not merged (open
+# or closed-unmerged) refuses every non-forced teardown outright (only
+# --force proceeds): a pushed branch with an open PR would otherwise read as
+# landed and lose the record its merge needs. A PR whose state the forge
+# cannot confirm falls through to the checks above instead. --retire-claim
+# keeps its records-only path outside this refusal.
 # The PR itself is resolved from the task's recorded pr= when present, or - when
 # no pr= was ever recorded (e.g. a yolo-authorized merge on a repo with no PR CI,
 # where the usual "checks green" fm-pr-check.sh trigger never fires) - by looking
@@ -1254,19 +1260,35 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
-if [ "$ONLY_IF_STOPPED" = 1 ] && [ -n "$PR_URL" ]; then
-  if ! fm_pr_url_parse "$PR_URL"; then
+# A recorded pr= the forge confirms is not merged refuses every non-forced
+# teardown, not just the --only-if-stopped sweep: a pushed branch with an
+# open PR reads as landed (reachable from a remote-tracking branch), so
+# without this ordinary teardown would delete the record a later merge
+# needs. Anything the forge cannot confirm - an unparseable recorded URL or
+# a failed lookup - falls through to the landed-work gates below, which
+# refuse unlanded work themselves; legacy and windowless records depend on
+# that fallthrough. --force still authorizes discarding, and --retire-claim
+# keeps its records-only path outside this gate.
+if [ -n "$PR_URL" ] && [ "$FORCE" != --force ] \
+  && { [ "$ONLY_IF_STOPPED" = 1 ] || [ "$RETIRE_CLAIM" != 1 ]; }; then
+  if fm_pr_url_parse "$PR_URL"; then
+    pr_status_rc=0
+    case "$FM_PR_PROVIDER" in
+      github) fm_pr_github_read_record "$FM_PR_OWNER" "$FM_PR_REPO" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+      gitlab) fm_pr_gitlab_read_record "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+      gerrit) fm_pr_gerrit_read_record "$FM_PR_HOST" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
+    esac
+    if [ "$ONLY_IF_STOPPED" = 1 ]; then
+      if [ "$pr_status_rc" -ne 0 ] || [ "$FM_PR_RECORD_MERGED" != true ]; then
+        echo "REFUSED: recorded PR $PR_URL is not confirmed merged; nothing was changed" >&2
+        exit 1
+      fi
+    elif [ "$pr_status_rc" -eq 0 ] && [ "$FM_PR_RECORD_MERGED" != true ]; then
+      echo "REFUSED: recorded PR $PR_URL is not confirmed merged; nothing was changed" >&2
+      exit 1
+    fi
+  elif [ "$ONLY_IF_STOPPED" = 1 ]; then
     echo "REFUSED: recorded PR for $ID cannot be verified as merged; nothing was changed" >&2
-    exit 1
-  fi
-  pr_status_rc=0
-  case "$FM_PR_PROVIDER" in
-    github) fm_pr_github_read_record "$FM_PR_OWNER" "$FM_PR_REPO" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
-    gitlab) fm_pr_gitlab_read_record "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
-    gerrit) fm_pr_gerrit_read_record "$FM_PR_HOST" "$FM_PR_NUMBER" || pr_status_rc=$? ;;
-  esac
-  if [ "$pr_status_rc" -ne 0 ] || [ "$FM_PR_RECORD_MERGED" != true ]; then
-    echo "REFUSED: recorded PR $PR_URL is not confirmed merged; nothing was changed" >&2
     exit 1
   fi
 fi
