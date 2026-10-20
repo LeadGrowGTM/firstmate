@@ -4,7 +4,6 @@
 #        fm-boat-worker.sh spawn <box-instance> < request.json
 #        fm-boat-worker.sh teardown <task-id> <box-instance>
 #        fm-boat-worker.sh idle <box-instance>
-#        fm-boat-worker.sh endpoints <box-instance>
 #        fm-boat-worker.sh retire-claim <task-id> <box-instance>
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
@@ -55,9 +54,6 @@
 # unknown transport completion
 # must be reconciled before reusing its id or rewriting its briefs.
 # idle reports whether any worker records or endpoints remain under that lock.
-# endpoints reports only whether a live fm-* worker window exists under that
-# lock, as `boat-endpoints-live: yes|no`; fm-boat-send.sh uses it before
-# stopping a box it resumed after a three-worker cap refusal.
 # Before spawn, intake adds a missing backlog item through fm-tasks-axi.sh;
 # an existing item must be dispatchable and match kind and project before its
 # brief can be rewritten. Ordinary spawn owns its In flight transition.
@@ -196,16 +192,16 @@ case "${1:-}" in
   validate) [ "$#" -eq 1 ] || die 'one operation required' ;;
   spawn) [ "$#" -eq 2 ] || die 'box instance required' ;;
   teardown) [ "$#" -eq 3 ] || die 'task id and box instance required' ;;
-  idle|endpoints) [ "$#" -eq 2 ] || die 'box instance required' ;;
+  idle) [ "$#" -eq 2 ] || die 'box instance required' ;;
   retire-claim|--retire-claim) [ "$#" -eq 3 ] || die 'task id and box instance required' ;;
-  *) die 'expected validate, spawn, teardown, idle, endpoints, or retire-claim' ;;
+  *) die 'expected validate, spawn, teardown, idle, or retire-claim' ;;
 esac
 if [ "$1" != validate ]; then
   expected_instance=${!#}
   [[ "$expected_instance" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die 'invalid box instance'
   [ "$(cat /proc/sys/kernel/random/boot_id)" = "$expected_instance" ] || die 'Boat instance changed; action refused'
 fi
-if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = endpoints ] || [ "$1" = retire-claim ] || [ "$1" = --retire-claim ]; then
+if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" = --retire-claim ]; then
   FM_HOME=${FM_HOME:?FM_HOME is required}
   [ -f "$FM_HOME/.fm-secondmate-home" ] && [ ! -L "$FM_HOME/.fm-secondmate-home" ] &&
     [ "$(cat "$FM_HOME/.fm-secondmate-home")" = boat-eng ] || die 'not the purpose-built boat-eng home'
@@ -251,16 +247,6 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = endpoints ] || [ "$1" = re
     cp -- "$FM_HOME/state/$ID.meta" "$archive" || die 'could not archive the worker record'
     rm -f -- "$FM_HOME/state/$ID.meta"
     printf 'retired boat record: %s (archived %s)\n' "$ID" "$archive"
-  fi
-  if [ "$1" = endpoints ]; then
-    windows=$(fm_backend_tmux_window_inventory '=firstmate') || windows_status=$?
-    case "${windows_status:-0}" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
-    if printf '%s\n' "$windows" | grep -q '^fm-'; then
-      printf 'boat-endpoints-live: yes\n'
-    else
-      printf 'boat-endpoints-live: no\n'
-    fi
-    exit 0
   fi
   COUNT=$(boat_worker_count) || exit 1
   if [ "$COUNT" -ne 0 ]; then

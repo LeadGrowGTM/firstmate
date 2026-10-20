@@ -651,8 +651,7 @@ When teardown cannot complete, the armed [idle check](configuration.md#boat-idle
 Without the idle check armed, the current auto-stop timer remains the fallback.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.
 After a definite spawn refusal, it stops a box resumed by this send only when a locked remote inventory confirms both records and worker windows are absent.
-A three-worker cap refusal is the exception: retained records fill the box but do not need it running, so the sender stops a box it resumed once the locked inventory shows no live worker window, then tries the next listed box.
-A box that was already running before the send is never stopped by a refusal.
+Retained records therefore keep a box that a three-worker cap refusal resumed running until its auto-stop timer, 1 hour by default (about $0.036 per box-hour), and a multi-box send can leave each box it tried running that way.
 A refused send still records the task's box, so a retry with the same task id goes only to that box; resend under a new id when that box stays full.
 The sender leaves an uncertain remote launch untouched for same-task reconciliation.
 It adds no automatic worker retry, merge path, or supervision loop.
