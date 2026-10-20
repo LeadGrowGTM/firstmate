@@ -123,6 +123,29 @@ if [ "$(turn_field unscoped)" != 1 ]; then
   esac
 fi
 
+if [ "$(turn_field posture)" = attended ]; then
+  CLAIMED_SIGNALS=$(awk -F '\t' -v seqs="$(turn_field rows)" -v key="$TASK.status" '
+    BEGIN { n = split(seqs, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
+    $2 in wanted && $3 == "signal" && $4 == key {
+      signal = 1
+      if ($5 ~ /^needs-decision:/) decision = 1
+    }
+    END { print decision + 0, signal + 0 }
+  ' "$STATE/.wake-queue" 2>/dev/null) || refuse "the claimed wake rows could not be checked"
+  if [ "${CLAIMED_SIGNALS%% *}" = 1 ] && [ "$VERDICT" != captain ]; then
+    refuse "the claimed needs-decision signal for $TASK requires a captain verdict"
+  fi
+  if [ "${CLAIMED_SIGNALS##* }" = 1 ]; then
+    case "$TASK" in *[!A-Za-z0-9._-]*) refuse "the claimed signal has an invalid task id" ;; esac
+    # shellcheck source=bin/fm-classify-lib.sh
+    . "$SCRIPT_DIR/fm-classify-lib.sh"
+    if status_open_decisions "$STATE/$TASK.status" | awk -F '\t' '$2 == "blocked" { found = 1 } END { exit !found }'; then
+      [ "$VERDICT" = captain ] && [ "$URGENCY" = urgent ] \
+        || refuse "the claimed blocked signal for $TASK requires a captain verdict with --urgency urgent"
+    fi
+  fi
+fi
+
 [ "$WAKE_SET" -eq 1 ] || WAKE=$(turn_field wake)
 
 set -- append --task "$TASK" --verdict "$VERDICT" --summary "$SUMMARY" --silent "$SILENT"

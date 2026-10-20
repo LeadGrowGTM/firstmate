@@ -363,6 +363,61 @@ test_report_surface_enforces_actor_turn_and_scope() {
   pass "report surface: only the branch actor's current turn may report, and only on the tasks its wake names"
 }
 
+test_report_surface_requires_decision_and_blocker_handoffs() {
+  local home state out rc
+  home="$TMP_ROOT/report-handoffs"
+  state="$home/state"
+  mkdir -p "$state"
+  printf 'needs-decision [at=1]: which format?\n' > "$state/alpha.status"
+  append_wake "$state" signal alpha.status "needs-decision:$state/alpha.status"
+  printf 'turn=t1\nrows=1\ntasks=alpha\nunscoped=0\nwake=signal: alpha.status\nposture=attended\n' > "$state/.supervision-host-turn"
+
+  out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 "$REPORT" \
+    --task alpha --verdict routine --summary quiet 2>&1); rc=$?
+  expect_code 3 "$rc" "an attended decision signal must refuse a routine report"
+  assert_contains "$out" "requires a captain verdict" "a decision refusal must tell the branch how to re-report"
+  [ ! -e "$state/branch-outcomes.jsonl" ] && [ ! -e "$state/.supervision-host-receipts" ] \
+    || fail "a refused decision report recorded an outcome or receipt"
+  out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 "$REPORT" \
+    --task alpha --verdict captain --urgency digest --summary 'which format?' 2>&1); rc=$?
+  expect_code 0 "$rc" "a decision that can wait for the digest must accept a captain report"
+
+  printf 'blocked [at=2]: credential needed\n' > "$state/beta.status"
+  append_wake "$state" signal beta.status "signal: $state/beta.status"
+  printf 'turn=t2\nrows=2\ntasks=beta\nunscoped=0\nwake=signal: beta.status\nposture=attended\n' > "$state/.supervision-host-turn"
+  for verdict in routine captain; do
+    if [ "$verdict" = captain ]; then
+      out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t2 "$REPORT" \
+        --task beta --verdict captain --urgency digest --summary 'credential needed' 2>&1); rc=$?
+    else
+      out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t2 "$REPORT" \
+        --task beta --verdict routine --summary quiet 2>&1); rc=$?
+    fi
+    expect_code 3 "$rc" "an attended blocked signal must refuse $verdict without urgent"
+    assert_contains "$out" "--urgency urgent" "a blocked refusal must name the required urgency"
+    [ "$(wc -l < "$state/branch-outcomes.jsonl")" -eq 1 ] \
+      && [ "$(wc -l < "$state/.supervision-host-receipts")" -eq 1 ] \
+      || fail "a refused blocked report recorded an outcome or receipt"
+  done
+  out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t2 "$REPORT" \
+    --task beta --verdict captain --urgency urgent --summary 'credential needed' 2>&1); rc=$?
+  expect_code 0 "$rc" "an urgent captain report must hand off a blocked signal"
+  assert_contains "$out" 'recorded seq 2 [captain]' "the blocker handoff was not stored"
+
+  printf 'resolved [at=3]: credential supplied\nworking [at=4]: running\n' >> "$state/beta.status"
+  append_wake "$state" signal beta.status "signal: $state/beta.status"
+  printf 'turn=t3\nrows=1 3\ntasks=alpha beta\nunscoped=0\nwake=signal: beta.status\nposture=attended\n' > "$state/.supervision-host-turn"
+  out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t3 "$REPORT" \
+    --task beta --verdict routine --summary 'running again' 2>&1); rc=$?
+  expect_code 0 "$rc" "a routine signal after the blocker resolves must stay routine"
+
+  printf 'turn=t4\nrows=1\ntasks=alpha\nunscoped=0\nwake=signal: alpha.status\nposture=away\n' > "$state/.supervision-host-turn"
+  out=$(FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t4 "$REPORT" \
+    --task alpha --verdict routine --summary 'handled while away' 2>&1); rc=$?
+  expect_code 0 "$rc" "away decision reporting must keep its existing behavior"
+  pass "report surface: attended decision and blocker signals require durable captain handoffs"
+}
+
 # The return brief is rendered after the record is archived, so a non-silent
 # report made after that may be missing from it: the report queues its relay
 # for main, while a report made during the away window only waits for the brief.
@@ -3457,6 +3512,7 @@ test_claude_stop_hook_notifies_when_closed_successor_downtime_restore_fails
 test_claude_stop_hook_notifies_when_closed_announced_successor_downtime_restore_fails
 test_park_exit_probe_uses_half_second_child_sleeps
 test_report_surface_enforces_actor_turn_and_scope
+test_report_surface_requires_decision_and_blocker_handoffs
 test_report_after_the_return_is_queued_for_main
 test_dispatch_entry_scopes_rows_and_renders_the_away_tail
 test_dispatch_offer_takes_a_routine_recovery_resurface_on_the_attended_host
