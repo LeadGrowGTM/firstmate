@@ -2,7 +2,7 @@
 # Owner of the Muse client-data decision for a launch.
 # A Muse launch carries client data when the spawning home is one of the
 # client homes below, or when the task brief carries the exact marker line
-# `client-data: yes` (written by bin/fm-brief.sh --client).
+# `client-data: yes`.
 # The decision is deterministic: it is never inferred from brief prose.
 # Such a launch must pass --contributor-mode off (per-run, never persisted),
 # so its prompts do not enter the contributor tier.

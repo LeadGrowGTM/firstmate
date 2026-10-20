@@ -20,12 +20,8 @@
 # charters still use a single `{TASK}` charter fill. Firstmate may adjust other
 # sections when the task genuinely deviates (e.g. working an existing external
 # PR instead of shipping a new one).
-# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--base-branch <branch>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab] [--type <name>] [--client]
-#        fm-brief.sh <task-id> <repo-name> --scout [--base-branch <branch>] [--herdr-lab] [--type <name>] [--client]
-#   --client marks the task as carrying client data by writing the exact
-#   `client-data: yes` marker line bin/fm-muse-client-lib.sh reads; a muse
-#   launch for such a task runs with --contributor-mode off. Refused on a
-#   secondmate charter.
+# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--base-branch <branch>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab] [--type <name>]
+#        fm-brief.sh <task-id> <repo-name> --scout [--base-branch <branch>] [--herdr-lab] [--type <name>]
 #        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
 #        fm-brief.sh --list-types
 #   --scout writes the scout contract instead: the deliverable is a report at
@@ -233,7 +229,6 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 case "$CONFIG" in /*) ;; *) CONFIG="$PWD/$CONFIG" ;; esac
 KIND=ship
 HERDR_LAB=0
-CLIENT=0
 NO_PROJECTS=0
 MODE=
 MODE_SET=0
@@ -273,7 +268,6 @@ for a in "$@"; do
     --scout) KIND=scout ;;
     --secondmate) KIND=secondmate ;;
     --herdr-lab) HERDR_LAB=1 ;;
-    --client) CLIENT=1 ;;
     --no-projects) NO_PROJECTS=1 ;;
     --mode) want_value=mode ;;
     --mode=*) MODE=${a#--mode=}; MODE_SET=1 ;;
@@ -386,14 +380,6 @@ if [ "$KIND" = secondmate ] && [ "$HERDR_LAB" -eq 1 ]; then
   exit 1
 fi
 
-if [ "$KIND" = secondmate ] && [ "$CLIENT" -eq 1 ]; then
-  echo "error: --client applies only to ship and scout briefs; a charter is not a task carrying client data" >&2
-  exit 1
-fi
-# The exact marker bin/fm-muse-client-lib.sh reads at muse launch time.
-CLIENT_LINE=
-[ "$CLIENT" -eq 1 ] && CLIENT_LINE='client-data: yes'
-
 if [ "$NO_PROJECTS" -eq 1 ] && [ "$KIND" != secondmate ]; then
   echo "error: --no-projects applies only to --secondmate charters" >&2
   exit 1
@@ -414,11 +400,6 @@ if [ "$KIND" != secondmate ] && { [ -e "$BRIEF_INCLUDE_FILE" ] || [ -L "$BRIEF_I
   fi
   [ -n "$(printf '%s' "$BRIEF_INCLUDE_BODY" | tr -d '[:space:]')" ] || BRIEF_INCLUDE_BODY=
 fi
-
-apply_client_marker() {
-  [ -n "$CLIENT_LINE" ] || return 0
-  printf '%s\n' "$CLIENT_LINE" >> "$BRIEF"
-}
 
 # Append the include as the last section of a ship or scout scaffold.
 append_brief_include() {
@@ -801,7 +782,6 @@ Before reporting done, read and follow \`$FM_ROOT/.agents/skills/captain-hold-li
 When the report is complete, append \`done [at=<epoch>]: {one-line conclusion}\` to the status file and stop.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
-apply_client_marker
 append_brief_include
 print_scaffold_result "scaffolded: $BRIEF (scout; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})"
 exit 0
@@ -880,7 +860,6 @@ A correction edits only the wrong text: do not run \`$FM_ROOT/bin/fm-ensure-agen
 
 $DOD
 EOF
-apply_client_marker
 append_brief_include
 if [ "$FORGE" = none ]; then
   print_scaffold_result "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK}, {GOAL}, {FIRSTMATE_SPEC}, {OFF_LIMITS}, and {CONTRACTS})"

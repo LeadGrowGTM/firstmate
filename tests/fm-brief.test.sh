@@ -1765,25 +1765,7 @@ test_ship_and_scout_briefs_grant_bounded_sub_agents() {
   pass "fm-brief: ship and scout grant bounded sub-agents by default; secondmate omits them"
 }
 
-test_client_marker() {
-  local home status
-  home="$TMP_ROOT/client-marker-home"
-  mkdir -p "$home/data"
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" client-ship some-proj --mode no-mistakes --client >/dev/null 2>&1; status=$?
-  expect_code 0 "$status" "--client ship brief should exit 0"
-  assert_grep 'client-data: yes' "$home/data/client-ship/brief.md" "--client ship brief lacks the client marker"
-  grep -qxF 'client-data: yes' "$home/data/client-ship/brief.md" || fail "--client ship brief marker is not an exact line"
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" plain-ship some-proj --mode no-mistakes >/dev/null 2>&1; status=$?
-  expect_code 0 "$status" "plain ship brief should exit 0"
-  assert_no_grep 'client-data: yes' "$home/data/plain-ship/brief.md" "plain ship brief gained the client marker"
-  FM_HOME="$home" FM_SECONDMATE_CHARTER='x' "$ROOT/bin/fm-brief.sh" client-mate --secondmate --no-projects --client >/dev/null 2>&1; status=$?
-  expect_code 1 "$status" "--client on a secondmate charter must fail"
-  assert_absent "$home/data/client-mate/brief.md" "--client charter refusal still wrote a brief"
-  pass "fm-brief.sh: --client writes the exact client marker and is refused on charters"
-}
-
 test_script_parses
-test_client_marker
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
