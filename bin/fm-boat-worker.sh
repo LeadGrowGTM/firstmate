@@ -7,7 +7,8 @@
 #        fm-boat-worker.sh retire-claim <task-id> <box-instance>
 #
 # One JSON object, <=65536 bytes, with exactly these required fields:
-#   id: safe task id; project: firstmate|dev-loop; kind: ship|scout;
+#   id: safe task id; project: a name allowed by config/boat-projects (below);
+#   kind: ship|scout;
 #   mode: direct-PR|no-mistakes for ship, "scout" for scout;
 #   intent, spec: nonempty task text, already labelled code-only by firstmate;
 #   harness: claude|codex|grok; model: concrete nonempty model; effort:
@@ -16,6 +17,19 @@
 # No other keys (including git_name, git_email, env, secrets, home, origin,
 # yolo, flags) are accepted.
 # Git identity never comes from the controller.
+#
+# Allowed projects: config/boat-projects in the home running the command, one
+# entry per line as `<project> [<github-owner>]` (owner defaults to LeadGrowGTM;
+# `#` comments and blank lines ignored); with no file, firstmate and dev-loop.
+# This is the single owner of which projects may run on Boat. The controller
+# validates against its own copy and the box against its own, so a project runs
+# only where both list it and the box holds a clone whose origin is
+# github.com/<owner>/<project>. A gtm-client-* name is refused whatever the file
+# says, an unreadable or malformed file refuses every request, and a clone that
+# tracks clients/ or contains a .env or .env.* file at any depth is refused at
+# spawn. Existing task cleanup validates the recorded project path without
+# requiring its name to remain listed. Adding a name is a captain decision
+# (R6), not something dispatch does.
 #
 # validate is pure, usable before Boat is contacted. spawn requires the seeded
 # boat-eng identity, safe operational directories, and allowlisted project
@@ -73,6 +87,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+# boat_project_owner <name>: prints the GitHub owner allowed for <name> on Boat,
+# or returns 1 when <name> may not run here (see "Allowed projects" above).
+boat_project_owner() { # <project-name>
+  local name=$1 file line entry owner extra listed=0 found=''
+  case "$name" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*|gtm-client-*) return 1 ;; esac
+  file="${FM_HOME:-}/config/boat-projects"
+  if [ -z "${FM_HOME:-}" ] || { [ ! -e "$file" ] && [ ! -L "$file" ]; }; then
+    [ "$name" = firstmate ] || [ "$name" = dev-loop ] || return 1
+    printf 'LeadGrowGTM\n'
+    return 0
+  fi
+  [ -f "$file" ] && [ ! -L "$file" ] && [ -r "$file" ] && [ "$(wc -c < "$file")" -le 4096 ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    case "$line" in ''|'#'*) continue ;; esac
+    entry='' owner='' extra=''
+    read -r entry owner extra <<< "$line"
+    [ -n "$entry" ] && [ -z "$extra" ] || return 1
+    case "$entry" in *[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) return 1 ;; esac
+    owner=${owner:-LeadGrowGTM}
+    case "$owner" in *[!A-Za-z0-9-]*|-*) return 1 ;; esac
+    listed=1
+    [ "$entry" != "$name" ] || found=$owner
+  done < "$file"
+  [ "$listed" -eq 1 ] && [ -n "$found" ] || return 1
+  printf '%s\n' "$found"
+}
+boat_record_project_safe() {
+  local project=$1 name=${1#"$FM_HOME/projects/"}
+  case "$name" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*|gtm-client-*) return 1 ;; esac
+  [ "$project" = "$FM_HOME/projects/$name" ]
+}
 boat_runtime() {
   [ -z "${TMUX:-}" ] || die 'Boat worker commands must run outside tmux through the remote transport'
   # shellcheck source=bin/fm-backend.sh
@@ -172,7 +218,9 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" =
     kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
     project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
-    case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
+    if ! boat_record_project_safe "$project"; then
+      die 'task is not an allowed Boat worker'
+    fi
     [ "$(fm_backend_of_meta "$FM_HOME/state/$ID.meta")" = tmux ] || die 'Boat teardown requires a tmux worker'
     if [ "$kind" = scout ] && ! "$SCRIPT_DIR/fm-captain-hold.sh" verify "$ID" >&2; then
       die "scout completion inventory required; after reviewing unresolved calls, run from the controller: fm-on.sh boat-eng fm-captain-hold.sh complete $ID --none (or list the held task ids instead of --none)"
@@ -186,7 +234,9 @@ if [ "$1" = teardown ] || [ "$1" = idle ] || [ "$1" = retire-claim ] || [ "$1" =
     kind=$(sed -n 's/^kind=//p' "$FM_HOME/state/$ID.meta")
     project=$(sed -n 's/^project=//p' "$FM_HOME/state/$ID.meta")
     case "$kind" in ship|scout) ;; *) die 'task is not an allowed Boat worker' ;; esac
-    case "$project" in "$FM_HOME/projects/firstmate"|"$FM_HOME/projects/dev-loop") ;; *) die 'task is not an allowed Boat worker' ;; esac
+    if ! boat_record_project_safe "$project"; then
+      die 'task is not an allowed Boat worker'
+    fi
     windows=$(fm_backend_tmux_window_inventory '=firstmate') || windows_status=$?
     case "${windows_status:-0}" in 0) ;; 2) windows= ;; *) die 'Boat worker endpoint inventory unavailable' ;; esac
     boat_record_not_counted "$ID" "$windows" || die 'task has a live endpoint or a fresh nonterminal status; retire-claim refused'
@@ -222,13 +272,15 @@ jq -es '
   length == 1 and (.[0] | type == "object" and
   (keys == ["effort","harness","id","intent","kind","mode","model","project","spec"]) and
   (.id | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
-  (.project == "firstmate" or .project == "dev-loop") and
+  (.project | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$")) and
   ((.kind == "ship" and (.mode == "direct-PR" or .mode == "no-mistakes")) or
    (.kind == "scout" and .mode == "scout")) and
   (.intent | text) and (.spec | text) and (.model | text) and
   (.harness == "claude" or .harness == "codex" or .harness == "grok") and
   (.effort | IN("low","medium","high","xhigh","max","ultra")))
 ' "$TMP/request" >/dev/null 2>&1 || die 'invalid code-only Boat request'
+OWNER=$(boat_project_owner "$(jq -r .project "$TMP/request")") ||
+  die 'invalid code-only Boat request: project is not allowed on Boat'
 [ "$1" = spawn ] || exit 0
 FM_HOME=${FM_HOME:?FM_HOME is required}
 [ "$(cd "$FM_HOME" && pwd -P)" = "$FM_HOME" ] || die 'overflow home must be canonical'
@@ -261,11 +313,17 @@ REPO="$FM_HOME/projects/$PROJECT"
 [ -d "$REPO" ] && [ ! -L "$REPO" ] && [ "$(cd "$REPO" && pwd -P)" = "$REPO" ] || die 'project clone is unavailable or unsafe'
 origin=$(git -C "$REPO" remote get-url origin) || die 'project origin unavailable'
 case "$origin" in
-  "https://github.com/LeadGrowGTM/$PROJECT.git"|"https://github.com/LeadGrowGTM/$PROJECT"|"git@github.com:LeadGrowGTM/$PROJECT.git") ;;
+  "https://github.com/$OWNER/$PROJECT.git"|"https://github.com/$OWNER/$PROJECT"|"git@github.com:$OWNER/$PROJECT.git") ;;
   *) die 'project origin is not the allowlisted fork' ;;
 esac
-[ -z "$(git -C "$REPO" ls-files -- 'clients' '.env' '**/.env')" ] || die 'project tracks client or secret files'
-[ ! -e "$REPO/clients" ] && [ ! -e "$REPO/.env" ] || die 'project contains private client or secret paths'
+[ -z "$(git -C "$REPO" ls-files -- 'clients')" ] || die 'project tracks client or secret files'
+[ ! -e "$REPO/clients" ] || die 'project contains private client or secret paths'
+git -C "$REPO" ls-files -z > "$TMP/tracked" || die 'project tracked files unavailable'
+while IFS= read -r -d '' tracked; do
+  case "${tracked##*/}" in .env|.env.*) die 'project tracks client or secret files' ;; esac
+done < "$TMP/tracked"
+find "$REPO" -path "$REPO/.git" -prune -o \( -name .env -o -name '.env.*' \) -print -quit > "$TMP/contained-env" || die 'project secret scan failed'
+[ ! -s "$TMP/contained-env" ] || die 'project contains private client or secret paths'
 command -v gh-axi >/dev/null || die 'every worker requires gh-axi installed on the Boat box'
 # Ask the injected connection for public identity only, never inspect or stage
 # its credentials. A marker/base64 scalar avoids parsing arbitrary TOON fields.

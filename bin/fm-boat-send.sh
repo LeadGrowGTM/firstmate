@@ -69,6 +69,10 @@
 # remote worker lock confirms that no task records or endpoints remain.
 # Pre-resume refusals never request a stop; stop authority follows only this
 # invocation's successful resume, not an earlier stopped-state observation.
+# Known limit: a three-worker cap refusal on a box this send resumed does not
+# stop it while retained records remain, so a multi-box send refused at the cap
+# can leave each resumed box running until its auto-stop timer (1 hour by
+# default, about $0.036 per box-hour).
 # Status, steering, and reports use existing fm-on.sh commands against boat-eng;
 # no PC worker endpoint or worktree is allocated. Last-task teardown stops the
 # box; its auto-stop timer is the hard upper bound if teardown cannot complete.

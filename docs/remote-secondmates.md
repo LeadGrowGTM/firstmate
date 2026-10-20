@@ -570,7 +570,7 @@ An explicitly Boat-selected ship or scout can use [`bin/fm-boat-send.sh`](../bin
 Firstmate still labels and selects work at intake; the sender does not evaluate routing policy or choose a model profile.
 The sender and [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) own the exact request schema, caps, and refusal behavior in their headers and `--help`; an unconfirmed-start refusal prints the same-task recovery commands.
 
-Provision a new purpose-built `boat-eng` home with the existing seed procedure below, using only the `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop` origins and a fresh charter.
+Provision a new purpose-built `boat-eng` home with the existing seed procedure below, cloning only the projects its `config/boat-projects` allows (by default `LeadGrowGTM/firstmate` and `LeadGrowGTM/dev-loop`), and a fresh charter.
 Do not transfer an existing mate home or inherited private material.
 Record approved box ids in the controller home's `config/boat-box-id`, one id per line.
 One id stays valid.
@@ -594,7 +594,12 @@ FM_HOME=<controller-home> bin/fm-boat-send.sh --code-only < <request.json>
 
 The box generates its own normal worker brief and operational paths, allocates its own worktree, and calls the existing spawn command with merge authority off.
 The box-wide three-worker cap counts distinct task IDs across retained records and live worker windows, including orphan windows after metadata rollback, with the stale-record exception [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) owns in its header.
-Firstmate excludes `local-only` work at intake; the worker rejects projects outside the two allowed names and origins.
+Firstmate excludes `local-only` work at intake.
+`config/boat-projects`, one `<project> [<github-owner>]` entry per line, decides which projects may run on Boat; [`bin/fm-boat-worker.sh`](../bin/fm-boat-worker.sh) owns its format in its header.
+With no file the list is `firstmate` and `dev-loop`; a present file replaces those defaults, so list them explicitly to keep them available.
+The controller and the box each check their own copy, so list a project in both homes and clone it into the box home with the listed origin owner (LeadGrowGTM unless the entry names another).
+The worker's header owns the client-name and clone-content guards, which apply regardless of the project list.
+Adding a project is the captain's decision under the Boat rules.
 A `no-mistakes` ship remains refused until a real successful box pipeline has an operator-recorded proof receipt; a missing receipt never downgrades delivery.
 Provision the dedicated `fm-code` Boat environment with GitHub access enabled and secrets, Boat credentials, and agent credentials disabled.
 The box acts as the captain's GitHub account through Boat's own GitHub connection; no PC credential or Infisical token is transferred.
@@ -613,7 +618,7 @@ Without a fresh worker status declaration, dispatch refuses success and leaves t
 New resumes and pre-spawn timer extensions follow the [Boat timer and idle check rules](configuration.md#boat-idle-check).
 With more than one listed box, dispatch prefers a listed box that is already running and still has room under the three-worker cap, and it does not create boxes.
 An active sandbox that is not listed, or more active sandboxes than `expected_running`, is refused.
-A task stays on the box recorded for it, and a later command that names that task uses that box.
+A task stays on its recorded box; later commands naming its id use that box, while file reads use it when the path operand is its status file or a path under its data directory.
 The account and monthly ceilings include the remaining timers of the other active listed boxes.
 
 Use the existing remote commands for supervision, steering, and report retrieval:
@@ -646,8 +651,39 @@ When teardown cannot complete, the armed [idle check](configuration.md#boat-idle
 Without the idle check armed, the current auto-stop timer remains the fallback.
 The sender refuses on unreadable spend state or a cap violation; the captain must confirm manually that auto-refill is off because the sender does not read billing status.
 After a definite spawn refusal, it stops a box resumed by this send only when a locked remote inventory confirms both records and worker windows are absent.
+Retained records therefore keep a box that a three-worker cap refusal resumed running until its auto-stop timer, 1 hour by default (about $0.036 per box-hour), and a multi-box send can leave each box it tried running that way.
+A refused send still records the task's box, so a retry with the same task id goes only to that box; resend under a new id when that box stays full.
 The sender leaves an uncertain remote launch untouched for same-task reconciliation.
 It adds no automatic worker retry, merge path, or supervision loop.
+
+### Sending from another home
+
+Each second mate home can send through the same controller home for any project allowed by the [code-only Boat overflow](#code-only-boat-overflow) lane; the home itself needs no route, box id, or Boat configuration.
+The allowlist is one list for the shared boxes, so each home's intake decides which listed projects it sends:
+
+| Kind of home | Route | Projects it may send | Scheduled | Not sent, and why |
+| - | - | - | - | - |
+| Non-client home with its own code repos | the shared controller | its own listed code repos, plus `firstmate` and `dev-loop` when listed | yes | anything that needs client data, secrets, or a GPU |
+| Client home | the shared controller | its listed non-client code repos, plus `firstmate` and `dev-loop` when listed | yes | client repositories and any repo that tracks client files; they wait for a separate client lane |
+| Media home | the shared controller | its listed code, copy and script repos | yes | video renders, which stay on the PC |
+| Home whose project is personal data | none | none | no | excluded: no code-only task exists without the data, which never leaves the PC |
+
+A future client lane would run only Claude or Codex workers, refuse Grok and Muse, and use secrets only through `lg run` with a read-only identity for each box; it is not part of the shared lane.
+A home schedules Boat work with its own [recurring intake](configuration.md#recurring-intake-configschedulesjson) entry, using a `daily-local` or `interval` cadence.
+The entry files an ordinary queued task at its time, and the home's intake sends it with the commands below, so no box-side scheduler or new loop is involved.
+A one-time cadence is not supported yet.
+Shared-lane task status is readable by any home in this fleet because all homes run as one Linux user with equal file access on this machine and code-only tasks carry no client data, so a watch adds no new exposure.
+Revisit this policy with a sender-only binding before any client lane opens.
+One controller keeps one send lock, one environment receipt per box, one owner of the `boat-prove` alias, and one spend reservation, so several homes cannot resume or reserve the same box against each other.
+Give each task an id that is unique across homes, for example prefixed with the sending home's name, because the box refuses an id it already holds.
+After a send succeeds, arm a watch in the sending home so the box worker's reports wake that home:
+
+```sh
+FM_HOME=<sending-home> bin/fm-boat-task-watch.sh arm <controller-home> <task-id>
+```
+
+[`bin/fm-boat-task-watch.sh`](../bin/fm-boat-task-watch.sh) owns which status lines it reports and how; its header and `--help` are the reference.
+Supervise, steer, and tear down with the controller commands in this section, run as `FM_HOME=<controller-home>`, then retire the watch with `FM_HOME=<sending-home> bin/fm-boat-task-watch.sh disarm <task-id>`.
 
 ## Provision a route
 

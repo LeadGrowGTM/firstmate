@@ -891,13 +891,22 @@ test_teardown_stop() {
   expect_code 1 "$CODE" 'teardown of non-worker record'
   [ "$(grep -c '^teardown task-one$' "$FIXTURES/calls")" -eq 0 ] || fail 'non-worker record reached teardown'
   assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-worker record stopped box'
-  new_case teardown-wrong-project
+  new_case teardown-client-project
   seed_receipt
-  seed_worker task-one ship other 'state: done complete'
+  seed_worker task-one ship gtm-client-other 'state: done complete'
   run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
-  expect_code 1 "$CODE" 'teardown of non-Boat project'
-  assert_no_grep '^teardown task-one$' "$FIXTURES/calls" 'non-Boat project reached teardown'
-  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'non-Boat project stopped box'
+  expect_code 1 "$CODE" 'teardown of client project'
+  ! grep -Fxq 'teardown task-one' "$FIXTURES/calls" || fail 'client project reached teardown'
+  assert_no_grep 'boat --no-update stop' "$FIXTURES/calls" 'client project stopped box'
+  new_case teardown-removed-project
+  seed_receipt
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_worker task-one ship extra-repo 'state: done complete'
+  printf 'firstmate\n' > "$REMOTE_HOME/config/boat-projects"
+  run_entry "$LOCAL_HOME" fm-boat-send.sh --teardown task-one
+  expect_code 0 "$CODE" "teardown after project removal: $OUT"
+  grep -Fxq 'teardown task-one' "$FIXTURES/calls" || fail 'removed project did not reach teardown'
+  assert_absent "$REMOTE_HOME/state/task-one.meta" 'removed project kept its task record'
   new_case teardown-short-project
   seed_receipt
   fm_write_meta "$REMOTE_HOME/state/task-one.meta" 'kind=ship' 'project=firstmate'
@@ -1208,6 +1217,20 @@ test_stale_records_and_retire_claim() {
   assert_absent "$REMOTE_HOME/state/stale-a.meta" 'retire-claim kept the worker record'
   [ -n "$(ls "$REMOTE_HOME/data/stale-a/"retired-boat-record.*.meta 2>/dev/null)" ] || fail 'retire-claim did not archive the worker record'
   assert_contains "$OUT" 'boat-tasks-remaining: no' 'retire-claim did not recount after retiring'
+  new_case retire-claim-removed-project
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_worker stale-a ship extra-repo 'state: working active'
+  printf 'done [at=1791892800]: finished\n' > "$REMOTE_HOME/state/stale-a.status"
+  printf 'firstmate\n' > "$REMOTE_HOME/config/boat-projects"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh retire-claim stale-a "$(cat "$FIXTURES/boot-id")"
+  expect_code 0 "$CODE" "retire-claim after project removal: $OUT"
+  assert_absent "$REMOTE_HOME/state/stale-a.meta" 'removed project kept its stale record'
+  new_case retire-claim-client-project
+  seed_worker stale-a ship gtm-client-other 'state: working active'
+  printf 'done [at=1791892800]: finished\n' > "$REMOTE_HOME/state/stale-a.status"
+  run_entry "$REMOTE_HOME" fm-boat-worker.sh retire-claim stale-a "$(cat "$FIXTURES/boot-id")"
+  expect_code 1 "$CODE" 'retire-claim of a client project must refuse'
+  [ -f "$REMOTE_HOME/state/stale-a.meta" ] || fail 'refused retire-claim removed a client project record'
   new_case retire-claim-live-refused
   seed_project firstmate
   seed_worker live-a ship firstmate 'state: working active'
@@ -1381,6 +1404,91 @@ prime_multi_box() { # id state usage-seconds boot ready-boot
   jq -n --arg id "$id" --argjson seconds "$usage" \
     '{sandboxId:$id,sandboxType:"default",secondsPerDollar:100000,billingMultiplier:1,seconds:$seconds}' \
     > "$FIXTURES/multi/$id.usage.json"
+}
+
+test_project_list() {
+  new_case project-list
+  mkdir -p "$REMOTE_HOME/config" "$LOCAL_HOME/config"
+  printf 'gtm-client-acme\nextra-repo\n# a comment\n\nowned-repo ExampleOwner\n' > "$LOCAL_HOME/config/boat-projects"
+  set_json request '.project = "gtm-client-acme"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a client repository must never be allowed, whatever the list says'
+  set_json request '.project = "firstmate"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a project missing from a present list must be refused'
+  set_json request '.project = "extra-repo"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 0 "$CODE" "a project named in config/boat-projects must validate: $OUT"
+  set_json request '.project = "owned-repo"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 0 "$CODE" "a project with its own GitHub owner must validate: $OUT"
+  printf 'extra repo with spaces\n' > "$LOCAL_HOME/config/boat-projects"
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a malformed project list must refuse every request'
+  printf '# only comments\n' > "$LOCAL_HOME/config/boat-projects"
+  set_json request '.project = "firstmate"'
+  run_entry "$LOCAL_HOME" fm-boat-worker.sh validate
+  expect_code 1 "$CODE" 'a present list that names nothing must refuse'
+
+  new_case project-owner-origin
+  mkdir -p "$REMOTE_HOME/config"
+  printf 'firstmate\nowned-repo ExampleOwner\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project owned-repo
+  set_json request '.project = "owned-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone whose origin owner differs from the list must refuse'
+  assert_contains "$OUT" 'project origin is not the allowlisted fork' 'owner mismatch explanation'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'an owner mismatch spawned a worker'
+  git -C "$REMOTE_HOME/projects/owned-repo" remote set-url origin https://github.com/ExampleOwner/owned-repo.git
+  spawn_task
+  expect_code 0 "$CODE" "a listed project at its listed owner must dispatch: $OUT"
+  assert_grep 'spawn task-one ' "$FIXTURES/calls" 'the listed project did not reach spawn'
+
+  new_case project-clone-guard
+  mkdir -p "$REMOTE_HOME/config"
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  mkdir -p "$REMOTE_HOME/projects/extra-repo/clients/acme"
+  printf 'x\n' > "$REMOTE_HOME/projects/extra-repo/clients/acme/list.csv"
+  git -C "$REMOTE_HOME/projects/extra-repo" add clients
+  git -C "$REMOTE_HOME/projects/extra-repo" commit -qm clients
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a listed clone that tracks client files must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'a clone with client files spawned a worker'
+
+  new_case project-tracked-env-variant
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  printf 'fixture\n' > "$REMOTE_HOME/projects/extra-repo/.env.production"
+  git -C "$REMOTE_HOME/projects/extra-repo" add -f .env.production
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone tracking a dot-env variant must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'a tracked dot-env variant reached spawn'
+
+  new_case project-nested-env-variant
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  mkdir -p "$REMOTE_HOME/projects/extra-repo/config"
+  printf 'fixture\n' > "$REMOTE_HOME/projects/extra-repo/config/.env.local"
+  git -C "$REMOTE_HOME/projects/extra-repo" add -f config/.env.local
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone tracking a nested dot-env variant must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'a nested dot-env variant reached spawn'
+
+  new_case project-untracked-env-variant
+  printf 'extra-repo\n' > "$REMOTE_HOME/config/boat-projects"
+  seed_project extra-repo
+  mkdir -p "$REMOTE_HOME/projects/extra-repo/config"
+  printf 'fixture\n' > "$REMOTE_HOME/projects/extra-repo/config/.env.local"
+  set_json request '.project = "extra-repo"'
+  spawn_task
+  expect_code 1 "$CODE" 'a clone containing an untracked dot-env variant must refuse'
+  assert_no_grep 'spawn task-one ' "$FIXTURES/calls" 'an untracked dot-env variant reached spawn'
+
+  pass 'config/boat-projects owns the project allowlist, guarded clones, and cleanup'
 }
 
 test_budget_caps() {
@@ -1622,6 +1730,7 @@ test_budget_caps() {
 test_budget_caps
 test_box_config_and_environment
 test_brief_placeholder_fill
+test_project_list
 test_independent_resume_before_refusal
 test_instance_changes_at_action_boundary
 test_same_id_orphan_retry
