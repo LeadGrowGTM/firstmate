@@ -1,0 +1,8 @@
+valid record: merge authority persisted
+fm-merge-authority-v1
+github
+github.com
+example/repo
+20
+attended
+injected record: rejected; authority record absent=yes
