@@ -1,0 +1,10 @@
+open: exit=1; /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5DRK9D15C6MH1WTQQAE0MAP/.validation-tmp/fm-teardown-endpoint-safety.woehjk/open/live.err:REFUSED: recorded PR https://github.com/cli/cli/pull/14768 is not confirmed merged; nothing was changed
+open: record and claim preserved; no archive created
+lookup-unavailable: exit=1; /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5DRK9D15C6MH1WTQQAE0MAP/.validation-tmp/fm-teardown-endpoint-safety.woehjk/lookup-unavailable/live.err:REFUSED: recorded PR https://github.com/cli/cli/pull/99999999 is not confirmed merged; nothing was changed
+lookup-unavailable: record and claim preserved; no archive created
+invalid-url: exit=1; /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5DRK9D15C6MH1WTQQAE0MAP/.validation-tmp/fm-teardown-endpoint-safety.woehjk/invalid-url/live.err:REFUSED: recorded PR for live-invalid cannot be verified as merged; nothing was changed
+invalid-url: record and claim preserved; no archive created
+merged: exit=0; 
+merged: record archived; claim removed
+ordinary --force with open recorded PR: exit=0; record_exists=no; Backlog: forced-open-pr just finished (this home keeps no markdown backlog at /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5DRK9D15C6MH1WTQQAE0MAP/.validation-tmp/fm-teardown-endpoint-safety.IDqk0O/forced-open-pr/home/data/backlog.md). Update /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5DRK9D15C6MH1WTQQAE0MAP/.validation-tmp/fm-teardown-endpoint-safety.IDqk0O/forced-open-pr/home/data/backlog.md - move forced-open-pr to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+pre-change retirement with open recorded PR: exit=0; record_exists=no; archive_exists=yes
