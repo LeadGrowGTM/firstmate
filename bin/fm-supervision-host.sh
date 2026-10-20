@@ -85,10 +85,14 @@
 # window and pr-ready policy of config/outcome-digest read through
 # fm_supervision_host_digest_config): due now, the host exits with one
 # "supervision-host: branch-outcome:" line naming the rows, without the close
-# it handled; otherwise it parks on the successor, and while rows wait for
-# their window the park also ends at the window's close, when the host asks
-# again and exits the same way if they are still due; a close already waiting
-# when they come due goes to main with them rather than to the engine. Main
+# it handled; otherwise it parks on the successor. The park asks again when
+# the window closes, when the processed marker changes, or when
+# config/outcome-digest changes, including when no deadline is armed, and
+# exits the same way if the rows are then due. Before every attended close is
+# offered to the engine the host asks again with the policy reloaded, so a
+# due digest never waits behind that turn or behind a deadline recorded
+# earlier. A close already waiting when they come due goes to main with them
+# rather than to the engine. Main
 # drains, where the
 # BRANCH OUTCOMES section (bin/fm-wake-drain.sh) presents every unread and
 # unprocessed captain outcome until main acknowledges it, so any drain main
@@ -293,6 +297,11 @@ READY_LINE=
 DIGEST_DUE_ELAPSED=
 DIGEST_DUE=
 DIGEST_PENDING=
+# Processed marker and config/outcome-digest as of the last digest judgment.
+# A change while parked is judged again even when no deadline is armed.
+DIGEST_INPUTS_SEEN=0
+DIGEST_MARKER_SNAPSHOT=
+DIGEST_CONFIG_SNAPSHOT=
 
 log_line() {  # <text>
   local tmp
@@ -548,15 +557,20 @@ stream_ready_line() {
 }
 
 # Wait for the current arm to close. Returns 0 with ARM_TEXT set, 1 when the
-# park boundary arrives first, or 2 when held captain outcomes come due first.
+# park boundary arrives first, or 2 when held captain outcomes should be
+# judged again: their deadline arrived, or the processed marker or
+# config/outcome-digest changed since the last judgment.
 await_close() {
   local i
   while fm_pid_alive "$ARM_PID"; do
     refresh_process "$ARM_PID"
     [ "$READY_PENDING" -eq 0 ] || stream_ready_line
     boundary_reached && return 1
-    if [ -n "$DIGEST_DUE_ELAPSED" ] && [ "$PARK_ELAPSED" -ge "$DIGEST_DUE_ELAPSED" ]; then
-      return 2
+    if ! fm_afk_contract_away_present "$STATE"; then
+      if digest_inputs_changed \
+        || { [ -n "$DIGEST_DUE_ELAPSED" ] && [ "$PARK_ELAPSED" -ge "$DIGEST_DUE_ELAPSED" ]; }; then
+        return 2
+      fi
     fi
     # Probe the arm's exit twice a second between POLL-cadence checks, without
     # changing the outer identity refresh, readiness, or boundary cadence.
@@ -665,13 +679,40 @@ turn_outcome_lookup_warning() {
     "${TURN_RECEIPT_SEQS:-unknown}"
 }
 
+# The processed marker and digest configuration, compared as text so a rewrite
+# to the same bytes is not a change. Absent and unreadable stay distinct.
+digest_input_text() {  # <path>
+  if [ -f "$1" ] && [ ! -L "$1" ] && [ -r "$1" ]; then
+    cat "$1" 2>/dev/null || printf 'unreadable'
+  elif [ -e "$1" ] || [ -L "$1" ]; then
+    printf 'unreadable'
+  else
+    printf 'absent'
+  fi
+}
+
+digest_inputs_remember() {
+  DIGEST_MARKER_SNAPSHOT=$(digest_input_text "$STATE/.branch-outcomes-processed")
+  DIGEST_CONFIG_SNAPSHOT=$(digest_input_text "$CONFIG/outcome-digest")
+  DIGEST_INPUTS_SEEN=1
+}
+
+# True when the processed marker or config/outcome-digest differs from the
+# last judgment. Before the first judgment there is nothing to compare, so a
+# host that started away does not treat the empty snapshot as a change.
+digest_inputs_changed() {
+  [ "$DIGEST_INPUTS_SEEN" -eq 1 ] || return 1
+  [ "$(digest_input_text "$STATE/.branch-outcomes-processed")" != "$DIGEST_MARKER_SNAPSHOT" ] \
+    || [ "$(digest_input_text "$CONFIG/outcome-digest")" != "$DIGEST_CONFIG_SNAPSHOT" ]
+}
+
 # Ask the outcome store whether its unread captain outcomes are due
 # (bin/fm-branch-outcome.sh digest owns the rule). Sets DIGEST_DUE
 # (now|later|none), DIGEST_PENDING, and DIGEST_DUE_ELAPSED; a decision that
 # cannot be computed reads as due now, so a fault wakes main rather than
 # holding an outcome. The store judges as of the park's own clock (the host's
 # start epoch plus park_elapsed), so the window closes on the same clock the
-# park boundary uses.
+# park boundary uses. The policy is reloaded on every ask.
 digest_judge() {
   local out at
   DIGEST_DUE=now
@@ -682,6 +723,7 @@ digest_judge() {
   if ! out=$("$SCRIPT_DIR/fm-branch-outcome.sh" digest --window "$FM_OUTCOME_DIGEST_WINDOW" \
       --pr-ready "$FM_OUTCOME_DIGEST_PR_READY" --now $((HOST_STARTED + PARK_ELAPSED)) 2>/dev/null); then
     log_line "digest	undecidable"
+    digest_inputs_remember
     return 0
   fi
   DIGEST_DUE=$(printf '%s\n' "$out" | sed -n 's/^due=//p')
@@ -698,6 +740,7 @@ digest_judge() {
     *) DIGEST_DUE=now ;;
   esac
   log_line "digest	due=$DIGEST_DUE	pending=${DIGEST_PENDING:-none}	repeats=$(printf '%s\n' "$out" | sed -n 's/^repeats=//p')"
+  digest_inputs_remember
 }
 
 # The branch-outcome line for rows the digest judged due now.
@@ -1231,22 +1274,18 @@ while :; do
   fi
   # Attended: the close reaches main exactly as the plain arm delivers it,
   # unless the supervision session may take it (attended_acceptor). Held
-  # captain outcomes whose window passed while the arm was already closed
-  # never wait behind another engine turn: this close goes to main with them,
-  # as a main-only pass-through does.
+  # captain outcomes are judged again, with the policy reloaded, before that
+  # offer. When they are due, this close goes to main with them rather than
+  # to the engine, as a main-only pass-through does.
   if ! fm_afk_contract_away_present "$STATE"; then
-    if [ -n "$DIGEST_DUE_ELAPSED" ]; then
-      park_elapsed
-      if [ "$PARK_ELAPSED" -ge "$DIGEST_DUE_ELAPSED" ]; then
-        DIGEST_DUE_ELAPSED=
-        digest_judge
-        if [ "$DIGEST_DUE" = now ]; then
-          log_line "pass-through	attended	digest-due	$(printf '%s\n' "$REASON" | head -n 1)"
-          leave_successor_for_main || true
-          emit "supervision-host: $(digest_due_line)"
-          exit 0
-        fi
-      fi
+    # Judge before the offer, with the policy reloaded. A cached deadline is
+    # not the only way a held row becomes due.
+    digest_judge
+    if [ "$DIGEST_DUE" = now ]; then
+      log_line "pass-through	attended	digest-due	$(printf '%s\n' "$REASON" | head -n 1)"
+      leave_successor_for_main || true
+      emit "supervision-host: $(digest_due_line)"
+      exit 0
     fi
     if ! attended_acceptor "$(printf '%s\n' "$REASON" | head -n 1)"; then
       log_line "pass-through	attended	$ATTENDED_WHY	$(printf '%s\n' "$REASON" | head -n 1)"

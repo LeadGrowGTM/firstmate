@@ -23,6 +23,10 @@
 # outcome and --urgency only for a captain one, which records it as the
 # urgency bin/fm-branch-outcome.sh digest reads.
 # --wake defaults to the wake reason the host recorded for the turn.
+# An attended turn whose wake claims a signal row stores that row's validated
+# status span, its endpoint and identity, as the outcome's status provenance
+# (bin/fm-branch-outcome.sh owns the fields). A status line that arrives after
+# the span was captured is not stamped onto this report.
 #
 # Only the branch actor of a live host turn may report: FM_SUPERVISION_ACTOR
 # must be "branch" and FM_BRANCH_REPORT_TURN must name the host's current turn
@@ -123,6 +127,8 @@ if [ "$(turn_field unscoped)" != 1 ]; then
   esac
 fi
 
+PROVENANCE_ENDPOINT=
+PROVENANCE_IDENT=
 if [ "$(turn_field posture)" = attended ]; then
   CLAIMED_SIGNAL=$(awk -F '\t' -v seqs="$(turn_field rows)" -v key="$TASK.status" '
     BEGIN { n = split(seqs, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
@@ -161,6 +167,8 @@ if [ "$(turn_field posture)" = attended ]; then
           || refuse "the claimed blocked signal for $TASK requires a captain verdict with --urgency urgent" ;;
       esac
     done <<< "$FM_WAKE_UNREAD_LINES"
+    PROVENANCE_ENDPOINT=$SPAN_END
+    PROVENANCE_IDENT=$SPAN_IDENT
   fi
 fi
 
@@ -169,6 +177,11 @@ fi
 set -- append --task "$TASK" --verdict "$VERDICT" --summary "$SUMMARY" --silent "$SILENT"
 [ -z "$URGENCY" ] || set -- "$@" --urgency "$URGENCY"
 [ -z "$WAKE" ] || set -- "$@" --wake "$WAKE"
+# Endpoint 0 is a real span end, so the ident's presence is the "we validated
+# a span" signal. Both flags are what append stores instead of a live capture.
+if [ -n "$PROVENANCE_IDENT" ]; then
+  set -- "$@" --status-endpoint "$PROVENANCE_ENDPOINT" --status-ident "$PROVENANCE_IDENT"
+fi
 if ! SEQ=$("$SCRIPT_DIR/fm-branch-outcome.sh" "$@"); then
   echo "outcome store append failed (nothing recorded)" >&2
   exit 1
