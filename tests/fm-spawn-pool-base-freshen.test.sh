@@ -1451,14 +1451,23 @@ test_scout_base_branch_refused_on_gerrit_forge() {
 }
 
 test_pool_rollback_preserves_or_releases_custody() {
-  local phase rec id out status real_tasks
+  local phase rec id out status real_tasks project_lock
   command -v tasks-axi >/dev/null 2>&1 || { echo 'skip - tasks-axi not installed'; return 0; }
   real_tasks=$(command -v tasks-axi)
-  for phase in prelaunch postlaunch foreign release-failure; do
+  for phase in prelaunch postlaunch foreign release-failure lock-contention; do
     id="pool-rollback-$phase"
     rec=$(make_case "rollback-$phase" "$id")
     read_case_record "$rec"
     lay_out_as_pool_slot
+    project_lock=$(FM_HOME="$HOME_DIR" bash -c '. "$1"; fm_treehouse_project_lock_path "$2"' _ \
+      "$ROOT/bin/fm-wake-lib.sh" "$PROJECT_DIR") || fail 'could not resolve the project lock'
+    /bin/mv "$FAKEBIN_DIR/tmux" "$FAKEBIN_DIR/tmux-base"
+    cat > "$FAKEBIN_DIR/tmux" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_R12_TMUX_LOG"
+exec "$(dirname "$0")/tmux-base" "$@"
+SH
+    chmod +x "$FAKEBIN_DIR/tmux"
     printf 'backend = "markdown"\n[markdown]\npath = "data/backlog.md"\n' > "$HOME_DIR/.tasks.toml"
     printf '# Backlog\n\n## Queued\n\n## In flight\n\n## Done\n' > "$HOME_DIR/data/backlog.md"
     tasks-axi add "$id" 'Exercise failed dispatch custody' --kind ship --file "$HOME_DIR/data/backlog.md" >/dev/null
@@ -1486,6 +1495,10 @@ if [ "$FM_R12_PHASE" != postlaunch ]; then
         if [ "$FM_R12_PHASE" = foreign ]; then
           printf 'task=other-task\nhome=%s/other-home\n' "$FM_R12_CASE" > "$FM_R12_SLOT"
         fi
+        if [ "$FM_R12_PHASE" = lock-contention ]; then
+          mkdir -p "$FM_R12_LOCK"
+          printf '%s\n' "$FM_R12_LOCK_PID" > "$FM_R12_LOCK/pid"
+        fi
         printf 'injected prelaunch staging failure\n' >&2
         exit 1
         ;;
@@ -1505,6 +1518,7 @@ exec /bin/rm "$@"
 SH
     chmod +x "$FAKEBIN_DIR/tasks-axi" "$FAKEBIN_DIR/mv" "$FAKEBIN_DIR/rm"
     out=$(FM_R12_PHASE="$phase" FM_R12_CASE="$CASE_DIR" FM_R12_HOME="$HOME_DIR" \
+      FM_R12_LOCK="$project_lock" FM_R12_LOCK_PID="$$" FM_R12_TMUX_LOG="$CASE_DIR/tmux.log" \
       FM_R12_SLOT="$SLOT_CLAIM" FM_R12_ID="$id" FM_FAKE_LAUNCH_LOG="$CASE_DIR/launch.log" \
       run_spawn "$id" --mode no-mistakes --yolo off)
     status=$?
@@ -1512,7 +1526,7 @@ SH
     assert_present "$CASE_DIR/reached" "$phase fixture never reached the provisional record and slot claim"
     assert_grep "task=$id" "$CASE_DIR/observed.claim" "$phase never held its own claim before the failure"
     assert_grep "worktree=$POOL_DIR" "$CASE_DIR/observed.meta" "$phase never published the allocated worktree"
-    if [ "$phase" = postlaunch ] || [ "$phase" = release-failure ]; then
+    if [ "$phase" = postlaunch ] || [ "$phase" = release-failure ] || [ "$phase" = lock-contention ]; then
       assert_present "$HOME_DIR/state/$id.meta" "$phase removed the observable task record"
       assert_grep "task=$id" "$SLOT_CLAIM" "$phase lost its own retained claim"
     else
@@ -1525,11 +1539,21 @@ SH
         assert_absent "$SLOT_CLAIM" 'prelaunch rollback orphaned its own slot claim'
       fi
     fi
+    assert_grep 'new-window ' "$CASE_DIR/tmux.log" "$phase never created its task window"
+    if [ "$phase" = prelaunch ] || [ "$phase" = foreign ]; then
+      assert_grep 'kill-window ' "$CASE_DIR/tmux.log" "$phase left an unrecorded task window behind"
+    elif grep -q '^kill-window ' "$CASE_DIR/tmux.log"; then
+      fail "$phase closed a window whose task record or worker was retained"
+    fi
     if [ "$phase" = postlaunch ]; then
       assert_present "$CASE_DIR/launch.log" 'backlog failure happened before launch delivery'
       assert_contains "$out" 'worker may be active' 'postlaunch failure did not explain custody preservation'
     else
       [ ! -s "$CASE_DIR/launch.log" ] || fail "$phase attempted to launch a worker"
+    fi
+    if [ "$phase" = lock-contention ]; then
+      assert_contains "$out" 'cannot lock the claimed slot for rollback' \
+        'rollback did not encounter the competing project lock'
     fi
     [ "$(tasks-axi show "$id" --file "$HOME_DIR/data/backlog.md" | sed -n 's/^  state: *//p')" = queued ] \
       || fail "$phase changed the failed-dispatch backlog row"
