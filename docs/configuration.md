@@ -1459,6 +1459,7 @@ The sweep runs while the normal supervision cycle is active, starts at most once
 [`bin/fm-deadweight-sweep.sh`](../bin/fm-deadweight-sweep.sh) owns the schedule, state records, output, and safety gates.
 It uses teardown's landed-work and completion checks, preserves captain holds and secondmates, and delegates pool removal to treehouse's safe prune.
 It keeps uncertain work, including ignored or operator-edited files, unmerged recorded PRs, and remote branches whose status cannot be verified; only exact Firstmate-generated wiring is exempt from the file check.
+When a worker copy is missing, its record remains unless the recorded remote branch is confirmed merged or absent.
 Automatic teardown requires a proven dead or missing endpoint.
 Alive workers remain in place and appear as `idle-left` in the one-line report when the semantic busy classifier confirms idle.
 Backends without reliable death proof also remain in place.
