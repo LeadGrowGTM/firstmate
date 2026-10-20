@@ -1,0 +1,16 @@
+Scenario: recorded PR lookup fails
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X/.fm-teardown-live.42Cf8Y
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed
+exit=1 record_retained=yes
+Scenario: recorded PR URL is malformed
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X/.fm-teardown-live.42Cf8Y
+WARNING: watcher still down (same stale episode; last beat: 2s ago, grace 300s) - full banner already printed this episode.
+REFUSED: recorded PR for task-x1 cannot be verified as merged; nothing was changed
+exit=1 record_retained=yes

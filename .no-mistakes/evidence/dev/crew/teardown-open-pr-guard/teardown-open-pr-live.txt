@@ -1,0 +1,13 @@
+Scenario: ordinary teardown of pushed branch with recorded open PR and real Treehouse lease
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X/.fm-teardown-live.42Cf8Y
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 67s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed
+exit=1 record_exists=yes
+treehouse_status=leased
+branch_head_unchanged=yes

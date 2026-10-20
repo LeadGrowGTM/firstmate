@@ -1,0 +1,24 @@
+
+ ▐▛███▛█   Claude Code v2.1.304
+▝▜██████▀  Sonnet 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+❯ Try "write a test for fm-brief.test.sh"
+────────────────────────────────────────────────────────────────────────────────
+   ⚓ 01M5CZXHDVF90SZH3HD1E4RB6X  ◆ Sonnet 5.5
+  ⏵⏵ auto mode on (shift+tab to cycle)

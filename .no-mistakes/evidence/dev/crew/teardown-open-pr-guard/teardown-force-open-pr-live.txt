@@ -1,0 +1,12 @@
+Scenario: explicit --force teardown with recorded open PR in disposable lab
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X/.fm-teardown-live.42Cf8Y
+WARNING: watcher still down (same stale episode; last beat: 75s ago, grace 300s) - full banner already printed this episode.
+A new version of treehouse is available: v2.1.1 → v3.1.4
+Run "treehouse update" to update
+
+🌳 Worktree returned to pool.
+project: STUCK: on branch main with uncommitted changes, 0 commits behind origin/main - needs attention
+teardown task-x1 complete (window primary:fm-task-x1, worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X/.fm-teardown-live.42Cf8Y/projects/pool/.treehouse/project-0b2b7d/1/project)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X/.fm-teardown-live.42Cf8Y/data/backlog.md). Update /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CZXHDVF90SZH3HD1E4RB6X/.fm-teardown-live.42Cf8Y/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+exit=0 record_exists=no
+treehouse_status=empty
