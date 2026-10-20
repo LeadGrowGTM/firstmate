@@ -242,12 +242,21 @@ fi
 # refuses before it is posted or previewed; refusals name only neutral ids.
 # An attached image is not scanned. A home with no registered names has
 # nothing to check; a list that exists but cannot be checked refuses.
+PN_LIST=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/private-names
+if [ ! -f "$PN_LIST" ] || [ ! -r "$PN_LIST" ]; then
+  echo "fm-x-reply: refusing this public reply: the private-name list config/private-names is missing or unreadable" >&2
+  exit 1
+fi
 PN_RC=0
 PN_OUT=$(printf '%s\n' "$TEXT" | "$FM_ROOT/bin/fm-private-names.sh" check 2>&1) || PN_RC=$?
-if [ "$PN_RC" -eq 3 ] &&
-  ! awk 'NF >= 2 && $1 !~ /^#/ { found = 1 } END { exit !found }' \
-    "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/private-names" 2>/dev/null; then
-  PN_RC=0
+if [ "$PN_RC" -eq 3 ]; then
+  case "$PN_OUT" in
+    *'the private-name list config/private-names is missing or empty'*)
+      if awk 'NF >= 2 && $1 !~ /^#/ { found = 1 } END { exit(found ? 1 : 0) }' "$PN_LIST" 2>/dev/null; then
+        PN_RC=0
+      fi
+      ;;
+  esac
 fi
 if [ "$PN_RC" -ne 0 ]; then
   [ -z "$PN_OUT" ] || printf '%s\n' "$PN_OUT" >&2

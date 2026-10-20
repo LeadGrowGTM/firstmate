@@ -218,7 +218,10 @@ cmd_refresh() {
   }
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$out" 2>/dev/null || return 1
-  register_gates || echo "fm-private-names: warning: could not record this home for its no-mistakes gates" >&2
+  register_gates || {
+    echo "fm-private-names: cannot record this home for its no-mistakes gates" >&2
+    return 1
+  }
   echo "private-names: $(fm_pn_count) names in config/private-names"
 }
 
@@ -482,10 +485,15 @@ scan_outgoing() {  # <dest>
       rc=1
     fi
     # An annotated tag carries its own message, which no commit check sees.
-    if [ "$(git cat-file -t "$local_sha" 2>/dev/null)" = tag ] &&
-      ! git cat-file tag "$local_sha" | sed '1,/^$/d' | report_hits "the tag message"; then
-      rc=1
-    fi
+    sha=$local_sha
+    while [ "$(git cat-file -t "$sha" 2>/dev/null)" = tag ]; do
+      git cat-file tag "$sha" | sed '1,/^$/d' | report_hits "the tag message" || rc=1
+      sha=$(git cat-file tag "$sha" | sed -n '1s/^object //p')
+      [ -n "$sha" ] || {
+        echo "fm-private-names: cannot read the outgoing tag chain; refusing" >&2
+        return 1
+      }
+    done
     range=("$local_sha" --not "${known_shas[@]}")
     commits=$(git rev-list "${range[@]}" 2>/dev/null) || {
       echo "fm-private-names: cannot list the commits being pushed; refusing" >&2
@@ -788,7 +796,7 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
   shift 4
   local args=("$@") n=$# i token option value prefix value_idx options=1 dest='' target='' rc=0 takes_value
   local positional=() texts=() files=() opaque=0 has_title=0 has_body=0 has_notes=0 has_flag=0
-  local visibility='' make_public=0 copy j
+  local visibility='' make_public=0 copy j workflow_json=''
   gh_shim_tmp || return 1
   for ((i = 0; i < n; i++)); do
     token=${args[i]}
@@ -838,6 +846,22 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
     case "$option" in
       -R | --repo) dest=$value; continue ;;
       -F | --body-file | --notes-file)
+        if [ "$command $action" = "workflow run" ] && [ "$option" = -F ]; then
+          case "$value" in
+            *=@*)
+              copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
+                echo "fm-private-names: cannot read the workflow field file" >&2
+                return 1
+              }
+              args[value_idx]=$prefix${value%%=*}=@$copy
+              files+=("$copy")
+              texts+=("${value%%=*}")
+              continue
+              ;;
+          esac
+          texts+=("$value")
+          continue
+        fi
         copy=$(gh_stage_file "$value" "file-$value_idx") || {
           echo "fm-private-names: cannot read the text file" >&2
           return 1
@@ -855,6 +879,15 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
       -b | --body) has_body=1 ;;
       -n | --notes | --generate-notes | --notes-from-tag) has_notes=1 ;;
       --visibility) visibility=$value ;;
+      --json)
+        if [ "$command $action" = "workflow run" ]; then
+          workflow_json=$(gh_stage_file - workflow-json) || {
+            echo "fm-private-names: cannot read workflow JSON input" >&2
+            return 1
+          }
+          files+=("$workflow_json")
+        fi
+        ;;
       --public) visibility=public ;;
       --private) visibility=private ;;
       --internal) visibility=internal ;;
@@ -882,7 +915,8 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
     "repo create" | "repo new")
       [ -n "${positional[0]:-}" ] && target=${args[${positional[0]}]}
       if [ "$visibility" != public ]; then
-        exec "$real" "${args[@]}"
+        "$real" "${args[@]}"
+        return
       fi
       ;;
     "repo edit" | "repo rename" | "repo fork")
@@ -896,7 +930,12 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
   fi
   if [ -n "$dest" ] && [ "$command $action" != "repo create" ] && [ "$command $action" != "repo new" ] &&
     ! fm_pn_dest_is_public "$dest"; then
-    exec "$real" "${args[@]}"
+    if [ -n "$workflow_json" ]; then
+      "$real" "${args[@]}" <"$workflow_json"
+    else
+      "$real" "${args[@]}"
+    fi
+    return
   fi
   require_current_list "this $tool $command $action" || return 3
   if [ "$opaque" = 1 ]; then
@@ -927,6 +966,8 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
         if [ "$i" != "${positional[0]}" ] && [ -f "${token%%#*}" ]; then
           value="release asset $(fm_pn_scrub_string "${token%%#*}")"
           report_hits "$value" noline <"${token%%#*}" || rc=1
+          value=${token%%#*}
+          texts+=("${value##*/}")
           case "$token" in *\#*) texts+=("${token#*#}") ;; esac
           continue
         fi
@@ -944,7 +985,11 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
     echo "fm-private-names: refusing $tool $command $action on a public repository; replace the listed names with their neutral ids" >&2
     return 1
   fi
-  "$real" "${args[@]}"
+  if [ -n "$workflow_json" ]; then
+    "$real" "${args[@]}" <"$workflow_json"
+  else
+    "$real" "${args[@]}"
+  fi
 }
 
 # Guard gh api. A write - a method other than GET or HEAD, fields or --input
@@ -955,7 +1000,7 @@ gh_api_guard() {  # <tool> <real> <arg>...
   local tool=$1 real=$2
   shift 2
   local args=("$@") n=$# i token option value prefix value_idx endpoint='' method='' host='' fields=0 input=0
-  local texts=() files=() copy rc=0 j rest owner repo dest='' seen_api=0 mutation=0
+  local texts=() files=() visibility_fields=() copy rc=0 j rest owner repo dest='' seen_api=0 mutation=0 make_public=0 input_copy=''
   gh_shim_tmp || return 1
   for ((i = 0; i < n; i++)); do
     token=${args[i]}
@@ -986,9 +1031,10 @@ gh_api_guard() {  # <tool> <real> <arg>...
     case "$option" in
       -X | --method) method=$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]') ;;
       --hostname) host=$value ;;
-      -f | --raw-field) fields=1; texts+=("${value#*=}") ;;
+      -f | --raw-field) fields=1; texts+=("${value#*=}"); visibility_fields+=("$value") ;;
       -F | --field)
         fields=1
+        visibility_fields+=("$value")
         case "${value#*=}" in
           @*)
             copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
@@ -1009,21 +1055,25 @@ gh_api_guard() {  # <tool> <real> <arg>...
         }
         args[value_idx]=$prefix$copy
         files+=("$copy")
+        input_copy=$copy
         ;;
     esac
   done
   if [ "$endpoint" = graphql ]; then
     for j in "${texts[@]}"; do
-      printf '%s\n' "$j" | grep -q -i -E '^[[:space:]]*mutation\b' && mutation=1
+      printf '%s\n' "$j" | grep -q -i 'mutation' && mutation=1
     done
     for copy in "${files[@]}"; do
-      grep -q -i -E '(^|["{[:space:]])mutation\b' "$copy" && mutation=1
+      grep -q -i 'mutation' "$copy" && mutation=1
     done
-    [ "$mutation" = 1 ] || exec "$real" "${args[@]}"
+    if [ "$mutation" = 0 ]; then
+      "$real" "${args[@]}"
+      return
+    fi
   else
     case "$method" in
-      '') [ "$fields" = 1 ] || [ "$input" = 1 ] || exec "$real" "${args[@]}" ;;
-      GET | HEAD) exec "$real" "${args[@]}" ;;
+      '') if [ "$fields" = 0 ] && [ "$input" = 0 ]; then "$real" "${args[@]}"; return; fi ;;
+      GET | HEAD) "$real" "${args[@]}"; return ;;
     esac
     rest=${endpoint#/}
     case "$rest" in
@@ -1042,8 +1092,43 @@ gh_api_guard() {  # <tool> <real> <arg>...
         fi
         ;;
     esac
+    if [ "$method" = PATCH ]; then
+      rest=${endpoint%%\?*}
+      rest=${rest#/}
+      case "${rest#repos/}" in
+        */*/*) ;;
+        */*)
+          case "$rest" in
+            repos/*)
+              for j in "${visibility_fields[@]}"; do
+                case "${j,,}" in
+                  private=false | visibility=public) make_public=1 ;;
+                  private=@* | visibility=@*)
+                    copy=${j#*=@}
+                    value=$(tr -d '[:space:]' <"$copy")
+                    case "${j%%=*}:${value,,}" in private:false | visibility:public) make_public=1 ;; esac
+                    ;;
+                esac
+              done
+              if [ -n "$input_copy" ] && perl -MJSON::PP -e '
+                local $/; my $data = eval { decode_json(<STDIN>) } || {};
+                exit(!((exists $data->{private} && !$data->{private}) ||
+                  (exists $data->{visibility} && lc($data->{visibility}) eq "public")));
+              ' <"$input_copy"; then
+                make_public=1
+              fi
+              ;;
+          esac
+          ;;
+      esac
+    fi
+    if [ "$make_public" = 1 ]; then
+      echo "fm-private-names: refusing to make a repository public from a fleet worker" >&2
+      return 1
+    fi
     if [ -n "$dest" ] && ! fm_pn_dest_is_public "$dest"; then
-      exec "$real" "${args[@]}"
+      "$real" "${args[@]}"
+      return
     fi
   fi
   require_current_list "this $tool api write" || return 3
@@ -1168,6 +1253,20 @@ cmd_gate_check() {
     awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }' |
     report_hits "an uncommitted change" noline || rc=1
   git diff --name-only -M --diff-filter=ACR HEAD | report_hits "an uncommitted file path" noline || rc=1
+  while IFS= read -r -d '' path; do
+    label="uncommitted binary content of $(fm_pn_scrub_string "$path")"
+    report_hits "$label" noline <"$path" || rc=1
+  done < <(git diff --numstat --no-renames --diff-filter=AM -z HEAD |
+    while IFS= read -r -d '' path; do
+      case "$path" in $'-\t-\t'*) printf '%s\0' "${path#$'-\t-\t'}" ;; esac
+    done)
+  while IFS= read -r -d '' path; do
+    label="staged binary content of $(fm_pn_scrub_string "$path")"
+    (set -o pipefail; git show ":$path" | report_hits "$label" noline) || rc=1
+  done < <(git diff --cached --numstat --no-renames --diff-filter=AM -z HEAD |
+    while IFS= read -r -d '' path; do
+      case "$path" in $'-\t-\t'*) printf '%s\0' "${path#$'-\t-\t'}" ;; esac
+    done)
   while IFS= read -r -d '' path; do
     printf '%s\n' "$path" | report_hits "an untracked file path" noline || rc=1
     label="untracked file $(fm_pn_scrub_string "$path")"

@@ -628,10 +628,10 @@ The configured merge authority approves the ready branch, then firstmate merges 
 EOF
       ;;
     no-mistakes:*)
-      scrub_cmd="FM_HOME=$(printf '%q' "${FM_HOME:-.}") $(printf '%q' "${FM_ROOT:-.}/bin/fm-private-names-scrub.sh") --repo <owner/repo> --pr <number> --no-evidence --apply"
+      scrub_cmd="FM_HOME=$(printf '%q' "${FM_HOME:-.}") $(printf '%q' "${FM_ROOT:-.}/bin/fm-private-names-scrub.sh") --repo <full-repository-url> --pr <number> --no-evidence --apply"
       if [ "$forge" != gerrit ]; then
         early_scrub="While the no-mistakes drive continues, use a separate call to \`no-mistakes axi status\` to watch for its PR URL.
-As soon as the URL appears, run \`$scrub_cmd\` with the owner/repo and number from that URL; do not wait for CI green.
+As soon as the URL appears, run \`$scrub_cmd\` with the repository URL (including host) and number from that URL; do not wait for CI green.
 Keep the drive call running and continue to its next gate or outcome.
 "
       fi
@@ -650,7 +650,7 @@ EOF
 
 ${early_scrub}After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
-The pipeline wrote the PR title and body itself, outside this copy's private-name checks, so run \`$scrub_cmd\` again with the owner/repo and number from your PR URL; it rewrites any listed private name there to a neutral id and prints only counts.
+The pipeline wrote the PR title and body itself, outside this copy's private-name checks, so run \`$scrub_cmd\` again with the repository URL (including host) and number from your PR URL; it rewrites any listed private name there to a neutral id and prints only counts.
 Then append \`done [at=<epoch>]: PR {url} checks green\` and stop. You are finished.
 That CI-ready \`done:\` is accepted only when this copy's HEAD - your latest commit - is one the /no-mistakes run pushed, so commit nothing after the run; the check tests that commit, not merely that a branch moved.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.

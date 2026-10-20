@@ -53,6 +53,15 @@ for a in "$@"; do
   fi
   prev=$a
 done
+if [ "$1 $2" = 'workflow run' ]; then
+  for a in "$@"; do
+    if [ "$a" = --json ]; then
+      printf 'STDIN<<\n' >>"$log"
+      cat >>"$log"
+      printf '>>STDIN\n' >>"$log"
+    fi
+  done
+fi
 case "$1 $2" in
   "api repos/"*)
     [ -z "${FAKE_GH_COUNT:-}" ] || echo x >>"$FAKE_GH_COUNT"
@@ -1017,6 +1026,11 @@ test_tag_messages_and_no_verify_pushes_are_refused() {
   assert_not_contains "$out" "acme-test" "the tag refusal printed the private name"
   git -C "$REPO" tag -a v2 -m "Clean release"
   in_pane "$HOOKS" git -C "$REPO" push -q origin v2 || fail "a clean annotated tag was refused"
+  git -C "$REPO" tag -a inner -m 'Release for zenith-sample'
+  git -C "$REPO" tag -a outer inner -m 'Clean outer release'
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin outer 2>&1) &&
+    fail "a nested annotated tag with a listed message was pushed"
+  assert_contains "$out" "client-1" "the nested tag refusal omitted the neutral id"
 
   in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/clean-tag main
   commit_file "$REPO" bypass.txt "names acme-test" "Clean subject"
@@ -1025,6 +1039,14 @@ test_tag_messages_and_no_verify_pushes_are_refused() {
   assert_contains "$out" "--no-verify" "the no-verify refusal was not explained"
   out=$(in_pane "$HOOKS" git -C "$REPO" -c core.hooksPath=/dev/null push -q origin HEAD 2>&1) &&
     fail "a push under another core.hooksPath skipped the private-name check"
+  assert_contains "$out" "core.hooksPath" "the hooksPath refusal was not explained"
+  for option in '-ccore.hooksPath=/dev/null' '--config-env=core.hooksPath=TEST_OTHER_HOOKS'; do
+    out=$(TEST_OTHER_HOOKS=/dev/null in_pane "$HOOKS" git -C "$REPO" "$option" push -q origin HEAD 2>&1) &&
+      fail "a push using $option skipped the private-name check"
+    assert_contains "$out" "core.hooksPath" "the hooksPath refusal was not explained"
+  done
+  out=$(TEST_OTHER_HOOKS=/dev/null in_pane "$HOOKS" git -C "$REPO" --config-env core.hooksPath=TEST_OTHER_HOOKS push -q origin HEAD 2>&1) &&
+    fail "a push using split --config-env skipped the private-name check"
   assert_contains "$out" "core.hooksPath" "the hooksPath refusal was not explained"
   [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/clean-tag)" ] || fail "a refused push reached the public origin"
   in_pane "$HOOKS" git -C "$REPO" status --short >/dev/null || fail "the git shim broke an ordinary command"
@@ -1043,6 +1065,8 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
   printf 'example/public-repo public\n' >>"$home/config/repo-visibility"
   printf 'Notes for zenith-sample.\n' >"$d/notes.md"
   printf 'asset names acme-test\0' >"$d/asset.bin"
+  printf 'clean asset\0' >"$d/acme-test.zip"
+  printf 'who=zenith-sample\n' >"$d/workflow-input.txt"
   for cmd in \
     "issue create --title Fix --body acme-test" \
     "issue create --title acme-test --body-file $d/notes.md" \
@@ -1054,6 +1078,7 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
     "release create v1 --notes acme-test" \
     "release create v1 --notes-file $d/notes.md" \
     "release create v1 $d/asset.bin --notes Clean" \
+    "release upload v1 $d/acme-test.zip" \
     "release edit v1 --title zenith-sample" \
     "label create acme-test --description Clean" \
     "label edit bug -d zenith-sample" \
@@ -1067,6 +1092,18 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
     assert_not_contains "$out" "zenith-sample" "the refusal of gh $cmd printed a private name"
     assert_not_contains "$(cat "$log")" "[${call[0]}] [${call[1]}]" "the real gh ran for gh $cmd"
   done
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh workflow run ci.yml -F "who=@$d/workflow-input.txt" --repo example/public-repo 2>&1) &&
+    fail "a workflow field file with a listed name was sent"
+  [ ! -s "$log" ] || fail "the real gh ran for a listed workflow field file"
+  : >"$log"
+  out=$(cd "$REPO" && printf '{"who":"acme-test"}' | in_pane "$HOOKS" gh workflow run ci.yml --json --repo example/public-repo 2>&1) &&
+    fail "workflow JSON stdin with a listed name was sent"
+  [ ! -s "$log" ] || fail "the real gh ran for listed workflow JSON"
+  : >"$log"
+  (cd "$REPO" && printf '{"who":"clean"}' | in_pane "$HOOKS" gh workflow run ci.yml --json --repo example/public-repo) ||
+    fail "clean workflow JSON was refused"
+  assert_contains "$(cat "$log")" 'STDIN<<' "clean workflow JSON did not reach gh stdin"
   for cmd in "issue create --title Clean" "issue comment 3" "release create v1" "issue create --title Clean --body Clean --web"; do
     read -r -a call <<<"$cmd"
     : >"$log"
@@ -1095,6 +1132,7 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
 
 test_gh_api_writes_are_checked() {
   local d=$TMP_ROOT/gh-api home log out
+  local -a call
   home=$d/home
   make_home "$home"
   make_repo "$d" "$home" private
@@ -1119,6 +1157,10 @@ test_gh_api_writes_are_checked() {
   out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=mutation { addComment(input: {body: "acme-test"}) { clientMutationId } }' 2>&1) &&
     fail "a GraphQL mutation with a listed name was sent"
   : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=query Q { viewer { login } } mutation M { addComment(input: {body: "acme-test"}) { clientMutationId } }' -f operationName=M 2>&1) &&
+    fail "a selected GraphQL mutation after a query was sent"
+  [ ! -s "$log" ] || fail "the real gh ran for a selected GraphQL mutation"
+  : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=query { repository(owner: "o", name: "acme-test") { id } }' >/dev/null) ||
     fail "a read-only GraphQL query was refused"
   assert_contains "$(cat "$log")" "[graphql]" "the read-only query did not reach gh"
@@ -1128,6 +1170,18 @@ test_gh_api_writes_are_checked() {
   (cd "$REPO" && in_pane "$HOOKS" gh api -X POST repos/example/private-repo/issues -f title=acme-test >/dev/null) ||
     fail "a private repository's api write was refused"
   assert_contains "$(cat "$log")" "[title=acme-test]" "the private api write did not reach gh"
+  for field in '-F private=false' '-f visibility=public'; do
+    read -r -a call <<<"$field"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH "${call[@]}" 2>&1) &&
+      fail "an API visibility change made a private repository public"
+    [ ! -s "$log" ] || fail "the real gh ran for an API visibility change"
+  done
+  printf '{"private":false}' >"$d/visibility.json"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH --input "$d/visibility.json" 2>&1) &&
+    fail "an API JSON visibility change made a private repository public"
+  [ ! -s "$log" ] || fail "the real gh ran for an API JSON visibility change"
   unset FAKE_GH_LOG FAKE_GH_VIS
   pass "gh api writes to public or unknown destinations have their endpoint, fields, and input checked"
 }
@@ -1167,6 +1221,9 @@ test_pipeline_gate_checks_what_the_push_would_publish() {
   clone=$home/projects/sample
   git clone -q "$ORIGIN" "$clone"
   git -C "$clone" remote add no-mistakes "$gate"
+  : >"$d/blocked-state"
+  FM_HOME=$home XDG_STATE_HOME=$d/blocked-state "$PN" refresh >/dev/null 2>&1 &&
+    fail "refresh succeeded when gate registration could not be recorded"
   FM_HOME=$home "$PN" refresh >/dev/null || fail "refresh failed"
   index=$XDG_STATE_HOME/firstmate/private-names-gates/abc123def456
   [ -f "$index" ] || fail "refresh did not record its home for the gate"
@@ -1188,6 +1245,23 @@ test_pipeline_gate_checks_what_the_push_would_publish() {
   assert_contains "$out" "mate-1" "the gate finding omitted the neutral id"
   assert_not_contains "$out" "acme-test" "the gate finding printed the private name"
   git -C "$run" reset -q --hard HEAD~1
+
+  printf 'clean\0' >"$run/tracked.bin"
+  git -C "$run" add tracked.bin
+  git -C "$run" commit -q -m 'Add clean binary'
+  printf 'zenith-sample\0' >"$run/tracked.bin"
+  : >"$findings"
+  (cd "$run" && NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1)
+  assert_contains "$(cat "$findings")" "client-1" "the gate missed pending binary content"
+  git -C "$run" checkout -q -- tracked.bin
+  printf 'zenith-sample\0' >"$run/tracked.bin"
+  git -C "$run" add tracked.bin
+  printf 'clean\0' >"$run/tracked.bin"
+  : >"$findings"
+  (cd "$run" && NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1)
+  assert_contains "$(cat "$findings")" "client-1" "the gate missed staged binary content"
+  git -C "$run" reset -q -- tracked.bin
+  git -C "$run" checkout -q -- tracked.bin
 
   printf 'serves zenith-sample\n' >"$run/pending.txt"
   : >"$findings"

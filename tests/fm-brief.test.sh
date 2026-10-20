@@ -431,7 +431,7 @@ test_no_mistakes_dod_green_detection() {
     "no-mistakes DOD must scrub the PR before CI green"
   assert_grep "use a separate call to \`no-mistakes axi status\`" "$brief" \
     "no-mistakes DOD must watch for a new PR while the drive continues"
-  assert_grep "--no-evidence --apply\` again with the owner/repo" "$brief" \
+  assert_grep "--no-evidence --apply\` again with the repository URL (including host)" "$brief" \
     "no-mistakes DOD must scrub the PR again after CI green"
   assert_no_grep "poll \`no-mistakes axi status\` from a separate call" "$brief" \
     "no-mistakes DOD still makes a status poll the wait for the next gate or outcome"

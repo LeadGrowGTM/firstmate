@@ -315,7 +315,18 @@ while [ "$i" -lt "$n" ]; do
       v=${args[i]:-}
       case "${v,,}" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
       ;;
-    -C | --git-dir | --work-tree | --namespace | --super-prefix | --config-env) i=$((i + 1)) ;;
+    -c?*)
+      v=${a:2}
+      case "${v,,}" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
+      ;;
+    --config-env)
+      i=$((i + 1))
+      case "${args[i],,}" in core.hookspath=*) other_hooks=1 ;; esac
+      ;;
+    --config-env=*)
+      case "${a#*=}" in [cC][oO][rR][eE].[hH][oO][oO][kK][sS][pP][aA][tT][hH]=*) other_hooks=1 ;; esac
+      ;;
+    -C | --git-dir | --work-tree | --namespace | --super-prefix) i=$((i + 1)) ;;
     -*) ;;
     *) break ;;
   esac
