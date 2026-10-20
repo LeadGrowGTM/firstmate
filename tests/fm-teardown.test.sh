@@ -40,6 +40,8 @@
 #   (q) no-mistakes + NO pr= recorded, PR discovered by branch  -> ALLOW  (yolo/no-CI merge)
 #   (q6) no-mistakes + recorded pr= still OPEN, branch pushed    -> REFUSE (open-PR guard)
 #   (q7) no-mistakes + recorded pr= merged, branch pushed        -> ALLOW  (no regression)
+#   (q8) no-mistakes + recorded pr= lookup fails, branch pushed  -> REFUSE
+#   (q9) no-mistakes + invalid recorded pr=, branch pushed       -> REFUSE
 #   (q2) no-mistakes + squash-merged, local followed pipeline rebase -> ALLOW
 #   (q3) no-mistakes + squash-merged, same file, different content   -> REFUSE
 #   (q4) no-mistakes + squash-merged rebased local plus extra commit -> REFUSE
@@ -1018,6 +1020,41 @@ test_recorded_open_pr_refuses_ordinary_teardown() {
   [ "$(backlog_row_state "$case_dir")" = "in_flight" ] \
     || fail "recorded-open-pr: refusal closed the backlog item"
   pass "ordinary teardown refuses while a recorded PR is open and changes nothing"
+}
+
+test_unverified_recorded_pr_refuses_ordinary_teardown() {
+  local case_dir rc head scenario expected
+  for scenario in failed-lookup invalid-url; do
+    case_dir=$(make_case "recorded-pr-$scenario")
+    write_meta "$case_dir" no-mistakes ship
+    wt_commit_file "$case_dir" feature.txt hello "add feature"
+    git -C "$case_dir/wt" push -q origin fm/task-x1
+    git -C "$case_dir/project" fetch -q origin fm/task-x1
+    head=$(git -C "$case_dir/wt" rev-parse HEAD)
+    case "$scenario" in
+      failed-lookup)
+        append_pr_meta_url "$case_dir"
+        add_gh_axi_error "$case_dir"
+        expected='REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed'
+        ;;
+      invalid-url)
+        printf '%s\n' 'pr=not-a-pr-url' >> "$case_dir/state/task-x1.meta"
+        expected='REFUSED: recorded PR for task-x1 cannot be verified as merged; nothing was changed'
+        ;;
+    esac
+    seed_backlog_in_flight "$case_dir"
+
+    rc=0
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+    expect_code 1 "$rc" "recorded-pr-$scenario: ordinary teardown should refuse without merge confirmation"
+    grep -Fq "$expected" "$case_dir/stderr" \
+      || fail "recorded-pr-$scenario: wrong refusal: $(cat "$case_dir/stderr")"
+    assert_refusal_retained_task_state "$case_dir" "recorded-pr-$scenario" "$head"
+    [ "$(backlog_row_state "$case_dir")" = "in_flight" ] \
+      || fail "recorded-pr-$scenario: refusal closed the backlog item"
+  done
+  pass "ordinary teardown retains pushed tasks when a recorded PR cannot be verified"
 }
 
 test_recorded_merged_pr_still_tears_down() {
@@ -4772,6 +4809,7 @@ test_squash_merged_branch_deleted_allows
 test_squash_merged_pr_allows_when_head_ancestor_of_pr_head
 test_no_pr_recorded_discovers_merged_pr_by_branch_allows
 test_recorded_open_pr_refuses_ordinary_teardown
+test_unverified_recorded_pr_refuses_ordinary_teardown
 test_recorded_merged_pr_still_tears_down
 test_squash_merged_pr_allows_replayed_unpushed_patch
 test_merged_pr_with_later_local_commit_refuses
