@@ -487,6 +487,49 @@ test_local_secondmate_reads_the_launching_home_pin() {
   pass "a local secondmate reads the launching home's pin and its own home's file is never inherited over"
 }
 
+test_local_secondmate_registers_trust_in_the_launching_home_pin() {
+  local out rc id=acct-sm-trust sm
+  new_case secondmate-trust claude
+  signed_in_claude_root "$CASE/work"
+  printf '%s\n' "$CASE/work" > "$HOME_DIR/config/claude-account"
+  # Both stores pre-exist with unrelated content, so a write to the wrong
+  # store - or a clobber of the right one - is visible.
+  printf '{"hasCompletedOnboarding":true,"projects":{"/other/path":{"allowedTools":["Bash"]}}}\n' > "$CASE/work/.claude.json"
+  mkdir -p "$CASE/ambient-claude"
+  printf '{"hasCompletedOnboarding":true}\n' > "$CASE/ambient-claude/.claude.json"
+  sm="$CASE/secondmate-home"
+  mkdir -p "$sm/bin" "$sm/data" "$sm/config" "$sm/state" "$sm/projects"
+  git init -q -b main "$sm"
+  printf '# Firstmate\n' > "$sm/AGENTS.md"
+  printf '%s\n' "$id" > "$sm/.fm-secondmate-home"
+  printf 'charter for %s\n' "$id" > "$sm/data/charter.md"
+  out=$(FM_FAKE_LAUNCH_LOG="$CASE/launch.log" FM_TEST_CLAUDE_CONFIG_DIR="$CASE/ambient-claude" \
+    fm_test_run_spawn "$HOME_DIR" "$WT" "$FAKEBIN" "$id" "$sm" --secondmate); rc=$?
+  expect_code 0 "$rc" "a local secondmate spawn under the launching home's pin should succeed: $out"
+  node -e '
+    const fs = require("node:fs");
+    const pinned = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const ambient = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+    const home = process.argv[3];
+    if (!pinned.projects || pinned.projects[home]?.hasTrustDialogAccepted !== true) {
+      console.error("the secondmate home was not trusted in the pinned root store");
+      process.exit(1);
+    }
+    if (JSON.stringify(pinned.projects["/other/path"]?.allowedTools) !== JSON.stringify(["Bash"])) {
+      console.error("the pinned root store lost unrelated content");
+      process.exit(1);
+    }
+    if (ambient.projects && Object.keys(ambient.projects).length !== 0) {
+      console.error("the ambient store gained an entry it must not have");
+      process.exit(1);
+    }
+  ' "$CASE/work/.claude.json" "$CASE/ambient-claude/.claude.json" "$sm" \
+    || fail "a secondmate spawn must pre-register trust in the pinned root store only"
+  assert_grep "CLAUDE_CONFIG_DIR='$CASE/work'" "$CASE/launch.log" \
+    "the secondmate launch must point at the same pinned store that was trusted"
+  pass "a local secondmate pre-registers trust in the launching home's pinned store"
+}
+
 test_absent_pin_keeps_the_launch_unchanged
 test_claude_pin_selects_the_root_and_sheds_ambient_credentials
 test_claude_pin_refuses_a_signed_out_root_despite_an_ambient_login
@@ -501,5 +544,6 @@ test_raw_claude_command_receives_the_pin
 test_raw_claude_account_override_refuses_under_a_pin
 test_raw_claude_account_override_is_kept_without_a_pin
 test_local_secondmate_reads_the_launching_home_pin
+test_local_secondmate_registers_trust_in_the_launching_home_pin
 
 echo "# all fm-worker-account tests passed"
