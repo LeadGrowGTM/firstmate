@@ -1,0 +1,4 @@
+scenario=open rc=1 response=REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed task_record=present branch_head=98d0418 backlog=in_flight
+scenario=failed_lookup rc=1 response=REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed task_record=present branch_head=98d0418 backlog=in_flight
+scenario=invalid_url rc=1 response=REFUSED: recorded PR for task-x1 cannot be verified as merged; nothing was changed task_record=present branch_head=98d0418 backlog=in_flight
+scenario=merged rc=0 task_record=removed backlog=done response=Backlog: task-x1 is closed in /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5CTRHWCC8NAJ62BZS9E5A99/.fm-live-teardown/lab/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.

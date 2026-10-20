@@ -1,0 +1,4 @@
+scenario=open rc=1 response=REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed task_record=present branch_head=0faa893 backlog=in_flight
+scenario=failed_lookup rc=1 response=REFUSED: recorded PR https://github.com/example/repo/pull/7 is not confirmed merged; nothing was changed task_record=present branch_head=0faa893 backlog=in_flight
+scenario=invalid_url rc=1 response=REFUSED: recorded PR for task-x1 cannot be verified as merged; nothing was changed task_record=present branch_head=0faa893 backlog=in_flight
+scenario=force_open rc=0 task_record=removed backlog=done
