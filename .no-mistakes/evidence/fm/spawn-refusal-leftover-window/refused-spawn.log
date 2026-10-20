@@ -1,0 +1,10 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4/data/refused-retry/launch-brief.md records no ship branch; defaulting to legacy branch fm/refused-retry
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4/data/refused-retry/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse pool /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4/projects/lab-project/.treehouse/lab-project-6f69b7 is inside Firstmate home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4; refusing allocation
+
+exit=1
+
+windows_after_refusal:
+claude
+meta_exists=no

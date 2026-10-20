@@ -1,0 +1,14 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4/data/refused-retry/launch-brief.md records no ship branch; defaulting to legacy branch fm/refused-retry
+warning: /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/fm-lab.Kk5vl4/data/refused-retry/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned refused-retry harness=sleep kind=ship mode=no-mistakes yolo=off window=primary:fm-refused-retry worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project
+
+exit=0
+
+windows_after_retry:
+claude
+fm-refused-retry
+meta_exists=yes
+recorded_endpoint:
+window=primary:fm-refused-retry
+worktree=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project

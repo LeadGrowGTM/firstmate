@@ -1,0 +1,23 @@
+NWM6E8VKAGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project. T
+ype 'exit' to return.
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VK
+AGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project$ cd -- '/h
+ome/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VKAGE5WB2TQ/lab-poo
+l-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project'
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VK
+AGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project$ export GO
+TMPDIR=/tmp/fm-refused-retry/gotmp
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VK
+AGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project$ export CO
+MPACT_ADVISER_DISABLE=1
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VK
+AGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project$ export FM
+_TASK_ID=refused-retry
+mitch@The-GOAT:/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BTWA8NWM6E8VK
+AGE5WB2TQ/lab-pool-Kk5vl4/.treehouse/lab-project-6f69b7/1/lab-project$ . '/tmp/f
+m-refused-retry+b02ef8b1d219b3fdb7308cb0653faba54d7327f14305cec596beaab60a8f4368
+/launch.s1792473117.3798783.4661.sh'
+
