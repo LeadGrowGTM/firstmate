@@ -2293,6 +2293,7 @@ Arm the check once per home with `bin/fm-boat-spend-check.sh arm`.
 - An evaluation that read everything is recorded, and the next one is due 24 hours later.
   Every condition is reported once, then again only when it changes to a distinct condition or clears and later returns.
   Spend uses the over-ceiling or projected-over-ceiling state, rather than a changing dollar amount, as its identity; a restore error uses its full error text even though the displayed text is shortened.
+  A partial read can clear an over-ceiling alert from readable spend alone; clearing a projected alert also requires the usage and plan-end inputs needed to calculate it.
   `bin/fm-boat-spend-check.sh` records only conditions included in the emitted line, so alerts omitted by the line cap remain pending.
 - An evaluation that could not see everything is not recorded, so the next watcher poll tries again and a passing failure does not cost the day's check.
   An unchanged failure stays silent while a newly observed condition can still alert.

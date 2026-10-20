@@ -224,6 +224,7 @@ findings() {
     ($limits.subscriptionCurrentPeriodEnd | ts) as $period_end |
     ($limits.subscriptionTrialEndsAt | ts) as $trial_end |
     (if $period_end != null and $period_end > $now then $period_end else month_end($now) end) as $horizon |
+    (($day | type) == "number" and ($limits.subscriptionCurrentPeriodEnd == null or $period_end != null)) as $projection_ok |
     (($list.sandboxes | type) == "array" and $list.pageInfo.hasMore == false) as $list_ok |
     ($list_ok and all($boxes[]; has_state) and ($states | strs)) as $live_ok |
     [
@@ -243,11 +244,8 @@ findings() {
       status: (if ($unread | length) > 0 then "blind" else "ok" end),
       observed: [
         {kind: "read"},
-        (if $spend_ok then
-           if ($used / $spd) > $cfg.ceiling_usd or
-              (($day | type) == "number" and ($limits.subscriptionCurrentPeriodEnd == null or $period_end != null))
-           then {kind: "spend"} else empty end
-         else empty end),
+        (if $spend_ok then {kind: "spend", detail: "over"} else empty end),
+        (if $spend_ok and $projection_ok then {kind: "spend", detail: "projected"} else empty end),
         (if $live_ok then {kind: "running"}, {kind: "size"}, {kind: "no-stop"},
            {kind: "restore-incomplete"}, {kind: "disk-expiry"} else empty end),
         (if ($billing.prepaid.enabled | type) == "boolean" then {kind: "refill"} else empty end),
@@ -268,7 +266,7 @@ findings() {
            (((if ($day | type) == "number" then $day else 0 end) / $spd) * (($horizon - $now) / 86400)) as $more |
            if $spent > $cfg.ceiling_usd
            then once("account"; "spend"; "over"; "spend $\($spent | usd) is over the $\($cfg.ceiling_usd) ceiling")
-           elif ($spent + $more) > $cfg.ceiling_usd
+           elif $projection_ok and ($spent + $more) > $cfg.ceiling_usd
            then once("account"; "spend"; "projected"; "spend $\($spent | usd) projects to $\(($spent + $more) | usd) by period end, over the $\($cfg.ceiling_usd) ceiling")
            else empty end
          else empty end),
@@ -382,7 +380,9 @@ publish_alerts() {
      then [$seen[] as $key | select(any($cur[]; . == $key)) | $key]
      else [$seen[] as $key |
        select(any($cur[]; . == $key) or
-         (any($observed[]; .kind == $key.kind and ((has("id") | not) or .id == $key.id)) | not)) | $key]
+         (any($observed[]; .kind == $key.kind and
+           ((has("id") | not) or .id == $key.id) and
+           ((has("detail") | not) or .detail == $key.detail)) | not)) | $key]
      end) as $base |
     [$f[] as $item | select(any($seen[]; . == ($item | norm)) | not) | $item] as $pending |
     (reduce $pending[] as $item ({line: "", sent: []};

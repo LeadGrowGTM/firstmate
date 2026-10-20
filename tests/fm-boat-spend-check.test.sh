@@ -476,6 +476,40 @@ test_spend_condition_uses_state_not_dollars() {
   assert_contains "$out" 'spend $35 is over' "returning to over-cap should alert"
 }
 
+test_spend_observation_uses_each_conditions_inputs() {
+  local home out source
+  for source in usage plan; do
+    home=$(make_world "spend-over-blind-$source")
+    set_json "$home" limits '.creditUsedSeconds = 3500000'
+    out=$(run_check "$home")
+    assert_contains "$out" 'spend $35 is over' "first over-cap alert with $source"
+    case "$source" in
+      usage) set_json "$home" limits '.creditUsedSeconds = 2000000 | del(.last24hUsageSeconds)' ;;
+      plan) set_json "$home" limits '.creditUsedSeconds = 2000000 | .subscriptionCurrentPeriodEnd = "not a date"' ;;
+    esac
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+    assert_contains "$out" 'read failed' "unreadable $source while spend falls below the ceiling"
+    assert_not_contains "$out" 'spend $' "unreadable $source cannot support a projection"
+    set_json "$home" limits '.creditUsedSeconds = 3500000'
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+    assert_equals 'boat-spend: spend $35 is over the $30 ceiling' "$out" "over-cap returns while $source is unreadable"
+
+    home=$(make_world "spend-projected-blind-$source")
+    set_json "$home" limits '.creditUsedSeconds = 2000000 | .last24hUsageSeconds = 1000000'
+    out=$(run_check "$home")
+    assert_contains "$out" 'projects to' "first projected alert with $source"
+    case "$source" in
+      usage) set_json "$home" limits '.creditUsedSeconds = 6124 | del(.last24hUsageSeconds)' ;;
+      plan) set_json "$home" limits '.creditUsedSeconds = 6124 | .subscriptionCurrentPeriodEnd = "not a date"' ;;
+    esac
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86400)))
+    assert_contains "$out" 'read failed' "unreadable $source cannot prove a projection cleared"
+    set_json "$home" limits '.creditUsedSeconds = 2000000 | .last24hUsageSeconds = 1000000 | .subscriptionCurrentPeriodEnd = "2026-10-30T21:38:16.000Z"'
+    out=$(run_check "$home" FM_BOAT_SPEND_NOW=$((NOW + 86700)))
+    [ -z "$out" ] || fail "projected spend should remain deduplicated after unreadable $source: $out"
+  done
+}
+
 test_restore_error_keys_full_text() {
   local home out prefix
   home=$(make_world full-restore-error)
@@ -679,6 +713,7 @@ test_only_the_three_read_commands_are_passed
 test_box_condition_alerts_once_per_distinct_detail
 test_spend_cap_still_alerts_when_a_known_box_error_does_not
 test_spend_condition_uses_state_not_dollars
+test_spend_observation_uses_each_conditions_inputs
 test_restore_error_keys_full_text
 test_capped_alerts_remain_pending
 test_new_box_condition_survives_repeated_blind_read
