@@ -131,6 +131,10 @@ test_absent_pin_keeps_the_launch_unchanged() {
   assert_not_contains "$out" "account=" "an unpinned spawn must not report an account"
   assert_no_grep "account=" "$HOME_DIR/state/$id.meta" "an unpinned task record must not carry an account"
   assert_absent "$CASE/claude-checks" "an unpinned spawn must not run a sign-in check"
+  assert_contains "$(cat "$CASE/ambient-claude/.claude.json" 2>/dev/null)" "$WT" \
+    "an unpinned spawn should register workspace trust in the invoking process's own Claude store"
+  assert_absent "$HOME_DIR/user-home/.claude.json" \
+    "an unpinned spawn must not fall back to the throwaway home when CLAUDE_CONFIG_DIR is set"
   run_pane
   assert_grep "CLAUDE_CONFIG_DIR=$CASE/ambient-claude" "$CASE/claude-worker" \
     "an unpinned launch must keep forwarding the invoking process's own Claude root"
@@ -474,10 +478,16 @@ test_local_secondmate_reads_the_launching_home_pin() {
   assert_contains "$out" "account=$CASE/work" "the secondmate spawn should report the launching home's pin"
   [ "$(cat "$sm/config/claude-account")" = "$CASE/sm-own" ] \
     || fail "the launching home's pin must not be inherited over the secondmate home's own file"
+  assert_contains "$(cat "$CASE/work/.claude.json" 2>/dev/null)" "$sm" \
+    "secondmate workspace trust should be registered in the launching home's pinned store"
+  assert_absent "$CASE/ambient-claude/.claude.json" \
+    "the ambient Claude store must not receive the secondmate trust entry"
+  assert_absent "$CASE/sm-own/.claude.json" \
+    "the secondmate home's own account dir must not receive this spawn's trust entry"
   run_pane
   assert_grep "CLAUDE_CONFIG_DIR=$CASE/work" "$CASE/claude-worker" \
     "the secondmate agent should run under the launching home's pinned root"
-  pass "a local secondmate reads the launching home's pin and its own home's file is never inherited over"
+  pass "a local secondmate reads the launching home's pin, trusts that store, and its own home's file is never inherited over"
 }
 
 test_absent_pin_keeps_the_launch_unchanged
