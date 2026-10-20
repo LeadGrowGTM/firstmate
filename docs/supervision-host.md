@@ -11,7 +11,7 @@ It is one architecture with Pi's, not a second one.
 These parts are shared with Pi and decide what the branch may do:
 
 - The same branch prompt.
-- The same row eligibility.
+- The same row eligibility, with the attended digest exception under [Postures](#postures).
 - The same records.
 - The same guarded scripts.
 
@@ -26,7 +26,7 @@ Today it runs beside a Claude, Cursor, OpenCode, omp, Grok, or Codex primary: aw
 
 ### Behavior by posture and harness
 
-- Attended (no away record: no `state/.afk-contract`, or quiet mode's) on Claude and Cursor, the engine takes the wakes the Pi branch would take plus eligible recovery resurfaces, and never wakes main for a routine outcome; see [Postures](#postures).
+- Attended (no away record: no `state/.afk-contract`, or quiet mode's) on Claude and Cursor, the engine takes eligible wakes, including recovery resurfaces and decision signals when the digest is on, and never wakes main for a routine outcome; see [Postures](#postures).
   Every other close reaches main exactly as the plain watcher arm delivers it.
 - Attended on OpenCode, omp, Grok, and Codex, the host is a pass-through: every close reaches main as without the host.
 - Away (an away record exists), the host hands each close to the engine.
@@ -84,9 +84,10 @@ The other owners read the file at every arm.
 ### The report surface
 
 `bin/fm-branch-report.sh` appends to the outcome store (`bin/fm-branch-outcome.sh`) plus a per-turn receipt the host requires.
+For an attended turn, it refuses a routine report for a newly claimed `needs-decision` status line and requires an urgent captain report for a newly claimed `blocked` line, using only the status lines surfaced by that turn's claimed signal rows.
 A non-silent row an away turn records after the captain returned is also queued for main as a durable check wake.
 Silent outcomes remain in the store but are not queued or relayed as notes.
-An attended turn queues nothing: its captain rows reach main through the host's `branch-outcome` exit and the drain, and its routine rows stay in the store.
+An attended turn queues nothing: its captain rows reach main when the digest is due through the host's `branch-outcome` exit and the drain, and its routine rows stay in the store.
 
 ### Leases and authority
 
@@ -106,7 +107,7 @@ Only an away record is away: no record, or the record daemon-backed quiet mode w
 ### Attended
 
 The host asks the Pi branch's offer rule (`branchOfferForWake`, through `bin/fm-branch-dispatch.mjs offer`) whether the branch may take the close.
-Except for the recovery resurface below, a check trigger reaches main off Pi, as do a decision-owned signal or stale trigger and a scan that is unsafe or holds nothing for the branch.
+Except for the recovery resurface below, a check trigger reaches main off Pi, as do a decision-owned stale trigger, a decision-owned signal trigger while the digest is off, and a scan that is unsafe or holds nothing for the branch.
 On that main-only pass-through the host starts the successor watcher cycle and leaves it running, then prints the close unchanged.
 That successor, like one a turn hands back at its start (see [Away](#away)), runs in a process group of its own, so the harness tearing down the hook's group after the rewake does not stop it.
 The host leaves the watcher's recovery marker reading downtime, confirming no handling handoff, because the re-arm owner delivers a close to main only while that marker reads downtime.
@@ -125,15 +126,16 @@ It also passes the close through unchanged, with no added line, when any of thes
 
 A close the engine takes is handled as in [One wake](#one-wake), with the dialog mirror at the head of the wake message.
 A handled wake with only routine outcomes never reaches main.
-A handled wake that recorded a captain outcome while the captain is still attended exits with one `supervision-host: branch-outcome:` line naming its store rows, without the close it handled; see [Captain outcomes](#captain-outcomes).
+A handled wake that recorded a captain outcome while the captain is still attended exits with one `supervision-host: branch-outcome:` line, without the close it handled, when the digest says outcomes are due or cannot judge them, and otherwise parks; see [Captain outcomes](#captain-outcomes).
 A turn that fails hands its close to main with one `supervision-host:` line, as away.
 Main-only rows that share the queue with the branch's rows stay queued for main, which is woken for each on its own triggering close, as on Pi.
+The captain-outcome digest is the one routing difference from Pi: while it is on, the host passes `--decision-digest`, so a decision-owned signal close goes to the engine, whose prompt calls for a captain outcome and which cannot answer the decision; main hears reported outcomes with the digest, and a decision-owned stale close stays main's.
 The engine turn runs beside a captain who is present, so its guarded actions take the task leases that keep it and main off the same task.
 
 ### Away
 
 Every close goes to the engine; captain outcomes remain in the store until the return drain presents them (see [Captain outcomes](#captain-outcomes)).
-Every turn that starts attended meets the attended rule again at its start, and the offer's scan is the scope the turn claims: a close accepted away whose turn starts attended, because the captain returned in between, or an attended close whose task turned main-only (a decision appeared) while the successor started, reaches main unchanged and leaves that successor cycle running, with the handoff that turn had confirmed handed back to downtime.
+Every turn that starts attended meets the attended rule again at its start, and the offer's scan is the scope the turn claims: a close accepted away whose turn starts attended, because the captain returned in between, or an attended close whose task turned main-only while the successor started, reaches main unchanged and leaves that successor cycle running, with the handoff that turn had confirmed handed back to downtime.
 A captain who leaves while an attended turn runs turns its captain outcomes into away outcomes: they wait for the return too.
 
 ### Quiet mode
@@ -201,7 +203,25 @@ One example is a Cursor park superseded by the return turn's own end, which stop
 
 ## Captain outcomes
 
-A captain outcome the attended engine records while the captain remains attended wakes main once, through the owner's ordinary wake path, with one `supervision-host: branch-outcome:` line naming its store rows.
+A captain outcome the attended engine records while the captain remains attended wakes main through the owner's ordinary wake path, with one `supervision-host: branch-outcome:` line, once the digest says it is due or cannot judge it.
+
+### The digest
+
+The prompt asks the engine to tag each attended captain outcome `urgent`, `pr-ready`, or `digest` (`bin/fm-branch-prompt.sh` "Verdict: routine or captain" owns the criteria), and the store keeps any supplied tag with the row.
+At startup, after every handled turn that recorded a captain outcome, and when a held outcome reaches its deadline, the host asks the store whether its unread captain outcomes are due (`bin/fm-branch-outcome.sh digest` owns the rule and `config/outcome-digest` the window and pr-ready policy, [configuration](configuration.md#captain-outcome-digest-configoutcome-digest)):
+
+- An urgent outcome, a ready PR when the policy makes it urgent, and an outcome without a tag are due at once, and the wake carries every waiting outcome with it.
+- Otherwise the outcomes wait, and the host parks until the oldest one's window closes, then wakes main once for all of them.
+- A report of a situation main already holds, presented and not yet acknowledged, with the task's status log unchanged since and the same urgency, wakes nothing; the store decides this from the rows' recorded status provenance, never from their prose.
+
+Nothing waits outside the store: every outcome is durable before the host judges it, the window's deadline comes from the rows' own timestamps so it survives a host restart, and any drain main runs for another reason presents the waiting outcomes too, which retires them from the next digest.
+A judgment that cannot be computed reads as due, so a fault wakes main rather than holding an outcome.
+The digest exit stops the parked cycle and hands main the same state as a handled close's exit.
+Due outcomes never wait behind another engine turn: when the cycle has already closed by the time they are due, that close goes to main with them, as a main-only pass-through does.
+While the digest is on, decision-owned signal rows are eligible for the branch ([Attended](#attended)); captain reports from them join the digest, and the decision stays open in the task's status log so every main drain still lists it under `OPEN DECISIONS`.
+
+### Presentation and acknowledgement
+
 Main drains, and `bin/fm-wake-drain.sh` presents it in its `BRANCH OUTCOMES` section with the exact `bin/fm-branch-outcome.sh mark-processed --through <seq>` acknowledgement.
 That presentation is what the Pi branch's visible entry is, so it advances the store's read cursor through the rows it presents.
 Every later drain, including the session-start digest, presents unprocessed captain outcomes again until main acknowledges them, so an ignored outcome costs no extra turn and is never lost.
@@ -328,10 +348,11 @@ A captain message typed during the park waits for the checkpoint to return, at m
 
 The engine keeps one conversation across wakes so the byte-stable prompt stays cached.
 That conversation is keyed to the current main session.
-A new one opens in two cases:
+A new one opens:
 
 - At every main session start.
 - Every `FM_SUPERVISION_HOST_ROTATE_TURNS` turns, because each wake adds history and the per-wake cost grows with it.
+- When the generated branch prompt changes, so the next turn receives its current instructions.
 
 Nothing captain-facing rides on that conversation, because the outcome store carries every result.
 The captain context it acts on is the [dialog mirror](#the-dialog-mirror) at the head of every attended wake and the away record's read-back at the tail of every away wake.

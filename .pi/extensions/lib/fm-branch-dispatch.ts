@@ -197,6 +197,16 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
 // and forced to main on its own triggering close (fm-primary-pi-watch.ts's
 // offerWakeToBranch). Heartbeat handling remains independent.
 //
+// One attended exception, for the supervision host only (`decisionDigest`,
+// which bin/fm-branch-dispatch.mjs passes while the host's captain-outcome
+// digest is on): a decision-owned SIGNAL row is claimed like any task-local
+// row and is not listed in needsDecisionKeys, so the branch can report it as a
+// captain outcome the digest batches (docs/supervision-host.md "Captain
+// outcomes"). The branch cannot answer it (bin/fm-lease-lib.sh refuses its
+// decision answer while attended), and main's drain folds the decision from
+// the status log whoever read the row. A decision-owned stale row stays
+// main's.
+//
 // That applies to a heartbeat review too, and it is the whole point: a
 // heartbeat used to be deferred to main merely because some unrelated check
 // row happened to be sitting unread, which put a routine fleet review in the
@@ -377,7 +387,13 @@ function spanIsDecisionOwned(
   return false;
 }
 
-export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = false, attendedHost = false): UnreadWakeScope {
+export function scopeForUnreadWake(
+  state: string,
+  heartbeat: boolean,
+  afk = false,
+  attendedHost = false,
+  decisionDigest = false,
+): UnreadWakeScope {
   let queue = "";
   try {
     queue = readFileSync(`${state}/.wake-queue`, "utf8");
@@ -465,7 +481,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     let task = "";
     if (kind === "signal") {
       const payload = fields[4] ?? "";
-      if (/^needs-decision:/.test(payload)) {
+      if (/^needs-decision:/.test(payload) && !decisionDigest) {
         // Main-owned exactly like a check-kind row above while attended: a
         // needs-decision status append surfaced through the actionable signal
         // path is excluded from what the branch may claim without vetoing the
@@ -493,7 +509,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     // before its task gained a main-owned decision, so it checks the whole
     // log; Pi retains its existing per-row scan.
     const spanRule = kind === "signal" && secondmates.has(task);
-    if (task && (kind === "stale" || (kind === "signal" && (attendedHost || spanRule)))) {
+    if (task && (kind === "stale" || (kind === "signal" && !decisionDigest && (attendedHost || spanRule)))) {
       const statusPath = `${state}/${task}.status`;
       const ownershipKey = `${kind}\0${statusPath}`;
       if (!staleDecisionOwnership.has(ownershipKey)) {
@@ -626,14 +642,23 @@ export interface BranchOfferVerdict {
 // running caught while main was in its turn, a close no reader saw
 // (docs/supervision-host.md "Attended"). So it is offered like that lost
 // close, but only when the scan leaves no row for main: any check,
-// heartbeat, or decision-owned row, or an empty queue, keeps it main's.
+// heartbeat, or decision-owned row that is not digest-eligible, or an empty
+// queue, keeps it main's.
 //
 // The away posture collapses that partition: every actionable row is
 // branch-eligible and the trigger class no longer forces anything to main
-// (scopeForUnreadWake owns the per-row rule).
-export function branchOfferForWake(state: string, message: string, afk: boolean, attendedHost = false): BranchOfferVerdict {
+// (scopeForUnreadWake owns the per-row rule). An attended host's
+// decisionDigest lifts it for decision-owned signal rows alone, through the
+// same per-row rule.
+export function branchOfferForWake(
+  state: string,
+  message: string,
+  afk: boolean,
+  attendedHost = false,
+  decisionDigest = false,
+): BranchOfferVerdict {
   const heartbeat = /^heartbeat($|:)/.test(message);
-  const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
+  const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk, attendedHost && !afk && decisionDigest);
   const isHostResurface = attendedHost && !afk && message === "check: rearm-resurface";
   const isCheckTrigger = /^check:/.test(message) && !(isHostResurface && scope.mainOnlySeqs.length === 0);
   const triggerKeys = /^signal:/.test(message)

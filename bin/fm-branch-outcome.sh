@@ -6,9 +6,13 @@
 #   - Store: $STATE/branch-outcomes.jsonl, strictly APPEND-ONLY. One JSON
 #     object per line: {"seq":N,"epoch":N,"task":"...","wake":"...",
 #     "verdict":"routine"|"captain","summary":"...","silent":true|false,
-#     "statusEndpoint":N,"statusIdent":"..."}. Legacy rows without `silent`
-#     or status provenance remain valid and are treated as visible. A silent
-#     row must have verdict `routine`; the branch prompt and delivery consumers
+#     "statusEndpoint":N,"statusIdent":"..."}, and a captain row the
+#     supervision host's attended branch recorded may also carry
+#     "urgency":"urgent"|"pr-ready"|"digest" (the digest subcommand below
+#     reads it). Legacy rows without `silent`, status provenance, or urgency
+#     remain valid; they are treated as visible, and a captain row without
+#     urgency as urgent. A silent row must have verdict `routine`, and only a
+#     captain row may carry urgency; the branch prompt and delivery consumers
 #     own the additional no-change eligibility rule.
 #     Every read and append validates the complete log as a gap-free sequence;
 #     malformed, duplicate, or reordered rows fail closed.
@@ -77,8 +81,10 @@
 #
 # Usage:
 #   fm-branch-outcome.sh append --task <id> --verdict routine|captain \
-#       --summary <text> [--wake <text>] [--silent true|false]
-#     Append one outcome record; prints the assigned seq.
+#       --summary <text> [--wake <text>] [--silent true|false] \
+#       [--urgency urgent|pr-ready|digest]
+#     Append one outcome record; prints the assigned seq. --urgency is legal
+#     only with the captain verdict.
 #   fm-branch-outcome.sh unread
 #     Print every unread record (raw JSONL). Exit 0 with no output when none.
 #   fm-branch-outcome.sh mark-read --through <seq>
@@ -115,6 +121,26 @@
 #     (fm-wake-drain.sh may run its redirected presentation body in a subshell
 #     on Bash 3.2); it skips the nested acquire so drain's bounded lock wait
 #     remains the deadline.
+#   fm-branch-outcome.sh digest --window <seconds> --pr-ready urgent|digest [--now <epoch>]
+#     The supervision host's attended wake decision for captain outcomes
+#     (docs/supervision-host.md "Captain outcomes"): under the lock, judge the
+#     unread captain rows as of <epoch> (default: the current time) and print
+#     four key=value lines, moving nothing:
+#       due=now|later|none
+#       at=<epoch>        when due=later, the epoch at which the window closes
+#       pending=<seq,...> the unread captain rows that are not repeats
+#       repeats=<seq,...> the unread captain rows that repeat a presented one
+#     A row repeats when an earlier captain row for the same task was
+#     presented (at or below the read cursor) and not yet processed (above the
+#     processed marker), both carry the same non-empty status provenance
+#     (statusEndpoint and statusIdent, so that task's status log has not moved
+#     between them), and both have the same effective urgency: an unchanged
+#     situation main already holds. Urgency is the row's own, a missing one
+#     reads as urgent, and pr-ready reads as --pr-ready says. The rows are due
+#     now when a pending row is urgent, or when the oldest pending row is at
+#     least <seconds> old; they are due later when pending rows exist but none
+#     is due; and none is due when every unread captain row repeats one or
+#     none is unread. A window of 0 makes every pending row due at once.
 #   fm-branch-outcome.sh list [--recent <n>]
 #     Print the last n records (default 20), read or not.
 #   fm-branch-outcome.sh lookup --seqs <n,...>
@@ -163,7 +189,7 @@ RECORDED_AGO_JQ='def recorded_ago: ([$now - .epoch, 0] | max) as $s
     else "\($s / 86400 | floor)d" end;'
 
 usage() {
-  echo "usage: fm-branch-outcome.sh append --task <id> --verdict routine|captain --summary <text> [--wake <text>] [--silent true|false] | unread | mark-read --through <seq> | unprocessed | mark-processed --through <seq> | present | processed-init [--held-lock] | list [--recent <n>] | lookup --seqs <n,...> | startup-replay | seed-tail" >&2
+  echo "usage: fm-branch-outcome.sh append --task <id> --verdict routine|captain --summary <text> [--wake <text>] [--silent true|false] [--urgency urgent|pr-ready|digest] | unread | mark-read --through <seq> | unprocessed | mark-processed --through <seq> | present | digest --window <seconds> --pr-ready urgent|digest [--now <epoch>] | processed-init [--held-lock] | list [--recent <n>] | lookup --seqs <n,...> | startup-replay | seed-tail" >&2
   exit 2
 }
 
@@ -234,16 +260,21 @@ last_seq() { # [<file> [<first expected seq, or null for a bounded suffix>]]
   local file=${1:-$STORE} start=${2:-1}
   [ -s "$file" ] || { printf '0\n'; return 0; }
   jq -Rse --argjson start "$start" '
+    def provenanced:
+      (.silent | type) == "boolean"
+      and ((.statusEndpoint | type) == "number" and .statusEndpoint >= 0 and .statusEndpoint <= 9007199254740991 and .statusEndpoint == (.statusEndpoint | floor))
+      and ((.statusIdent | type) == "string" and (.statusIdent | test("[\\t\\n]") | not));
     def valid:
       type == "object"
       and (
         keys == ["epoch", "seq", "summary", "task", "verdict", "wake"]
         or (keys == ["epoch", "seq", "silent", "summary", "task", "verdict", "wake"] and (.silent | type) == "boolean")
+        or (keys == ["epoch", "seq", "silent", "statusEndpoint", "statusIdent", "summary", "task", "verdict", "wake"] and provenanced)
         or (
-          keys == ["epoch", "seq", "silent", "statusEndpoint", "statusIdent", "summary", "task", "verdict", "wake"]
-          and (.silent | type) == "boolean"
-          and ((.statusEndpoint | type) == "number" and .statusEndpoint >= 0 and .statusEndpoint <= 9007199254740991 and .statusEndpoint == (.statusEndpoint | floor))
-          and ((.statusIdent | type) == "string" and (.statusIdent | test("[\\t\\n]") | not))
+          keys == ["epoch", "seq", "silent", "statusEndpoint", "statusIdent", "summary", "task", "urgency", "verdict", "wake"]
+          and provenanced
+          and .verdict == "captain"
+          and (.urgency == "urgent" or .urgency == "pr-ready" or .urgency == "digest")
         )
       )
       and ((.seq | type) == "number" and .seq >= 1 and .seq <= 9007199254740991 and .seq == (.seq | floor))
@@ -503,6 +534,7 @@ case "$CMD" in
     SUMMARY=''
     WAKE=''
     SILENT=false
+    URGENCY=''
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --task) TASK=${2:-}; shift 2 || usage ;;
@@ -510,6 +542,7 @@ case "$CMD" in
         --summary) SUMMARY=${2:-}; shift 2 || usage ;;
         --wake) WAKE=${2:-}; shift 2 || usage ;;
         --silent) SILENT=${2:-}; shift 2 || usage ;;
+        --urgency) URGENCY=${2:-}; shift 2 || usage ;;
         *) usage ;;
       esac
     done
@@ -520,6 +553,11 @@ case "$CMD" in
     case "$SILENT" in true|false) ;; *) usage ;; esac
     if [ "$SILENT" = true ] && [ "$VERDICT" != routine ]; then
       echo "error: silent outcomes must have the routine verdict" >&2
+      exit 2
+    fi
+    case "$URGENCY" in ''|urgent|pr-ready|digest) ;; *) usage ;; esac
+    if [ -n "$URGENCY" ] && [ "$VERDICT" != captain ]; then
+      echo "error: only a captain outcome carries an urgency" >&2
       exit 2
     fi
     fm_lock_acquire_wait "$LOCK"
@@ -536,9 +574,9 @@ case "$CMD" in
     SEQ=$(( LAST_SEQ + 1 ))
     capture_status_position "$TASK"
     rm -f -- "$OUTCOME_INDEX_READY" || { fm_lock_release "$LOCK"; exit 1; }
-    printf '{"seq":%s,"epoch":%s,"task":"%s","wake":"%s","verdict":"%s","summary":"%s","silent":%s,"statusEndpoint":%s,"statusIdent":"%s"}\n' \
+    printf '{"seq":%s,"epoch":%s,"task":"%s","wake":"%s","verdict":"%s",%s"summary":"%s","silent":%s,"statusEndpoint":%s,"statusIdent":"%s"}\n' \
       "$SEQ" "$(date +%s)" "$(json_escape "$TASK")" "$(json_escape "$WAKE")" \
-      "$VERDICT" "$(json_escape "$SUMMARY")" "$SILENT" "$CAPTURED_STATUS_ENDPOINT" \
+      "$VERDICT" "${URGENCY:+\"urgency\":\"$URGENCY\",}" "$(json_escape "$SUMMARY")" "$SILENT" "$CAPTURED_STATUS_ENDPOINT" \
       "$(json_escape "$CAPTURED_STATUS_IDENT")" >> "$STORE"
     write_outcome_tail || echo "warning: outcome $SEQ was stored but its display tail copy could not be refreshed" >&2
     # A task with neither a live meta nor a status log is retired: the branch
@@ -618,6 +656,66 @@ case "$CMD" in
         select(.seq > $cursor or (.verdict == "captain" and .seq > $processed))
         | . + {unread: (.seq > $cursor)}
         | if .verdict == "captain" then . + {recordedAgo: recorded_ago} else . end' "$STORE"; then
+      fm_lock_release "$LOCK"
+      exit 1
+    fi
+    fm_lock_release "$LOCK"
+    ;;
+  digest)
+    WINDOW=''
+    PR_READY=''
+    NOW=$(date +%s)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --window) WINDOW=${2:-}; shift 2 || usage ;;
+        --pr-ready) PR_READY=${2:-}; shift 2 || usage ;;
+        --now) NOW=${2:-}; shift 2 || usage ;;
+        *) usage ;;
+      esac
+    done
+    [ "$WINDOW" = 0 ] || bounded_uint "$WINDOW" || usage
+    bounded_uint "$NOW" || usage
+    case "$PR_READY" in urgent|digest) ;; *) usage ;; esac
+    fm_lock_acquire_wait "$LOCK"
+    if ! LAST_SEQ=$(last_seq); then
+      fm_lock_release "$LOCK"
+      echo "error: refusing the digest decision because the outcome store is malformed or non-sequential" >&2
+      exit 1
+    fi
+    if ! CURSOR_SEQ=$(read_cursor) || ! PROCESSED_SEQ=$(read_processed); then
+      fm_lock_release "$LOCK"
+      exit 1
+    fi
+    if [ "$CURSOR_SEQ" -gt "$LAST_SEQ" ] || [ "$PROCESSED_SEQ" -gt "$CURSOR_SEQ" ]; then
+      fm_lock_release "$LOCK"
+      echo "error: refusing the digest decision because the outcome cursor or processed marker is out of order" >&2
+      exit 1
+    fi
+    if [ ! -s "$STORE" ]; then
+      fm_lock_release "$LOCK"
+      printf 'due=none\nat=\npending=\nrepeats=\n'
+      exit 0
+    fi
+    # shellcheck disable=SC2016  # jq program text: $-names are jq variables.
+    if ! jq -rs --argjson cursor "$CURSOR_SEQ" --argjson processed "$PROCESSED_SEQ" \
+        --argjson now "$NOW" --argjson window "$WINDOW" --arg pr "$PR_READY" '
+        def urgency: (.urgency // "urgent") as $u
+          | if $u == "pr-ready" then (if $pr == "urgent" then "urgent" else "digest" end) else $u end;
+        def situation: if ((.statusIdent // "-") | . != "-" and . != "") and (.statusEndpoint | type) == "number"
+          then [.task, .statusEndpoint, .statusIdent, urgency] else null end;
+        map(select(.verdict == "captain")) as $captain
+        | [$captain[] | select(.seq <= $cursor and .seq > $processed) | situation | select(. != null)] as $held
+        | [$captain[] | select(.seq > $cursor)] as $unread
+        | [$unread[] | select(situation as $s | $s != null and any($held[]; . == $s))] as $repeats
+        | [$unread[] | select(.seq as $n | all($repeats[]; .seq != $n))] as $pending
+        | (if ($pending | length) == 0 then null else ($pending | map(.epoch) | min) + $window end) as $at
+        | (if ($pending | length) == 0 then "none"
+           elif any($pending[]; urgency == "urgent") or $now >= $at then "now"
+           else "later" end) as $due
+        | "due=\($due)",
+          "at=\(if $due == "later" then $at else "" end)",
+          "pending=\($pending | map(.seq | tostring) | join(","))",
+          "repeats=\($repeats | map(.seq | tostring) | join(","))"' "$STORE"; then
       fm_lock_release "$LOCK"
       exit 1
     fi

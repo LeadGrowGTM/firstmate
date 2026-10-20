@@ -48,8 +48,9 @@
 #     lock holder can be identified, the session is not cooling down after
 #     engine errors, and the Pi branch's offer rule
 #     (bin/fm-branch-dispatch.mjs offer) says the branch may take this close,
-#     so main-only classes (check triggers, decision-owned triggers, a scan
-#     that is unsafe or holds nothing for the branch) stay main's. That
+#     so main-only classes (check triggers, decision-owned stale triggers,
+#     decision-owned signal triggers while the digest is off, and a scan that
+#     is unsafe or holds nothing for the branch) stay main's. That
 #     pass-through starts the successor watcher cycle and leaves it running
 #     before the close is printed, so supervision continues when the session
 #     drops the handoff. It confirms no handling handoff, so the recovery
@@ -79,11 +80,23 @@
 # queue. A handled wake with only routine outcomes never wakes
 # main, and neither does any handled wake while away: captain outcomes wait in
 # the outcome store for the return drain's BRANCH OUTCOMES section. A handled
-# attended wake that recorded a captain outcome exits with one "supervision-host: branch-outcome:"
-# line naming its store rows, without the close it handled; main drains, where
-# the BRANCH OUTCOMES section (bin/fm-wake-drain.sh) presents every
-# unprocessed captain outcome until main acknowledges it. Otherwise the host
-# parks on the successor.
+# attended wake that recorded a captain outcome asks the store whether its
+# unread captain outcomes are due (bin/fm-branch-outcome.sh digest, with the
+# window and pr-ready policy of config/outcome-digest read through
+# fm_supervision_host_digest_config): due now, the host exits with one
+# "supervision-host: branch-outcome:" line naming the rows, without the close
+# it handled; otherwise it parks on the successor, and while rows wait for
+# their window the park also ends at the window's close, when the host asks
+# again and exits the same way if they are still due; a close already waiting
+# when they come due goes to main with them rather than to the engine. Main
+# drains, where the
+# BRANCH OUTCOMES section (bin/fm-wake-drain.sh) presents every unread and
+# unprocessed captain outcome until main acknowledges it, so any drain main
+# runs in the meantime carries the waiting rows and an outcome is never held
+# from a drain. A judgment that cannot be computed reads as due now. While
+# that digest is on, the attended offer passes --decision-digest
+# (bin/fm-branch-dispatch.mjs), so a decision-owned signal close reaches the
+# engine, which reports it, rather than main.
 # Every other outcome exits with the close's own reason line plus one
 # "supervision-host:" line saying why main has this wake, after stopping the
 # successor cycle so main's next turn end starts from the same state as
@@ -275,6 +288,11 @@ TURN_ERRORS=
 # (header, OUTPUT) and left out of that cycle's close.
 READY_PENDING=1
 READY_LINE=
+# The park second (park_elapsed) at which captain outcomes held for the digest
+# window are due, or empty when none wait.
+DIGEST_DUE_ELAPSED=
+DIGEST_DUE=
+DIGEST_PENDING=
 
 log_line() {  # <text>
   local tmp
@@ -529,14 +547,17 @@ stream_ready_line() {
   READY_PENDING=0
 }
 
-# Wait for the current arm to close. Returns 0 with ARM_TEXT set,
-# or 1 when the park boundary arrives first.
+# Wait for the current arm to close. Returns 0 with ARM_TEXT set, 1 when the
+# park boundary arrives first, or 2 when held captain outcomes come due first.
 await_close() {
   local i
   while fm_pid_alive "$ARM_PID"; do
     refresh_process "$ARM_PID"
     [ "$READY_PENDING" -eq 0 ] || stream_ready_line
     boundary_reached && return 1
+    if [ -n "$DIGEST_DUE_ELAPSED" ] && [ "$PARK_ELAPSED" -ge "$DIGEST_DUE_ELAPSED" ]; then
+      return 2
+    fi
     # Probe the arm's exit twice a second between POLL-cadence checks, without
     # changing the outer identity refresh, readiness, or boundary cadence.
     i=$((POLL * 2))
@@ -644,6 +665,70 @@ turn_outcome_lookup_warning() {
     "${TURN_RECEIPT_SEQS:-unknown}"
 }
 
+# Ask the outcome store whether its unread captain outcomes are due
+# (bin/fm-branch-outcome.sh digest owns the rule). Sets DIGEST_DUE
+# (now|later|none), DIGEST_PENDING, and DIGEST_DUE_ELAPSED; a decision that
+# cannot be computed reads as due now, so a fault wakes main rather than
+# holding an outcome. The store judges as of the park's own clock (the host's
+# start epoch plus park_elapsed), so the window closes on the same clock the
+# park boundary uses.
+digest_judge() {
+  local out at
+  DIGEST_DUE=now
+  DIGEST_PENDING=
+  DIGEST_DUE_ELAPSED=
+  fm_supervision_host_digest_config "$CONFIG"
+  park_elapsed
+  if ! out=$("$SCRIPT_DIR/fm-branch-outcome.sh" digest --window "$FM_OUTCOME_DIGEST_WINDOW" \
+      --pr-ready "$FM_OUTCOME_DIGEST_PR_READY" --now $((HOST_STARTED + PARK_ELAPSED)) 2>/dev/null); then
+    log_line "digest	undecidable"
+    return 0
+  fi
+  DIGEST_DUE=$(printf '%s\n' "$out" | sed -n 's/^due=//p')
+  DIGEST_PENDING=$(printf '%s\n' "$out" | sed -n 's/^pending=//p')
+  case "$DIGEST_DUE" in
+    now|none) ;;
+    later)
+      at=$(printf '%s\n' "$out" | sed -n 's/^at=//p')
+      case "$at" in
+        ''|*[!0-9]*) DIGEST_DUE=now ;;
+        *) DIGEST_DUE_ELAPSED=$((at - HOST_STARTED)) ;;
+      esac
+      ;;
+    *) DIGEST_DUE=now ;;
+  esac
+  log_line "digest	due=$DIGEST_DUE	pending=${DIGEST_PENDING:-none}	repeats=$(printf '%s\n' "$out" | sed -n 's/^repeats=//p')"
+}
+
+# The branch-outcome line for rows the digest judged due now.
+digest_line() {  # <lead>
+  printf 'branch-outcome: %s (store rows %s); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints' \
+    "$1" "${DIGEST_PENDING:-$CAPTAIN_SEQS}"
+  [ -z "$FM_OUTCOME_DIGEST_PROBLEM" ] \
+    || printf '; %s, so each captain outcome wakes you as it is recorded until it is fixed' "$FM_OUTCOME_DIGEST_PROBLEM"
+}
+
+# The branch-outcome line for a digest judged due now outside a handled turn:
+# the rows it names, or, when the judgment could not be computed, the store.
+digest_due_line() {
+  if [ -z "$DIGEST_PENDING" ]; then
+    printf 'branch-outcome: the outcome digest could not be judged; check the outcome store, then drain and acknowledge captain outcomes'
+  else
+    digest_line "captain outcomes the supervision session recorded for you are due"
+  fi
+}
+
+# From the park, when held outcomes came due: hand main the parked cycle's
+# state exactly as a handled close's branch-outcome exit does.
+digest_exit() {
+  SUCCESSOR_PID=$ARM_PID
+  SUCCESSOR_OUT=$ARM_OUT
+  ARM_PID=
+  ARM_OUT=
+  ARM_TEXT=
+  exit_to_main "$(digest_due_line)" "$HEALTH_NOTE"
+}
+
 stand_down() {  # <why>
   log_line "stand-down	$1"
   emit "supervision-host stood down: $1"
@@ -719,17 +804,28 @@ leave_successor_for_main() {
 # this main session and has turns left, otherwise a new one. Sets ENGINE_SESSION
 # and ENGINE_MODE (new|resume).
 choose_conversation() {
-  local key recorded_key recorded_session recorded_engine recorded_model turns
+  local key recorded_key recorded_session recorded_engine recorded_model recorded_prompt_hash turns tmp
+  tmp=$(mktemp "$PROMPT_FILE.tmp.XXXXXX") || return 1
+  if ! "$SCRIPT_DIR/fm-branch-prompt.sh" > "$tmp" 2>/dev/null \
+    || [ "$(wc -c < "$tmp" | tr -d ' ')" -lt 1024 ]; then
+    rm -f "$tmp"
+    return 1
+  fi
+  ENGINE_PROMPT_HASH=$(node -e 'const fs = require("node:fs"); const crypto = require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$tmp") \
+    || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$PROMPT_FILE" || { rm -f "$tmp"; return 1; }
   key=$(fm_supervision_host_main_key "$STATE") || key=
   recorded_key=$(sed -n 's/^key=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   recorded_session=$(sed -n 's/^session=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   recorded_engine=$(sed -n 's/^engine=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   recorded_model=$(sed -n 's/^model=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
+  recorded_prompt_hash=$(sed -n 's/^prompt_sha256=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)
   turns=$(numeric_or "$(sed -n 's/^turns=//p' "$ENGINE_RECORD" 2>/dev/null | head -n 1)" 0)
   if [ -n "$key" ] && [ -n "$recorded_session" ] && [ "$recorded_key" = "$key" ] \
     && [ "$recorded_engine" = "$FM_SUPERVISION_ENGINE" ] \
     && [ "$recorded_model" = "$FM_SUPERVISION_ENGINE_MODEL" ] \
-    && [ "$turns" -lt "$ROTATE_TURNS" ] && [ -s "$PROMPT_FILE" ]; then
+    && [ "$recorded_prompt_hash" = "$ENGINE_PROMPT_HASH" ] \
+    && [ "$turns" -lt "$ROTATE_TURNS" ]; then
     ENGINE_SESSION=$recorded_session
     ENGINE_MODE=resume
     ENGINE_TURNS=$turns
@@ -746,22 +842,14 @@ choose_conversation() {
   ENGINE_TURNS=0
   ENGINE_COST=0
   ENGINE_KEY=$key
-  local tmp
-  tmp=$(mktemp "$PROMPT_FILE.tmp.XXXXXX") || return 1
-  if ! "$SCRIPT_DIR/fm-branch-prompt.sh" > "$tmp" 2>/dev/null \
-    || [ "$(wc -c < "$tmp" | tr -d ' ')" -lt 1024 ]; then
-    rm -f "$tmp"
-    return 1
-  fi
-  mv -f "$tmp" "$PROMPT_FILE" || return 1
   return 0
 }
 
 write_engine_record() {  # <turns> <conversation-cost>
   local tmp
   tmp=$(mktemp "$ENGINE_RECORD.tmp.XXXXXX") || return 1
-  printf 'engine=%s\nmodel=%s\nsession=%s\nkey=%s\nturns=%s\nconversation_cost=%s\n' \
-    "$FM_SUPERVISION_ENGINE" "$FM_SUPERVISION_ENGINE_MODEL" "$ENGINE_SESSION" "$ENGINE_KEY" "$1" "$2" > "$tmp" \
+  printf 'engine=%s\nmodel=%s\nsession=%s\nkey=%s\nprompt_sha256=%s\nturns=%s\nconversation_cost=%s\n' \
+    "$FM_SUPERVISION_ENGINE" "$FM_SUPERVISION_ENGINE_MODEL" "$ENGINE_SESSION" "$ENGINE_KEY" "$ENGINE_PROMPT_HASH" "$1" "$2" > "$tmp" \
     && mv -f "$tmp" "$ENGINE_RECORD"
 }
 
@@ -843,6 +931,7 @@ health_record() {  # <engine-error 0|1> <reports>
 handle_wake() {  # <reason-lines>
   local reason=$1 first scope status corrupted rows tasks unscoped rc turn readback
   local receipts usage result errors unacked mirror
+  local signal_keys status_key status_file status_spans span_start span_end span_ident
   LAST_TURN=
   ENGINE_ERROR=0
   HEALTH_NOTE=
@@ -898,12 +987,41 @@ handle_wake() {  # <reason-lines>
     HANDLE_WHY="the branch prompt or engine conversation could not be prepared"
     return 1
   fi
+  status_spans=
+  if [ "$TURN_POSTURE" = attended ]; then
+    rc=0
+    signal_keys=$(awk -F '\t' -v seqs="$rows" '
+      BEGIN { n = split(seqs, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
+      $2 in wanted && $3 == "signal" && $4 ~ /\.status$/ && !seen[$4]++ { print $4 }
+    ' "$STATE/.wake-queue") || rc=1
+    if [ -n "$signal_keys" ]; then
+      _fm_wake_require_classify || rc=1
+      while [ "$rc" -eq 0 ] && IFS= read -r status_key; do
+        fm_wake_status_key_map "$status_key" || { rc=1; break; }
+        status_file="$STATE/$status_key"
+        [ -f "$status_file" ] && [ -r "$status_file" ] && [ ! -L "$status_file" ] || { rc=1; break; }
+        span_start=$(status_presentation_cursor_offset "$status_file") || { rc=1; break; }
+        span_end=$(_fm_status_file_size "$status_file") || { rc=1; break; }
+        span_ident=$(_fm_open_decisions_file_ident "$status_file") || { rc=1; break; }
+        case "$span_start:$span_end" in *[!0-9:]*) rc=1; break ;; esac
+        [ "$span_start" -le "$span_end" ] && [ -n "$span_ident" ] || { rc=1; break; }
+        status_spans="${status_spans}span=${FM_WAKE_STATUS_KEY%.status}"$'\t'"${span_start}"$'\t'"${span_end}"$'\t'"${span_ident}"$'\n'
+      done <<EOF
+$signal_keys
+EOF
+    fi
+    if [ "$rc" -ne 0 ]; then
+      "$SCRIPT_DIR/fm-wake-grant.sh" release "$GEN" >/dev/null 2>&1 || true
+      HANDLE_WHY="the claimed status lines could not be captured"
+      return 1
+    fi
+  fi
   TURN_SEQ=$((TURN_SEQ + 1))
   turn="$GEN.$TURN_SEQ"
   LAST_TURN=$turn
   : > "$RECEIPTS"
-  printf 'turn=%s\nrows=%s\ntasks=%s\nunscoped=%s\nwake=%s\nposture=%s\n' \
-    "$turn" "$rows" "$tasks" "${unscoped:-0}" "$first" "$TURN_POSTURE" > "$TURN_FILE"
+  printf 'turn=%s\nrows=%s\ntasks=%s\nunscoped=%s\nwake=%s\nposture=%s\n%s' \
+    "$turn" "$rows" "$tasks" "${unscoped:-0}" "$first" "$TURN_POSTURE" "$status_spans" > "$TURN_FILE"
   readback=
   if [ "$TURN_POSTURE" = away ]; then
     readback=$(mktemp "$STATE/.supervision-host-readback.XXXXXX") || readback=
@@ -1028,7 +1146,9 @@ turn_captain_seqs() {  # <turn>
 # or nothing when the supervision session may take it. Sets ATTENDED_WHY, and
 # ATTENDED_OFFER to the offer's verdict and the scope it judged.
 attended_acceptor() {  # <first-reason-line>
-  local offer=
+  local offer='' digest=''
+  fm_supervision_host_digest_config "$CONFIG"
+  [ "$FM_OUTCOME_DIGEST_WINDOW" -eq 0 ] || digest=--decision-digest
   ATTENDED_WHY=
   ATTENDED_OFFER=
   if ! fm_supervision_host_attended_ready "$CONFIG" "$PRIMARY"; then
@@ -1037,7 +1157,7 @@ attended_acceptor() {  # <first-reason-line>
     ATTENDED_WHY="the main session could not be identified"
   elif health_cooling; then
     ATTENDED_WHY="the supervision session is cooling down after engine errors"
-  elif ! offer=$(printf '%s\n' "$1" | node "$SCRIPT_DIR/fm-branch-dispatch.mjs" offer 2>/dev/null); then
+  elif ! offer=$(printf '%s\n' "$1" | node "$SCRIPT_DIR/fm-branch-dispatch.mjs" offer ${digest:+"$digest"} 2>/dev/null); then
     ATTENDED_WHY="branch eligibility could not be computed"
   elif [ "$(printf '%s\n' "$offer" | sed -n 's/^eligible=//p')" != 1 ]; then
     ATTENDED_WHY="main-only"
@@ -1069,10 +1189,30 @@ else
 fi || { echo "watcher: FAILED - the supervision host could not start a watcher cycle"; exit 1; }
 ARM_PID=$STARTED_ARM_PID
 ARM_OUT=$STARTED_ARM_OUT
+if ! fm_afk_contract_away_present "$STATE"; then
+  digest_judge
+  if [ "$DIGEST_DUE" = now ]; then
+    park_elapsed
+    DIGEST_DUE_ELAPSED=$PARK_ELAPSED
+  fi
+fi
 
 while :; do
   boundary_reached && boundary_exit
-  await_close || boundary_exit
+  AWAIT_RC=0
+  await_close || AWAIT_RC=$?
+  if [ "$AWAIT_RC" -eq 2 ]; then
+    # Held outcomes came due: main hears them now unless a drain already
+    # presented them, a newer urgent one already woke it, or the captain left,
+    # in which case they wait for the return like every away outcome.
+    DIGEST_DUE_ELAPSED=
+    if ! fm_afk_contract_away_present "$STATE"; then
+      digest_judge
+      [ "$DIGEST_DUE" != now ] || digest_exit
+    fi
+    continue
+  fi
+  [ "$AWAIT_RC" -eq 0 ] || boundary_exit
   REASON=$(printf '%s\n' "$ARM_TEXT" | grep -E '^(signal:|stale:|check:|heartbeat($|:))' || true)
 
   # The away daemon owns triage while its flag exists; the owner stands down.
@@ -1090,8 +1230,24 @@ while :; do
     exit 0
   fi
   # Attended: the close reaches main exactly as the plain arm delivers it,
-  # unless the supervision session may take it (attended_acceptor).
+  # unless the supervision session may take it (attended_acceptor). Held
+  # captain outcomes whose window passed while the arm was already closed
+  # never wait behind another engine turn: this close goes to main with them,
+  # as a main-only pass-through does.
   if ! fm_afk_contract_away_present "$STATE"; then
+    if [ -n "$DIGEST_DUE_ELAPSED" ]; then
+      park_elapsed
+      if [ "$PARK_ELAPSED" -ge "$DIGEST_DUE_ELAPSED" ]; then
+        DIGEST_DUE_ELAPSED=
+        digest_judge
+        if [ "$DIGEST_DUE" = now ]; then
+          log_line "pass-through	attended	digest-due	$(printf '%s\n' "$REASON" | head -n 1)"
+          leave_successor_for_main || true
+          emit "supervision-host: $(digest_due_line)"
+          exit 0
+        fi
+      fi
+    fi
     if ! attended_acceptor "$(printf '%s\n' "$REASON" | head -n 1)"; then
       log_line "pass-through	attended	$ATTENDED_WHY	$(printf '%s\n' "$REASON" | head -n 1)"
       if [ "$ATTENDED_WHY" = main-only ]; then
@@ -1172,13 +1328,18 @@ while :; do
   fi
   # Attended captain outcomes are main's to process; away they wait for the
   # return, including when the captain left while this turn ran. The close
-  # itself was handled, so only the host's lines reach main.
+  # itself was handled, so only the host's lines reach main, and only once
+  # the digest says the unread captain outcomes are due; until then the park
+  # ends at their window's close.
   if [ -n "$LAST_TURN" ] && ! fm_afk_contract_away_present "$STATE"; then
     CAPTAIN_SEQS=$(turn_captain_seqs "$LAST_TURN")
     if [ -n "$CAPTAIN_SEQS" ]; then
-      ARM_TEXT=
-      exit_to_main "branch-outcome: the supervision session handled this wake and recorded captain outcomes for you (store rows $CAPTAIN_SEQS); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints" \
-        "$HEALTH_NOTE"
+      digest_judge
+      if [ "$DIGEST_DUE" = now ]; then
+        ARM_TEXT=
+        exit_to_main "$(digest_line "the supervision session handled this wake and recorded captain outcomes for you")" \
+          "$HEALTH_NOTE"
+      fi
     fi
   fi
 

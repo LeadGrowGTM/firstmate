@@ -16,10 +16,12 @@
 #
 # Usage:
 #   fm-branch-report.sh --task <id|fleet> --verdict routine|captain \
-#       --summary <text> [--silent true|false] [--wake <text>]
+#       --summary <text> [--silent true|false] [--urgency urgent|pr-ready|digest] [--wake <text>]
 #
-# The verdict criteria are owned by bin/fm-branch-prompt.sh ("Verdict: routine
-# or captain"); --silent true is legal only for a routine outcome.
+# The verdict and urgency criteria are owned by bin/fm-branch-prompt.sh
+# ("Verdict: routine or captain"); --silent true is legal only for a routine
+# outcome and --urgency only for a captain one, which records it as the
+# urgency bin/fm-branch-outcome.sh digest reads.
 # --wake defaults to the wake reason the host recorded for the turn.
 #
 # Only the branch actor of a live host turn may report: FM_SUPERVISION_ACTOR
@@ -63,13 +65,14 @@ refuse() {
   exit 3
 }
 
-TASK='' VERDICT='' SUMMARY='' SILENT=false WAKE='' WAKE_SET=0
+TASK='' VERDICT='' SUMMARY='' SILENT=false URGENCY='' WAKE='' WAKE_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --task) TASK=${2:-}; shift 2 || usage ;;
     --verdict) VERDICT=${2:-}; shift 2 || usage ;;
     --summary) SUMMARY=${2:-}; shift 2 || usage ;;
     --silent) SILENT=${2:-}; shift 2 || usage ;;
+    --urgency) URGENCY=${2:-}; shift 2 || usage ;;
     --wake) WAKE=${2:-}; WAKE_SET=1; shift 2 || usage ;;
     -h|--help) usage ;;
     *) usage ;;
@@ -86,6 +89,11 @@ if [ -z "$TASK" ] || [ -z "$SUMMARY" ] || [ -z "$VERDICT" ]; then
 fi
 if [ "$SILENT" = true ] && [ "$VERDICT" != routine ]; then
   echo "invalid report: --silent true requires the routine verdict" >&2
+  exit 2
+fi
+case "$URGENCY" in ''|urgent|pr-ready|digest) ;; *) usage ;; esac
+if [ -n "$URGENCY" ] && [ "$VERDICT" != captain ]; then
+  echo "invalid report: --urgency requires the captain verdict" >&2
   exit 2
 fi
 
@@ -115,9 +123,51 @@ if [ "$(turn_field unscoped)" != 1 ]; then
   esac
 fi
 
+if [ "$(turn_field posture)" = attended ]; then
+  CLAIMED_SIGNAL=$(awk -F '\t' -v seqs="$(turn_field rows)" -v key="$TASK.status" '
+    BEGIN { n = split(seqs, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
+    $2 in wanted && $3 == "signal" && $4 == key { signal = 1 }
+    END { print signal + 0 }
+  ' "$STATE/.wake-queue" 2>/dev/null) || refuse "the claimed wake rows could not be checked"
+  if [ "$CLAIMED_SIGNAL" = 1 ]; then
+    case "$TASK" in *[!A-Za-z0-9._-]*) refuse "the claimed signal has an invalid task id" ;; esac
+    SPAN=$(awk -F '\t' -v key="span=$TASK" '$1 == key { print; n++ } END { if (n != 1) exit 1 }' "$TURN_FILE") \
+      || refuse "the claimed status lines for $TASK were not captured; hand this wake to MAIN"
+    IFS=$'\t' read -r _ SPAN_START SPAN_END SPAN_IDENT SPAN_EXTRA <<< "$SPAN"
+    case "$SPAN_START:$SPAN_END" in *[!0-9:]*|:*|*:) refuse "the claimed status span is invalid" ;; esac
+    [ "$SPAN_START" -le "$SPAN_END" ] && [ -n "$SPAN_IDENT" ] && [ -z "$SPAN_EXTRA" ] \
+      || refuse "the claimed status span is invalid"
+    # shellcheck source=bin/fm-classify-lib.sh
+    . "$SCRIPT_DIR/fm-classify-lib.sh"
+    STATUS_FILE="$STATE/$TASK.status"
+    [ "$(_fm_open_decisions_file_ident "$STATUS_FILE" 2>/dev/null)" = "$SPAN_IDENT" ] \
+      || refuse "the claimed status file changed; hand this wake to MAIN"
+    # shellcheck source=bin/fm-wake-lib.sh
+    . "$SCRIPT_DIR/fm-wake-lib.sh"
+    FM_WAKE_UNREAD_LINES=
+    if [ "$SPAN_START" -lt "$SPAN_END" ]; then
+      fm_wake_unread_events "$STATUS_FILE" 0 "$SPAN_START" "$SPAN_END" \
+        || refuse "the claimed status lines could not be read; hand this wake to MAIN"
+    fi
+    [ "$(_fm_open_decisions_file_ident "$STATUS_FILE" 2>/dev/null)" = "$SPAN_IDENT" ] \
+      || refuse "the claimed status file changed; hand this wake to MAIN"
+    while IFS= read -r STATUS_LINE || [ -n "$STATUS_LINE" ]; do
+      [ -n "$STATUS_LINE" ] || continue
+      status_line_verb "$STATUS_LINE" EVENT_VERB
+      case "$EVENT_VERB" in
+        needs-decision) [ "$VERDICT" = captain ] \
+          || refuse "the claimed needs-decision signal for $TASK requires a captain verdict" ;;
+        blocked) [ "$VERDICT" = captain ] && [ "$URGENCY" = urgent ] \
+          || refuse "the claimed blocked signal for $TASK requires a captain verdict with --urgency urgent" ;;
+      esac
+    done <<< "$FM_WAKE_UNREAD_LINES"
+  fi
+fi
+
 [ "$WAKE_SET" -eq 1 ] || WAKE=$(turn_field wake)
 
 set -- append --task "$TASK" --verdict "$VERDICT" --summary "$SUMMARY" --silent "$SILENT"
+[ -z "$URGENCY" ] || set -- "$@" --urgency "$URGENCY"
 [ -z "$WAKE" ] || set -- "$@" --wake "$WAKE"
 if ! SEQ=$("$SCRIPT_DIR/fm-branch-outcome.sh" "$@"); then
   echo "outcome store append failed (nothing recorded)" >&2

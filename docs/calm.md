@@ -298,7 +298,7 @@ Evidence for 2.1.280 and the record-backed doorbell is also in its [2026-09-25 r
 - The detailed transcript view (`ctrl+o`) keeps its per-message timestamp and model headers where hidden assistant rows sat, because those headers are not a hookable drawing.
 - Collapsed thinking never appears in Claude Code's default view.
 - Supervision notes are system-notice rows rather than Pi's rendered entries: Claude Code draws them in one gray with its own bullet and the plugin's name, so the glyph cannot take its own color as on Pi.
-- A captain outcome still wakes main through a `Stop hook feedback` row, which fires no hookable drawing, so its anchor line appears beside that row rather than replacing it.
+- A captain-outcome note can appear before the host wakes main; the later `Stop hook feedback` row fires no hookable drawing, and [Captain outcomes](supervision-host.md#captain-outcomes) owns when that wake is due.
 - The mod has no thinking drawing to hide in other views.
 
 ### Claude Code regression entry points
