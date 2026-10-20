@@ -188,6 +188,27 @@ test_secondmate_refresh_merges_the_primary_list() {
   pass "a second mate home's refresh merges its primary's list from disk"
 }
 
+test_secondmate_commit_refreshes_new_parent_records() {
+  local d=$TMP_ROOT/parent-new-client primary mate out
+  primary=$d/primary
+  mate=$d/mate
+  make_home "$primary"
+  mkdir -p "$mate/data" "$mate/config"
+  printf '%s\n' schema=fm-secondmate-parent.v1 route=local "parent_home=$primary" >"$mate/.fm-secondmate-parent"
+  FM_HOME=$mate "$PN" refresh >/dev/null || fail "secondmate refresh failed"
+  make_repo "$d" "$mate" public
+  sleep 1
+  printf '%s\n' '- gtm-client-nova-mock - A made-up client (added 2026-01-01)' >"$primary/data/projects.md"
+  out=$(in_pane "$HOOKS" commit_file "$REPO" fresh.txt clean "Route nova-mock work" 2>&1) &&
+    fail "a parent-registered client passed the second mate's public commit guard"
+  assert_contains "$out" "client-" "the parent-registered client refusal omitted a neutral id"
+  assert_not_contains "$out" "nova-mock" "the refusal printed the private client name"
+  assert_contains "$(cat "$mate/config/private-names")" "client nova-mock" \
+    "the second mate did not derive the new client from its parent records"
+  assert_equals 1 "$(git -C "$REPO" rev-list --count HEAD)" "the refused commit was written"
+  pass "a second mate refreshes parent records before a public commit"
+}
+
 test_commit_message_is_refused_or_rewritten_on_a_public_repo() {
   local d=$TMP_ROOT/commit home out rc
   home=$d/home
@@ -887,6 +908,7 @@ test_existing_tree_never_blocks_an_unrelated_push() {
 
 test_refresh_derives_names_from_local_records
 test_secondmate_refresh_merges_the_primary_list
+test_secondmate_commit_refreshes_new_parent_records
 test_existing_tree_never_blocks_an_unrelated_push
 test_commit_message_is_refused_or_rewritten_on_a_public_repo
 test_private_repo_passes_untouched

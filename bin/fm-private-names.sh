@@ -139,15 +139,20 @@ cmd_refresh() {
   [ "$#" -eq 0 ] || usage
   local out=$FM_PN_LIST tmp derived parent
   mkdir -p "$(dirname "$out")" 2>/dev/null || return 1
-  derived=$(emit_home_records "$DATA" "$PROJECTS" 1 | LC_ALL=C sort -u)
   # A second mate home on this machine also takes its primary's whole list, so
   # every home refuses the same names. The list is read from disk rather than
   # pushed as inherited config, which would paste it into the mate's context.
   parent=
   if fm_secondmate_parent_record_parse "$FM_HOME/.fm-secondmate-parent" 2>/dev/null &&
     [ "$FM_SECONDMATE_PARENT_ROUTE" = local ]; then
-    parent=$FM_SECONDMATE_PARENT_HOME/config/private-names
+    parent=$FM_SECONDMATE_PARENT_HOME
   fi
+  derived=$({
+    emit_home_records "$DATA" "$PROJECTS" 1
+    if [ -n "$parent" ]; then
+      emit_home_records "$parent/data" "$parent/projects" 1
+    fi
+  } | LC_ALL=C sort -u)
   tmp=$(mktemp "$(dirname "$out")/.private-names.XXXXXX" 2>/dev/null) || return 1
   # Keep existing order, append newly derived names, then hand additions.
   {
@@ -155,7 +160,8 @@ cmd_refresh() {
     printf '# add names in private-names.local and rerun refresh. Never commit this file.\n'
     {
       [ -f "$out" ] && awk 'NF >= 2 && $1 !~ /^#/ { print }' "$out"
-      [ -n "$parent" ] && [ -f "$parent" ] && awk 'NF >= 2 && $1 !~ /^#/ { print }' "$parent"
+      [ -n "$parent" ] && [ -f "$parent/config/private-names" ] &&
+        awk 'NF >= 2 && $1 !~ /^#/ { print }' "$parent/config/private-names"
       printf '%s\n' "$derived" | awk 'NF >= 2 { print }'
       [ -f "$FM_PN_LOCAL" ] && awk '
         /^[[:space:]]*(#|$)/ { next }
@@ -210,27 +216,34 @@ source_newer_in_home() {  # <data-dir> <projects-dir>
   return 1
 }
 
+sources_newer_for_home() {  # <data-dir> <projects-dir>
+  local data=$1 projects=$2 line home
+  source_newer_in_home "$data" "$projects" && return 0
+  if [ -f "$data/secondmates.md" ]; then
+    while IFS= read -r line; do
+      secondmate_registry_parse_line "$line" || continue
+      [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] || continue
+      home=$SECONDMATE_REGISTRY_HOME
+      case "$home" in \~/*) home=$HOME/${home#\~/} ;; esac
+      source_newer_in_home "$home/data" "$home/projects" && return 0
+    done <"$data/secondmates.md"
+  fi
+  return 1
+}
+
 refresh_if_stale() {
-  local line home parent
+  local parent
   [ -s "$FM_PN_LIST" ] || { cmd_refresh >/dev/null; return; }
   [ "$FM_PN_GENERIC" -nt "$FM_PN_LIST" ] && { cmd_refresh >/dev/null; return; }
   [ "$FM_PN_LOCAL" -nt "$FM_PN_LIST" ] && { cmd_refresh >/dev/null; return; }
   [ "$FM_HOME/.fm-secondmate-parent" -nt "$FM_PN_LIST" ] && { cmd_refresh >/dev/null; return; }
   if fm_secondmate_parent_record_parse "$FM_HOME/.fm-secondmate-parent" 2>/dev/null &&
     [ "$FM_SECONDMATE_PARENT_ROUTE" = local ]; then
-    parent=$FM_SECONDMATE_PARENT_HOME/config/private-names
-    [ "$parent" -nt "$FM_PN_LIST" ] && { cmd_refresh >/dev/null; return; }
+    parent=$FM_SECONDMATE_PARENT_HOME
+    [ "$parent/config/private-names" -nt "$FM_PN_LIST" ] && { cmd_refresh >/dev/null; return; }
+    sources_newer_for_home "$parent/data" "$parent/projects" && { cmd_refresh >/dev/null; return; }
   fi
-  source_newer_in_home "$DATA" "$PROJECTS" && { cmd_refresh >/dev/null; return; }
-  if [ -f "$DATA/secondmates.md" ]; then
-    while IFS= read -r line; do
-      secondmate_registry_parse_line "$line" || continue
-      [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] || continue
-      home=$SECONDMATE_REGISTRY_HOME
-      case "$home" in \~/*) home=$HOME/${home#\~/} ;; esac
-      source_newer_in_home "$home/data" "$home/projects" && { cmd_refresh >/dev/null; return; }
-    done <"$DATA/secondmates.md"
-  fi
+  sources_newer_for_home "$DATA" "$PROJECTS" && { cmd_refresh >/dev/null; return; }
   return 0
 }
 

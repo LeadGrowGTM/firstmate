@@ -808,11 +808,12 @@ A short name, a name with no letter, or a name on the tracked [`bin/fm-private-n
 Context-tier names match only `fm-homes/<name>`, `<name>.status`, `<name>.inbox`, `<name> mate`, `<name> home`, `<name> second mate`, and `@<name>`.
 All other names match as plain whole words, and the gitignored list records each entry's tier without keeping real names in tracked files.
 The optional, gitignored `config/private-names.local` adds names by hand (`<kind> <name>`, or a bare name) and cannot exclude registered names.
-A refresh in a second mate home on this machine also merges its primary's list from disk; it is deliberately not inherited config, because inherited config is pasted into the mate's instructions.
+A refresh in a second mate home on this machine merges its primary's list from disk and derives names from the primary's records; the list is deliberately not inherited config, because inherited config is pasted into the mate's instructions.
 
 Names match case-insensitively as whole words, so a name never matches inside a longer word, and each maps to a stable neutral id (`mate-1`, `client-1`, `private-1`) by its position in the list.
 Refusals and reports print neutral ids and locations, never the matched name.
 
+Firstmate itself never commits to or opens PRs on project repositories; its own changes ship through workers and the pipeline, which carry these guards, so the guards are installed in worker launches only.
 Every fleet launch's `state/<id>.git-hooks` (see "Commit attribution") carries the guard, including when `config/keep-ai-trailers` is set:
 
 - `commit-msg` refuses a listed name in a commit message;
