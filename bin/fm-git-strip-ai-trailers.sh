@@ -6,9 +6,11 @@
 #   fm-git-strip-ai-trailers.sh <msgfile>
 #       Commit-msg hook mode. Git passes the proposed message file as $1.
 #       Rewrites that file in place, then exits 0 so the commit proceeds.
-#   fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree>
+#   fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree> [--keep-ai-trailers]
+#                                  [--private-names <config-dir> <state-dir>]
 #       Recreate <hooks-dir> as a core.hooksPath for this launch: a commit-msg
-#       hook that runs this strip, plus one wrapper per client-side hook name
+#       hook that runs this strip (omitted with --keep-ai-trailers), plus one
+#       wrapper per client-side hook name
 #       git documents except reference-transaction and post-index-change,
 #       which are deliberately excluded (see FM_GIT_CLIENT_HOOKS below).
 #       Each wrapper unsets GIT_CONFIG_* and then resolves
@@ -24,6 +26,12 @@
 #       nonzero rather than skipping the repository's hook. Does not touch the
 #       project's git config; the caller prefixes the pane with
 #       GIT_CONFIG_COUNT / GIT_CONFIG_KEY_0 / GIT_CONFIG_VALUE_0.
+#       --private-names adds the private-name guard (bin/fm-private-names.sh,
+#       reading that home's config and state directories) to the commit-msg
+#       and pre-push hooks before the repository's own hook runs, and writes
+#       gh and gh-axi shims into <hooks-dir>/bin for the caller to put first
+#       on the pane's PATH. The pre-push wrapper replays git's ref lines to
+#       the repository's own pre-push hook after the guard reads them.
 #
 # WHY THIS EXISTS. Claude launches already carry attribution-off in their
 # per-launch --settings JSON. Cursor and other non-Claude runtimes inject a
@@ -64,7 +72,8 @@ usage() {
   cat >&2 <<'EOF'
 usage:
   fm-git-strip-ai-trailers.sh <msgfile>
-  fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree>
+  fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree> [--keep-ai-trailers]
+                                 [--private-names <config-dir> <state-dir>]
 EOF
   exit 2
 }
@@ -209,8 +218,18 @@ FM_GIT_CLIENT_HOOKS='applypatch-msg pre-applypatch post-applypatch pre-commit
 pre-merge-commit prepare-commit-msg post-commit pre-rebase post-checkout
 post-merge pre-push post-rewrite pre-auto-gc sendemail-validate'
 
+# The guard command line a hook runs, with the launching home's config and
+# state directories baked in; empty when the private-name guard is off.
+private_names_command() {  # <subcommand>
+  [ -n "$PN_CONFIG" ] || return 0
+  printf 'FM_CONFIG_OVERRIDE=%s FM_STATE_OVERRIDE=%s %s %s' \
+    "$(quote_for_hook "$PN_CONFIG")" "$(quote_for_hook "$PN_STATE")" \
+    "$(quote_for_hook "$PN_GUARD")" "$1"
+}
+
+# shellcheck disable=SC2016 # hook bodies are written literally for git to run
 install_hooks() {
-  local hooks_dir=$1 wt=$2 name
+  local hooks_dir=$1 wt=$2 name tool
   [ -n "$hooks_dir" ] && [ -n "$wt" ] || usage
   [ -d "$wt" ] || {
     echo "error: worktree is not a directory: $wt" >&2
@@ -226,28 +245,72 @@ install_hooks() {
   chmod 700 "$hooks_dir" 2>/dev/null || true
   hooks_dir=$(CDPATH='' cd -- "$hooks_dir" && pwd -P) || return 1
 
-  write_executable "$hooks_dir/commit-msg" <<EOF
-#!/usr/bin/env bash
-set -u
-$(quote_for_hook "$SELF") "\$1" || exit \$?
-$(runtime_chain_body "$hooks_dir")
-EOF
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -u'
+    if [ "$KEEP_TRAILERS" = 0 ]; then
+      printf '%s "$1" || exit $?\n' "$(quote_for_hook "$SELF")"
+    fi
+    if [ -n "$PN_CONFIG" ]; then
+      printf '%s "$1" || exit $?\n' "$(private_names_command commit-msg)"
+    fi
+    runtime_chain_body "$hooks_dir"
+  } | write_executable "$hooks_dir/commit-msg" || return 1
 
   for name in $FM_GIT_CLIENT_HOOKS; do
-    write_executable "$hooks_dir/$name" <<EOF
-#!/usr/bin/env bash
-set -u
-$(runtime_chain_body "$hooks_dir")
-EOF
+    {
+      printf '%s\n' '#!/usr/bin/env bash' 'set -u'
+      if [ "$name" = pre-push ] && [ -n "$PN_CONFIG" ]; then
+        # Keep git's ref lines for the repository's own pre-push hook: the
+        # unlinked file stays readable on stdin after the guard consumed it.
+        printf '%s\n' 'refs=$(mktemp "${TMPDIR:-/tmp}/fm-pre-push.XXXXXX") || exit 1' \
+          'cat >"$refs" || { rm -f "$refs"; exit 1; }'
+        printf '%s "$@" <"$refs" || { rc=$?; rm -f "$refs"; exit "$rc"; }\n' \
+          "$(private_names_command pre-push)"
+        printf '%s\n' 'exec <"$refs"' 'rm -f "$refs"'
+      fi
+      runtime_chain_body "$hooks_dir"
+    } | write_executable "$hooks_dir/$name" || return 1
   done
+
+  if [ -n "$PN_CONFIG" ]; then
+    mkdir -p "$hooks_dir/bin" || return 1
+    : >"$hooks_dir/bin/.fm-private-names-shim" || return 1
+    for tool in gh gh-axi; do
+      printf '%s\n' '#!/usr/bin/env bash' \
+        "exec env $(private_names_command gh-shim) $tool \"\$@\"" |
+        write_executable "$hooks_dir/bin/$tool" || return 1
+    done
+  fi
   chmod 500 "$hooks_dir"
 }
 
 CMD=${1:-}
 case "$CMD" in
 install)
-  [ "$#" -eq 3 ] || usage
-  install_hooks "$2" "$3"
+  [ "$#" -ge 3 ] || usage
+  hooks_arg=$2
+  wt_arg=$3
+  shift 3
+  KEEP_TRAILERS=0
+  PN_CONFIG=
+  PN_STATE=
+  PN_GUARD="$(cd "$(dirname "$SELF")" && pwd -P)/fm-private-names.sh"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --keep-ai-trailers)
+      KEEP_TRAILERS=1
+      shift
+      ;;
+    --private-names)
+      [ "$#" -ge 3 ] && [ -n "$2" ] && [ -n "$3" ] || usage
+      PN_CONFIG=$2
+      PN_STATE=$3
+      shift 3
+      ;;
+    *) usage ;;
+    esac
+  done
+  install_hooks "$hooks_arg" "$wt_arg"
   ;;
 -h | --help)
   usage

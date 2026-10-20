@@ -32,7 +32,7 @@ task_inbox_export() {  # <home> <id>
 ai_trailer_hooks_prefix() {  # <home> <id>
   local state
   state=$(CDPATH='' cd -- "$1/state" && pwd -P) || fail "cannot resolve state dir $1/state"
-  printf "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s'; " "$state/$2.git-hooks"
+  printf "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s' PATH='%s':\"\$PATH\"; " "$state/$2.git-hooks" "$state/$2.git-hooks/bin"
 }
 
 cleanup_kimi_harness() {

@@ -287,7 +287,7 @@ task_inbox_export() {  # <home> <id>
 ai_trailer_hooks_prefix() {  # <home> <id>
   local state
   state=$(CDPATH='' cd -- "$1/state" && pwd -P) || fail "cannot resolve state dir $1/state"
-  printf "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s'; " "$state/$2.git-hooks"
+  printf "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s' PATH='%s':\"\$PATH\"; " "$state/$2.git-hooks" "$state/$2.git-hooks/bin"
 }
 
 run_spawn() {
@@ -2037,11 +2037,11 @@ test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks() {
   expect_code 0 "$status" "claude spawn with keep-ai-trailers should succeed"$'\n'"$out"
   launch=$(cat "$LAUNCH_LOG")
   assert_attribution_policy_absent "$launch" "opted-in claude"
-  assert_not_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
-    "opted-in launch still overrides the repository hooksPath"
-  [ ! -e "$HOME_DIR/state/$id.git-hooks" ] \
-    || fail "opted-in launch installed AI trailer strip hooks"
-  pass "keep-ai-trailers omits Claude attribution settings and the pane strip hooks"
+  assert_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
+    "opted-in launch must still select the pane's private-name hooks"
+  [ -d "$HOME_DIR/state/$id.git-hooks/bin" ] \
+    || fail "opted-in launch did not install the private-name hooks and gh shims"
+  pass "keep-ai-trailers omits Claude attribution settings but keeps the private-name hooks"
 }
 
 test_keep_ai_trailers_reaches_secondmate_crew_launches() {
@@ -2067,10 +2067,8 @@ test_keep_ai_trailers_reaches_secondmate_crew_launches() {
   expect_code 0 "$status" "secondmate crew spawn should succeed"$'\n'"$out"
   launch=$(cat "$LAUNCH_LOG")
   assert_attribution_policy_absent "$launch" "secondmate crew claude"
-  assert_not_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
-    "secondmate crew launch still overrides the repository hooksPath"
-  [ ! -e "$HOME_DIR/state/$crew_id.git-hooks" ] \
-    || fail "secondmate crew launch installed AI trailer strip hooks"
+  assert_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
+    "secondmate crew launch must still select the pane's private-name hooks"
   pass "keep-ai-trailers is inherited so a secondmate's crew launch keeps AI trailers"
 }
 
@@ -2525,7 +2523,7 @@ SH
         enabled) expected=$(printf '%s\n' unset "$value" '' unset) ;;
         empty) expected=$(printf '%s\n' unset unset unset unset) ;;
       esac
-      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
+      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$(CDPATH='' cd -- "$HOME_DIR/state" && pwd -P)/$id.git-hooks/bin:$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
       [ "$result" = "$expected" ] || fail "allowlist=$setting worker environment mismatch: $result"
     done
     pass "allowlist=$setting preserves the operational floor and filters only when opted in"
