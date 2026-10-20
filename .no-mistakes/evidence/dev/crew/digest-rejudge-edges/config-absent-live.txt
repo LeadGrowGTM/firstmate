@@ -1,0 +1,34 @@
+BEFORE FILE CREATION
+1792466425	start	gen=host-2-1792466425	primary=codex
+1792466426	digest	due=later	pending=1	repeats=
+config exists=no
+
+AFTER FILE CREATION
+1792466425	start	gen=host-2-1792466425	primary=codex
+1792466426	digest	due=later	pending=1	repeats=
+1792466442	digest	due=now	pending=1	repeats=
+1792466442	to-main	branch-outcome: captain outcomes the supervision session recorded for you are due (store rows 1); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints; config/outcome-digest holds 'absent', which is not window=<minutes 0-1440> or pr-ready=urgent|digest, so each captain outcome wakes you as it is recorded until it is fixed
+  lock.sh && FM_HOME=/home/mitch/.no-mistakes/
+  worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ977Y/.fm-lab.wil1PX
+  FM_SUPERVISION_HOST_PRIMARY=codex FM_SUPERVISION_HOST_PARK_SECONDS=120 bin/
+  fm-supervision-host.sh park. Keep it running until the host outputs a result.
+
+
+• Captain, I’ll run the exact command and keep the session open until the
+  supervision host returns a result.
+
+• Ran FM_HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NC…
+  └ lock acquired: harness pid 1
+    watcher: started pid=214 (beacon fresh)
+    supervision-host: branch-outcome: captain outcomes the supervision session …
+    + 1 line (^t to expand)
+
+• Captain, the command exited successfully. The lock was acquired, and the
+  supervision host returned branch-outcome: one recorded captain outcome is due.
+  It
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view

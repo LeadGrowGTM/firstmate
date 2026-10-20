@@ -1,0 +1,37 @@
+REAL PRIMARY OUTPUT
+  change source files or use any other home.
+
+
+• Captain, I’ll run that exact command in the isolated lab home and keep the
+  session open while it waits.
+
+• Ran bin/fm-lock.sh && FM_SUPERVISION_HOST_PRIMARY=codex FM_SUPERVISION_HOST_P…
+  └ lock acquired: harness pid 1
+    watcher: started pid=223 (beacon fresh)
+    supervision-host: branch-outcome: captain outcomes the supervision session …
+    + 2 lines (^t to expand)
+
+• Captain, I ran the exact command in the isolated lab home. It acquired the
+  lock and started the watcher, then exited with code 0 after about 15 seconds.
+  It did not remain waiting: the supervision host reported two pending captain
+  outcomes. I made no source changes and ran no other command.
+
+  Worked for 24s • 23:15
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
+
+HOST LEDGER
+1792466126	start	gen=host-2-1792466126	primary=codex
+1792466126	digest	due=none	pending=none	repeats=2
+1792466139	digest	due=now	pending=2	repeats=
+1792466139	to-main	branch-outcome: captain outcomes the supervision session recorded for you are due (store rows 2); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints
+
+STORE DIGEST AFTER ACK
+due=now
+at=
+pending=2
+repeats=

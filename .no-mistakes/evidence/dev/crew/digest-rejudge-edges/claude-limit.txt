@@ -1,0 +1,24 @@
+
+ ▐▛███▛█   Claude Code v2.1.304
+▝▜██████▀  Sonnet 5.5 · Claude Max
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ977Y
+
+
+❯ Run this exact shell command for an isolated validation of this lab home:
+  bin/fm-lock.sh && FM_SUPERVISION_HOST_PRIMARY=claude
+  FM_SUPERVISION_HOST_PARK_SECONDS=120 bin/fm-supervision-host.sh park. Keep it
+  running while it waits. Do not change source files or use any other home.
+  ⎿  You've hit your weekly limit · resets Oct 21, 10pm (America/Toronto)
+
+✻ Brewed for 0s · done 11:14 PM
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   What do you want to do?
+
+   ❯ 1. Stop and wait for limit to reset
+     2. Wait here, then continue automatically at Oct 21, 10pm
+     3. Switch to usage credits
+
+   Enter to confirm · Esc to cancel

@@ -1,0 +1,12 @@
+FIRST REPORT AFTER SECOND LINE ARRIVED
+recorded seq 1 [captain]; MAIN processes it from its next drain
+stored endpoint=29
+validated endpoint=29, log endpoint=58
+
+SECOND REPORT AND DIGEST
+recorded seq 2 [captain]; MAIN processes it from its next drain
+due=later
+at=1792469976
+pending=2
+repeats=
+stored endpoints=[29,58]

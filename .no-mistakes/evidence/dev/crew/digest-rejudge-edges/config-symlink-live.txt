@@ -1,0 +1,35 @@
+BEFORE SYMLINK TARGET EDIT
+1792466466	start	gen=host-2-1792466466	primary=codex
+1792466466	digest	due=later	pending=1	repeats=
+link=outcome-policy
+target=window=60
+
+AFTER SYMLINK TARGET EDIT
+1792466466	start	gen=host-2-1792466466	primary=codex
+1792466466	digest	due=later	pending=1	repeats=
+1792466485	digest	due=now	pending=1	repeats=
+1792466485	to-main	branch-outcome: captain outcomes the supervision session recorded for you are due (store rows 1); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints
+› Run exactly: FM_HOME=/home/mitch/.no-mistakes/
+  worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ977Y/.fm-lab.5OEYiS bin/fm-
+  lock.sh && FM_HOME=/home/mitch/.no-mistakes/
+  worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ977Y/.fm-lab.5OEYiS
+  FM_SUPERVISION_HOST_PRIMARY=codex FM_SUPERVISION_HOST_PARK_SECONDS=120 bin/
+  fm-supervision-host.sh park. Keep it running until the host outputs a result.
+
+
+• Captain, I’ll run the exact command and keep the session open until the
+  supervision host returns a result.
+
+• Ran FM_HOME=/home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NC…
+  └ lock acquired: harness pid 1
+    watcher: started pid=216 (beacon fresh)
+    supervision-host: branch-outcome: captain outcomes the supervision session …
+    + 1 line (^t to expand)
+
+• Working (26s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view

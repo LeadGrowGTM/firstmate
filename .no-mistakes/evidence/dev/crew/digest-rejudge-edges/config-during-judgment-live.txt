@@ -1,0 +1,34 @@
+PAUSED DURING REAL DIGEST JUDGMENT
+jq reached=yes
+config before=window=60
+1792466537	start	gen=host-81-1792466537	primary=codex
+
+AFTER EDIT AND RELEASE
+1792466537	start	gen=host-81-1792466537	primary=codex
+1792466554	digest	due=later	pending=1	repeats=
+1792466554	digest	due=now	pending=1	repeats=
+1792466554	to-main	branch-outcome: captain outcomes the supervision session recorded for you are due (store rows 1); run bin/fm-wake-drain.sh, act on its BRANCH OUTCOMES section, and acknowledge them as it prints
+
+
+› Run the isolated lab test runner /home/mitch/.no-mistakes/
+  worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ977Y/.fm-lab.4Vct4w/run-host.sh
+  exactly once. Keep the command running until it returns. It runs the real
+  lock, host, and jq inside this lab.
+
+
+• Captain, I’ll run the lab script once and keep the session open until it
+  returns.
+
+• Ran /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ977…
+  └ lock acquired: harness pid 1
+    watcher: started pid=233 (beacon fresh)
+    supervision-host: branch-outcome: captain outcomes the supervision session …
+    + 1 line (^t to expand)
+
+• Working (25s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  GPT-6-Sol high · ~/.no-mistakes/worktrees/5782b7185c5e/01M5BKD5NJ3Y6K6NCWH7WQ…
+  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view
