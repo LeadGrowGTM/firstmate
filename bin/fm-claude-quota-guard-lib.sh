@@ -14,7 +14,7 @@
 # line and continues with the Opus-type and concurrency checks, which do not
 # need a usage reading. A malformed config file or an unreadable task record
 # refuses the launch instead of guessing.
-# Env-wrapped and compound raw Claude launches are not guarded.
+# Env-wrapped and compound raw Claude launches, quoted command names, and quoted or escaped leading assignments are not guarded.
 
 # Built-in defaults. A present key replaces that default.
 FM_CQG_DEFAULT_MARGIN=10

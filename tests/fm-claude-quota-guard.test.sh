@@ -1081,6 +1081,36 @@ SH
   pass "quota pace follows pinned, raw, and unpinned Claude accounts"
 }
 
+test_spawn_pinned_raw_override_refuses_before_reroute() {
+  local case_dir home assignment id out rc before trees
+  case_dir=$(make_case pinned-raw-override task-a engineering)
+  home="$case_dir/home"
+  mkdir -p "$case_dir/profile-b" "$case_dir/other"
+  printf '%s\n' "$case_dir/profile-b" > "$home/config/claude-account"
+  link_quota "$case_dir/fakebin"
+  fake_tool "$case_dir/fakebin" grok
+  write_snap "$case_dir/snap.json" 30 259200
+  FM_TEST_SNAP="$case_dir/snap.json"
+  for assignment in "CLAUDE_CONFIG_DIR=$case_dir/other" 'ANTHROPIC_API_KEY=override'; do
+    id=task-a
+    [ "$assignment" != 'ANTHROPIC_API_KEY=override' ] || id=task-b
+    if [ "$id" = task-b ]; then
+      write_brief "$home" "$id" engineering
+      add_item "$home" "$id"
+    fi
+    before=$(call_count "$case_dir")
+    trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+    rc=0
+    out=$(run_spawn "$case_dir" "$case_dir/unused" "$id" "$case_dir/sample-project" \
+      --harness "$assignment claude --model haiku" --mode no-mistakes --yolo off 2>&1) || rc=$?
+    expect_code 1 "$rc" "a pinned raw override was rerouted: $out"
+    assert_contains "$out" "the raw launch command sets ${assignment%%=*}" "the pin refusal was not reported"
+    assert_nothing_created "$case_dir" "$id" "$before" "$trees"
+    assert_equals 0 "$(key_count "$home/state/$id.status" 'claude-quota-pace')" "a refused override wrote a pace line"
+  done
+  pass "pinned raw Claude overrides refuse before quota rerouting"
+}
+
 test_spawn_malformed_dispatch_refuses() {
   local case_dir home out rc=0 before trees
   case_dir=$(make_case malformed-dispatch task-w engineering)
@@ -1683,6 +1713,7 @@ test_spawn_keeps_early_dead_seat_until_startup_grace
 test_spawn_rechecked_dead_seat_uses_startup_grace
 test_spawn_rechecked_alive_records_observation
 test_spawn_reads_quota_for_selected_claude_account
+test_spawn_pinned_raw_override_refuses_before_reroute
 test_spawn_malformed_dispatch_refuses
 test_failed_claude_spawn_keeps_task_lock_through_rollback
 test_spawn_records_live_agent_before_process_seat

@@ -1484,6 +1484,11 @@ spawn_apply_claude_quota_guard() {
   fi
   quota_account=$(fm_worker_account_resolve claude "$CONFIG") || exit 1
   if [ -n "$quota_account" ]; then
+    if [ "$RAW_LAUNCH" = 1 ] && ! fm_worker_account_claude_raw_override_check "$ARG3"; then
+      FM_LAUNCH_OUTCOME=unsafe-refusal
+      FM_LAUNCH_OUTCOME_REASON=guard-refusal
+      exit 1
+    fi
     quota_root=${quota_account#*$'\t'}
     quota_root=${quota_root%%$'\t'*}
     guard_args+=(--quota-profile-dir "$quota_root")

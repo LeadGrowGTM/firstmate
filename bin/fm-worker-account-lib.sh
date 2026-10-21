@@ -257,6 +257,23 @@ fm_worker_account_check() {
   return 0
 }
 
+fm_worker_account_claude_raw_override_check() {
+  local raw=$1 word
+  for word in $raw; do
+    case "$word" in
+    [A-Za-z_]*=*)
+      case " CLAUDE_CONFIG_DIR $FM_WORKER_ACCOUNT_CLAUDE_SHED " in
+      *" ${word%%=*} "*)
+        echo "error: config/claude-account pins Claude workers, but the raw launch command sets ${word%%=*}, which would override the pinned account; remove ${word%%=*} from the raw command, or change or remove config/claude-account" >&2
+        return 1
+        ;;
+      esac
+      ;;
+    *) break ;;
+    esac
+  done
+}
+
 # fm_worker_account_select <harness> <config-dir> <model> <executable> [<raw-command>]
 # The whole launch-time decision. Prints nothing for an unpinned runner, so
 # the caller keeps today's launch unchanged. For a pinned one prints
@@ -266,7 +283,7 @@ fm_worker_account_check() {
 # endpoint exists, and bin/fm-control.sh before a relaunch stops the live
 # agent.
 fm_worker_account_select() {
-  local harness=$1 config=$2 model=$3 executable=$4 raw=${5:-} selection declared root providers word provider=
+  local harness=$1 config=$2 model=$3 executable=$4 raw=${5:-} selection declared root providers provider=
   selection=$(fm_worker_account_resolve "$harness" "$config") || return 1
   [ -n "$selection" ] || return 0
   declared=${selection%%$'\t'*}
@@ -274,19 +291,7 @@ fm_worker_account_select() {
   providers=${root#*$'\t'}
   root=${root%%$'\t'*}
   if [ "$harness" = claude ]; then
-    for word in $raw; do
-      case "$word" in
-      [A-Za-z_]*=*)
-        case " CLAUDE_CONFIG_DIR $FM_WORKER_ACCOUNT_CLAUDE_SHED " in
-        *" ${word%%=*} "*)
-          echo "error: config/claude-account pins Claude workers, but the raw launch command sets ${word%%=*}, which would override the pinned account; remove ${word%%=*} from the raw command, or change or remove config/claude-account" >&2
-          return 1
-          ;;
-        esac
-        ;;
-      *) break ;;
-      esac
-    done
+    fm_worker_account_claude_raw_override_check "$raw" || return 1
   else
     if [ -n "$raw" ]; then
       echo "error: config/pi-account pins Pi workers, and a raw Pi launch command runs verbatim, so it cannot carry the pinned --provider; launch with --harness $harness and --model <provider>/<id> instead" >&2
