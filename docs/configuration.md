@@ -455,6 +455,7 @@ The wrapper still passes through the documented direct transition `tasks-axi sta
 Completion refuses to report success until the item is closed, and session start reconciles this home's own books after an interrupted run.
 
 When a spawn is interrupted after launch delivery began, its exit path re-reads the paired task record and the backlog row under the same per-task lock as the commit, repairs a row the commit believed it had moved, and reports only what was verified or honestly attempted, never intent phrased as outcome ([`bin/fm-spawn.sh`](../bin/fm-spawn.sh); [`tests/fm-backlog-atomicity.test.sh`](../tests/fm-backlog-atomicity.test.sh)).
+Teardown refuses a task while its spawn holds the per-task spawn lock, including during rollback of a published provisional record before delivery ([`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh)).
 
 ### Which backlog receives a transition
 
