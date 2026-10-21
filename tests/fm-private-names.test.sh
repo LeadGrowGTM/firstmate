@@ -1745,6 +1745,110 @@ SH
   pass "refresh handles source races, parallel updates, and unavailable locks"
 }
 
+test_gate_no_verify_push_is_allowed_and_other_no_verify_pushes_stay_refused() {
+  local d=$TMP_ROOT/gate-no-verify home nm id gate out elsewhere bad fakehome
+  home=$d/home
+  nm=$d/nm
+  id=abcdef123456
+  make_home "$home"
+  make_repo "$d" "$home" public
+  mkdir -p "$nm/repos"
+  gate=$nm/repos/$id.git
+  git init -q --bare "$gate"
+  git -C "$gate" config receive.advertisePushOptions true
+  git -C "$REPO" remote add no-mistakes "$gate"
+  in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/gate-nv
+  commit_file "$REPO" bypass.txt "names acme-test" "Clean subject" --no-verify
+
+  # The command no-mistakes uses: git push --no-verify [-o opt] no-mistakes <src>:<ref>
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -o nm.opt -q no-mistakes \
+    HEAD:refs/heads/fm/gate-nv 2>&1) ||
+    fail "a --no-verify push to the no-mistakes gate was refused: $out"
+  assert_equals "$(git -C "$REPO" rev-parse HEAD)" "$(git -C "$gate" rev-parse refs/heads/fm/gate-nv)" \
+    "the --no-verify push did not reach the gate"
+  assert_contains "$(git -C "$gate" show refs/heads/fm/gate-nv:bypass.txt)" "acme-test" \
+    "the gate push did not carry the commit the pre-push hook would have refused"
+
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-veri -q no-mistakes HEAD 2>&1) ||
+    fail "an abbreviated --no-verify push to the gate was refused: $out"
+  # git push: a positional repository wins over --repo. --repo alone is the target.
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q --repo origin no-mistakes HEAD 2>&1) ||
+    fail "a positional no-mistakes target was refused because --repo named origin: $out"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q --repo no-mistakes origin HEAD 2>&1) &&
+    fail "a positional origin target was allowed because --repo named the gate"
+  assert_contains "$out" "--no-verify" "the positional origin refusal was not explained"
+  git -C "$REPO" config branch.fm/gate-nv.remote no-mistakes
+  git -C "$REPO" config branch.fm/gate-nv.merge refs/heads/fm/gate-nv
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q --repo=no-mistakes 2>&1) ||
+    fail "a --repo=no-mistakes push with no positional repository was refused: $out"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q "$gate" HEAD 2>&1) ||
+    fail "a --no-verify push to the gate path itself was refused: $out"
+  git -C "$REPO" remote set-url no-mistakes "file://$gate"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q no-mistakes HEAD 2>&1) ||
+    fail "a --no-verify push to a file:// gate URL was refused: $out"
+  git -C "$REPO" remote set-url no-mistakes "$gate"
+
+  git -C "$REPO" config branch.fm/gate-nv.remote no-mistakes
+  git -C "$REPO" config branch.fm/gate-nv.merge refs/heads/fm/gate-nv
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q 2>&1) ||
+    fail "a --no-verify push with the gate as upstream was refused: $out"
+
+  git -C "$REPO" config branch.fm/gate-nv.remote origin
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q 2>&1) &&
+    fail "a --no-verify push with origin as upstream was allowed"
+  assert_contains "$out" "--no-verify" "the upstream origin refusal was not explained"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q origin HEAD 2>&1) &&
+    fail "git push --no-verify to origin was allowed"
+  assert_contains "$out" "--no-verify" "the origin no-verify refusal was not explained"
+  git -C "$REPO" remote add my-no-mistakes-backup "$ORIGIN"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q my-no-mistakes-backup HEAD 2>&1) &&
+    fail "a --no-verify push to a remote whose name only contains no-mistakes was allowed"
+  assert_contains "$out" "--no-verify" "the lookalike remote refusal was not explained"
+  [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/gate-nv)" ] ||
+    fail "a refused --no-verify push reached the public origin"
+
+  git -C "$REPO" remote set-url no-mistakes "$ORIGIN"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q no-mistakes HEAD 2>&1) &&
+    fail "a --no-verify push to a no-mistakes remote pointed at origin was allowed"
+  assert_contains "$out" "--no-verify" "the retargeted no-mistakes refusal was not explained"
+  [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/gate-nv)" ] ||
+    fail "the retargeted no-mistakes remote received the push"
+
+  bad=$nm/repos/not-a-gate-id.git
+  git init -q --bare "$bad"
+  git -C "$REPO" remote set-url no-mistakes "$bad"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q no-mistakes HEAD 2>&1) &&
+    fail "a --no-verify push to a no-mistakes remote that is not a 12-hex gate id was allowed"
+  assert_contains "$out" "--no-verify" "the bad gate id refusal was not explained"
+  [ -z "$(git -C "$bad" for-each-ref refs/heads/fm/gate-nv)" ] || fail "the bad-id remote received the push"
+
+  elsewhere=$d/elsewhere/repos/$id.git
+  mkdir -p "$(dirname "$elsewhere")"
+  git init -q --bare "$elsewhere"
+  git -C "$REPO" remote set-url no-mistakes "$elsewhere"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q no-mistakes HEAD 2>&1) &&
+    fail "a --no-verify push to a gate-shaped path outside the no-mistakes root was allowed"
+  assert_contains "$out" "--no-verify" "the outside-root refusal was not explained"
+  [ -z "$(git -C "$elsewhere" for-each-ref refs/heads/fm/gate-nv)" ] ||
+    fail "the outside-root remote received the push"
+
+  git -C "$REPO" remote set-url no-mistakes "$gate"
+  out=$(unset NM_HOME; in_pane "$HOOKS" git -C "$REPO" push --no-verify -q no-mistakes HEAD 2>&1) &&
+    fail "a temp gate was treated as ~/.no-mistakes when NM_HOME was unset"
+  assert_contains "$out" "--no-verify" "the unset NM_HOME refusal was not explained"
+
+  fakehome=$d/fakehome
+  mkdir -p "$fakehome/.no-mistakes/repos"
+  gate=$fakehome/.no-mistakes/repos/$id.git
+  git init -q --bare "$gate"
+  git -C "$REPO" remote set-url no-mistakes "$gate"
+  out=$(unset NM_HOME; HOME=$fakehome in_pane "$HOOKS" git -C "$REPO" push --no-verify -q no-mistakes HEAD 2>&1) ||
+    fail "a --no-verify push to ~/.no-mistakes was refused when NM_HOME was unset: $out"
+  assert_equals "$(git -C "$REPO" rev-parse HEAD)" "$(git -C "$gate" rev-parse refs/heads/fm/gate-nv)" \
+    "the default-root gate did not receive the push"
+  pass "a --no-verify push is allowed only when its target is the no-mistakes gate"
+}
+
 test_refresh_derives_names_from_local_records
 test_secondmate_refresh_merges_the_primary_list
 test_secondmate_commit_refreshes_new_parent_records
@@ -1775,6 +1879,7 @@ test_scrub_ssh_repository_urls
 test_scrub_refreshes_registered_names
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard
 test_tag_messages_and_no_verify_pushes_are_refused
+test_gate_no_verify_push_is_allowed_and_other_no_verify_pushes_stay_refused
 test_push_shim_and_gate_close_hook_bypasses
 test_gh_shim_guards_issue_release_label_repo_and_workflow_text
 test_gh_api_writes_are_checked

@@ -79,9 +79,13 @@
 # FM_DATA_OVERRIDE / FM_PROJECTS_OVERRIDE like every other fleet script;
 # bin/fm-git-strip-ai-trailers.sh bakes them into each launch's hooks and shims.
 # bin/fm-private-names-lib.sh owns matching, neutral ids, and visibility.
-# Worker launches also get a git shim that refuses git push --no-verify, a
-# push whose effective core.hooksPath (from -c, --config-env, the environment,
-# or an include) is not the launch's hooks, send-pack, http-push, and unknown
+# Worker launches also get a git shim that refuses git push --no-verify, except
+# a push whose target is this repository's no-mistakes remote when that
+# remote's push URL is the local gate no-mistakes configures
+# (<NM_HOME or ~/.no-mistakes>/repos/<12-hex>.git). The gate scans that
+# outgoing content before publishing it. The shim also refuses a push whose
+# effective core.hooksPath (from -c, --config-env, the environment, or an
+# include) is not the launch's hooks, send-pack, http-push, and unknown
 # options before the command (bin/fm-git-strip-ai-trailers.sh writes it).
 # Accepted residual: a git alias that skips hooks, a process that runs git or
 # gh by absolute path, or one that calls the GitHub API directly is not seen,
