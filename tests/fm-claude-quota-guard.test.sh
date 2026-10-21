@@ -1036,7 +1036,8 @@ SH
   expect_code 0 "$rc" "an ordinary pin did not use the default account: $out"
   assert_equals claude "$(verdict_field "$home/state/task-b.meta" harness)" "the ordinary pin read the hot ambient profile"
   calls=$(cat "$case_dir/quota-calls")
-  assert_contains "$calls" '__unset__|--provider claude --profile-only --no-credential-refresh' "the ordinary pin did not select the default profile"
+  assert_contains "$calls" '__unset__|--provider claude --no-credential-refresh' "the ordinary pin did not select the default profile"
+  assert_not_contains "$calls" '--profile-only' "the ordinary pin asked for a profile without a directory"
   assert_not_contains "$calls" "$case_dir/profile-b|" "the ordinary pin read the ambient profile"
 
   rm -f "$home/config/claude-account"

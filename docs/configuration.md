@@ -1514,7 +1514,9 @@ Any other key, a malformed file, or an unreadable file refuses the launch.
 [`docs/examples/claude-quota-guard.json`](examples/claude-quota-guard.json) is a copyable sample and is never loaded.
 
 For a fresh launch, after validating the config and before the task-type and cap checks, the guard reads quota for the Claude account that the launch will use: the home's `config/claude-account` pin, a guarded raw command's leading `CLAUDE_CONFIG_DIR`, or the unpinned launch environment.
-Both the TOON read and JSON fallback use `--no-credential-refresh`, and a selected credential directory uses quota-axi's `--profile-only` selection.
+Both the TOON read and JSON fallback use `--no-credential-refresh`.
+A selected credential directory uses quota-axi's `--profile-only` selection.
+An ordinary pin unsets that directory and does not pass `--profile-only`, because quota-axi rejects the flag without one.
 It uses the Claude `all_models` row with the lowest percent remaining.
 When that row is limited by `seven_day` or `weekly`, that row is the weekly window.
 Otherwise it reads one Claude JSON response and uses the tightest Claude window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.

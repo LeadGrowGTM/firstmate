@@ -240,14 +240,16 @@ fm_cqg_read_weekly() {
   if ! command -v quota-axi >/dev/null 2>&1; then
     return 0
   fi
+  # quota-axi rejects --profile-only unless a credential directory is set.
+  # An ordinary pin unsets that directory and uses the default reading.
   if [ "${FM_CQG_PROFILE_SELECTED:-0}" = 1 ]; then
     if [ -n "$FM_CQG_PROFILE_DIR" ]; then
       quota_env=(env "CLAUDE_CONFIG_DIR=$FM_CQG_PROFILE_DIR")
+      quota_args+=(--profile-only)
     else
       quota_env=(env -u CLAUDE_CONFIG_DIR)
     fi
-  fi
-  if [ "${FM_CQG_PROFILE_SELECTED:-0}" = 1 ] || [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+  elif [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
     quota_args+=(--profile-only)
   fi
   toon=$(fm_run_timed 20 "${quota_env[@]}" quota-axi "${quota_args[@]}" --no-credential-refresh 2>/dev/null) || rc=$?
