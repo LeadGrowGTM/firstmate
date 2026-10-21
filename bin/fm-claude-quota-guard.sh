@@ -123,4 +123,9 @@ esac
 [ "${#id}" -le 64 ] || { usage; exit 2; }
 
 FM_CQG_APPLY_STATUS=$apply
+[ -d "$state" ] && [ -r "$state" ] || { printf '%s\n' 'error: cannot count Claude workers because the state directory is unreadable' >&2; exit 1; }
+FM_HOME=$home
+FM_STATE_OVERRIDE=$state
+# shellcheck source=bin/fm-wake-lib.sh
+. "$SCRIPT_DIR/fm-wake-lib.sh"
 fm_cqg_decide "$config" "$state" "$home" "$id" "$brief" "$model" "$verdict"

@@ -348,7 +348,7 @@ fm_cqg_pick_route() {
 # Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home whose
 # recorded endpoint has not been proven dead. Returns 1 when a record cannot be read.
 fm_cqg_count() {
-  local state=$1 self=$2 list f id harness kind backend target socket alive proof reservation now
+  local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity current_identity reserved
   FM_CQG_OCCUPANTS=0
   if [ ! -d "$state" ] || [ ! -r "$state" ]; then
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
@@ -358,7 +358,6 @@ fm_cqg_count() {
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
     return 1
   fi
-  now=$(date +%s)
   while IFS= read -r f || [ -n "$f" ]; do
     [ -n "$f" ] || continue
     if [ ! -r "$f" ]; then
@@ -374,13 +373,23 @@ fm_cqg_count() {
       '' | ship | scout) ;;
       *) continue ;;
     esac
-    reservation=$(fm_meta_get "$f" quota_reservation_until)
-    if [ -n "$reservation" ]; then
-      case "$reservation" in
-        *[!0-9]*) fm_cqg_die "cannot count Claude workers because a launch reservation is malformed"; return 1 ;;
+    spawn_pid=$(fm_meta_get "$f" quota_spawn_pid)
+    spawn_identity=$(fm_meta_get "$f" quota_spawn_identity)
+    reserved=0
+    if grep -qE '^quota_spawn_(pid|identity)=' "$f"; then
+      reserved=1
+      case "$spawn_pid" in
+        ''|0*|*[!0-9]*) fm_cqg_die "cannot count Claude workers because a launch reservation is malformed"; return 1 ;;
       esac
-      [ "${#reservation}" -le 12 ] || { fm_cqg_die "cannot count Claude workers because a launch reservation is malformed"; return 1; }
-      if [ "$reservation" -gt "$now" ]; then
+      if [ -z "$spawn_identity" ] || [ "${#spawn_pid}" -gt 12 ] ||
+        [ "$(grep -c '^quota_spawn_pid=' "$f")" != 1 ] ||
+        [ "$(grep -c '^quota_spawn_identity=' "$f")" != 1 ]; then
+        fm_cqg_die "cannot count Claude workers because a launch reservation is malformed"
+        return 1
+      fi
+      if fm_pid_alive "$spawn_pid" &&
+        current_identity=$(fm_pid_identity "$spawn_pid" 2>/dev/null) &&
+        [ "$current_identity" = "$spawn_identity" ]; then
         FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
         continue
       fi
@@ -395,6 +404,10 @@ fm_cqg_count() {
     fi
     case "$alive" in
       dead) continue ;;
+      alive) FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1)); continue ;;
+    esac
+    [ "$reserved" = 0 ] || continue
+    case "$alive" in
       missing)
         proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")
         case "${proof%%$'\t'*}" in gone|dead) continue ;; esac

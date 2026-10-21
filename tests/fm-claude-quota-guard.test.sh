@@ -638,7 +638,7 @@ test_spawn_selected_opus_rule_defers() {
 }
 
 test_spawn_keeps_published_claude_seat_during_delivery() {
-  local case_dir home pane out rc=0 first_pid tries deadline now
+  local case_dir home pane out rc=0 first_pid tries recorded_pid recorded_identity
   case_dir=$(make_case published-seat task-a engineering)
   home="$case_dir/home"
   write_brief "$home" task-b engineering
@@ -648,7 +648,7 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
   pane=$(new_worktree "$case_dir" task-a)
   FM_TEST_SNAP="$case_dir/snap.json"
-  FM_FAKE_PAUSE_LAUNCH=1 run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
+  FM_CONTROL_LAUNCH_WAIT=1 FM_FAKE_PAUSE_LAUNCH=1 run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
     --harness claude --model haiku --mode no-mistakes --yolo off > "$case_dir/first.out" 2>&1 &
   first_pid=$!
   for ((tries=0; tries<300; tries++)); do
@@ -657,10 +657,12 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   done
   [ -f "$case_dir/launch-paused" ] || fail "first Claude launch did not reach its published delivery gap: $(cat "$case_dir/first.out")"
   assert_present "$home/state/task-a.meta" "first launch had no published record during delivery"
-  deadline=$(awk -F= '$1=="quota_reservation_until" {print $2}' "$home/state/task-a.meta")
-  now=$(date +%s)
-  [[ "$deadline" =~ ^[0-9]+$ ]] && [ "$deadline" -ge "$now" ] && [ "$deadline" -le "$((now + 90))" ] ||
-    fail "published Claude reservation was not bounded by launch wait: $deadline"
+  recorded_pid=$(awk -F= '$1=="quota_spawn_pid" {print $2}' "$home/state/task-a.meta")
+  recorded_identity=$(awk -F= '$1=="quota_spawn_identity" {sub(/^[^=]*=/, ""); print}' "$home/state/task-a.meta")
+  [ -n "$recorded_pid" ] && [ -n "$recorded_identity" ] && kill -0 "$recorded_pid" 2>/dev/null ||
+    fail "published Claude record did not name a live spawning process"
+  cp "$home/state/task-a.meta" "$case_dir/reserved.meta"
+  sleep 2
   out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
   expect_code "$DEFER_EXIT" "$rc" "second Claude worker entered while the first was published but not observable: $out"
@@ -668,7 +670,23 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "published-seat deferral missed its cap line"
   : > "$case_dir/release-launch"
   wait "$first_pid" || fail "first Claude launch failed after release: $(cat "$case_dir/first.out")"
-  pass "a published Claude launch holds the seat before its agent is observable"
+  assert_equals 0 "$(key_count "$home/state/task-a.meta" 'quota_spawn_pid=')" "completed delivery kept its process reservation"
+  cp "$case_dir/reserved.meta" "$home/state/task-a.meta"
+  printf '%s\n' 'quota_spawn_identity=' >> "$home/state/task-a.meta"
+  rc=0
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 1 "$rc" "a malformed Claude reservation did not refuse the count: $out"
+  assert_absent "$home/state/task-b.meta" "malformed reservation admitted a worker"
+  cp "$case_dir/reserved.meta" "$home/state/task-a.meta"
+  printf 'quota_reservation_until=%s\n' "$(( $(date +%s) + 3600 ))" >> "$home/state/task-a.meta"
+  rc=0
+  pane=$(new_worktree "$case_dir" task-b)
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "an exited spawn with no observable agent kept its seat: $out"
+  assert_present "$home/state/task-b.meta" "released Claude seat did not admit the next launch"
+  pass "a live spawn holds its seat and an exited undelivered spawn releases it"
 }
 
 test_spawn_reroute_keeps_inferred_dispatch_rule() {

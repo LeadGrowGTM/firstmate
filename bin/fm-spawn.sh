@@ -224,8 +224,8 @@
 #   and the gap is stated. The admitting spawn holds
 #   state/.claude-quota-guard.lock until the task record is published, or
 #   releases it immediately when the route leaves claude.
-#   A published Claude record reserves its cap place through the existing
-#   launch-delivery wait, until the endpoint state can decide whether it remains occupied.
+#   A published Claude record reserves its cap place while its spawning process
+#   is alive; after delivery, the endpoint state decides whether it remains occupied.
 #   With no harness arg, a crewmate/scout spawn resolves the CREW harness only when
 #   config/crew-dispatch.json is absent. When that file exists, crewmate/scout
 #   spawns require an explicit harness so firstmate cannot silently skip dispatch
@@ -6160,7 +6160,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen quota_reservation_until traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen quota_spawn_pid quota_spawn_identity traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -6203,8 +6203,11 @@ preserve_relaunch_meta() {
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
   echo "spawn_gen=$SPAWN_GEN"
   if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
-    reservation_until=$(awk -v now="$(date +%s)" -v wait="${FM_CONTROL_LAUNCH_WAIT:-90}" 'BEGIN { if (wait !~ /^[0-9]+([.][0-9]+)?$/ || wait + 0 <= 0) exit 1; printf "%.0f\n", now + int(wait) + (wait > int(wait)) }') || exit 1
-    echo "quota_reservation_until=$reservation_until"
+    fm_current_pid quota_spawn_pid || exit 1
+    quota_spawn_identity=$(fm_pid_identity "$quota_spawn_pid") || exit 1
+    case "$quota_spawn_identity" in ''|*$'\n'*|*$'\r'*) exit 1 ;; esac
+    echo "quota_spawn_pid=$quota_spawn_pid"
+    echo "quota_spawn_identity=$quota_spawn_identity"
   fi
   # Default-off writes no traceparent= line.
   # backend= is written only for a non-default (non-tmux) backend, so the
@@ -6919,6 +6922,15 @@ if [ -n "$SPAWN_DEFERRED_SIGNAL" ]; then
   trap - HUP INT TERM
   echo "error: spawn of $ID was interrupted after launch delivery began; $SPAWN_PRESERVED_CLAIM" >&2
   exit "$SPAWN_DEFERRED_SIGNAL_STATUS"
+fi
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
+  SPAWN_META_TMP="$STATE/.$ID.meta.quota.${BASHPID:-$$}"
+  if ! awk -F= '$1 != "quota_spawn_pid" && $1 != "quota_spawn_identity"' "$STATE/$ID.meta" >"$SPAWN_META_TMP" ||
+    ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
+    echo "error: could not finish Claude launch reservation for $ID" >&2
+    exit 1
+  fi
+  SPAWN_META_TMP=
 fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
