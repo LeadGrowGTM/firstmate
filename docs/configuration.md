@@ -1529,6 +1529,7 @@ When the check trips, the launch goes to the first available preference: Grok, t
 That order stands when the chosen profile declares a weaker reasoning class than the requested Claude profile.
 Ordinary dispatch still keeps the strongest reasoning class when this pace check has not tripped.
 With a selected or uniquely inferred dispatch rule, only profiles listed by that rule are eligible, and the chosen rule stays attached to a rerouted launch; when none is available, the launch exits 75 and leaves its backlog item queued.
+A dispatch file, a scheduled plan, or a selected dispatch rule that cannot be read refuses the launch and names that configuration error instead of exiting 75.
 An omitted launch model is read as `default` before that rule is inferred, matching the dispatch profile checker.
 For a scheduled worker, only profiles in its authorized plan are eligible, excluding any profile already tried in that episode.
 A repeated destination is rejected before a worker is provisioned.
@@ -1546,6 +1547,8 @@ The check reads the effective model, including a raw Claude command's model and 
 
 The cap counts Claude ship and scout records in this home's own state directory when their launch reservation is active or their recorded endpoint has not been proven dead, including records with a `pr`.
 For a newly published Claude record, the guard records an already-alive agent before counting a spawning process whose PID and start-time identity match, keeps that observation ahead of any recorded PR identity, and still counts a later missing endpoint until normal absence proof says the agent is gone.
+A reserved seat whose spawning process has exited stays counted when the endpoint is unverified, unreadable, or only unproven, including a cmux endpoint.
+The seat is released when the agent is dead, or when a missing endpoint's absence proof says the agent is gone.
 A second mate record is not counted, and neither is the task being launched.
 An unreadable state directory or task record refuses a Claude-bound launch.
 When the count is already at the cap, the spawn prints one `deferred:` line, exits 75, and leaves the backlog item queued.
@@ -1557,7 +1560,7 @@ Each of those lines is appended once per task, and a retry appends nothing furth
 An Opus refusal appends no status line.
 The admitting spawn holds `state/.claude-quota-guard.lock` from the check until the task record is published, and releases it immediately when the route leaves Claude.
 A second Claude launch that arrives while the lock is held is refused rather than waited on, so the two cannot both take the last place.
-[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, an omitted model inferred as `default`, a scheduled destination already tried in the episode, the cap including a published launch whose agent is not yet observable, a missing quota reading, and the single status line.
+[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, an omitted model inferred as `default`, a scheduled destination already tried in the episode, the cap including a published launch whose agent is not yet observable, an unverified reserved seat, a malformed dispatch file, a missing quota reading, and the single status line.
 
 ## Automatic deadweight cleanup
 

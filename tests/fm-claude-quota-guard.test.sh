@@ -683,12 +683,83 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   cp "$case_dir/reserved.meta" "$home/state/task-a.meta"
   printf 'quota_reservation_until=%s\n' "$(( $(date +%s) + 3600 ))" >> "$home/state/task-a.meta"
   rc=0
-  pane=$(new_worktree "$case_dir" task-b)
-  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
-  expect_code 0 "$rc" "an exited spawn with no observable agent kept its seat: $out"
-  assert_present "$home/state/task-b.meta" "released Claude seat did not admit the next launch"
-  pass "a live spawn holds its seat and an exited undelivered spawn releases it"
+  expect_code "$DEFER_EXIT" "$rc" "an exited reservation with an unproven endpoint freed its seat: $out"
+  assert_absent "$home/state/task-b.meta" "unproven endpoint allowed a second Claude record"
+  assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "unproven endpoint duplicated the cap line"
+  pass "a live spawn holds its seat and an exited reservation without absence proof keeps it"
+}
+
+test_spawn_keeps_unverified_reserved_seat() {
+  local case_dir home out rc=0 before trees dead_pid
+  case_dir=$(make_case unverified-seat task-b engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  sleep 30 &
+  dead_pid=$!
+  kill "$dead_pid" 2>/dev/null || fail "could not stop the reservation process"
+  wait "$dead_pid" 2>/dev/null || true
+  if kill -0 "$dead_pid" 2>/dev/null; then
+    fail "reservation pid is still alive"
+  fi
+  fm_write_meta "$home/state/task-a.meta" \
+    harness=claude kind=ship backend=cmux \
+    window=cmux:surface-a \
+    cmux_workspace_id=ws-a cmux_surface_id=surface-a \
+    quota_spawn_pid="$dead_pid" \
+    quota_spawn_identity=exited-spawn
+  FM_TEST_SNAP="$case_dir/snap.json"
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an unverified reserved Claude seat admitted another worker: $out"
+  assert_nothing_created "$case_dir" task-b "$before" "$trees"
+  assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "unverified seat missed its cap line"
+  assert_equals 0 "$(key_count "$home/state/task-b.status" 'claude-quota-pace')" "unverified seat wrote a pace line"
+  rc=0
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an unverified reserved seat admitted a retry: $out"
+  assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "unverified seat retry wrote another cap line"
+  pass "an unverified reserved Claude seat keeps the cap full"
+}
+
+test_spawn_malformed_dispatch_refuses() {
+  local case_dir home out rc=0 before trees
+  case_dir=$(make_case malformed-dispatch task-w engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  fake_tool "$case_dir/fakebin" grok
+  fake_tool "$case_dir/fakebin" muse
+  write_snap "$case_dir/snap.json" 30 259200
+  printf '%s\n' 'not-a-dispatch-file' > "$home/config/crew-dispatch.json"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-w "$case_dir/sample-project" \
+    --harness claude --model opus --effort high --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 1 "$rc" "a malformed dispatch file deferred the launch: $out"
+  assert_contains "$out" 'config/crew-dispatch.json is malformed' "the malformed dispatch file was not named"
+  assert_not_contains "$out" 'not-a-dispatch-file' "the malformed dispatch file contents were printed"
+  assert_nothing_created "$case_dir" task-w "$before" "$trees"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota-route')" "a malformed dispatch file wrote the route line"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota-pace')" "a malformed dispatch file wrote a pace line"
+
+  printf '%s\n' '{"default":[{"harness":"claude","model":"opus","effort":"high"}]}' > "$home/config/crew-dispatch.json"
+  rc=0
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-w "$case_dir/sample-project" \
+    --harness claude --model opus --effort high \
+    --dispatch-rule '{"rule":"rule_9"}' --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 1 "$rc" "an unreadable dispatch rule deferred the launch: $out"
+  assert_contains "$out" 'config/crew-dispatch.json: selected dispatch rule is unavailable' "the unavailable rule was not named"
+  assert_not_contains "$out" 'rule_9' "the unavailable rule contents were printed"
+  assert_nothing_created "$case_dir" task-w "$before" "$trees"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota-route')" "an unavailable rule wrote the route line"
+  pass "a malformed dispatch file refuses the launch without a route deferral"
 }
 
 test_failed_claude_spawn_keeps_task_lock_through_rollback() {
@@ -1253,6 +1324,8 @@ test_spawn_refuses_opus_for_writing
 test_spawn_refuses_raw_opus_for_writing
 test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
+test_spawn_keeps_unverified_reserved_seat
+test_spawn_malformed_dispatch_refuses
 test_failed_claude_spawn_keeps_task_lock_through_rollback
 test_spawn_records_live_agent_before_process_seat
 test_spawn_observation_preserves_pr_identity

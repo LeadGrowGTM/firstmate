@@ -292,17 +292,38 @@ fm_cqg_ahead_of_margin() {
 # First allowed, installed preference. Client data never selects grok.
 # bin/fm-muse-client-lib.sh owns that decision. Sonnet needs no extra binary
 # because the launch is already Claude.
+# Return 0 and print harness, model, effort, and rule, tab-separated.
+# Return 1 when a successfully read rule has no remaining alternate.
+# Return 2 when FM_CQG_TRIED cannot be read.
+# Return 3 after naming a dispatch configuration error on stderr.
 fm_cqg_pick_route() {
-  local home=$1 brief=$2 config=$3 rule=$4 model=${5:-default} effort=${6:-default} plan=$7 profiles='' choice selection source='' tried='[]'
+  local home=$1 brief=$2 config=$3 rule=$4 model=${5:-default} effort=${6:-default} plan=$7 profiles='' choice selection source='' tried='[]' route_err=''
   # An empty launch model is the dispatch checker's "default". FM_CQG_TRIED is
   # this scheduled episode's already-tried profiles; a repeated destination is skipped.
   if [ -n "${FM_CQG_TRIED:-}" ]; then
     tried=$(jq -ce 'if type == "array" and all(.[]; type == "object") then . else empty end' <<<"${FM_CQG_TRIED}") || return 2
   fi
   if [ -n "$plan" ]; then
-    profiles=$(jq -ces 'if length != 1 then error("expected one scheduled plan") else .[0] end | select(.authorized == true and (.profiles | type) == "array" and (.profiles | length) > 0) | .profiles' "$plan" 2>/dev/null) || return 1
+    route_err=$(mktemp "${TMPDIR:-/tmp}/fm-cqg-route.XXXXXX") || {
+      fm_cqg_die "scheduled plan could not be read"
+      return 3
+    }
+    if ! profiles=$(jq -ces 'if length != 1 then error("expected one scheduled plan") else .[0] end | select(.authorized == true and (.profiles | type) == "array" and (.profiles | length) > 0) | .profiles' "$plan" 2>"$route_err"); then
+      if [ -s "$route_err" ]; then
+        rm -f "$route_err"
+        fm_cqg_die "scheduled plan could not be read"
+        return 3
+      fi
+      rm -f "$route_err"
+      return 1
+    fi
+    rm -f "$route_err"
   elif [ -f "$config/crew-dispatch.json" ]; then
-    selection=$(jq -ce --arg rule "$rule" --arg model "$model" --arg effort "$effort" '
+    route_err=$(mktemp "${TMPDIR:-/tmp}/fm-cqg-route.XXXXXX") || {
+      fm_cqg_die "config/crew-dispatch.json could not be read"
+      return 3
+    }
+    if ! selection=$(jq -ce --arg rule "$rule" --arg model "$model" --arg effort "$effort" '
       def profiles: if type == "array" then . else [.] end;
       (if $rule != "" then ($rule | fromjson) else null end) as $selected |
       ([.rules // [] | to_entries[] | {key:{rule:("rule_" + ((.key + 1) | tostring))}, items:(.value.use | profiles)}]
@@ -310,9 +331,25 @@ fm_cqg_pick_route() {
       if $selected != null then map(select(.key == $selected))
       else map(select(any(.items[]; .harness == "claude" and (.model // "default") == $model and (.effort // "default") == $effort))) end |
       if length != 1 then error("selected dispatch rule is unavailable") else .[0] end
-    ' "$config/crew-dispatch.json" 2>/dev/null) || return 1
-    profiles=$(jq -c '.items' <<<"$selection") || return 1
-    source=$(jq -c '.key' <<<"$selection") || return 1
+    ' "$config/crew-dispatch.json" 2>"$route_err"); then
+      if grep -F -q 'selected dispatch rule is unavailable' "$route_err"; then
+        rm -f "$route_err"
+        fm_cqg_die "config/crew-dispatch.json: selected dispatch rule is unavailable"
+        return 3
+      fi
+      rm -f "$route_err"
+      fm_cqg_die "config/crew-dispatch.json is malformed"
+      return 3
+    fi
+    rm -f "$route_err"
+    profiles=$(jq -c '.items' <<<"$selection") || {
+      fm_cqg_die "config/crew-dispatch.json is malformed"
+      return 3
+    }
+    source=$(jq -c '.key' <<<"$selection") || {
+      fm_cqg_die "config/crew-dispatch.json is malformed"
+      return 3
+    }
   fi
   if [ -n "$profiles" ]; then
     profiles=$(jq -c --argjson tried "$tried" '
@@ -320,7 +357,10 @@ fm_cqg_pick_route() {
         .harness == $profile.harness and
         (.model // "default") == ($profile.model // "default") and
         (.effort // "default") == ($profile.effort // "default")) | not)]
-    ' <<<"$profiles") || return 1
+    ' <<<"$profiles") || {
+      fm_cqg_die "dispatch profiles could not be read"
+      return 3
+    }
     if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
       choice=$(jq -r '[.[] | select(.harness == "grok")] | if length == 0 then empty else .[0] | [.harness, (.model // "default"), (.effort // "default")] | @tsv end' <<<"$profiles")
       [ -z "$choice" ] || { printf '%s\t%s\n' "$choice" "$source"; return 0; }
@@ -373,8 +413,10 @@ fm_cqg_mark_observed() {
 }
 
 # fm_cqg_count <state-dir> <self-id>
-# Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home whose
-# recorded endpoint has not been proven dead. Returns 1 when a record cannot be read.
+# Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home that still
+# hold a seat. A reserved seat stays occupied unless the agent is dead or a
+# missing endpoint's absence proof says it is gone. An unverified endpoint
+# stays occupied. Returns 1 when a record cannot be read.
 fm_cqg_count() {
   local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity spawn_gen current_identity reserved observed observed_count spawn_live
   FM_CQG_OCCUPANTS=0
@@ -455,9 +497,6 @@ fm_cqg_count() {
       continue
     fi
     case "$alive" in dead) continue ;; esac
-    if [ "$reserved" = 1 ] && [ "$observed_count" = 0 ]; then
-      continue
-    fi
     case "$alive" in
       missing)
         proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")
@@ -520,6 +559,9 @@ fm_cqg_decide() {
       route=$(fm_cqg_pick_route "$home" "$brief" "$config" "${FM_CQG_DISPATCH_RULE:-}" "$model" "${FM_CQG_EFFORT:-default}" "${FM_CQG_SCHEDULED_PLAN:-}") || route_rc=$?
       if [ "$route_rc" -eq 2 ]; then
         fm_cqg_die "scheduled tried profiles could not be read"
+        return 1
+      fi
+      if [ "$route_rc" -eq 3 ]; then
         return 1
       fi
       if [ "$route_rc" -ne 0 ]; then
