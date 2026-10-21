@@ -659,8 +659,11 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   assert_present "$home/state/task-a.meta" "first launch had no published record during delivery"
   recorded_pid=$(awk -F= '$1=="quota_spawn_pid" {print $2}' "$home/state/task-a.meta")
   recorded_identity=$(awk -F= '$1=="quota_spawn_identity" {sub(/^[^=]*=/, ""); print}' "$home/state/task-a.meta")
-  [ -n "$recorded_pid" ] && [ -n "$recorded_identity" ] && kill -0 "$recorded_pid" 2>/dev/null ||
+  if [ -n "$recorded_pid" ] && [ -n "$recorded_identity" ] && kill -0 "$recorded_pid" 2>/dev/null; then
+    :
+  else
     fail "published Claude record did not name a live spawning process"
+  fi
   cp "$home/state/task-a.meta" "$case_dir/reserved.meta"
   out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
@@ -759,8 +762,11 @@ test_spawn_records_live_agent_before_process_seat() {
   done
   [ -f "$case_dir/launch-paused" ] || fail "first Claude launch did not pause after publication: $(cat "$case_dir/first.out")"
   recorded_pid=$(awk -F= '$1=="quota_spawn_pid" {print $2}' "$home/state/task-a.meta")
-  [ -n "$recorded_pid" ] && kill -0 "$recorded_pid" 2>/dev/null ||
+  if [ -n "$recorded_pid" ] && kill -0 "$recorded_pid" 2>/dev/null; then
+    :
+  else
     fail "published Claude record did not name a live spawning process"
+  fi
   assert_equals 0 "$(key_count "$home/state/task-a.meta" 'quota_agent_observed=')" "agent was observed before the competing launch"
   window=$(awk -F= '$1=="window" {print $2}' "$home/state/task-a.meta")
   printf '%s\n' "${window#*:}" > "$case_dir/agent-window"
@@ -806,8 +812,11 @@ test_spawn_observation_preserves_pr_identity() {
   done
   [ -f "$case_dir/launch-paused" ] || fail "first Claude launch did not pause after publication: $(cat "$case_dir/first.out")"
   recorded_pid=$(awk -F= '$1=="quota_spawn_pid" {print $2}' "$home/state/task-a.meta")
-  [ -n "$recorded_pid" ] && kill -0 "$recorded_pid" 2>/dev/null ||
+  if [ -n "$recorded_pid" ] && kill -0 "$recorded_pid" 2>/dev/null; then
+    :
+  else
     fail "published Claude record did not name a live spawning process"
+  fi
   kill -KILL "$recorded_pid" 2>/dev/null || fail "could not interrupt the first Claude spawn"
   : > "$case_dir/release-launch"
   wait "$first_pid" 2>/dev/null || true
@@ -853,8 +862,11 @@ test_guard_observation_keeps_interleaved_pr_identity() {
   done
   [ -f "$case_dir/launch-paused" ] || fail "first Claude launch did not pause after publication: $(cat "$case_dir/first.out")"
   recorded_pid=$(awk -F= '$1=="quota_spawn_pid" {print $2}' "$home/state/task-a.meta")
-  [ -n "$recorded_pid" ] && kill -0 "$recorded_pid" 2>/dev/null ||
+  if [ -n "$recorded_pid" ] && kill -0 "$recorded_pid" 2>/dev/null; then
+    :
+  else
     fail "published Claude record did not name a live spawning process"
+  fi
   kill -KILL "$recorded_pid" 2>/dev/null || fail "could not interrupt the first Claude spawn"
   : > "$case_dir/release-launch"
   wait "$first_pid" 2>/dev/null || true

@@ -345,7 +345,7 @@ fm_cqg_pick_route() {
 }
 
 fm_cqg_mark_observed() {
-  local meta=$1 state=$2 spawn_gen=$3 spawn_pid=$4 spawn_identity=$5 lock staged= observed_count result=0
+  local meta=$1 state=$2 spawn_gen=$3 spawn_pid=$4 spawn_identity=$5 lock='' staged='' observed_count result=0
   [ -n "$spawn_gen" ] || return 1
   lock=$(fm_meta_lock_path "$meta") || return 1
   fm_lock_acquire_wait "$lock" || return 1

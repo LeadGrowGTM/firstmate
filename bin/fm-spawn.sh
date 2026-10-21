@@ -6203,6 +6203,7 @@ preserve_relaunch_meta() {
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
   echo "spawn_gen=$SPAWN_GEN"
   if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
+    quota_spawn_pid=''
     fm_current_pid quota_spawn_pid || exit 1
     quota_spawn_identity=$(fm_pid_identity "$quota_spawn_pid") || exit 1
     case "$quota_spawn_identity" in ''|*$'\n'*|*$'\r'*) exit 1 ;; esac
