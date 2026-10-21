@@ -1594,13 +1594,16 @@ spawn_apply_claude_quota_guard() {
   MODEL=$verdict_model
   EFFORT=$verdict_effort
   [ -z "$verdict_rule" ] || DISPATCH_RULE=$verdict_rule
-  RAW_LAUNCH=0
   LAUNCH=$(launch_template "$HARNESS" "$KIND") || {
     echo "error: no launch template for harness '$HARNESS' after the Claude quota guard rerouted this launch" >&2
     FM_LAUNCH_OUTCOME=unsafe-refusal
     FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
     exit 1
   }
+  if [ "$HARNESS" = claude ] && [ "$RAW_LAUNCH" = 1 ] && [ "$RAW_CLAUDE_CONFIG_DIR_SET" = 1 ]; then
+    LAUNCH="CLAUDE_CONFIG_DIR=$(shell_quote "$RAW_CLAUDE_CONFIG_DIR") $LAUNCH"
+  fi
+  RAW_LAUNCH=0
   if [ "$HARNESS" != claude ]; then
     SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
     fm_lock_release "$SPAWN_CLAUDE_QUOTA_LOCK" || true

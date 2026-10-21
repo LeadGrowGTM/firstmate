@@ -1674,6 +1674,34 @@ test_spawn_sonnet_and_cap() {
   pass "spawn defers at the cap with one line, and a later under-cap retry records the pace line once"
 }
 
+test_spawn_raw_sonnet_reroute_keeps_credential_dir() {
+  local case_dir home pane out rc=0 calls
+  case_dir=$(make_case raw-sonnet-profile task-s engineering)
+  home="$case_dir/home"
+  mkdir -p "$case_dir/profile-a" "$case_dir/profile-b"
+  link_quota "$case_dir/fakebin"
+  mv "$case_dir/fakebin/quota-axi" "$case_dir/fakebin/quota-axi-real"
+  cat > "$case_dir/fakebin/quota-axi" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${CLAUDE_CONFIG_DIR-__unset__}" >> "${FM_FAKE_CALL_LOG%/*}/quota-profiles"
+exec "${BASH_SOURCE[0]}-real" "$@"
+SH
+  chmod +x "$case_dir/fakebin/quota-axi"
+  write_snap "$case_dir/snap.json" 30 259200
+  FM_TEST_SNAP="$case_dir/snap.json"
+  FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-a"
+  pane=$(new_worktree "$case_dir" task-s)
+  out=$(run_spawn "$case_dir" "$pane" task-s "$case_dir/sample-project" \
+    --harness "CLAUDE_CONFIG_DIR=$case_dir/profile-b claude --model haiku" \
+    --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "a raw Claude Sonnet fallback did not launch: $out"
+  assert_equals sonnet "$(verdict_field "$home/state/task-s.meta" model)" "the raw launch did not reroute to Sonnet"
+  assert_equals "$case_dir/profile-b" "$(cat "$case_dir/quota-profiles")" "the pace check read the wrong profile"
+  calls=$(cat "$case_dir/calls.log")
+  assert_contains "$calls" "CLAUDE_CONFIG_DIR='$case_dir/profile-a' env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI CLAUDE_CONFIG_DIR='$case_dir/profile-b' CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false" "the Sonnet launch dropped the checked profile"
+  pass "raw Claude Sonnet reroutes keep the checked credential directory"
+}
+
 test_spawn_missing_quota_proceeds_and_allowed_opus() {
   local case_dir home pane out rc=0
   case_dir=$(make_case gap task-q engineering)
@@ -1759,5 +1787,6 @@ test_spawn_scheduled_reroute_skips_tried_profile
 test_spawn_scheduled_plan_routes_only_listed_profiles
 test_spawn_reroutes_hot_window
 test_spawn_sonnet_and_cap
+test_spawn_raw_sonnet_reroute_keeps_credential_dir
 test_spawn_missing_quota_proceeds_and_allowed_opus
 test_spawn_ignores_non_claude
