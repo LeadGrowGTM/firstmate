@@ -229,8 +229,8 @@ test_reported_weekly_window_controls_pace() {
   rc=0
   out=$(run_check "$home" task-w haiku) || rc=$?
   expect_code 0 "$rc" "a missing window length refused the launch: $out"
-  assert_contains "$out" "$GAP_LINE" "a missing window length hid the quota gap"
-  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a missing window length drove pace"
+  assert_not_contains "$out" "$GAP_LINE" "a reported reset time without a length skipped pace"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a reported reset time without a length changed the route"
 
   jq 'del(.providers[0].windows[] | select(.id == "seven_day") | .resetsAt)' "$snap" \
     > "$TMP_ROOT/reported-window/no-reset.json"
@@ -241,15 +241,18 @@ test_reported_weekly_window_controls_pace() {
   assert_contains "$out" "$GAP_LINE" "a missing reset time hid the quota gap"
   assert_equals proceed "$(verdict_field "$home/verdict" action)" "a missing reset time drove pace"
 
-  jq '(.providers[0].windows[] | select(.id == "seven_day") | .resetsAt) as $reset
-    | .providers[0].windows += [{"id":"seven_day","kind":"weekly","percentRemaining":30,"resetsAt":$reset}]' \
-    "$snap" > "$TMP_ROOT/reported-window/tighter-without-length.json"
+  reset=$(date -u -d "@$(($(date +%s) + 420000))" +%Y-%m-%dT%H:%M:%SZ)
+  jq --arg reset "$reset" \
+    '.providers[0].windows = [
+      {"id":"seven_day","kind":"weekly","percentRemaining":90,"resetsAt":$reset,"windowSeconds":432000},
+      {"id":"seven_day","kind":"weekly","percentRemaining":70,"resetsAt":$reset}
+    ]' "$snap" > "$TMP_ROOT/reported-window/tighter-without-length.json"
   FM_TEST_SNAP="$TMP_ROOT/reported-window/tighter-without-length.json"
   rc=0
   out=$(run_check "$home" task-w haiku) || rc=$?
   expect_code 0 "$rc" "a tighter window without length refused the launch: $out"
-  assert_contains "$out" "$GAP_LINE" "the guard borrowed length from a looser window"
-  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a tighter window without length drove pace"
+  assert_not_contains "$out" "$GAP_LINE" "a reported reset time without a length skipped pace"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "the guard borrowed a shorter length from another window"
   pass "pace uses the reported weekly length and missing timing skips pace"
 }
 

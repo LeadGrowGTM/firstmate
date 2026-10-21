@@ -1517,13 +1517,16 @@ The JSON read uses `--no-credential-refresh`.
 A selected credential directory uses quota-axi's `--profile-only` selection.
 An ordinary pin unsets that directory and does not pass `--profile-only`, because quota-axi rejects the flag without one.
 It uses the tightest Claude JSON window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
-That window must report both `resetsAt` and a positive `windowSeconds` length.
+That window must report `resetsAt`.
+A positive `windowSeconds` on that window is its length.
+When the weekly window reports no length, the pace check uses 604800 seconds with that reset time.
+A length that is present but not a positive number skips the pace check.
 When quota-axi is missing, times out, fails, or cannot be parsed, the pace check is skipped and the spawn output states that gap.
 That gap never refuses a launch by itself.
 The Opus-type check and the worker cap still run.
 
 Weekly usage is 100 minus percent remaining.
-Elapsed time is the fraction of that window's `windowSeconds` already gone before `resetsAt`, expressed as a percent.
+Elapsed time is the fraction of that length already gone before `resetsAt`, expressed as a percent.
 The pace check trips only when usage minus elapsed time is strictly greater than `pace_margin_points`.
 A reset time in the past, or one that cannot be parsed, is treated as a missing reading and skips the pace check.
 When the check trips, the launch goes to the first available preference: Grok, then Muse, then Claude Sonnet.

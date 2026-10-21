@@ -155,9 +155,14 @@ fm_cqg_json_weekly() {
     | (if ($named | length) > 0 then $named else rows(.kind == "weekly") end)
     | min_by(.percentRemaining) // empty
     | select(.resetsAt | type == "string")
-    | select(.windowSeconds | type == "number")
-    | select(.windowSeconds > 0 and (.windowSeconds | isinfinite | not) and (.windowSeconds | isnan | not))
-    | "\(.percentRemaining)\t\(.resetsAt)\t\(.windowSeconds)"
+    | if (.windowSeconds | type) == "number"
+        and .windowSeconds > 0
+        and (.windowSeconds | isinfinite | not)
+        and (.windowSeconds | isnan | not)
+      then "\(.percentRemaining)\t\(.resetsAt)\t\(.windowSeconds)"
+      elif has("windowSeconds") | not
+      then "\(.percentRemaining)\t\(.resetsAt)\t604800"
+      else empty end
   ' <<<"$1" 2>/dev/null || true
 }
 
