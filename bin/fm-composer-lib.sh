@@ -744,6 +744,7 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
 #                or `probe-absent` when the probe found no live identity; only
 #                meaningful when caps carry identity=1.
 #   [cursor_col] zero-based cursor column, when the adapter can supply it.
+#                Column plus spelling is not emptiness proof.
 # Prints exactly one verdict: empty | pending | pending-unproven | unknown,
 # or the internal sentinel `need-identity` when caps declare identity=1, no
 # identity result was supplied, and the verdict depends on it. Adapters answer
@@ -1751,8 +1752,8 @@ fm_composer_dialog_sink_release() {
 }
 
 fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [cursor_col]
-  local caps=$1 screen=$2 cy=${3:-} identity=${4:-} cx=${5:-}
-  local styled=0 cursor=0 has_identity=0 kv plain suggestion
+  local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
+  local styled=0 cursor=0 has_identity=0 kv plain
   # Note the dialog before any early return so a pending picker is still named.
   fm_composer_note_blocking_dialog "$screen" || true
   while IFS= read -r kv; do
@@ -1788,20 +1789,6 @@ EOF
       return 0
     fi
     if [ "$FM_COMPOSER_SCAN_BARE_ROW" -ge 0 ] && [ "$cy" -eq "$FM_COMPOSER_SCAN_BARE_ROW" ]; then
-      # Claude can render its rotating Try hint without ANSI styling. Its
-      # idle cursor stays beside the glyph; a typed draft moves it past the
-      # text. Require Claude's one-row separator pair as well as that cursor.
-      if [ "$styled" = 1 ] && [ "$cx" = 2 ] \
-         && [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ] \
-         && [ "$FM_COMPOSER_SCAN_PI_OPEN" -eq "$((cy - 1))" ] \
-         && [ "$FM_COMPOSER_SCAN_PI_CLOSE" -eq "$((cy + 1))" ]; then
-        suggestion=$(_fm_composer_screen_row "$cy" "$plain")
-        fm_composer_normalize_spaces_var suggestion
-        fm_composer_normalize_trim_var suggestion
-        if [[ "$suggestion" =~ ^❯[[:space:]]Try[[:space:]]\"[^\"]+\"$ ]]; then
-          printf 'empty'; return 0
-        fi
-      fi
       if [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 1 ] \
          && [ "$cy" -gt "$FM_COMPOSER_SCAN_PI_OPEN" ] \
          && [ "$cy" -lt "$FM_COMPOSER_SCAN_PI_CLOSE" ]; then
