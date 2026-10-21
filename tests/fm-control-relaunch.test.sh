@@ -950,6 +950,29 @@ test_direct_spawn_relaunch_refuses_opus_writing() {
   pass "selected and recorded Opus models refuse writing relaunches before launch"
 }
 
+test_control_relaunch_refuses_opus_before_stopping_agent() {
+  local dir out rc variant id
+  for variant in selected recorded; do
+    id="rl-control-opus-$variant"
+    dir=$(new_case "control-opus-$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    printf '\n## Task type\nName: writing\n' >> "$dir/home/data/$id/brief.md"
+    if [ "$variant" = recorded ]; then
+      sed 's/^model=default$/model=opus/' "$dir/home/state/$id.meta" > "$dir/home/state/$id.meta.tmp"
+      mv "$dir/home/state/$id.meta.tmp" "$dir/home/state/$id.meta"
+      out=$(run_control "$dir" "$id" relaunch --note "retain the working agent"); rc=$?
+    else
+      out=$(run_control "$dir" "$id" relaunch --model opus --note "retain the working agent"); rc=$?
+    fi
+    expect_code 1 "$rc" "control stopped an agent before refusing Opus: $out"
+    assert_contains "$out" "refused: Opus is not allowed for task type writing" "control did not preflight the Opus refusal"
+    assert_equals claude "$(cat "$dir/fake/command")" "control stopped the working agent"
+    assert_no_grep '/exit' "$dir/fake/literal" "control sent an exit command before refusal"
+    assert_absent "$dir/home/state/$id.control-relaunch" "control started a relaunch transaction before refusal"
+  done
+  pass "control refuses selected and recorded Opus before stopping the agent"
+}
+
 test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop() {
   local dir out rc variant
   for variant in unlisted weaker; do
@@ -4634,6 +4657,7 @@ test_prefixed_recorded_harness_requires_explicit_replacement
 test_same_harness_relaunch_keeps_the_profile_axes
 test_direct_spawn_relaunch_keeps_the_profile_axes
 test_direct_spawn_relaunch_refuses_opus_writing
+test_control_relaunch_refuses_opus_before_stopping_agent
 test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop
 test_fallback_policy_changes
 test_configured_fallback_refuses_an_omitted_effort_before_stop

@@ -184,7 +184,8 @@ test_exact_margin_does_not_reroute() {
   home=$(make_home exact task-w engineering)
   prepare_fake exact quota grok
   write_snap "$TMP_ROOT/exact/snap.json" 40 302400
-  FM_TEST_SNAP="$TMP_ROOT/exact/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
+  FM_TEST_SNAP="$TMP_ROOT/exact/snap.json"
+  out=$(run_check "$home" task-w opus) || rc=$?
   expect_code 0 "$rc" "an exact 10-point lead refused the launch: $out"
   assert_equals proceed "$(verdict_field "$home/verdict" action)" "an exact 10-point lead rerouted"
   assert_equals opus "$(verdict_field "$home/verdict" model)" "an exact 10-point lead changed the model"
@@ -196,7 +197,8 @@ test_pace_prefers_grok_then_muse_then_sonnet() {
   home=$(make_home pace-grok task-w writing)
   prepare_fake pace-grok quota grok muse
   write_snap "$TMP_ROOT/pace-grok/snap.json" 30 259200
-  FM_TEST_SNAP="$TMP_ROOT/pace-grok/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
+  FM_TEST_SNAP="$TMP_ROOT/pace-grok/snap.json"
+  out=$(run_check "$home" task-w opus) || rc=$?
   expect_code 0 "$rc" "a hot window refused a grok route: $out"
   assert_equals reroute "$(verdict_field "$home/verdict" action)" "a hot window did not reroute"
   assert_equals grok "$(verdict_field "$home/verdict" harness)" "a hot window did not prefer grok"
@@ -205,7 +207,8 @@ test_pace_prefers_grok_then_muse_then_sonnet() {
   home=$(make_home pace-muse task-w writing client)
   prepare_fake pace-muse quota grok muse
   write_snap "$TMP_ROOT/pace-muse/snap.json" 30 259200
-  FM_TEST_SNAP="$TMP_ROOT/pace-muse/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
+  FM_TEST_SNAP="$TMP_ROOT/pace-muse/snap.json"
+  out=$(run_check "$home" task-w opus) || rc=$?
   expect_code 0 "$rc" "client data refused a muse route: $out"
   assert_equals muse "$(verdict_field "$home/verdict" harness)" "client data was offered to grok"
   assert_contains "$out" "routing this launch to muse" "the muse route was not announced"
@@ -213,7 +216,8 @@ test_pace_prefers_grok_then_muse_then_sonnet() {
   home=$(make_home pace-sonnet task-w writing)
   prepare_fake pace-sonnet quota
   write_snap "$TMP_ROOT/pace-sonnet/snap.json" 30 259200
-  FM_TEST_SNAP="$TMP_ROOT/pace-sonnet/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
+  FM_TEST_SNAP="$TMP_ROOT/pace-sonnet/snap.json"
+  out=$(run_check "$home" task-w opus) || rc=$?
   expect_code 0 "$rc" "a hot window with no other tool refused sonnet: $out"
   assert_equals claude "$(verdict_field "$home/verdict" harness)" "sonnet left claude"
   assert_equals sonnet "$(verdict_field "$home/verdict" model)" "the fallback model was not sonnet"
@@ -225,7 +229,8 @@ test_opus_refused_for_writing_and_allowed_when_cleared() {
   home=$(make_home opus-no task-w writing)
   prepare_fake opus-no quota
   write_snap "$TMP_ROOT/opus-no/snap.json" 95 259200
-  FM_TEST_SNAP="$TMP_ROOT/opus-no/snap.json" out=$(run_check "$home" task-w opus 2>&1) || rc=$?
+  FM_TEST_SNAP="$TMP_ROOT/opus-no/snap.json"
+  out=$(run_check "$home" task-w opus 2>&1) || rc=$?
   expect_code 1 "$rc" "opus on a writing task was launched: $out"
   assert_contains "$out" "refused: Opus is not allowed for task type writing; task task-w was not launched" \
     "the refusal did not name the task type"
@@ -233,7 +238,7 @@ test_opus_refused_for_writing_and_allowed_when_cleared() {
 
   printf '%s\n' '{"opus_refused_types":["execution"]}' > "$home/config/claude-quota-guard.json"
   rc=0
-  FM_TEST_SNAP="$TMP_ROOT/opus-no/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
+  out=$(run_check "$home" task-w opus) || rc=$?
   expect_code 0 "$rc" "a writing launch was refused despite an execution-only list: $out"
   assert_equals proceed "$(verdict_field "$home/verdict" action)" "an execution-only list rerouted"
   assert_equals opus "$(verdict_field "$home/verdict" model)" "an execution-only list changed the model"
@@ -375,13 +380,14 @@ test_selected_opus_rule_defers_without_alternate() {
   prepare_fake selected quota grok muse
   write_snap "$TMP_ROOT/selected/snap.json" 30 259200
   printf '%s\n' '{"default":[{"harness":"claude","model":"opus","effort":"high"}]}' > "$home/config/crew-dispatch.json"
-  FM_TEST_SNAP="$TMP_ROOT/selected/snap.json" out=$(run_check "$home" task-w opus \
+  FM_TEST_SNAP="$TMP_ROOT/selected/snap.json"
+  out=$(run_check "$home" task-w opus \
     --dispatch-rule '{"default":true}' --effort high --apply-status 2>&1) || rc=$?
   expect_code "$DEFER_EXIT" "$rc" "an Opus-only rule selected an unlisted worker: $out"
   assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "route deferral did not write one line"
   assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota-pace')" "route deferral wrote a pace line"
   rc=0
-  FM_TEST_SNAP="$TMP_ROOT/selected/snap.json" out=$(run_check "$home" task-w opus \
+  out=$(run_check "$home" task-w opus \
     --dispatch-rule '{"default":true}' --effort high --apply-status 2>&1) || rc=$?
   expect_code "$DEFER_EXIT" "$rc" "an Opus-only rule launched on retry: $out"
   assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "route retry wrote another line"
@@ -404,7 +410,8 @@ test_valid_margin_keeps_allowed_model() {
   prepare_fake off quota grok
   write_snap "$TMP_ROOT/off/snap.json" 30 259200
   printf '%s\n' '{"pace_margin_points":100}' > "$home/config/claude-quota-guard.json"
-  FM_TEST_SNAP="$TMP_ROOT/off/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
+  FM_TEST_SNAP="$TMP_ROOT/off/snap.json"
+  out=$(run_check "$home" task-w opus) || rc=$?
   expect_code 0 "$rc" "a configured margin refused allowed opus: $out"
   assert_equals proceed "$(verdict_field "$home/verdict" action)" "a configured margin rerouted"
   assert_equals opus "$(verdict_field "$home/verdict" model)" "a configured margin changed the model"
@@ -454,6 +461,14 @@ case "${1:-}" in
           ". '"*"'")
             staged=${a#". '"}
             staged=${staged%"'"}
+            if [ "${FM_FAKE_PAUSE_LAUNCH:-0}" = 1 ]; then
+              : > "${FM_FAKE_CALL_LOG%/*}/launch-paused"
+              for ((pause_try=0; pause_try<300; pause_try++)); do
+                [ ! -f "${FM_FAKE_CALL_LOG%/*}/release-launch" ] || break
+                sleep 0.05
+              done
+              [ -f "${FM_FAKE_CALL_LOG%/*}/release-launch" ] || exit 1
+            fi
             if [ -f "$staged" ]; then
               cat "$staged" >> "$FM_FAKE_CALL_LOG"
               printf '\n' >> "$FM_FAKE_CALL_LOG"
@@ -522,6 +537,7 @@ run_spawn() { # <case> <pane> <args...>
       FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
       FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" FM_BACKEND=tmux \
       FM_FAKE_PANE_PATH="$pane" FM_FAKE_CALL_LOG="$case_dir/calls.log" \
+      FM_FAKE_PAUSE_LAUNCH="${FM_FAKE_PAUSE_LAUNCH:-0}" \
       PATH="$(guard_path "$case_dir/fakebin")" \
       "$SPAWN" "$@"
   )
@@ -619,6 +635,59 @@ test_spawn_selected_opus_rule_defers() {
   expect_code "$DEFER_EXIT" "$rc" "an Opus-only rule launched on retry: $out"
   assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "spawn retry duplicated route line"
   pass "spawn leaves an Opus-only rule queued with one route line"
+}
+
+test_spawn_keeps_published_claude_seat_during_delivery() {
+  local case_dir home pane out rc=0 first_pid tries deadline now
+  case_dir=$(make_case published-seat task-a engineering)
+  home="$case_dir/home"
+  write_brief "$home" task-b engineering
+  add_item "$home" task-b
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  pane=$(new_worktree "$case_dir" task-a)
+  FM_TEST_SNAP="$case_dir/snap.json"
+  FM_FAKE_PAUSE_LAUNCH=1 run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off > "$case_dir/first.out" 2>&1 &
+  first_pid=$!
+  for ((tries=0; tries<300; tries++)); do
+    [ ! -f "$case_dir/launch-paused" ] || break
+    sleep 0.05
+  done
+  [ -f "$case_dir/launch-paused" ] || fail "first Claude launch did not reach its published delivery gap: $(cat "$case_dir/first.out")"
+  assert_present "$home/state/task-a.meta" "first launch had no published record during delivery"
+  deadline=$(awk -F= '$1=="quota_reservation_until" {print $2}' "$home/state/task-a.meta")
+  now=$(date +%s)
+  [[ "$deadline" =~ ^[0-9]+$ ]] && [ "$deadline" -ge "$now" ] && [ "$deadline" -le "$((now + 90))" ] ||
+    fail "published Claude reservation was not bounded by launch wait: $deadline"
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "second Claude worker entered while the first was published but not observable: $out"
+  assert_absent "$home/state/task-b.meta" "deferred Claude worker published a record"
+  assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "published-seat deferral missed its cap line"
+  : > "$case_dir/release-launch"
+  wait "$first_pid" || fail "first Claude launch failed after release: $(cat "$case_dir/first.out")"
+  pass "a published Claude launch holds the seat before its agent is observable"
+}
+
+test_spawn_reroute_keeps_inferred_dispatch_rule() {
+  local case_dir home pane out rc=0
+  case_dir=$(make_case inferred-rule task-w engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  fake_tool "$case_dir/fakebin" grok
+  write_snap "$case_dir/snap.json" 30 259200
+  printf '%s\n' '{"default":[{"harness":"claude","model":"opus","effort":"high","reasoning_class":"strong"},{"harness":"grok","model":"grok-4.7","effort":"high","reasoning_class":"strong"}],"rules":[{"when":"other work","use":[{"harness":"grok","model":"grok-4.7","effort":"high","reasoning_class":"strong"}]}]}' > "$home/config/crew-dispatch.json"
+  pane=$(new_worktree "$case_dir" task-w)
+  FM_TEST_SNAP="$case_dir/snap.json"
+  out=$(run_spawn "$case_dir" "$pane" task-w "$case_dir/sample-project" \
+    --harness claude --model opus --effort high --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "an inferred rule lost its identity after quota reroute: $out"
+  assert_equals grok "$(awk -F= '$1=="harness"{print $2}' "$home/state/task-w.meta")" "reroute did not publish Grok"
+  assert_equals '{"default":true}' "$(awk -F= '$1=="dispatch_rule"{print $2}' "$home/state/task-w.meta")" "reroute lost the default rule"
+  assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$PACE_LINE")" "reroute missed its pace line"
+  pass "quota reroute preserves an inferred dispatch rule"
 }
 
 test_spawn_scheduled_plan_routes_only_listed_profiles() {
@@ -833,6 +902,8 @@ test_valid_margin_keeps_allowed_model
 test_spawn_refuses_opus_for_writing
 test_spawn_refuses_raw_opus_for_writing
 test_spawn_selected_opus_rule_defers
+test_spawn_keeps_published_claude_seat_during_delivery
+test_spawn_reroute_keeps_inferred_dispatch_rule
 test_spawn_scheduled_plan_routes_only_listed_profiles
 test_spawn_reroutes_hot_window
 test_spawn_sonnet_and_cap

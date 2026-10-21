@@ -293,49 +293,51 @@ fm_cqg_ahead_of_margin() {
 # bin/fm-muse-client-lib.sh owns that decision. Sonnet needs no extra binary
 # because the launch is already Claude.
 fm_cqg_pick_route() {
-  local home=$1 brief=$2 config=$3 rule=$4 model=$5 effort=$6 plan=$7 profiles='' choice
+  local home=$1 brief=$2 config=$3 rule=$4 model=$5 effort=$6 plan=$7 profiles='' choice selection source=''
   if [ -n "$plan" ]; then
     profiles=$(jq -ces 'if length != 1 then error("expected one scheduled plan") else .[0] end | select(.authorized == true and (.profiles | type) == "array" and (.profiles | length) > 0) | .profiles' "$plan" 2>/dev/null) || return 1
   elif [ -f "$config/crew-dispatch.json" ]; then
-    profiles=$(jq -ce --arg rule "$rule" --arg model "$model" --arg effort "$effort" '
+    selection=$(jq -ce --arg rule "$rule" --arg model "$model" --arg effort "$effort" '
       def profiles: if type == "array" then . else [.] end;
       (if $rule != "" then ($rule | fromjson) else null end) as $selected |
       ([.rules // [] | to_entries[] | {key:{rule:("rule_" + ((.key + 1) | tostring))}, items:(.value.use | profiles)}]
        + (if has("default") then [{key:{default:true}, items:(.default | profiles)}] else [] end)) |
       if $selected != null then map(select(.key == $selected))
       else map(select(any(.items[]; .harness == "claude" and (.model // "default") == $model and (.effort // "default") == $effort))) end |
-      if length != 1 then error("selected dispatch rule is unavailable") else .[0].items end
+      if length != 1 then error("selected dispatch rule is unavailable") else .[0] end
     ' "$config/crew-dispatch.json" 2>/dev/null) || return 1
+    profiles=$(jq -c '.items' <<<"$selection") || return 1
+    source=$(jq -c '.key' <<<"$selection") || return 1
   fi
   if [ -n "$profiles" ]; then
     if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
       choice=$(jq -r '[.[] | select(.harness == "grok")] | if length == 0 then empty else .[0] | [.harness, (.model // "default"), (.effort // "default")] | @tsv end' <<<"$profiles")
-      [ -z "$choice" ] || { printf '%s\n' "$choice"; return 0; }
+      [ -z "$choice" ] || { printf '%s\t%s\n' "$choice" "$source"; return 0; }
     fi
     if command -v muse >/dev/null 2>&1; then
       choice=$(jq -r '[.[] | select(.harness == "muse")] | if length == 0 then empty else .[0] | [.harness, (.model // "default"), (.effort // "default")] | @tsv end' <<<"$profiles")
-      [ -z "$choice" ] || { printf '%s\n' "$choice"; return 0; }
+      [ -z "$choice" ] || { printf '%s\t%s\n' "$choice" "$source"; return 0; }
     fi
     choice=$(jq -r '[.[] | select(.harness == "claude" and ((.model // "") | ascii_downcase | contains("sonnet")))] | if length == 0 then empty else .[0] | [.harness, .model, (.effort // "default")] | @tsv end' <<<"$profiles")
-    [ -z "$choice" ] || { printf '%s\n' "$choice"; return 0; }
+    [ -z "$choice" ] || { printf '%s\t%s\n' "$choice" "$source"; return 0; }
     return 1
   fi
   if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
-    printf 'grok\t\t\n'
+    printf 'grok\t\t\t\n'
     return 0
   fi
   if command -v muse >/dev/null 2>&1; then
-    printf 'muse\t\t\n'
+    printf 'muse\t\t\t\n'
     return 0
   fi
-  printf 'claude\tsonnet\t\n'
+  printf 'claude\tsonnet\t\t\n'
 }
 
 # fm_cqg_count <state-dir> <self-id>
 # Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home whose
 # recorded endpoint has not been proven dead. Returns 1 when a record cannot be read.
 fm_cqg_count() {
-  local state=$1 self=$2 list f id harness kind backend target socket alive proof
+  local state=$1 self=$2 list f id harness kind backend target socket alive proof reservation now
   FM_CQG_OCCUPANTS=0
   if [ ! -d "$state" ] || [ ! -r "$state" ]; then
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
@@ -345,6 +347,7 @@ fm_cqg_count() {
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
     return 1
   fi
+  now=$(date +%s)
   while IFS= read -r f || [ -n "$f" ]; do
     [ -n "$f" ] || continue
     if [ ! -r "$f" ]; then
@@ -360,6 +363,17 @@ fm_cqg_count() {
       '' | ship | scout) ;;
       *) continue ;;
     esac
+    reservation=$(fm_meta_get "$f" quota_reservation_until)
+    if [ -n "$reservation" ]; then
+      case "$reservation" in
+        *[!0-9]*) fm_cqg_die "cannot count Claude workers because a launch reservation is malformed"; return 1 ;;
+      esac
+      [ "${#reservation}" -le 12 ] || { fm_cqg_die "cannot count Claude workers because a launch reservation is malformed"; return 1; }
+      if [ "$reservation" -gt "$now" ]; then
+        FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
+        continue
+      fi
+    fi
     backend=$(fm_backend_of_meta "$f")
     target=$(fm_backend_target_of_meta "$f")
     socket=$(fm_meta_get "$f" tmux_socket)
@@ -391,8 +405,9 @@ fm_cqg_status_once() {
 }
 
 fm_cqg_write_verdict() {
-  local path=$1 action=$2 harness=$3 model=$4 effort=${5:-}
-  printf 'action=%s\nharness=%s\nmodel=%s\neffort=%s\n' "$action" "$harness" "$model" "$effort" >"$path"
+  local path=$1 action=$2 harness=$3 model=$4 effort=${5:-} rule=${6:-}
+  printf 'action=%s\nharness=%s\nmodel=%s\neffort=%s\n' "$action" "$harness" "$model" "$effort" >"$path" || return 1
+  [ -z "$rule" ] || printf 'rule=%s\n' "$rule" >>"$path"
 }
 
 # fm_cqg_decide <config-dir> <state-dir> <home> <id> <brief> <model> <verdict>
@@ -400,7 +415,7 @@ fm_cqg_write_verdict() {
 # 75 defer. Notices on stdout. Refusals and deferrals on stderr.
 fm_cqg_decide() {
   local config=$1 state=$2 home=$3 id=$4 brief=$5 model=$6 verdict=$7
-  local weekly rem reset ahead route route_model route_effort type_name
+  local weekly rem reset ahead route route_model route_effort route_rule type_name
   if ! fm_cqg_load "$config"; then
     return 1
   fi
@@ -440,6 +455,8 @@ fm_cqg_decide() {
       return 1
     fi
   fi
+  route_rule=${route##*$'\t'}
+  route=${route%$'\t'*}
   route_model=${route#*$'\t'}
   route_effort=${route_model#*$'\t'}
   route_model=${route_model%%$'\t'*}
@@ -447,7 +464,7 @@ fm_cqg_decide() {
   if [ "$route" = grok ] || [ "$route" = muse ]; then
     fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_STATUS" || return 1
     printf 'claude-quota-guard: weekly usage is ahead of the window; routing this launch to %s\n' "$route"
-    fm_cqg_write_verdict "$verdict" reroute "$route" "$route_model" "$route_effort"
+    fm_cqg_write_verdict "$verdict" reroute "$route" "$route_model" "$route_effort" "$route_rule"
     return 0
   fi
   if ! fm_cqg_count "$state" "$id"; then
@@ -462,7 +479,7 @@ fm_cqg_decide() {
   if [ "$route" = claude ]; then
     fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_STATUS" || return 1
     printf '%s\n' "claude-quota-guard: weekly usage is ahead of the window; routing this launch to claude sonnet"
-    fm_cqg_write_verdict "$verdict" reroute claude "$route_model" "$route_effort"
+    fm_cqg_write_verdict "$verdict" reroute claude "$route_model" "$route_effort" "$route_rule"
     return 0
   fi
   fm_cqg_write_verdict "$verdict" proceed claude "$model"

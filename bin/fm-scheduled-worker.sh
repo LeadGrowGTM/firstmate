@@ -235,7 +235,22 @@ case "$OUTCOME:$RC" in
       write_journal '.phase="blocked" | .reason="publication-generation-mismatch"'
       die 'publication cannot be confirmed'
     }
-    write_journal '.phase=$outcome | .spawn_gen=$gen' --arg outcome "$OUTCOME" --arg gen "$NEW_GEN"
+    ACTUAL_PROFILE=$(jq -ce \
+      --arg harness "$(fm_meta_get "$STATE/$ID.meta" harness)" \
+      --arg model "$(fm_meta_get "$STATE/$ID.meta" model)" \
+      --arg effort "$(fm_meta_get "$STATE/$ID.meta" effort)" \
+      '[.profiles[] | select(.harness == $harness and .model == $model and .effort == $effort)] | if length == 1 then .[0] else error("published profile is unavailable") end' \
+      "$DIR/plan.json") || {
+      write_journal '.phase="blocked" | .reason="publication-profile-mismatch"'
+      die 'published profile is not uniquely authorized'
+    }
+    jq -e --argjson actual "$ACTUAL_PROFILE" --argjson selected "$PROFILE" \
+      '.tried | map(select(. != $selected)) | index($actual) == null' "$JOURNAL" >/dev/null || {
+      write_journal '.phase="blocked" | .reason="published-profile-already-tried"'
+      die 'published profile was already attempted this episode'
+    }
+    write_journal '.phase=$outcome | .spawn_gen=$gen | .tried -= [.profile] | .profile=$actual | .tried += [$actual]' \
+      --arg outcome "$OUTCOME" --arg gen "$NEW_GEN" --argjson actual "$ACTUAL_PROFILE"
     ;;
   worker-unavailable:1)
     write_journal '.phase="reselect" | .reason=$reason' --arg reason "$(jq -r .reason "$RECEIPT")"

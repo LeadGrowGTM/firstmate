@@ -17,6 +17,7 @@ make_case() {
 #!/usr/bin/env bash
 set -u
 printf 'spawn %s\n' "$*" >> "$FM_HOME/calls"
+id=$1
 mode=$(cat "$FM_HOME/result")
 case "$mode" in
   missing) exit 1 ;;
@@ -25,12 +26,24 @@ case "$mode" in
   unsafe) outcome=unsafe-refusal; code=1 ;;
   uncertain) outcome=uncertain; code=1 ;;
   published) outcome=worker-published; code=0 ;;
+  published-reroute) outcome=worker-published; code=0 ;;
 esac
 if [ "$outcome" = worker-published ]; then
   project=$(CDPATH='' cd -- "$2" && pwd)
-  printf 'spawn_gen=gen-1\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\n' "$project" > "$FM_HOME/state/$1.meta"
+  harness= model= effort=
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --harness) harness=$2; shift 2 ;;
+      --model) model=$2; shift 2 ;;
+      --effort) effort=$2; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [ "$mode" = published-reroute ]; then harness=claude; model=sonnet; effort=high; fi
+  printf 'spawn_gen=gen-1\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\nharness=%s\nmodel=%s\neffort=%s\n' \
+    "$project" "$harness" "$model" "$effort" > "$FM_HOME/state/$id.meta"
 fi
-jq -n --arg task "$1" --arg outcome "$outcome" --argjson code "$code" \
+jq -n --arg task "$id" --arg outcome "$outcome" --argjson code "$code" \
   '{version:1,task:$task,outcome:$outcome,exit_code:$code,spawn_gen:"gen-1",reason:"fixture"}' \
   > "$FM_SPAWN_OUTCOME_FILE"
 exit "$code"
@@ -44,12 +57,15 @@ case " $* " in *' --note-file '*) : ;; *) exit 2 ;; esac
 id=$1
 note=${!#}
 expected=
+harness= model= effort=
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = --expected-spawn-gen ]; then
-    expected=${2:-}
-    break
-  fi
-  shift
+  case "$1" in
+    --expected-spawn-gen) expected=${2:-}; shift 2 ;;
+    --harness) harness=${2:-}; shift 2 ;;
+    --model) model=${2:-}; shift 2 ;;
+    --effort) effort=${2:-}; shift 2 ;;
+    *) shift ;;
+  esac
 done
 [ "$expected" = gen-1 ] || exit 2
 [ -f "$note" ] && [ "$(cat "$note")" = checkpoint ] || exit 2
@@ -63,7 +79,8 @@ if [ "$current" != "$expected" ]; then
   exit 1
 fi
 printf 'relaunch\n' >> "$FM_HOME/control-relaunches"
-printf 'spawn_gen=gen-2\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\n' "$(cat "$FM_HOME/project")" > "$FM_HOME/state/$id.meta"
+printf 'spawn_gen=gen-2\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\nharness=%s\nmodel=%s\neffort=%s\n' \
+  "$(cat "$FM_HOME/project")" "$harness" "$model" "$effort" > "$FM_HOME/state/$id.meta"
 jq -n --arg task "$id" '{version:1,task:$task,outcome:"live-worker",exit_code:0,spawn_gen:"gen-2"}' > "$FM_SPAWN_OUTCOME_FILE"
 STUB
   chmod +x "$dir/bin/fm-spawn.sh" "$dir/bin/fm-control.sh"
@@ -182,6 +199,35 @@ check_attempt_and_exhaustion() {
   pass 'attempting barrier, current-generation exhaustion, checkpoint and live replay'
 }
 
+check_published_reroute_updates_journal_profile() {
+  local dir out rc journal
+  dir=$(make_case published-reroute)
+  jq '.profiles=[{"harness":"claude","model":"opus","effort":"high","reasoning_class":"standard"},{"harness":"claude","model":"sonnet","effort":"high","reasoning_class":"standard"}]' \
+    "$dir/plan.json" > "$dir/other.json"; mv "$dir/other.json" "$dir/plan.json"
+  jq -n --argjson at "$(( $(date +%s) - 1 ))" \
+    '{profile:{harness:"claude",model:"opus",effort:"high",reasoning_class:"standard"},observed_at:$at,evidence:"current candidates checked"}' > "$dir/selection.json"
+  printf '%s\n' published-reroute > "$dir/home/result"
+  out=$(run_case "$dir"); rc=$?
+  expect_code 0 "$rc" "a published Sonnet reroute did not reconcile: $out"
+  journal="$dir/home/state/scheduled-worker/occ/journal.json"
+  assert_equals sonnet "$(jq -r .profile.model "$journal")" 'journal kept the requested Opus profile'
+  assert_equals sonnet "$(jq -r '.tried[0].model' "$journal")" 'tried list kept Opus instead of published Sonnet'
+  printf '%s\n' '{"kind":"usage-exhausted","spawn_gen":"gen-1","evidence":"Sonnet was exhausted"}' > "$dir/proof.json"
+  printf 'checkpoint\n' > "$dir/note.txt"
+  jq -n --argjson at "$(date +%s)" \
+    '{profile:{harness:"claude",model:"sonnet",effort:"high",reasoning_class:"standard"},observed_at:$at,evidence:"current candidates checked"}' > "$dir/selection.json"
+  out=$(run_case "$dir" --exhaustion "$dir/proof.json" --note-file "$dir/note.txt"); rc=$?
+  expect_code 1 "$rc" "exhausted Sonnet was selected again: $out"
+  assert_contains "$out" 'candidate already attempted' 'exhaustion did not exclude Sonnet'
+  assert_equals 1 "$(count_calls "$dir")" 'exhausted Sonnet reached the control owner'
+  jq -n --argjson at "$(date +%s)" \
+    '{profile:{harness:"claude",model:"opus",effort:"high",reasoning_class:"standard"},observed_at:$at,evidence:"current candidates checked"}' > "$dir/selection.json"
+  out=$(run_case "$dir"); rc=$?
+  expect_code 0 "$rc" "Opus was not available after the Sonnet reroute exhausted: $out"
+  assert_grep 'control job relaunch --harness claude --model opus --effort high' "$dir/home/calls" 'continuation reused exhausted Sonnet'
+  pass 'published quota reroute updates journal profile and next exhaustion exclusion'
+}
+
 check_relative_state_receipt() {
   local dir out rc
   dir=$(make_case relative-state)
@@ -268,6 +314,7 @@ check_authorization_and_selection
 check_capacity_and_reselect
 check_failure_barriers
 check_attempt_and_exhaustion
+check_published_reroute_updates_journal_profile
 check_relative_state_receipt
 check_generation_change_at_control_admission
 check_branch_prefix_forwarding

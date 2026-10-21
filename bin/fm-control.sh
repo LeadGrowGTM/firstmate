@@ -1220,6 +1220,12 @@ do_relaunch() {
       die "task $ID records kind '$KIND', which has no defined relaunch shape"
       ;;
   esac
+  if [ "$KIND" != secondmate ] && [ "$TARGET_HARNESS" = claude ]; then
+    "$SCRIPT_DIR/fm-claude-quota-guard.sh" check \
+      --config "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" --state "$STATE" --home "$FM_HOME" \
+      --id "$ID" --brief "$RELAUNCH_BRIEF" --model="$TARGET_MODEL" \
+      --verdict /dev/null --refusal-only || die "Claude quota guard refused relaunch of $ID before its agent was stopped"
+  fi
 
   if [ -n "$NOTE" ]; then
     note_line="note_file=$NOTE_FILE"

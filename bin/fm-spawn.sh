@@ -1467,7 +1467,7 @@ SPAWN_CLAUDE_QUOTA_VERDICT=
 # The guard command owns the decision; this function only applies its verdict.
 spawn_apply_claude_quota_guard() {
   local quota_rc=0 line key value guard_model=$MODEL
-  local verdict_action='' verdict_harness='' verdict_model='' verdict_effort=''
+  local verdict_action='' verdict_harness='' verdict_model='' verdict_effort='' verdict_rule=''
   local -a guard_args=()
   [ "$KIND" != secondmate ] || return 0
   [ "$HARNESS" = claude ] || return 0
@@ -1538,6 +1538,7 @@ spawn_apply_claude_quota_guard() {
       harness) verdict_harness=$value ;;
       model) verdict_model=$value ;;
       effort) verdict_effort=$value ;;
+      rule) verdict_rule=$value ;;
     esac
   done <"$SPAWN_CLAUDE_QUOTA_VERDICT"
   rm -f "$SPAWN_CLAUDE_QUOTA_VERDICT"
@@ -1572,6 +1573,7 @@ spawn_apply_claude_quota_guard() {
   HARNESS=$verdict_harness
   MODEL=$verdict_model
   EFFORT=$verdict_effort
+  [ -z "$verdict_rule" ] || DISPATCH_RULE=$verdict_rule
   RAW_LAUNCH=0
   LAUNCH=$(launch_template "$HARNESS" "$KIND") || {
     echo "error: no launch template for harness '$HARNESS' after the Claude quota guard rerouted this launch" >&2
@@ -6156,7 +6158,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen quota_reservation_until traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -6198,6 +6200,10 @@ preserve_relaunch_meta() {
   [ -z "$WORKER_ACCOUNT_PROVIDER" ] || echo "account_provider=$WORKER_ACCOUNT_PROVIDER"
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
   echo "spawn_gen=$SPAWN_GEN"
+  if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
+    reservation_until=$(awk -v now="$(date +%s)" -v wait="${FM_CONTROL_LAUNCH_WAIT:-90}" 'BEGIN { if (wait !~ /^[0-9]+([.][0-9]+)?$/ || wait + 0 <= 0) exit 1; printf "%.0f\n", now + int(wait) + (wait > int(wait)) }') || exit 1
+    echo "quota_reservation_until=$reservation_until"
+  fi
   # Default-off writes no traceparent= line.
   # backend= is written only for a non-default (non-tmux) backend, so the
   # default path's meta stays byte-identical (absent backend= means tmux;
