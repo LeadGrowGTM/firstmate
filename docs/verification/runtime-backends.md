@@ -1010,7 +1010,7 @@ The Herdr captures above are therefore this entry's live evidence, and the guard
 
 Verified on 2026-09-15 on macOS arm64 (Darwin 25.5.0) against codex-cli 0.154.0 (model gpt-6-astra, fast mode) running as a Codex second mate inside a Herdr pane, read through Herdr's ANSI capture with its exact capability descriptor (`styled=1`, `cursor=0`, `identity=1`, `rows=20`).
 Idle, codex 0.154 animates a braille starfield on the row above its bold `›` prompt row, on the `›` row behind the SGR-2 dim `Ask Codex to do anything` placeholder, and on the row below it, then draws a status footer reading `gpt-6-astra high fast · ~/Projects/purser · Launch Purser desk brief`.
-The starfield cells are truecolor greys whose luminance runs from roughly 66 to 165, so the cells above the 128 ghost ceiling survive ghost stripping, and the footer is bright, non-blank, and carries no structural edge.
+The starfield cells are truecolor greys whose luminance runs from roughly 66 to 165, so the cells above the then-default 128 ghost ceiling survived ghost stripping, and the footer was bright, non-blank, and carried no structural edge.
 
 The capture is a read-only `herdr pane read <pane> --format ansi` of the live pane; its 20-row tail is fed to the shared classifier with the descriptor above:
 
@@ -1825,6 +1825,8 @@ Real captures verified these active distinctions:
 - Claude and Codex use bare `❯` and `›` agent composers.
 - Pi uses content between complete separator rows and requires exact native Pi identity.
 - Dim or faint suggestion text is ghost content, while normally styled text is pending input.
+- Claude Code 2.1.306's idle `Try "..."` suggestion is an SGR 2 run after `❯` and U+00A0, and `tmux capture-pane -e` on 2026-10-21 read that row empty while the same words with no dim attribute stayed pending with the cursor on the first character.
+- A reverse-video first cell of that suggestion, with the rest dim, is the same empty hint, and `tests/fm-composer-ghost.test.sh` pins both captures.
 - Grok dark truecolor placeholders are ghost content, while bright truecolor typed input remains pending.
 - A bare shell prompt has no safe agent-composer container and is unknown.
 - Codex 0.154's idle braille starfield rows are composer furniture, with the dated Herdr evidence and refresh command in [Composer classification matrix](#composer-classification-matrix).

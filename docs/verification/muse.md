@@ -155,7 +155,7 @@ Captured with `tmux capture-pane -p -e`:
 ^[[0m^[[38;2;90;160;255m⟩ ^[[39m
 ```
 
-Prompt glyph `⟩` (U+27E9) at luminance ~149.9 against the 128 default ghost threshold; typed text at ~209.8.
+Prompt glyph `⟩` (U+27E9) at luminance ~149.9 against the then-default ghost threshold of 128; typed text at ~209.8.
 After a single Escape the interrupted prompt is restored into the composer at the same bright ~209.8, and `C-u` clears it.
 
 ## The credentialed multi-step smoke (verified 2026-08-06)

@@ -28,9 +28,9 @@
 #               carrying trailing non-idle text degrades to `unknown` rather
 #               than `pending`: the text may be the harness's own idle
 #               suggestion, and a false `pending` blocks every safe caller.
-#   cursor=1    a cursor row is supplied (tmux #{cursor_y} only). The cursor
+#   cursor=1    a cursor row is supplied (tmux #{cursor_y}). The cursor
 #               anchors shape selection: the shape containing the cursor is the
-#               composer. Without it, the bottom-most shape wins.
+#               composer. Without a cursor row, the bottom-most shape wins.
 #   identity=1  a native agent identity/state probe exists (herdr `agent get`;
 #               the tmux pi foreground-process probe). Identity is what makes
 #               Pi's blank separated composer provable; with identity=0 that
@@ -240,7 +240,7 @@ fm_composer_normalize_trim_var() {  # <varname>
 #     A reset (SGR 0) or normal-intensity (SGR 22) ends a dim run.
 #   - dark/muted TRUECOLOR foreground runs (SGR 38;2;r;g;b or the colon form
 #     38:2::r:g:b) whose perceived luminance (0.299R + 0.587G + 0.114B) is below
-#     FM_COMPOSER_GHOST_LUMA_MAX (default 128): how grok renders its placeholder
+#     FM_COMPOSER_GHOST_LUMA_MAX (default 130): how grok renders its placeholder
 #     and hint text. A reset (SGR 0), a default-foreground (SGR 39), any base
 #     foreground colour (30-37 / 90-97), or a lighter 38;2 foreground ends the
 #     dark-foreground run. This assumes a DARK terminal theme, the firstmate
@@ -252,7 +252,7 @@ fm_composer_normalize_trim_var() {  # <varname>
 #     over-stripping would inject over real input).
 # Raising FM_COMPOSER_GHOST_LUMA_MAX is not free: muse draws its `⟩` prompt glyph
 # in truecolor 38;2;90;160;255, luminance ~149.9 (verified, muse 0.1.0-R708.1),
-# the tightest margin over the 128 default in the fleet. Above ~150 that glyph is
+# the tightest margin over the fleet default. Above ~150 that glyph is
 # stripped as ghost text, which is why the bare-glyph fallback below must also
 # recognise every agent glyph from the UNSTRIPPED plain row.
 # The dim/faint and dark-foreground states are tracked together as "de-emphasis";
@@ -260,7 +260,7 @@ fm_composer_normalize_trim_var() {  # <varname>
 # LC_ALL=C makes awk walk bytes, so multibyte glyphs (e.g. ❯) and de-emphasised
 # runs alike pass through or drop intact without locale-dependent classes.
 fm_composer_strip_ghost() {
-  LC_ALL=C awk -v lumamax="${FM_COMPOSER_GHOST_LUMA_MAX:-128}" '
+  LC_ALL=C awk -v lumamax="${FM_COMPOSER_GHOST_LUMA_MAX:-130}" '
     function sgr_code(v, b) {
       b = v
       sub(/:.*/, "", b)
@@ -641,6 +641,32 @@ fm_composer_idle_matches() {
   esac
 }
 
+# 0 when <row> is Claude's `❯ Try "..."` idle suggestion.
+# Claude Code 2.1.306 draws that suggestion as an SGR 2 run after `❯` and
+# U+00A0. Ink's focused placeholder path can also invert only the first cell
+# (SGR 7) and dim the rest, so ghost stripping keeps that one cell.
+# This pattern stays out of FM_COMPOSER_IDLE_RE_DEFAULT. That set treats an
+# unstyled bordered match as empty, and a typed copy of the suggestion must
+# stay pending. Callers use the plain row when ghost stripping removes either
+# the whole hint or all but its reverse-video cursor cell.
+_fm_composer_claude_try_hint() {  # <row>
+  local body=$1 inner glyph=''
+  fm_composer_leading_agent_glyph_var glyph "$body" || return 1
+  [ "$glyph" = '❯' ] || return 1
+  body=${body#*"$glyph"}
+  fm_composer_normalize_trim_var body
+  case "$body" in
+    'Try "'*'"') ;;
+    *) return 1 ;;
+  esac
+  inner=${body#Try \"}
+  inner=${inner%\"}
+  case "$inner" in
+    ''|*'"'*) return 1 ;;
+  esac
+  return 0
+}
+
 # fm_composer_classify_content: the single shared composer-content verdict.
 #   <bordered> 1 when <content> came from a genuine agent-composer container (a
 #              bordered composer box, an identity-proven separated composer, or
@@ -670,6 +696,14 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
     if _fm_composer_is_prompt_glyph "$plain_content" "$FM_COMPOSER_AGENT_PROMPT_GLYPHS"; then
       printf 'empty'; return 0
     fi
+    if [ "$styled" = 1 ] && fm_composer_leading_agent_glyph_var glyph "$plain_content"; then
+      if _fm_composer_claude_try_hint "$plain_content"; then
+        printf 'empty'
+      else
+        printf 'pending'
+      fi
+      return 0
+    fi
     printf 'unknown'; return 0
   fi
   if _fm_composer_is_prompt_glyph "$content" "$FM_COMPOSER_AGENT_PROMPT_GLYPHS"; then
@@ -693,8 +727,9 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
   # character survives a stripper built for the other two. cursor-agent renders
   # exactly this shape: a dim `Plan, search, build anything` whose first
   # character is reverse-video, leaving a lone `P` (verified live on
-  # cursor-agent 2026.08.11-e8db854). Judging that remnant on its own reads
-  # `pending` on a genuinely idle pane.
+  # cursor-agent 2026.08.11-e8db854). Claude's idle `Try "..."` suggestion
+  # has the same shape when its first cell is inverted and the rest is dim.
+  # Judging that remnant on its own reads `pending` on a genuinely idle pane.
   # The plain row is the styling-independent signal, so consult it here. This
   # stays safe in the false-EMPTY direction because it demands the remnant be a
   # PROPER, strictly shorter substring of a plain row that matches a full
@@ -709,7 +744,8 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
     fi
     fm_composer_normalize_trim_var plain_body
     if [ "${#content}" -lt "${#plain_body}" ] \
-       && fm_composer_idle_matches "$plain_body" "$idle_re" "$idle_case"; then
+       && { fm_composer_idle_matches "$plain_body" "$idle_re" "$idle_case" \
+            || _fm_composer_claude_try_hint "$plain_content"; }; then
       case "$plain_body" in
         *"$content"*) printf 'empty'; return 0 ;;
       esac

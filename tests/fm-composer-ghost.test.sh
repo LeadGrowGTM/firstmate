@@ -212,6 +212,116 @@ test_dim_ghost_inside_bordered_composer_is_not_pending() {
   pass "fm_pane_input_pending: dim ghost inside a bordered composer is NOT pending"
 }
 
+test_gray_claude_suggestion_does_not_block_idle_composer() {
+  local dir fb capture out nbsp rule
+  dir="$TMP_ROOT/claude-gray-suggestion"; mkdir -p "$dir"
+  fb=$(make_fake_tmux "$dir")
+  capture="$dir/styled.txt"
+  nbsp=$(printf '\302\240')
+  rule='────────────────────────────────────────────────────────────────────────────────'
+  # The failed live run kept plain text only; use Claude's recorded muted RGB
+  # with that pane layout, then prove the same visible draft stays pending.
+  printf '%s\n\033[38;2;128;130;131m❯%sTry "edit fm-spawn.sh to..."\033[0m\n%s\n' \
+    "$rule" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = empty ] || fail "an idle Claude pane with a gray Try suggestion should be empty, got '$out'"
+  printf '%s\n❯%sTry "edit fm-spawn.sh to..."\n%s\n' \
+    "$rule" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "an identical typed draft should stay pending, got '$out'"
+  pass "fm_tmux_composer_state: Claude's gray suggestion is empty while identical typed text stays pending"
+}
+
+test_unstyled_try_draft_stays_pending() {
+  local dir fb capture out nbsp rule esc stripped
+  dir="$TMP_ROOT/claude-unstyled-suggestion"; mkdir -p "$dir"
+  fb=$(make_fake_tmux "$dir")
+  capture="$dir/styled.txt"
+  nbsp=$(printf '\302\240')
+  esc=$(printf '\033')
+  rule='────────────────────────────────────────────────────────────────────────────────'
+  # Claude Code 2.1.306, capture-pane -e, cursor_x=2 on both rows:
+  # idle is SGR 2 on the suggestion; Home or Ctrl+A on a typed draft leaves
+  # the same words with no dim attribute. Column is not the signal.
+  printf '%s\n%s[39m❯%s%s[2mTry "how does fm-composer-lib.sh work?"%s[0m\n%s\n' \
+    "$rule" "$esc" "$nbsp" "$esc" "$esc" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = empty ] || fail "Claude's dim Try suggestion should be empty, got '$out'"
+  printf '%s\n%s[39m❯%sTry "fix typecheck errors"\n%s\n' \
+    "$rule" "$esc" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "a typed Try draft at column 2 should stay pending, got '$out'"
+  out=$(PATH="$fb:$PATH" LC_ALL=C FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "a typed Try draft at column 2 should stay pending under LC_ALL=C, got '$out'"
+  printf '%s\n%s[39m❯%s%s[7mT%s[27mry "fix typecheck errors"\n%s\n' \
+    "$rule" "$esc" "$nbsp" "$esc" "$esc" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "a bright Try draft with its first cell inverted should stay pending, got '$out'"
+  # Ink can invert only the first suggestion cell and dim the rest. The
+  # survivor must be a real remnant, or this case would pass by the empty path.
+  printf '%s\n%s[39m❯%s%s[7mT%s[27m%s[2mry "fix typecheck errors"%s[0m\n%s\n' \
+    "$rule" "$esc" "$nbsp" "$esc" "$esc" "$esc" "$esc" "$rule" > "$capture"
+  stripped=$(sed -n '2p' "$capture" | fm_composer_strip_ghost)
+  fm_composer_normalize_trim_var stripped
+  case "$stripped" in
+    *T*) ;;
+    *) fail "the reverse-video Try cell must survive ghost stripping, got '$stripped'" ;;
+  esac
+  case "$stripped" in
+    *'Try "'*) fail "the dim tail of the Try hint must be stripped, got '$stripped'" ;;
+  esac
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = empty ] || fail "a dim Try hint with a reverse-video cursor cell should be empty, got '$out'"
+  printf '%s\n\033[38;2;128;130;131m❯%sTry "fix typecheck errors"\033[0m\n%s\n' \
+    "$rule" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = empty ] || fail "a muted Try suggestion should be empty, got '$out'"
+  printf '❯%sTry "fix typecheck errors"\n' "$nbsp" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=0 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "a Try draft without Claude's separator pair should remain pending, got '$out'"
+  pass "fm_tmux_composer_state: dim Try hint is empty; a bright draft at column 2 stays pending"
+}
+
+test_only_claude_try_hint_is_empty() {
+  local dir fb capture out nbsp rule esc
+  dir="$TMP_ROOT/claude-hint-scope"; mkdir -p "$dir"
+  fb=$(make_fake_tmux "$dir")
+  capture="$dir/styled.txt"
+  nbsp=$(printf '\302\240')
+  esc=$(printf '\033')
+  rule='────────────────────────────────────────────────────────────────────────────────'
+  printf '%s\n\033[38;2;128;130;131m›%sTry "fix typecheck errors"\033[0m\n%s\n' \
+    "$rule" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "another fully muted glyph with a Try hint should stay pending, got '$out'"
+  printf '%s\n\033[38;2;128;130;131m❯%sReview the draft\033[0m\n%s\n' \
+    "$rule" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "other fully muted text after Claude's glyph should stay pending, got '$out'"
+  printf '%s\n›%s%s[7mT%s[27m%s[2mry "fix typecheck errors"%s[0m\n%s\n' \
+    "$rule" "$nbsp" "$esc" "$esc" "$esc" "$esc" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "another glyph with a Try hint survivor should stay pending, got '$out'"
+  printf '%s\n❯%s%s[7mR%s[27m%s[2meview the draft%s[0m\n%s\n' \
+    "$rule" "$nbsp" "$esc" "$esc" "$esc" "$esc" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "other muted text with a survivor should stay pending, got '$out'"
+  pass "fm_tmux_composer_state: only Claude's muted Try hint is empty"
+}
+
 test_normal_text_still_pending() {
   local dir fb capture
   dir="$TMP_ROOT/real-text"; mkdir -p "$dir"
@@ -688,6 +798,9 @@ test_strip_ghost_drops_dark_truecolor_ghost
 test_strip_ghost_keeps_muse_composer_colors
 test_dim_ghost_only_composer_is_not_pending
 test_dim_ghost_inside_bordered_composer_is_not_pending
+test_gray_claude_suggestion_does_not_block_idle_composer
+test_unstyled_try_draft_stays_pending
+test_only_claude_try_hint_is_empty
 test_normal_text_still_pending
 test_colored_text_with_2_payload_still_pending
 test_dark_truecolor_ghost_only_composer_is_not_pending

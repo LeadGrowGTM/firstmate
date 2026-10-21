@@ -22,7 +22,9 @@
 #      aged message on an idle pane WITHOUT waking firstmate, waits on a busy
 #      pane, stays silent on a healthy/empty inbox, surfaces unwritable ladder
 #      bookkeeping only while its record remains unhandled, and emits exactly
-#      one stale wake once the ring budget is spent.
+#      one stale wake once the ring budget is spent. After a stuck-busy
+#      escalation the same message is rung again once the pane is idle,
+#      still with one wake, and acknowledgement stops those retries.
 #   6. Dead panes: the doorbell line is a shell no-op when executed by a bare
 #      shell, the ring skips an agent the backend classifies dead, and the
 #      watcher surfaces such a record exactly once instead of re-ringing.
@@ -58,10 +60,12 @@ inbox_lib() {  # <state> <function> [args...]
 # display-message yields a numeric cursor row, and every literal send-keys is
 # logged to FM_SEND_LOG so a doorbell ring is observable. With
 # FM_FAKE_TMUX_AGENT set, the inventory lists window fm-t1 and its
-# #{pane_current_command} answers with that value, so `zsh` makes
-# fm_backend_tmux_agent_state read the pane as a dead bare shell.
+# #{pane_current_command} answers with that value. A shell name also gets the
+# synthetic foreground input proof from tests/tmux-helpers.sh, which is what
+# makes fm_backend_tmux_agent_state read that pane as a dead bare shell.
+# A harness name stays a live agent. An unset name does not invent a process.
 make_watch_stubs() {  # <dir> -> echoes fakebin dir
-  local dir=$1 fb="$1/fakebin"
+  local dir=$1 fb="$1/fakebin" real_ps real_python
   mkdir -p "$fb"
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
@@ -97,7 +101,7 @@ case "${1:-}" in
       case "$a" in
         *cursor_y*) printf '1\n'; exit 0 ;;
         *pane_current_command*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '%s\n' "$FM_FAKE_TMUX_AGENT"; exit 0; } ;;
-        *pane_tty*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf '\n'; exit 0; } ;;
+        *pane_tty*) [ -z "${FM_FAKE_TMUX_AGENT:-}" ] || { printf 'fakepane\n'; exit 0; } ;;
       esac
     done
     printf 'fakepane\n'; exit 0 ;;
@@ -113,6 +117,29 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
+  # Honour FM_FAKE_TMUX_AGENT at call time. A static command file cannot, because
+  # one stub serves both live-harness and dead-shell checks.
+  real_ps=$(command -v ps)
+  real_python=$(command -v python3)
+  printf '#!/usr/bin/env bash\nreal_ps=%q\n' "$real_ps" > "$fb/ps"
+  cat >> "$fb/ps" <<'SH'
+agent=${FM_FAKE_TMUX_AGENT:-}
+if [ -n "$agent" ] && [ "${1:-}" = -t ] && [ "${2:-}" = fakepane ]; then
+  printf '2147483647 2147483647 2147483647 %s\n' "$agent"
+elif [ -n "$agent" ] && [ "${1:-}" = -p ] && [ "${2:-}" = 2147483647 ]; then
+  printf '%s\n' "$agent"
+else
+  exec "$real_ps" "$@"
+fi
+SH
+  printf '#!/usr/bin/env bash\nreal_python=%q\n' "$real_python" > "$fb/python3"
+  cat >> "$fb/python3" <<'SH'
+case "${1:-}:${2:-}:${3:-}" in
+  */fm-agent-process.py:input:2147483647) exit 0 ;;
+esac
+exec "$real_python" "$@"
+SH
+  chmod +x "$fb/ps" "$fb/python3"
   make_fake_crew_state "$fb" >/dev/null
   printf '%s\n' "$fb"
 }
@@ -699,10 +726,10 @@ test_watcher_rerings_idle_pane_quietly() {
 }
 
 # A fresh process for each check proves the busy budget survives watcher restarts.
-busy_steer_check() {  # <case-dir> [capture] [busy-max]
+busy_steer_check() {  # <case-dir> [capture] [busy-max] [grace-secs]
   PATH="$1/fakebin:$PATH" FM_STATE_OVERRIDE="$1/state" FM_SEND_LOG="$1/send.log" \
     FM_FAKE_TMUX_CAPTURE="${2:-$1/busy.capture}" FM_BUSY_REGEX=BUSYTOKEN \
-    FM_TASK_INBOX_GRACE_SECS=0 FM_TASK_INBOX_BUSY_MAX="${3-2}" \
+    FM_TASK_INBOX_GRACE_SECS="${4-0}" FM_TASK_INBOX_BUSY_MAX="${3-2}" \
     bash -c '. "$1" && inbox_steer_check sess:fm-t1 t1' _ "$WATCH" > "$1/check.out" 2>&1
 }
 
@@ -729,6 +756,150 @@ test_watcher_waits_on_busy_pane() {
   [ "$(wc -l < "$dir/state/.wake-queue")" = "$wakes" ] || fail "busy escalation repeated"
   [ -f "$dir/state/t1.inbox/001.msg" ] || fail "busy escalation lost the steer"
   pass "watcher: busy deferrals survive restart, escalate once at the bound, and never type"
+}
+
+test_watcher_retries_doorbell_after_busy_escalation() {
+  local dir wakes rings
+  dir=$(busy_case busy-then-idle)
+  : > "$dir/send.log"
+  busy_steer_check "$dir"
+  busy_steer_check "$dir"
+  grep -q 'unacknowledged firstmate instruction: stuck-busy after 2 consecutive busy-deferred due doorbells' "$dir/state/.wake-queue" \
+    || fail "busy escalation did not call the instruction unacknowledged:"$'\n'"$(cat "$dir/state/.wake-queue" 2>/dev/null)"
+  grep -q 'this retry was deferred because the agent was busy' "$dir/state/.wake-queue" \
+    || fail "busy escalation did not say the retry was deferred because the agent was busy:"$'\n'"$(cat "$dir/state/.wake-queue" 2>/dev/null)"
+  if grep -q 'no doorbell was typed' "$dir/state/.wake-queue"; then
+    fail "busy escalation still said no doorbell was typed:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  fi
+  if grep -q 'unread firstmate instruction' "$dir/state/.wake-queue"; then
+    fail "busy escalation still said unread:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  fi
+  [ ! -s "$dir/send.log" ] || fail "busy escalation typed into the pane:"$'\n'"$(cat "$dir/send.log")"
+  wakes=$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')
+  busy_steer_check "$dir"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = "$wakes" ] \
+    || fail "a later busy poll escalated again:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  [ ! -s "$dir/send.log" ] || fail "a later busy poll typed a doorbell:"$'\n'"$(cat "$dir/send.log")"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "idle after busy escalation did not ring the doorbell once, got $rings:"$'\n'"$(cat "$dir/send.log")"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = "$wakes" ] \
+    || fail "the idle retry queued another wake:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "grace did not hold the post-escalation retry, got $rings:"$'\n'"$(cat "$dir/send.log")"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 2 ] || fail "a later due idle poll did not ring again, got $rings:"$'\n'"$(cat "$dir/send.log")"
+  [ "$(grep -c 'stuck-busy' "$dir/state/.wake-queue")" = 1 ] \
+    || fail "post-escalation retries raised another stuck-busy wake:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  mv "$dir/state/t1.inbox/001.msg" "$dir/state/t1.inbox/handled/"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 2 ] || fail "acknowledgement did not stop doorbell retries, got $rings:"$'\n'"$(cat "$dir/send.log")"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = "$wakes" ] \
+    || fail "acknowledgement queued another wake:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  pass "watcher: after busy escalation an idle pane is rung until acknowledgement, with one wake"
+}
+
+test_watcher_rearms_legacy_busy_escalation() {
+  local dir rec rings
+  dir=$(busy_case legacy-busy-escalation)
+  rec="$dir/state/t1.inbox/001.msg"
+  printf '%s\n' "${rec##*/}" > "$dir/state/t1.inbox/.escalated"
+  printf '%s\t2\n' "${rec##*/}" > "$dir/state/t1.inbox/.busy-state"
+  printf 'existing stale wake\n' > "$dir/state/.wake-queue"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "legacy busy escalation did not resume its doorbell"
+  [ "$(cut -f1 "$dir/state/t1.inbox/.escalation-retry")" = "${rec##*/}" ] \
+    || fail "legacy busy escalation did not start its retry generation"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
+    || fail "legacy busy retry ignored its spacing"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "legacy busy retry queued another escalation wake"
+  pass "watcher: a legacy busy escalation resumes paced retries without another wake"
+}
+
+test_watcher_keeps_legacy_nonbusy_escalation_quiet() {
+  local dir rec
+  dir=$(busy_case legacy-nonbusy-escalation)
+  rec="$dir/state/t1.inbox/001.msg"
+  printf '%s\n' "${rec##*/}" > "$dir/state/t1.inbox/.escalated"
+  printf 'other.msg\t2\n' > "$dir/state/t1.inbox/.busy-state"
+  printf 'existing stale wake\n' > "$dir/state/.wake-queue"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "legacy non-busy escalation rang a doorbell"
+  [ ! -e "$dir/state/t1.inbox/.escalation-retry" ] \
+    || fail "legacy non-busy escalation started a retry generation"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "legacy non-busy escalation queued another wake"
+  : > "$dir/state/t1.inbox/.escalation-retry"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "a partial marker revived a non-busy escalation"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "a partial non-busy marker queued another wake"
+  pass "watcher: a legacy non-busy escalation stays quiet"
+}
+
+test_watcher_dead_after_busy_deferral_stays_quiet() {
+  local dir
+  dir=$(busy_case dead-after-busy)
+  busy_steer_check "$dir"
+  FM_FAKE_TMUX_AGENT=zsh busy_steer_check "$dir"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "a dead-pane escalation resumed the busy retry"
+  [ ! -e "$dir/state/t1.inbox/.escalation-retry" ] \
+    || fail "a dead-pane escalation opened a busy retry generation"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "a dead-pane escalation queued another wake"
+  pass "watcher: a dead pane after one busy deferral stays quiet"
+}
+
+test_watcher_paces_retry_when_bookkeeping_fails() {
+  local dir rec marker inbox rings
+  dir=$(busy_case escalation-retry-bookkeeping)
+  rec="$dir/state/t1.inbox/001.msg"
+  busy_steer_check "$dir"
+  busy_steer_check "$dir"
+  inbox="$dir/state/t1.inbox"
+  marker="$inbox/.escalation-retry"
+  chmod a-w "$inbox"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "an unrecorded retry rang on every poll"
+  [ "$(cut -f2 "$marker")" = 0 ] || fail "retry write failure changed the old attempt time"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "post-escalation bookkeeping failure queued another wake"
+  chmod u+w "$inbox"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "repaired retry bookkeeping did not resume delivery"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
+    || fail "repaired retry bookkeeping lost ring spacing"
+  [ -f "$rec" ] || fail "post-escalation bookkeeping failure lost the record"
+  pass "watcher: post-escalation bookkeeping failures preserve spacing and wake deduplication"
+}
+
+test_watcher_recovers_partial_retry_marker() {
+  local dir marker rings
+  dir=$(busy_case partial-retry-marker)
+  busy_steer_check "$dir"
+  busy_steer_check "$dir"
+  marker="$dir/state/t1.inbox/.escalation-retry"
+  : > "$marker"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "a partial retry marker stopped delivery"
+  [ "$(cut -f1 "$marker")" = 001.msg ] || fail "partial retry marker was not repaired"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
+    || fail "repaired partial marker did not pace the next retry"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "repairing a partial marker repeated the escalation wake"
+  pass "watcher: a partial retry marker is repaired without another wake"
 }
 
 test_watcher_busy_budget_resets_on_ring_and_ack() {
@@ -1120,11 +1291,11 @@ test_watcher_escalates_once_after_budget() {
     || { kill "$pid" 2>/dev/null; fail "the watcher never escalated a spent ring budget"; }
   rings=$(grep -cF 'Firstmate instruction waiting' "$log" || true)
   [ "$rings" = 1 ] || fail "expected exactly 1 doorbell before escalation, got $rings:"$'\n'"$(cat "$log")"
-  grep -qF 'unread firstmate instruction' "$state/.wake-queue" \
-    || fail "the escalation should queue a stale wake naming the unread instruction:"$'\n'"$(cat "$state/.wake-queue" 2>/dev/null)"
+  grep -qF 'unacknowledged firstmate instruction' "$state/.wake-queue" \
+    || fail "the escalation should queue a stale wake naming the unacknowledged instruction:"$'\n'"$(cat "$state/.wake-queue" 2>/dev/null)"
   grep -qF "$rec" "$state/.wake-queue" \
     || fail "the stale wake should name the record path:"$'\n'"$(cat "$state/.wake-queue")"
-  [ "$(grep -cF 'unread firstmate instruction' "$state/.wake-queue")" = 1 ] \
+  [ "$(grep -cF 'unacknowledged firstmate instruction' "$state/.wake-queue")" = 1 ] \
     || fail "the escalation must fire exactly once:"$'\n'"$(cat "$state/.wake-queue")"
   grep -qF 'stale:' "$out" || fail "the watcher should exit through the ordinary stale wake:"$'\n'"$(cat "$out")"
   pass "watcher: a spent ring budget emits exactly one ordinary stale wake for recovery"
@@ -1143,7 +1314,7 @@ test_watcher_dead_pane_escalates_once_without_ringing() {
   wait_watcher_gone "$pid" \
     || { kill "$pid" 2>/dev/null; fail "the watcher never surfaced a dead pane's unhandled instruction"; }
   [ ! -s "$log" ] || fail "a dead pane was typed into:"$'\n'"$(cat "$log")"
-  [ "$(grep -cF 'unread firstmate instruction' "$state/.wake-queue" 2>/dev/null || true)" = 1 ] \
+  [ "$(grep -cF 'unacknowledged firstmate instruction' "$state/.wake-queue" 2>/dev/null || true)" = 1 ] \
     || fail "a dead pane should surface exactly one stale wake:"$'\n'"$(cat "$state/.wake-queue" 2>/dev/null)"
   grep -qF "agent has exited" "$state/.wake-queue" \
     || fail "the stale wake should say the agent has exited:"$'\n'"$(cat "$state/.wake-queue")"
@@ -1173,7 +1344,7 @@ test_watcher_dead_pane_ignores_stale_busy_state() {
   wait_watcher_gone "$pid" \
     || { kill "$pid" 2>/dev/null; fail "stale busy state hid a dead pane's unhandled instruction"; }
   [ ! -s "$log" ] || fail "a busy-marked dead pane was typed into:"$'\n'"$(cat "$log")"
-  [ "$(grep -cF 'unread firstmate instruction' "$state/.wake-queue" 2>/dev/null || true)" = 1 ] \
+  [ "$(grep -cF 'unacknowledged firstmate instruction' "$state/.wake-queue" 2>/dev/null || true)" = 1 ] \
     || fail "a busy-marked dead pane should surface exactly once:"$'\n'"$(cat "$state/.wake-queue" 2>/dev/null)"
   [ -f "$rec" ] || fail "the durable record must survive stale busy-state recovery"
   [ "$(cat "$state/t1.inbox/.escalated")" = "${rec##*/}" ] \
@@ -1198,6 +1369,12 @@ test_fire_and_forget_retry_is_quiet_without_the_flag
 test_ring_ladder_policy
 test_watcher_rerings_idle_pane_quietly
 test_watcher_waits_on_busy_pane
+test_watcher_retries_doorbell_after_busy_escalation
+test_watcher_rearms_legacy_busy_escalation
+test_watcher_keeps_legacy_nonbusy_escalation_quiet
+test_watcher_dead_after_busy_deferral_stays_quiet
+test_watcher_paces_retry_when_bookkeeping_fails
+test_watcher_recovers_partial_retry_marker
 test_watcher_busy_budget_resets_on_ring_and_ack
 test_watcher_busy_bookkeeping_failure_surfaces
 test_watcher_successor_busy_reset_failure_surfaces idle
