@@ -307,21 +307,22 @@ args=("$@")
 n=$#
 i=0
 other_hooks=0
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 while [ "$i" -lt "$n" ]; do
   a=${args[i]}
   case "$a" in
     -c)
       i=$((i + 1))
       v=${args[i]:-}
-      case "${v,,}" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
+      case "$(lower "$v")" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
       ;;
     -c?*)
       v=${a:2}
-      case "${v,,}" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
+      case "$(lower "$v")" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
       ;;
     --config-env)
       i=$((i + 1))
-      case "${args[i],,}" in core.hookspath=*) other_hooks=1 ;; esac
+      case "$(lower "${args[i]:-}")" in core.hookspath=*) other_hooks=1 ;; esac
       ;;
     --config-env=*)
       case "${a#*=}" in [cC][oO][rR][eE].[hH][oO][oO][kK][sS][pP][aA][tT][hH]=*) other_hooks=1 ;; esac
@@ -332,6 +333,12 @@ while [ "$i" -lt "$n" ]; do
   esac
   i=$((i + 1))
 done
+if [ -n "${args[i]:-}" ]; then
+  if "$real" "${args[@]:0:i}" config --get "alias.${args[i]}" >/dev/null 2>&1; then
+    echo "fm-private-names: refusing unchecked git alias; use the full git command" >&2
+    exit 1
+  fi
+fi
 if [ "${args[i]:-}" = push ]; then
   for a in "${args[@]:i+1}"; do
     [ "$a" = -- ] && break

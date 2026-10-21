@@ -159,13 +159,33 @@ emit_home_records() {  # <data-dir> <projects-dir> <with-routes:0|1>
   done <"$data/secondmates.md"
 }
 
+refresh_source_snapshot() {
+  local parent=$1
+  [ -f "$FM_HOME/.fm-secondmate-parent" ] && cat "$FM_HOME/.fm-secondmate-parent"
+  emit_home_records "$DATA" "$PROJECTS" 1
+  if [ -n "$parent" ]; then
+    emit_home_records "$parent/data" "$parent/projects" 1
+    [ -f "$parent/config/private-names" ] && cat "$parent/config/private-names"
+  fi
+  [ -f "$FM_PN_LOCAL" ] && cat "$FM_PN_LOCAL"
+  return 0
+}
+
 cmd_refresh() (
   [ "$#" -eq 0 ] || usage
-  local out=$FM_PN_LIST tmp derived parent
+  local out=$FM_PN_LIST tmp derived parent source_before
   mkdir -p "$(dirname "$out")" 2>/dev/null || return 1
   . "$SCRIPT_DIR/fm-wake-lib.sh"
-  fm_lock_acquire_wait "$out.lock" || return 1
+  if { [ -e "$out.lock" ] || [ -L "$out.lock" ]; } && [ ! -d "$out.lock" ]; then
+    echo "fm-private-names: cannot lock the private-name list; refusing refresh" >&2
+    return 1
+  fi
+  fm_lock_acquire_wait_max "$out.lock" 30 || {
+    echo "fm-private-names: cannot lock the private-name list; refusing refresh" >&2
+    return 1
+  }
   trap 'fm_lock_release "$out.lock"' EXIT
+  while :; do
   # A second mate home on this machine also takes its primary's whole list, so
   # every home refuses the same names. The list is read from disk rather than
   # pushed as inherited config, which would paste it into the mate's context.
@@ -174,6 +194,7 @@ cmd_refresh() (
     [ "$FM_SECONDMATE_PARENT_ROUTE" = local ]; then
     parent=$FM_SECONDMATE_PARENT_HOME
   fi
+  source_before=$(refresh_source_snapshot "$parent")
   derived=$({
     emit_home_records "$DATA" "$PROJECTS" 1
     if [ -n "$parent" ]; then
@@ -221,6 +242,8 @@ cmd_refresh() (
   }
   chmod 600 "$tmp" 2>/dev/null || true
   mv "$tmp" "$out" 2>/dev/null || return 1
+  [ "$(refresh_source_snapshot "$parent")" = "$source_before" ] && break
+  done
   register_gates || {
     echo "fm-private-names: cannot record this home for its no-mistakes gates" >&2
     return 1
@@ -238,7 +261,15 @@ register_gates() (
   index=$(fm_pn_gate_index) || return 1
   [ -d "$PROJECTS" ] || return 0
   mkdir -p "$index" && chmod 700 "$index" 2>/dev/null || return 1
-  fm_lock_acquire_wait "$index/.private-names.lock" || return 1
+  if { [ -e "$index/.private-names.lock" ] || [ -L "$index/.private-names.lock" ]; } &&
+    [ ! -d "$index/.private-names.lock" ]; then
+    echo "fm-private-names: cannot lock the gate index; refusing refresh" >&2
+    return 1
+  fi
+  fm_lock_acquire_wait_max "$index/.private-names.lock" 30 || {
+    echo "fm-private-names: cannot lock the gate index; refusing refresh" >&2
+    return 1
+  }
   trap 'fm_lock_release "$index/.private-names.lock"' EXIT
   line=$(printf '%s\t%s\t%s\t%s\t%s' "$(abs_dir "$FM_HOME")" "$(abs_dir "$CONFIG")" \
     "$(abs_dir "$STATE")" "$(abs_dir "$DATA")" "$(abs_dir "$PROJECTS")")
@@ -661,7 +692,8 @@ cmd_gh_shim() {
       */*/*) target_id=$target_repo ;;
       *) target_id=github.com/$target_repo ;;
     esac
-    if [ "${repo_id,,}" != "${target_id,,}" ]; then
+    if [ "$(printf '%s' "$repo_id" | tr '[:upper:]' '[:lower:]')" != \
+      "$(printf '%s' "$target_id" | tr '[:upper:]' '[:lower:]')" ]; then
       echo "fm-private-names: conflicting pull-request destinations; refusing" >&2
       return 1
     fi
@@ -1146,7 +1178,7 @@ gh_api_guard() {  # <tool> <real> <arg>...
           case "$rest" in
             repos/*)
               for j in "${visibility_fields[@]}"; do
-                case "${j,,}" in
+                case "$(printf '%s' "$j" | tr '[:upper:]' '[:lower:]')" in
                   private=false | visibility=public) make_public=1 ;;
                 esac
               done

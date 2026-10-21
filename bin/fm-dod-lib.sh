@@ -511,6 +511,7 @@ fm_brief_direct_pr_origin_repo() {  # <home> <repo-name-or-path>
 fm_dod_block() {  # <mode> <task-id> [branch] [<forge>] [<base>] [<origin-repo>]
   local mode=$1 id=$2 forge=${4:-none} base=${5:-} origin_repo=${6:-}
   local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove proof_path create_cmd scrub_cmd early_scrub=''
+  local home_path config_path state_path data_path projects_path path_name path_value
   proof_path="\`${FM_HOME:-.}/data/$id/proof.md\`"
   prove=$(fm_prove_it_clause ship "$proof_path")
   fm_forge_valid_for_mode "$forge" "$mode" fm_dod_block || return 1
@@ -628,7 +629,16 @@ The configured merge authority approves the ready branch, then firstmate merges 
 EOF
       ;;
     no-mistakes:*)
-      scrub_cmd="FM_HOME=$(printf '%q' "${FM_HOME:-.}") $(printf '%q' "${FM_ROOT:-.}/bin/fm-private-names-scrub.sh") --repo <full-repository-url> --pr <number> --no-evidence --apply"
+      home_path=${FM_HOME:-.}
+      config_path=${FM_CONFIG_OVERRIDE:-$home_path/config}
+      state_path=${FM_STATE_OVERRIDE:-$home_path/state}
+      data_path=${FM_DATA_OVERRIDE:-$home_path/data}
+      projects_path=${FM_PROJECTS_OVERRIDE:-$home_path/projects}
+      for path_name in home_path config_path state_path data_path projects_path; do
+        path_value=${!path_name}
+        case "$path_value" in /*) ;; *) printf -v "$path_name" '%s/%s' "$PWD" "$path_value" ;; esac
+      done
+      scrub_cmd="FM_HOME=$(printf '%q' "$home_path") FM_CONFIG_OVERRIDE=$(printf '%q' "$config_path") FM_STATE_OVERRIDE=$(printf '%q' "$state_path") FM_DATA_OVERRIDE=$(printf '%q' "$data_path") FM_PROJECTS_OVERRIDE=$(printf '%q' "$projects_path") $(printf '%q' "${FM_ROOT:-.}/bin/fm-private-names-scrub.sh") --repo <full-repository-url> --pr <number> --no-evidence --apply"
       if [ "$forge" != gerrit ]; then
         early_scrub="While the no-mistakes drive continues, use a separate call to \`no-mistakes axi status\` to watch for its PR URL.
 As soon as the URL appears, run \`$scrub_cmd\` with the repository URL (including host) and number from that URL; do not wait for CI green.

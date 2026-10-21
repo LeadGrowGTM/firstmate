@@ -1099,6 +1099,14 @@ test_tag_messages_and_no_verify_pushes_are_refused() {
   out=$(TEST_OTHER_HOOKS=/dev/null in_pane "$HOOKS" git -C "$REPO" --config-env core.hooksPath=TEST_OTHER_HOOKS push -q origin HEAD 2>&1) &&
     fail "a push using split --config-env skipped the private-name check"
   assert_contains "$out" "core.hooksPath" "the hooksPath refusal was not explained"
+  git -C "$REPO" config alias.publish 'push --no-verify'
+  out=$(in_pane "$HOOKS" git -C "$REPO" publish origin HEAD 2>&1) &&
+    fail "a publishing Git alias bypassed the private-name check"
+  assert_contains "$out" "git alias" "the publishing alias refusal was not explained"
+  git -C "$REPO" config alias.publish '!git -c core.hooksPath=/dev/null push origin HEAD'
+  out=$(in_pane "$HOOKS" git -C "$REPO" publish 2>&1) &&
+    fail "a shell Git alias bypassed the private-name check"
+  assert_contains "$out" "git alias" "the shell alias refusal was not explained"
   [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/clean-tag)" ] || fail "a refused push reached the public origin"
   in_pane "$HOOKS" git -C "$REPO" status --short >/dev/null || fail "the git shim broke an ordinary command"
   pass "annotated tag messages are checked, and git push --no-verify or another hooksPath is refused"
@@ -1470,6 +1478,34 @@ SH
   assert_contains "$(cat "$home/config/private-names")" 'client later-mock' \
     "a stale concurrent refresh replaced the new client list"
 
+  marker=$d/source-marker
+  printf '%s\n' '- gtm-client-before-mock - A made-up client (added 2026-01-03)' >"$home/data/projects.md"
+  FM_HOME=$home FM_TEST_SLOW_LIST=1 FM_TEST_MARKER=$marker FM_TEST_REAL_MV=$real_mv FM_TEST_REAL_AWK=$real_awk \
+    PATH="$fakebin:$PATH" "$PN" refresh >"$d/source-first.out" 2>&1 &
+  pid=$!
+  for ((i = 0; i < 500; i++)); do [ -f "$marker" ] && break; sleep 0.01; done
+  [ -f "$marker" ] || fail "refresh did not reach its source-race write"
+  printf '%s\n' '- gtm-client-during-mock - A made-up client (added 2026-01-04)' >"$home/data/projects.md"
+  wait "$pid" || fail "refresh failed after a registry write"
+  assert_contains "$(cat "$home/config/private-names")" 'client during-mock' \
+    "refresh published a list older than its source records"
+
+  one=$d/primary
+  two=$d/mate
+  make_home "$one"
+  make_home "$two"
+  printf '%s\n' schema=fm-secondmate-parent.v1 route=local "parent_home=$one" >"$two/.fm-secondmate-parent"
+  marker=$d/parent-marker
+  FM_HOME=$two FM_TEST_SLOW_LIST=1 FM_TEST_MARKER=$marker FM_TEST_REAL_MV=$real_mv FM_TEST_REAL_AWK=$real_awk \
+    PATH="$fakebin:$PATH" "$PN" refresh >"$d/parent-first.out" 2>&1 &
+  pid=$!
+  for ((i = 0; i < 500; i++)); do [ -f "$marker" ] && break; sleep 0.01; done
+  [ -f "$marker" ] || fail "the mate refresh did not reach its parent-list write"
+  printf '%s\n' 'client parent-mock' >>"$one/config/private-names"
+  wait "$pid" || fail "mate refresh failed after a parent list write"
+  assert_contains "$(cat "$two/config/private-names")" 'client parent-mock' \
+    "a parent list update during refresh was omitted"
+
   one=$d/one
   two=$d/two
   gate=$d/abc123def456.git
@@ -1491,7 +1527,13 @@ SH
   wait "$pid" || fail "the first gate registration failed"
   assert_contains "$(cat "$index")" "$one/config" "the first home vanished from the gate index"
   assert_contains "$(cat "$index")" "$two/config" "a concurrent home vanished from the gate index"
-  pass "parallel refreshes preserve newly derived names and both gate registrations"
+  printf 'blocked\n' >"${index%/*}/.private-names.lock"
+  out=$(FM_HOME=$two "$PN" refresh 2>&1) && fail "a malformed gate lock was accepted"
+  assert_contains "$out" 'cannot lock the gate index' "the gate lock refusal was not clear"
+  printf 'blocked\n' >"$home/config/private-names.lock"
+  out=$(FM_HOME=$home "$PN" refresh 2>&1) && fail "a malformed list lock was accepted"
+  assert_contains "$out" 'cannot lock the private-name list' "the list lock refusal was not clear"
+  pass "refresh handles source races, parallel updates, and unavailable locks"
 }
 
 test_refresh_derives_names_from_local_records

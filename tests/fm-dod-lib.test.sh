@@ -383,6 +383,31 @@ test_pr_based_dod_draft_check_uses_gh_axi() {
   pass "PR-based DoD draft check uses gh-axi"
 }
 
+test_scrub_handoff_carries_effective_source_paths() {
+  local home config state data projects out key value quoted count
+  home=$TMP_ROOT/mate-lumen-mock
+  config=$TMP_ROOT/config-orbit-mock
+  state=$TMP_ROOT/state-orbit-mock
+  data=$TMP_ROOT/data-orbit-mock
+  projects=$TMP_ROOT/projects-orbit-mock
+  out=$(FM_HOME=$home FM_CONFIG_OVERRIDE=$config FM_STATE_OVERRIDE=$state \
+    FM_DATA_OVERRIDE=$data FM_PROJECTS_OVERRIDE=$projects \
+    fm_dod_block no-mistakes scrub-path-task fm/scrub-path-task)
+  for key in FM_HOME FM_CONFIG_OVERRIDE FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_PROJECTS_OVERRIDE; do
+    case "$key" in
+      FM_HOME) value=$home ;;
+      FM_CONFIG_OVERRIDE) value=$config ;;
+      FM_STATE_OVERRIDE) value=$state ;;
+      FM_DATA_OVERRIDE) value=$data ;;
+      FM_PROJECTS_OVERRIDE) value=$projects ;;
+    esac
+    quoted=$(printf '%q' "$value")
+    count=$(printf '%s\n' "$out" | grep -Fo "$key=$quoted" | wc -l | tr -d ' ')
+    [ "$count" = 2 ] || fail "both generated scrub calls must carry the effective $key path"
+  done
+  pass "both generated scrub handoffs preserve the guard's source paths"
+}
+
 # A scout spawned on a named base keeps that base through promotion: the ship
 # instructions start from it and the PR targets it; local-only cannot carry it.
 test_promotion_keeps_the_recorded_base_branch() {
@@ -474,6 +499,7 @@ test_worker_role_names_skill_and_fallback_file() {
 }
 
 test_worker_role_names_skill_and_fallback_file
+test_scrub_handoff_carries_effective_source_paths
 
 # Required labeled fields must have filled values.
 test_unfilled_bounded_lines_are_detected() {
