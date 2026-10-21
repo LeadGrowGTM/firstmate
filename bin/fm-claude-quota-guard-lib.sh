@@ -345,12 +345,10 @@ fm_cqg_pick_route() {
 }
 
 fm_cqg_mark_observed() {
-  local meta=$1 state=$2 spawn_gen=$3 spawn_pid=$4 spawn_identity=$5 spawn_live=$6 lock= staged= observed_count result=0
+  local meta=$1 state=$2 spawn_gen=$3 spawn_pid=$4 spawn_identity=$5 lock staged= observed_count result=0
   [ -n "$spawn_gen" ] || return 1
-  if [ "$spawn_live" != 1 ]; then
-    lock=$(fm_meta_lock_path "$meta") || return 1
-    fm_lock_acquire_wait "$lock" || return 1
-  fi
+  lock=$(fm_meta_lock_path "$meta") || return 1
+  fm_lock_acquire_wait "$lock" || return 1
   if ! fm_backlog_record_present "$meta" "task record" "$state" ||
     [ "$(fm_meta_get "$meta" spawn_gen)" != "$spawn_gen" ] ||
     [ "$(fm_meta_get "$meta" quota_spawn_pid)" != "$spawn_pid" ] ||
@@ -370,7 +368,7 @@ fm_cqg_mark_observed() {
     fi
   fi
   [ -z "$staged" ] || rm -f "$staged" 2>/dev/null || true
-  [ -z "$lock" ] || fm_lock_release "$lock" || result=1
+  fm_lock_release "$lock" || result=1
   return "$result"
 }
 
@@ -443,7 +441,7 @@ fm_cqg_count() {
       alive)
         if [ "$reserved" = 1 ] && [ "$observed_count" = 0 ]; then
           spawn_gen=$(fm_meta_get "$f" spawn_gen)
-          if ! fm_cqg_mark_observed "$f" "$state" "$spawn_gen" "$spawn_pid" "$spawn_identity" "$spawn_live"; then
+          if ! fm_cqg_mark_observed "$f" "$state" "$spawn_gen" "$spawn_pid" "$spawn_identity"; then
             fm_cqg_die "cannot count Claude workers because the agent observation could not be recorded"
             return 1
           fi

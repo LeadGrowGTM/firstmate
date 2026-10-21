@@ -6331,12 +6331,6 @@ if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_TMP=
   TMUX_REBIND_ABORT_TARGET=
 fi
-# A dispatch or relaunch keeps the per-task meta lock through launch delivery.
-# The backlog mutation is deliberately the final fallible commit below, so
-# teardown cannot remove a relaunched record while its replacement worker is
-# still being delivered, cannot observe or complete a fresh provisional record
-# between its state check and `tasks-axi start`, and a delivery failure cannot
-# follow a committed In-flight transition.
 if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
   fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
@@ -6344,6 +6338,10 @@ fi
 if [ "$SPAWN_CLAUDE_QUOTA_LOCK_HELD" = 1 ]; then
   SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
   fm_lock_release "$SPAWN_CLAUDE_QUOTA_LOCK" || true
+fi
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
+  fm_lock_release "$SPAWN_META_LOCK" || exit 1
+  SPAWN_META_LOCK_HELD=0
 fi
 # The record is published, so this task is now part of the set a teardown
 # enumerates and locks per task. The set lock, or a secondmate's publisher lock,
@@ -6606,8 +6604,6 @@ fi
 
 spawn_record_traceparent() {
   local meta="$STATE/$ID.meta" status=0 acquired=0
-  # Fresh publication still owns the lock. Relaunch deliberately uses a short
-  # independent critical section so other metadata interfaces can serialize.
   if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
     SPAWN_META_LOCK=$(fm_meta_lock_path "$meta") || return 1
     fm_lock_acquire_wait "$SPAWN_META_LOCK"
@@ -6924,9 +6920,13 @@ if [ -n "$SPAWN_DEFERRED_SIGNAL" ]; then
   exit "$SPAWN_DEFERRED_SIGNAL_STATUS"
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
+  fm_lock_release "$SPAWN_META_LOCK" || exit 1
+  SPAWN_META_LOCK_HELD=0
   SPAWN_CLAUDE_QUOTA_LOCK=$STATE/.claude-quota-guard.lock
   fm_lock_acquire_wait "$SPAWN_CLAUDE_QUOTA_LOCK" || exit 1
   SPAWN_CLAUDE_QUOTA_LOCK_HELD=1
+  fm_lock_acquire_wait "$SPAWN_META_LOCK" || exit 1
+  SPAWN_META_LOCK_HELD=1
   SPAWN_META_TMP="$STATE/.$ID.meta.quota.${BASHPID:-$$}"
   if ! awk -F= '$1 != "quota_spawn_pid" && $1 != "quota_spawn_identity" && $1 != "quota_agent_observed"' "$STATE/$ID.meta" >"$SPAWN_META_TMP" ||
     ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
@@ -6934,11 +6934,15 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]
     exit 1
   fi
   SPAWN_META_TMP=
+  fm_lock_release "$SPAWN_META_LOCK" || exit 1
+  SPAWN_META_LOCK_HELD=0
   SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
   fm_lock_release "$SPAWN_CLAUDE_QUOTA_LOCK" || exit 1
 fi
-fm_lock_release "$SPAWN_META_LOCK"
-SPAWN_META_LOCK_HELD=0
+if [ "$SPAWN_META_LOCK_HELD" = 1 ]; then
+  fm_lock_release "$SPAWN_META_LOCK" || exit 1
+  SPAWN_META_LOCK_HELD=0
+fi
 
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"

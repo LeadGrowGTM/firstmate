@@ -607,6 +607,12 @@ fm_backlog_record_present "$META" "task record" "$STATE" || {
   echo "error: teardown refused after locking: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
 }
+TEARDOWN_SPAWN_LOCK=$STATE/.spawn-$ID.lock
+if ! fm_lock_try_acquire "$TEARDOWN_SPAWN_LOCK"; then
+  echo "error: teardown refused while a spawn of $ID is in progress" >&2
+  exit 1
+fi
+fm_lock_release "$TEARDOWN_SPAWN_LOCK" || exit 1
 TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
 if [ "$ONLY_IF_STOPPED" = 1 ]; then

@@ -148,19 +148,6 @@ run_check() { # <home> <id> <model> [extra guard args]
   fi
 }
 
-use_fakebin() { # <case-name>
-  TMP_ROOT_FAKE="$TMP_ROOT/$1/fakebin"
-  mkdir -p "$TMP_ROOT_FAKE"
-  # shellcheck disable=SC2034
-  ln -sfn "$TMP_ROOT_FAKE" "$TMP_ROOT/current-fakebin-link"
-  rm -rf "$TMP_ROOT/current-fakebin"
-  mkdir -p "$TMP_ROOT/current-fakebin"
-  # The path helper reads this directory. Copying links keeps each case isolated.
-  if [ -n "$(ls -A "$TMP_ROOT_FAKE" 2>/dev/null || true)" ]; then
-    cp -a "$TMP_ROOT_FAKE/." "$TMP_ROOT/current-fakebin/"
-  fi
-}
-
 prepare_fake() { # <case-name> [grok|muse|quota ...]
   local name=$1 tool
   shift
@@ -792,6 +779,77 @@ test_spawn_observation_preserves_pr_identity() {
   pass "an observed Claude PR worker keeps its seat and PR identity"
 }
 
+test_guard_observation_keeps_interleaved_pr_identity() {
+  local case_dir home pane first_pid recorded_pid tries window meta_lock before calls guard_pid rc pr_url pr_head order
+  case_dir=$(make_case interleaved-pr-observation task-a engineering)
+  home="$case_dir/home"
+  write_brief "$home" task-b engineering
+  add_item "$home" task-b
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  pane=$(new_worktree "$case_dir" task-a)
+  FM_TEST_SNAP="$case_dir/snap.json"
+  FM_FAKE_PAUSE_LAUNCH=1 run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off > "$case_dir/first.out" 2>&1 &
+  first_pid=$!
+  for ((tries=0; tries<300; tries++)); do
+    [ ! -f "$case_dir/launch-paused" ] || break
+    sleep 0.05
+  done
+  [ -f "$case_dir/launch-paused" ] || fail "first Claude launch did not pause after publication: $(cat "$case_dir/first.out")"
+  recorded_pid=$(awk -F= '$1=="quota_spawn_pid" {print $2}' "$home/state/task-a.meta")
+  [ -n "$recorded_pid" ] && kill -0 "$recorded_pid" 2>/dev/null ||
+    fail "published Claude record did not name a live spawning process"
+  kill -KILL "$recorded_pid" 2>/dev/null || fail "could not interrupt the first Claude spawn"
+  : > "$case_dir/release-launch"
+  wait "$first_pid" 2>/dev/null || true
+  window=$(awk -F= '$1=="window" {print $2}' "$home/state/task-a.meta")
+  printf '%s\n' "${window#*:}" > "$case_dir/agent-window"
+  # shellcheck source=bin/fm-wake-lib.sh
+  . "$ROOT/bin/fm-wake-lib.sh"
+  meta_lock=$(fm_meta_lock_path "$home/state/task-a.meta") || fail "could not locate the task record lock"
+  fm_lock_acquire_wait "$meta_lock" || fail "could not hold the task record lock"
+  before=$(grep -c '^list-windows ' "$case_dir/calls.log" || true)
+  (
+    rc=0
+    run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+      --harness claude --model haiku --mode no-mistakes --yolo off > "$case_dir/second.out" 2>&1 || rc=$?
+    printf '%s\n' "$rc" > "$case_dir/second.rc"
+  ) &
+  guard_pid=$!
+  for ((tries=0; tries<300; tries++)); do
+    calls=$(grep -c '^list-windows ' "$case_dir/calls.log" || true)
+    [ "$calls" -le "$before" ] || break
+    [ ! -f "$case_dir/second.rc" ] || break
+    sleep 0.05
+  done
+  calls=$(grep -c '^list-windows ' "$case_dir/calls.log" || true)
+  [ "$calls" -gt "$before" ] && [ -d "$home/state/.claude-quota-guard.lock" ] ||
+    fail "guard did not reach the agent observation while the record was locked: $(cat "$case_dir/second.out")"
+  assert_equals 0 "$(key_count "$home/state/task-a.meta" 'quota_agent_observed=')" "guard wrote without the task record lock"
+  pr_url=https://github.com/example/repo/pull/10
+  pr_head=0123456789abcdef0123456789abcdef01234567
+  cp "$home/state/task-a.meta" "$home/state/.task-a.pr.tmp"
+  printf 'pr=%s\npr_head=%s\n' "$pr_url" "$pr_head" >> "$home/state/.task-a.pr.tmp"
+  mv -f "$home/state/.task-a.pr.tmp" "$home/state/task-a.meta"
+  fm_lock_release "$meta_lock" || fail "could not release the task record lock"
+  wait "$guard_pid" || fail "competing spawn did not finish"
+  rc=$(cat "$case_dir/second.rc")
+  expect_code "$DEFER_EXIT" "$rc" "a PR worker lost its Claude seat: $(cat "$case_dir/second.out")"
+  assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "PR worker deferral missed its cap line"
+  assert_absent "$home/state/task-b.meta" "PR worker allowed a second Claude record"
+  assert_equals 1 "$(key_count "$home/state/task-a.meta" 'quota_agent_observed=1')" "guard did not persist the observation"
+  order=$(awk -F= '$1 == "pr" { print previous == "quota_agent_observed=1" ? 1 : 0; exit } { previous=$0 }' "$home/state/task-a.meta")
+  assert_equals 1 "$order" "observation did not precede the interleaved PR identity"
+  # shellcheck source=bin/fm-pr-lib.sh
+  . "$ROOT/bin/fm-pr-lib.sh"
+  fm_pr_metadata_identity_parse "$home/state/task-a.meta" || fail "PR parser rejected the observed task record"
+  assert_equals "$pr_url" "$FM_PR_META_URL" "observation changed the PR identity"
+  assert_equals 1 "$(key_count "$home/state/task-a.meta" "pr_head=$pr_head")" "observation changed the PR head"
+  pass "guard observation retains an intervening PR identity"
+}
+
 test_spawn_observed_agent_keeps_seat_when_endpoint_goes_missing() {
   local case_dir home pane out rc=0 first_pid rooted_pid tries window
   case_dir=$(make_case observed-seat task-a engineering)
@@ -1131,6 +1189,7 @@ test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
 test_spawn_records_live_agent_before_process_seat
 test_spawn_observation_preserves_pr_identity
+test_guard_observation_keeps_interleaved_pr_identity
 test_spawn_observed_agent_keeps_seat_when_endpoint_goes_missing
 test_spawn_reroute_keeps_inferred_dispatch_rule
 test_spawn_omitted_model_infers_dispatch_rule
