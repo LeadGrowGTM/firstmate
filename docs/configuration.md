@@ -1548,6 +1548,7 @@ Env-wrapped and compound raw Claude launches are not guarded.
 
 The cap counts Claude ship and scout records in this home's own state directory, including records with a `pr`, while a matching spawning process or agent is alive, an unobserved dead endpoint is within startup grace, or endpoint absence remains unproved.
 For a newly published Claude record, the guard records an already-alive agent before counting a spawning process whose PID and start-time identity match, keeps that observation ahead of any recorded PR identity, and still counts a later missing endpoint until normal absence proof says the agent is gone.
+Clearing a finished launch reservation removes only the spawning-process fields and keeps a recorded agent observation.
 A reserved seat whose spawning process has exited stays counted when the endpoint is unverified, unreadable, or only unproven, including a cmux endpoint.
 An unobserved new launch keeps its seat for 90 seconds from its recorded `spawn_gen` epoch when the endpoint reads dead, giving the agent time to start without delaying spawn.
 After the spawning process exits, a dead endpoint releases the seat immediately if the agent was observed, or after the grace if it was not; a missing endpoint releases the seat only when normal absence proof says the agent is gone.
@@ -1562,7 +1563,7 @@ Each of those lines is appended once per task, and a retry appends nothing furth
 An Opus refusal appends no status line.
 The admitting spawn holds `state/.claude-quota-guard.lock` from the check until the task record is published, and releases it immediately when the route leaves Claude.
 A second Claude launch that arrives while the lock is held is refused rather than waited on, so the two cannot both take the last place.
-[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, an omitted model inferred as `default`, a scheduled destination already tried in the episode, the cap including a published launch whose agent is not yet observable, an unverified reserved seat, a malformed dispatch file, a missing quota reading, and the single status line.
+[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, an omitted model inferred as `default`, a scheduled destination already tried in the episode, the cap including a published launch whose agent is not yet observable, a completed launch that keeps a recorded agent observation, an unverified reserved seat, an exited reservation whose absence proof is unproven, a malformed dispatch file, a missing quota reading, and the single status line.
 
 ## Automatic deadweight cleanup
 

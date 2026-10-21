@@ -6929,7 +6929,8 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]
   fm_lock_acquire_wait "$SPAWN_META_LOCK" || exit 1
   SPAWN_META_LOCK_HELD=1
   SPAWN_META_TMP="$STATE/.$ID.meta.quota.${BASHPID:-$$}"
-  if ! awk -F= '$1 != "quota_spawn_pid" && $1 != "quota_spawn_identity" && $1 != "quota_agent_observed"' "$STATE/$ID.meta" >"$SPAWN_META_TMP" ||
+  # Drop only the spawning-process reservation. A recorded observation stays.
+  if ! awk -F= '$1 != "quota_spawn_pid" && $1 != "quota_spawn_identity"' "$STATE/$ID.meta" >"$SPAWN_META_TMP" ||
     ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
     echo "error: could not finish Claude launch reservation for $ID" >&2
     exit 1

@@ -112,6 +112,19 @@ key_count() { # <file> <text>
   grep -c -F -- "$2" "$1" || true
 }
 
+# A background child inherits this file's fixture cleanup and can delete the
+# tree when it exits. A reservation test needs a pid that is already gone.
+unused_dead_pid() {
+  local pid=4194304
+  if kill -0 "$pid" 2>/dev/null; then
+    pid=4194317
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    fail "reservation pid is still alive"
+  fi
+  printf '%s\n' "$pid"
+}
+
 # A status line is stamped before it is appended. Count lines whose text
 # matches the canonical event once that time tag is removed.
 canonical_count() { # <file> <unstamped-line>
@@ -638,7 +651,7 @@ test_spawn_selected_opus_rule_defers() {
 }
 
 test_spawn_keeps_published_claude_seat_during_delivery() {
-  local case_dir home pane out rc=0 first_pid tries recorded_pid recorded_identity
+  local case_dir home pane out rc=0 first_pid tries recorded_pid recorded_identity dead_pid now_epoch
   case_dir=$(make_case published-seat task-a engineering)
   home="$case_dir/home"
   write_brief "$home" task-b engineering
@@ -665,6 +678,7 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
     fail "published Claude record did not name a live spawning process"
   fi
   cp "$home/state/task-a.meta" "$case_dir/reserved.meta"
+  printf '%s\n' 'quota_agent_observed=1' >> "$home/state/task-a.meta"
   out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
   expect_code "$DEFER_EXIT" "$rc" "second Claude worker entered while the first was published but not observable: $out"
@@ -673,6 +687,8 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   : > "$case_dir/release-launch"
   wait "$first_pid" || fail "first Claude launch failed after release: $(cat "$case_dir/first.out")"
   assert_equals 0 "$(key_count "$home/state/task-a.meta" 'quota_spawn_pid=')" "completed delivery kept its process reservation"
+  assert_equals 0 "$(key_count "$home/state/task-a.meta" 'quota_spawn_identity=')" "completed delivery kept its process identity"
+  assert_equals 1 "$(key_count "$home/state/task-a.meta" 'quota_agent_observed=1')" "completed delivery dropped the recorded observation"
   cp "$case_dir/reserved.meta" "$home/state/task-a.meta"
   printf '%s\n' 'quota_spawn_identity=' >> "$home/state/task-a.meta"
   rc=0
@@ -680,14 +696,45 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
   expect_code 1 "$rc" "a malformed Claude reservation did not refuse the count: $out"
   assert_absent "$home/state/task-b.meta" "malformed reservation admitted a worker"
-  cp "$case_dir/reserved.meta" "$home/state/task-a.meta"
-  printf 'quota_reservation_until=%s\n' "$(( $(date +%s) + 3600 ))" >> "$home/state/task-a.meta"
+  # The first pane read is authoritative absence. The recheck then finds the
+  # session server running but cannot classify the pane, so absence stays
+  # unproven without consulting this host's tmux server or process table.
+  cat > "$case_dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_FAKE_CALL_LOG%/*}/herdr.log"
+case "$*" in
+  'pane get proof-pane --session proof-session')
+    if [ ! -f "${FM_FAKE_CALL_LOG%/*}/herdr-pane-seen" ]; then
+      : > "${FM_FAKE_CALL_LOG%/*}/herdr-pane-seen"
+      printf '%s\n' '{"error":{"code":"pane_not_found"}}'
+    else
+      printf '%s\n' '{"error":{"code":"unavailable"}}'
+    fi
+    ;;
+  'status --json --session proof-session')
+    printf '%s\n' '{"server":{"running":true}}'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/herdr"
+  dead_pid=$(unused_dead_pid)
+  now_epoch=$(date +%s)
+  fm_write_meta "$home/state/task-a.meta" \
+    harness=claude kind=ship backend=herdr \
+    window=proof-session:proof-pane \
+    worktree="$pane" \
+    spawn_gen="s${now_epoch}.1.1" \
+    quota_spawn_pid="$dead_pid" \
+    quota_spawn_identity=exited-spawn
   rc=0
   out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
   expect_code "$DEFER_EXIT" "$rc" "an exited reservation with an unproven endpoint freed its seat: $out"
   assert_absent "$home/state/task-b.meta" "unproven endpoint allowed a second Claude record"
   assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "unproven endpoint duplicated the cap line"
+  assert_equals 2 "$(grep -c -F 'pane get proof-pane --session proof-session' "$case_dir/herdr.log")" \
+    "the unproven endpoint did not recheck pane absence"
   pass "a live spawn holds its seat and an exited reservation without absence proof keeps it"
 }
 
@@ -698,13 +745,7 @@ test_spawn_keeps_unverified_reserved_seat() {
   link_quota "$case_dir/fakebin"
   write_snap "$case_dir/snap.json" 95 259200
   printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
-  (trap - EXIT; exec sleep 30) &
-  dead_pid=$!
-  kill "$dead_pid" 2>/dev/null || fail "could not stop the reservation process"
-  wait "$dead_pid" 2>/dev/null || true
-  if kill -0 "$dead_pid" 2>/dev/null; then
-    fail "reservation pid is still alive"
-  fi
+  dead_pid=$(unused_dead_pid)
   fm_write_meta "$home/state/task-a.meta" \
     harness=claude kind=ship backend=cmux \
     window=cmux:surface-a \
