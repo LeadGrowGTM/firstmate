@@ -641,16 +641,20 @@ fm_composer_idle_matches() {
   esac
 }
 
-# 0 when <text> is exactly Claude's idle suggestion, `Try "..."`.
+# 0 when <row> is Claude's `❯ Try "..."` idle suggestion.
 # Claude Code 2.1.306 draws that suggestion as an SGR 2 run after `❯` and
 # U+00A0. Ink's focused placeholder path can also invert only the first cell
 # (SGR 7) and dim the rest, so ghost stripping keeps that one cell.
 # This pattern stays out of FM_COMPOSER_IDLE_RE_DEFAULT. That set treats an
 # unstyled bordered match as empty, and a typed copy of the suggestion must
-# stay pending. Callers use this only as plain-row proof that a strictly
-# shorter ghost-strip survivor is the cursor cell of an idle hint.
-_fm_composer_claude_try_hint() {  # <text>
-  local body=$1 inner
+# stay pending. Callers use the plain row when ghost stripping removes either
+# the whole hint or all but its reverse-video cursor cell.
+_fm_composer_claude_try_hint() {  # <row>
+  local body=$1 inner glyph=''
+  fm_composer_leading_agent_glyph_var glyph "$body" || return 1
+  [ "$glyph" = '❯' ] || return 1
+  body=${body#*"$glyph"}
+  fm_composer_normalize_trim_var body
   case "$body" in
     'Try "'*'"') ;;
     *) return 1 ;;
@@ -692,10 +696,13 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
     if _fm_composer_is_prompt_glyph "$plain_content" "$FM_COMPOSER_AGENT_PROMPT_GLYPHS"; then
       printf 'empty'; return 0
     fi
-    # The glyph and its suggestion can share one muted color. When styling
-    # removes the whole row, the plain agent glyph still proves the composer.
     if [ "$styled" = 1 ] && fm_composer_leading_agent_glyph_var glyph "$plain_content"; then
-      printf 'empty'; return 0
+      if _fm_composer_claude_try_hint "$plain_content"; then
+        printf 'empty'
+      else
+        printf 'pending'
+      fi
+      return 0
     fi
     printf 'unknown'; return 0
   fi
@@ -738,7 +745,7 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
     fm_composer_normalize_trim_var plain_body
     if [ "${#content}" -lt "${#plain_body}" ] \
        && { fm_composer_idle_matches "$plain_body" "$idle_re" "$idle_case" \
-            || _fm_composer_claude_try_hint "$plain_body"; }; then
+            || _fm_composer_claude_try_hint "$plain_content"; }; then
       case "$plain_body" in
         *"$content"*) printf 'empty'; return 0 ;;
       esac
