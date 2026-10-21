@@ -345,10 +345,12 @@ fm_cqg_pick_route() {
 }
 
 fm_cqg_mark_observed() {
-  local meta=$1 state=$2 spawn_gen=$3 spawn_pid=$4 spawn_identity=$5 lock staged= observed_count result=0
+  local meta=$1 state=$2 spawn_gen=$3 spawn_pid=$4 spawn_identity=$5 spawn_live=$6 lock= staged= observed_count result=0
   [ -n "$spawn_gen" ] || return 1
-  lock=$(fm_meta_lock_path "$meta") || return 1
-  fm_lock_acquire_wait "$lock" || return 1
+  if [ "$spawn_live" != 1 ]; then
+    lock=$(fm_meta_lock_path "$meta") || return 1
+    fm_lock_acquire_wait "$lock" || return 1
+  fi
   if ! fm_backlog_record_present "$meta" "task record" "$state" ||
     [ "$(fm_meta_get "$meta" spawn_gen)" != "$spawn_gen" ] ||
     [ "$(fm_meta_get "$meta" quota_spawn_pid)" != "$spawn_pid" ] ||
@@ -368,7 +370,7 @@ fm_cqg_mark_observed() {
     fi
   fi
   [ -z "$staged" ] || rm -f "$staged" 2>/dev/null || true
-  fm_lock_release "$lock" || result=1
+  [ -z "$lock" ] || fm_lock_release "$lock" || result=1
   return "$result"
 }
 
@@ -376,7 +378,7 @@ fm_cqg_mark_observed() {
 # Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home whose
 # recorded endpoint has not been proven dead. Returns 1 when a record cannot be read.
 fm_cqg_count() {
-  local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity spawn_gen current_identity reserved observed observed_count
+  local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity spawn_gen current_identity reserved observed observed_count spawn_live
   FM_CQG_OCCUPANTS=0
   if [ ! -d "$state" ] || [ ! -r "$state" ]; then
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
@@ -411,6 +413,7 @@ fm_cqg_count() {
     spawn_pid=$(fm_meta_get "$f" quota_spawn_pid)
     spawn_identity=$(fm_meta_get "$f" quota_spawn_identity)
     reserved=0
+    spawn_live=0
     if grep -qE '^quota_spawn_(pid|identity)=' "$f"; then
       reserved=1
       case "$spawn_pid" in
@@ -425,8 +428,7 @@ fm_cqg_count() {
       if fm_pid_alive "$spawn_pid" &&
         current_identity=$(fm_pid_identity "$spawn_pid" 2>/dev/null) &&
         [ "$current_identity" = "$spawn_identity" ]; then
-        FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
-        continue
+        spawn_live=1
       fi
     fi
     backend=$(fm_backend_of_meta "$f")
@@ -438,11 +440,10 @@ fm_cqg_count() {
       alive=$(fm_backend_agent_state "$backend" "$target")
     fi
     case "$alive" in
-      dead) continue ;;
       alive)
         if [ "$reserved" = 1 ] && [ "$observed_count" = 0 ]; then
           spawn_gen=$(fm_meta_get "$f" spawn_gen)
-          if ! fm_cqg_mark_observed "$f" "$state" "$spawn_gen" "$spawn_pid" "$spawn_identity"; then
+          if ! fm_cqg_mark_observed "$f" "$state" "$spawn_gen" "$spawn_pid" "$spawn_identity" "$spawn_live"; then
             fm_cqg_die "cannot count Claude workers because the agent observation could not be recorded"
             return 1
           fi
@@ -451,6 +452,11 @@ fm_cqg_count() {
         continue
         ;;
     esac
+    if [ "$spawn_live" = 1 ]; then
+      FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
+      continue
+    fi
+    case "$alive" in dead) continue ;; esac
     if [ "$reserved" = 1 ] && [ "$observed_count" = 0 ]; then
       continue
     fi
@@ -544,9 +550,16 @@ fm_cqg_decide() {
     fm_cqg_write_verdict "$verdict" reroute "$route" "$route_model" "$route_effort" "$route_rule"
     return 0
   fi
+  local count_lock=
+  if [ "${FM_CQG_ADMISSION_LOCK_HELD:-0}" != 1 ]; then
+    count_lock=$state/.claude-quota-guard.lock
+    fm_lock_acquire_wait "$count_lock" || return 1
+  fi
   if ! fm_cqg_count "$state" "$id"; then
+    [ -z "$count_lock" ] || fm_lock_release "$count_lock" || true
     return 1
   fi
+  [ -z "$count_lock" ] || fm_lock_release "$count_lock" || return 1
   if [ "$FM_CQG_OCCUPANTS" -ge "$FM_CQG_CAP" ]; then
       fm_cqg_status_once "$state" "$id" "$FM_CQG_CAP_STATUS" || return 1
       printf 'deferred: this home already holds %s Claude worker(s) and the cap is %s; task %s was not launched and its backlog item stays queued\n' \

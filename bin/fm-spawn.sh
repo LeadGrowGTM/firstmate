@@ -1508,7 +1508,7 @@ spawn_apply_claude_quota_guard() {
     exit 1
   }
   quota_rc=0
-  "$SCRIPT_DIR/fm-claude-quota-guard.sh" check \
+  FM_CQG_ADMISSION_LOCK_HELD="$SPAWN_CLAUDE_QUOTA_LOCK_HELD" "$SCRIPT_DIR/fm-claude-quota-guard.sh" check \
     --config "$CONFIG" \
     --state "$STATE" \
     --home "$FM_HOME" \
@@ -6924,6 +6924,9 @@ if [ -n "$SPAWN_DEFERRED_SIGNAL" ]; then
   exit "$SPAWN_DEFERRED_SIGNAL_STATUS"
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
+  SPAWN_CLAUDE_QUOTA_LOCK=$STATE/.claude-quota-guard.lock
+  fm_lock_acquire_wait "$SPAWN_CLAUDE_QUOTA_LOCK" || exit 1
+  SPAWN_CLAUDE_QUOTA_LOCK_HELD=1
   SPAWN_META_TMP="$STATE/.$ID.meta.quota.${BASHPID:-$$}"
   if ! awk -F= '$1 != "quota_spawn_pid" && $1 != "quota_spawn_identity" && $1 != "quota_agent_observed"' "$STATE/$ID.meta" >"$SPAWN_META_TMP" ||
     ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
@@ -6931,6 +6934,8 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]
     exit 1
   fi
   SPAWN_META_TMP=
+  SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
+  fm_lock_release "$SPAWN_CLAUDE_QUOTA_LOCK" || exit 1
 fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0

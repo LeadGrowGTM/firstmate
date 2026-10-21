@@ -1544,7 +1544,7 @@ A missing brief is untyped, so Opus stays allowed.
 The check reads the effective model, including a raw Claude command's model and a relaunch's recorded or selected model.
 
 The cap counts Claude ship and scout records in this home's own state directory when their launch reservation is active or their recorded endpoint has not been proven dead, including records with a `pr`.
-A newly published Claude record holds its place while its recorded spawning process and start-time identity match; once the guard has seen its agent alive, a later missing endpoint still counts until the normal absence proof says the agent is gone.
+For a newly published Claude record, the guard records an already-alive agent before counting a spawning process whose PID and start-time identity match; once observed, a later missing endpoint still counts until the normal absence proof says the agent is gone.
 A second mate record is not counted, and neither is the task being launched.
 An unreadable state directory or task record refuses a Claude-bound launch.
 When the count is already at the cap, the spawn prints one `deferred:` line, exits 75, and leaves the backlog item queued.
