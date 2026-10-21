@@ -212,6 +212,28 @@ test_dim_ghost_inside_bordered_composer_is_not_pending() {
   pass "fm_pane_input_pending: dim ghost inside a bordered composer is NOT pending"
 }
 
+test_gray_claude_suggestion_does_not_block_idle_composer() {
+  local dir fb capture out nbsp rule
+  dir="$TMP_ROOT/claude-gray-suggestion"; mkdir -p "$dir"
+  fb=$(make_fake_tmux "$dir")
+  capture="$dir/styled.txt"
+  nbsp=$(printf '\302\240')
+  rule='────────────────────────────────────────────────────────────────────────────────'
+  # The failed live run kept plain text only; use Claude's recorded muted RGB
+  # with that pane layout, then prove the same visible draft stays pending.
+  printf '%s\n\033[38;2;128;130;131m❯%sTry "edit fm-spawn.sh to..."\033[0m\n%s\n' \
+    "$rule" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = empty ] || fail "an idle Claude pane with a gray Try suggestion should be empty, got '$out'"
+  printf '%s\n❯%sTry "edit fm-spawn.sh to..."\n%s\n' \
+    "$rule" "$nbsp" "$rule" > "$capture"
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
+    fm_tmux_composer_state fakepane)
+  [ "$out" = pending ] || fail "an identical typed draft should stay pending, got '$out'"
+  pass "fm_tmux_composer_state: Claude's gray suggestion is empty while identical typed text stays pending"
+}
+
 test_normal_text_still_pending() {
   local dir fb capture
   dir="$TMP_ROOT/real-text"; mkdir -p "$dir"
@@ -688,6 +710,7 @@ test_strip_ghost_drops_dark_truecolor_ghost
 test_strip_ghost_keeps_muse_composer_colors
 test_dim_ghost_only_composer_is_not_pending
 test_dim_ghost_inside_bordered_composer_is_not_pending
+test_gray_claude_suggestion_does_not_block_idle_composer
 test_normal_text_still_pending
 test_colored_text_with_2_payload_still_pending
 test_dark_truecolor_ghost_only_composer_is_not_pending

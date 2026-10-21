@@ -240,7 +240,7 @@ fm_composer_normalize_trim_var() {  # <varname>
 #     A reset (SGR 0) or normal-intensity (SGR 22) ends a dim run.
 #   - dark/muted TRUECOLOR foreground runs (SGR 38;2;r;g;b or the colon form
 #     38:2::r:g:b) whose perceived luminance (0.299R + 0.587G + 0.114B) is below
-#     FM_COMPOSER_GHOST_LUMA_MAX (default 128): how grok renders its placeholder
+#     FM_COMPOSER_GHOST_LUMA_MAX (default 130): how grok renders its placeholder
 #     and hint text. A reset (SGR 0), a default-foreground (SGR 39), any base
 #     foreground colour (30-37 / 90-97), or a lighter 38;2 foreground ends the
 #     dark-foreground run. This assumes a DARK terminal theme, the firstmate
@@ -260,7 +260,7 @@ fm_composer_normalize_trim_var() {  # <varname>
 # LC_ALL=C makes awk walk bytes, so multibyte glyphs (e.g. ❯) and de-emphasised
 # runs alike pass through or drop intact without locale-dependent classes.
 fm_composer_strip_ghost() {
-  LC_ALL=C awk -v lumamax="${FM_COMPOSER_GHOST_LUMA_MAX:-128}" '
+  LC_ALL=C awk -v lumamax="${FM_COMPOSER_GHOST_LUMA_MAX:-130}" '
     function sgr_code(v, b) {
       b = v
       sub(/:.*/, "", b)
@@ -668,6 +668,11 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
   fm_composer_normalize_trim_var plain_content
   if [ "$bordered" != 1 ] && [ -z "$content" ] && [ -n "$plain_content" ]; then
     if _fm_composer_is_prompt_glyph "$plain_content" "$FM_COMPOSER_AGENT_PROMPT_GLYPHS"; then
+      printf 'empty'; return 0
+    fi
+    # The glyph and its suggestion can share one muted color. When styling
+    # removes the whole row, the plain agent glyph still proves the composer.
+    if [ "$styled" = 1 ] && fm_composer_leading_agent_glyph_var glyph "$plain_content"; then
       printf 'empty'; return 0
     fi
     printf 'unknown'; return 0

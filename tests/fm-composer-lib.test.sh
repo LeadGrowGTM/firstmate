@@ -43,7 +43,7 @@ test_stripped_unbordered_content_uses_plain_content() {
     [ "$out" = unknown ] \
       || fail "stripped unbordered content '$plain' must retain its unknown safety verdict, got '$out'"
   done
-  # muse draws `⟩` at luminance ~150, the tightest margin over the 128 ghost
+  # muse draws `⟩` at luminance ~150, the tightest margin over the 130 ghost
   # threshold in the fleet, so a raised threshold really can strip it to empty
   # and leave only the plain row. This branch is what keeps that pane readable.
   for plain in '❯' '›' '⟩'; do
@@ -700,8 +700,7 @@ test_matrix_opencode_leftbar_signals() {
   assert_screen "opencode idle on zellij" empty "$CAPS_STYLED_NOID" "$dim_screen"
   assert_screen "opencode idle on cmux/orca" empty "$CAPS_PLAIN" "$screen"
   # This sanitized live OpenCode 1.18.30 capture preserves its U+2026 hint and
-  # RGB 128 styling. RGB 128 is deliberately outside the ghost threshold, so
-  # the placeholder spelling is the independent empty signal. The completed-
+  # RGB 128 styling, now inside the ghost threshold. The completed-
   # turn row above the active composer also pins the incident's idle layout.
   captured_idle=$'  ▣ Build · Big Pickle · 3.4s\n\n  ┃\n  ┃  '"${ESC}[38;2;128;128;128mAsk anything… \"Fix a TODO in the codebase\"${ESC}[38;2;255;255;255m"$'\n  ┃\n  ┃  Build · Big Pickle OpenCode Zen\n  ╹▀▀▀▀▀▀▀▀'
   assert_screen "opencode 1.18.30 completed-turn idle hint on tmux" empty "$CAPS_TMUX" "$captured_idle" 3

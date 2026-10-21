@@ -181,7 +181,7 @@ case "${1:-}" in
     [ "$_print" = 1 ] && printf 'fakepane\n'
     exit 0 ;;
   list-windows)
-    [ -n "${FM_FAKE_TMUX_WINDOW:-}" ] && printf '%s\n' "$FM_FAKE_TMUX_WINDOW"
+    [ -n "${FM_FAKE_TMUX_WINDOW-0}" ] && printf '%s\n' "${FM_FAKE_TMUX_WINDOW-0}"
     exit 0 ;;
   capture-pane)
     # Honor a single-line band capture (-S N -E M, both non-negative) for the
@@ -270,7 +270,7 @@ case "${1:-}" in
     [ "$print" = 1 ] && printf 'fakepane\n'
     exit 0 ;;
   capture-pane) cat "$COMPOSER" 2>/dev/null; exit 0 ;;
-  list-windows) exit 0 ;;
+  list-windows) printf '0\nwin\n'; exit 0 ;;
   send-keys)
     shift
     text=""; is_enter=0; lit=0
