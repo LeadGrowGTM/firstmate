@@ -83,10 +83,6 @@ fm_tmux_composer_cursor_row() {  # <target>
   tmux display-message -p -t "$1" '#{cursor_y}' 2>/dev/null
 }
 
-fm_tmux_composer_cursor_col() {  # <target>
-  tmux display-message -p -t "$1" '#{cursor_x}' 2>/dev/null
-}
-
 # fm_tmux_composer_caps: the tmux capability descriptor - static data, not
 # logic (see the capability model in bin/fm-composer-lib.sh).
 fm_tmux_composer_caps() {
@@ -147,17 +143,16 @@ EOF
 # it (a pi separator pair under the cursor), so the common read never pays
 # for the process probe.
 fm_tmux_composer_state() {  # <target> -> empty|pending|pending-unproven|unknown
-  local target=$1 cy cx pane verdict identity
+  local target=$1 cy pane verdict identity
   cy=$(fm_tmux_composer_cursor_row "$target") || { printf 'unknown'; return 0; }
   case "$cy" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
-  cx=$(fm_tmux_composer_cursor_col "$target") || cx=
   pane=$(fm_tmux_composer_capture "$target") || { printf 'unknown'; return 0; }
-  verdict=$(fm_composer_classify_screen "$(fm_tmux_composer_caps)" "$pane" "$cy" '' "$cx")
+  verdict=$(fm_composer_classify_screen "$(fm_tmux_composer_caps)" "$pane" "$cy")
   if [ "$verdict" = need-identity ]; then
     if ! identity=$(fm_tmux_composer_identity "$target") || [ -z "$identity" ]; then
       identity='probe-absent'
     fi
-    verdict=$(fm_composer_classify_screen "$(fm_tmux_composer_caps)" "$pane" "$cy" "$identity" "$cx")
+    verdict=$(fm_composer_classify_screen "$(fm_tmux_composer_caps)" "$pane" "$cy" "$identity")
     [ "$verdict" != need-identity ] || verdict=unknown
   fi
   # Cursor Agent CLI parks its terminal cursor OUTSIDE its composer, below the

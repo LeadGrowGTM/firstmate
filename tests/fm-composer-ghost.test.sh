@@ -48,7 +48,6 @@ set -u
 case "${1:-}" in
   display-message)
     for a in "$@"; do case "$a" in *cursor_y*) printf '%s\n' "${FM_FAKE_CY:-0}"; exit 0 ;; esac; done
-    for a in "$@"; do case "$a" in *cursor_x*) printf '%s\n' "${FM_FAKE_CX:-0}"; exit 0 ;; esac; done
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     has_e=0
@@ -235,38 +234,33 @@ test_gray_claude_suggestion_does_not_block_idle_composer() {
   pass "fm_tmux_composer_state: Claude's gray suggestion is empty while identical typed text stays pending"
 }
 
-test_unstyled_try_draft_at_column_two_stays_pending() {
+test_unstyled_try_draft_stays_pending() {
   local dir fb capture out nbsp rule
   dir="$TMP_ROOT/claude-unstyled-suggestion"; mkdir -p "$dir"
   fb=$(make_fake_tmux "$dir")
   capture="$dir/styled.txt"
   nbsp=$(printf '\302\240')
   rule='────────────────────────────────────────────────────────────────────────────────'
-  # Home or Ctrl+A parks the cursor on column 2 of a real typed draft. Spelling
-  # plus that column is not placeholder proof, so the doorbell must not inject.
+  # An unstyled suggestion is indistinguishable from a real typed draft, so
+  # the doorbell must not inject.
   printf '%s\n❯%sTry "fix typecheck errors"\n%s\n' \
     "$rule" "$nbsp" "$rule" > "$capture"
-  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 FM_FAKE_CX=2 \
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
     fm_tmux_composer_state fakepane)
-  [ "$out" = pending ] || fail "a typed Try draft at column 2 should stay pending, got '$out'"
-  out=$(PATH="$fb:$PATH" LC_ALL=C FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 FM_FAKE_CX=2 \
+  [ "$out" = pending ] || fail "an unstyled Try draft should stay pending, got '$out'"
+  out=$(PATH="$fb:$PATH" LC_ALL=C FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
     fm_tmux_composer_state fakepane)
-  [ "$out" = pending ] || fail "a typed Try draft at column 2 should stay pending under LC_ALL=C, got '$out'"
+  [ "$out" = pending ] || fail "an unstyled Try draft should stay pending under LC_ALL=C, got '$out'"
   printf '%s\n\033[38;2;128;130;131m❯%sTry "fix typecheck errors"\033[0m\n%s\n' \
     "$rule" "$nbsp" "$rule" > "$capture"
-  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 FM_FAKE_CX=2 \
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 \
     fm_tmux_composer_state fakepane)
-  [ "$out" = empty ] || fail "a muted Try suggestion at column 2 should be empty, got '$out'"
-  printf '%s\n❯%sTry "fix typecheck errors"\n%s\n' \
-    "$rule" "$nbsp" "$rule" > "$capture"
-  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=1 FM_FAKE_CX=23 \
-    fm_tmux_composer_state fakepane)
-  [ "$out" = pending ] || fail "a typed Try draft past the glyph should remain pending, got '$out'"
+  [ "$out" = empty ] || fail "a muted Try suggestion should be empty, got '$out'"
   printf '❯%sTry "fix typecheck errors"\n' "$nbsp" > "$capture"
-  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=0 FM_FAKE_CX=2 \
+  out=$(PATH="$fb:$PATH" FM_FAKE_STYLED="$capture" FM_FAKE_CY=0 \
     fm_tmux_composer_state fakepane)
   [ "$out" = pending ] || fail "a Try draft without Claude's separator pair should remain pending, got '$out'"
-  pass "fm_tmux_composer_state: a typed Try draft at column 2 stays pending; only muted styling is empty"
+  pass "fm_tmux_composer_state: an unstyled Try draft stays pending; only muted styling is empty"
 }
 
 test_normal_text_still_pending() {
@@ -746,7 +740,7 @@ test_strip_ghost_keeps_muse_composer_colors
 test_dim_ghost_only_composer_is_not_pending
 test_dim_ghost_inside_bordered_composer_is_not_pending
 test_gray_claude_suggestion_does_not_block_idle_composer
-test_unstyled_try_draft_at_column_two_stays_pending
+test_unstyled_try_draft_stays_pending
 test_normal_text_still_pending
 test_colored_text_with_2_payload_still_pending
 test_dark_truecolor_ghost_only_composer_is_not_pending
