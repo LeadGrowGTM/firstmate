@@ -15,7 +15,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Automatic reversible work and numeric goals | [Idle sweep and standing targets](#idle-sweep-and-standing-targets) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd), [Claude Remote Control](#claude-remote-control-configclaude-remote-control), and [Orca view tabs](#orca-view-tabs-configorca-view-tabs) |
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity), [worktree pool guard](#worktree-pool-guard), [data management](#data-management-configdata-management), and [disk guard](#disk-guard-configdisk-guard) |
-| Claude subscription budget on each worker launch | [Claude quota guard](#claude-quota-guard-configclaude-quota-guardjson) |
+| Claude subscription budget for fresh ships and scouts | [Claude quota guard](#claude-quota-guard-configclaude-quota-guardjson) |
 | Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
 | Opt-in recurring task intake | [Recurring intake](#recurring-intake-configschedulesjson) |
 | Keeping private home and client names off public repositories | [Private names](#private-names-configprivate-names) |
