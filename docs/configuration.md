@@ -1505,7 +1505,6 @@ The file belongs to one home and is not copied into a second mate home.
 
 `pace_margin_points` is a number greater than or equal to zero and defaults to 10.
 `concurrent_claude_cap` is a whole number greater than or equal to 1 and defaults to 4.
-`weekly_window_seconds` is a whole number greater than or equal to 1 and defaults to 604800, which is seven days.
 `opus_refused_types`, when present, replaces the default list entirely and must be non-empty.
 Each type name matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
 The default refused types are `writing`, `execution`, `copy-draft`, `list-build`, and `bison-launch`.
@@ -1514,18 +1513,17 @@ Any other key, a malformed file, or an unreadable file refuses the launch.
 [`docs/examples/claude-quota-guard.json`](examples/claude-quota-guard.json) is a copyable sample and is never loaded.
 
 For a fresh launch, after validating the config and before the task-type and cap checks, the guard reads quota for the Claude account that the launch will use: the home's `config/claude-account` pin, a guarded raw command's leading `CLAUDE_CONFIG_DIR`, or the unpinned launch environment.
-Both the TOON read and JSON fallback use `--no-credential-refresh`.
+The JSON read uses `--no-credential-refresh`.
 A selected credential directory uses quota-axi's `--profile-only` selection.
 An ordinary pin unsets that directory and does not pass `--profile-only`, because quota-axi rejects the flag without one.
-It uses the Claude `all_models` row with the lowest percent remaining.
-When that row is limited by `seven_day` or `weekly`, that row is the weekly window.
-Otherwise it reads one Claude JSON response and uses the tightest Claude window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
+It uses the tightest Claude JSON window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
+That window must report both `resetsAt` and a positive `windowSeconds` length.
 When quota-axi is missing, times out, fails, or cannot be parsed, the pace check is skipped and the spawn output states that gap.
 That gap never refuses a launch by itself.
 The Opus-type check and the worker cap still run.
 
 Weekly usage is 100 minus percent remaining.
-Elapsed time is the fraction of `weekly_window_seconds` already gone before `resetsAt`, expressed as a percent.
+Elapsed time is the fraction of that window's `windowSeconds` already gone before `resetsAt`, expressed as a percent.
 The pace check trips only when usage minus elapsed time is strictly greater than `pace_margin_points`.
 A reset time in the past, or one that cannot be parsed, is treated as a missing reading and skips the pace check.
 When the check trips, the launch goes to the first available preference: Grok, then Muse, then Claude Sonnet.

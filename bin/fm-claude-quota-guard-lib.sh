@@ -16,10 +16,9 @@
 # refuses the launch instead of guessing.
 # Env-wrapped and compound raw Claude launches, quoted command names, and quoted or escaped leading assignments are not guarded.
 
-# Built-in defaults. A present key replaces that default.
+# Built-in policy values. Supported config keys can override margin, cap, and types.
 FM_CQG_DEFAULT_MARGIN=10
 FM_CQG_DEFAULT_CAP=4
-FM_CQG_DEFAULT_WINDOW=604800
 FM_CQG_STARTUP_GRACE=90
 FM_CQG_DEFAULT_TYPES=$'writing\nexecution\ncopy-draft\nlist-build\nbison-launch'
 
@@ -39,13 +38,12 @@ fm_cqg_die() {
 }
 
 # fm_cqg_load <config-dir>
-# Sets FM_CQG_MARGIN, FM_CQG_CAP, FM_CQG_WINDOW, and FM_CQG_TYPES. Returns 1 when the file is present and
+# Sets FM_CQG_MARGIN, FM_CQG_CAP, and FM_CQG_TYPES. Returns 1 when the file is present and
 # unusable. An absent file keeps the defaults and returns 0.
 fm_cqg_load() {
   local dir=$1 file
   FM_CQG_MARGIN=$FM_CQG_DEFAULT_MARGIN
   FM_CQG_CAP=$FM_CQG_DEFAULT_CAP
-  FM_CQG_WINDOW=$FM_CQG_DEFAULT_WINDOW
   FM_CQG_TYPES=$FM_CQG_DEFAULT_TYPES
   file=$dir/claude-quota-guard.json
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then
@@ -65,14 +63,13 @@ fm_cqg_load() {
     def whole: num and . == floor;
     if length != 1 then error("expected one JSON object") else .[0] end |
     if type != "object" then error("expected a JSON object")
-    elif (keys - ["pace_margin_points","concurrent_claude_cap","weekly_window_seconds","opus_refused_types"]) != []
+    elif (keys - ["pace_margin_points","concurrent_claude_cap","opus_refused_types"]) != []
       then error("unknown key")
     else
       {
         margin: (if has("pace_margin_points") then (if (.pace_margin_points | num) and .pace_margin_points >= 0 then .pace_margin_points else error("pace_margin_points") end) else 10 end),
         cap: (if has("concurrent_claude_cap") then (if (.concurrent_claude_cap | whole) and .concurrent_claude_cap >= 1 then .concurrent_claude_cap else error("concurrent_claude_cap") end)
               else 4 end),
-        window: (if has("weekly_window_seconds") then (if (.weekly_window_seconds | whole) and .weekly_window_seconds >= 1 then .weekly_window_seconds else error("weekly_window_seconds") end) else 604800 end),
         types_set: has("opus_refused_types"),
         types: (if has("opus_refused_types") then
                   (if (.opus_refused_types | type) == "array" and (.opus_refused_types | length) > 0
@@ -87,7 +84,6 @@ fm_cqg_load() {
   fi
   FM_CQG_MARGIN=$(jq -r '.margin' <<<"$parsed")
   FM_CQG_CAP=$(jq -r '.cap' <<<"$parsed")
-  FM_CQG_WINDOW=$(jq -r '.window' <<<"$parsed")
   if [ "$(jq -r '.types_set' <<<"$parsed")" = true ]; then
     FM_CQG_TYPES=$(jq -r '.types[]' <<<"$parsed")
   fi
@@ -146,96 +142,32 @@ fm_cqg_iso_epoch() {
   date -u -d "$raw" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$raw" +%s 2>/dev/null
 }
 
-# fm_cqg_toon_weekly <toon-text>
-# Prints remaining, limitedBy, and resetsAt for the tightest Claude all_models
-# row, separated by tabs. Prints nothing when that row is absent.
-fm_cqg_toon_weekly() {
-  awk '
-    function split_csv(line, out,    i, n, c, q, cur) {
-      n = 0
-      q = 0
-      cur = ""
-      for (i = 1; i <= length(line); i++) {
-        c = substr(line, i, 1)
-        if (c == "\"") {
-          q = !q
-          continue
-        }
-        if (c == "," && !q) {
-          out[++n] = cur
-          cur = ""
-          continue
-        }
-        cur = cur c
-      }
-      out[++n] = cur
-      return n
-    }
-    function trim(s) {
-      sub(/^[[:space:]]+/, "", s)
-      sub(/[[:space:]]+$/, "", s)
-      return s
-    }
-    BEGIN { count = -1; k = 0 }
-    {
-      line = trim($0)
-      if (count < 0 && line ~ /^quota\[[0-9]+\]\{/) {
-        if (index(line, "{provider,accountKey,") > 0) k = 1
-        header = line
-        sub(/^quota\[/, "", header)
-        sub(/\].*/, "", header)
-        count = header + 0
-        next
-      }
-      if (count > 0 && seen < count) {
-        seen++
-        n = split_csv(line, f)
-        provider = f[1]
-        scope = f[2 + k]
-        remaining = f[3 + k]
-        limited = f[7 + k]
-        reset = f[8 + k]
-        if (provider == "claude" && scope == "all_models" && remaining ~ /^-?[0-9]+(\.[0-9]+)?$/) {
-          if (!picked || remaining + 0 < best + 0) {
-            picked = 1
-            best = remaining + 0
-            best_limited = limited
-            best_reset = reset
-          }
-        }
-      }
-    }
-    END {
-      if (picked) printf "%s\t%s\t%s\n", best, best_limited, best_reset
-    }
-  ' <<<"$1"
-}
-
 # fm_cqg_json_weekly <json>
-# Prints percentRemaining and resetsAt for the tightest Claude seven_day
+# Prints percentRemaining, resetsAt, and windowSeconds for the tightest Claude seven_day
 # window, or a weekly-kind window when seven_day is absent.
 fm_cqg_json_weekly() {
   jq -r '
     def rows(which):
       [.providers[]? | select(.provider == "claude" and .state.stale != true) | .windows[]?
         | select(which)
-        | select(.percentRemaining | type == "number")
-        | select(.resetsAt | type == "string")
-        | {rem: .percentRemaining, reset: .resetsAt}];
+        | select(.percentRemaining | type == "number")];
     (rows(.id == "seven_day")) as $named
     | (if ($named | length) > 0 then $named else rows(.kind == "weekly") end)
-    | min_by(.rem) // empty
-    | if . == null then "" else "\(.rem)\t\(.reset)" end
+    | min_by(.percentRemaining) // empty
+    | select(.resetsAt | type == "string")
+    | select(.windowSeconds | type == "number")
+    | select(.windowSeconds > 0 and (.windowSeconds | isinfinite | not) and (.windowSeconds | isnan | not))
+    | "\(.percentRemaining)\t\(.resetsAt)\t\(.windowSeconds)"
   ' <<<"$1" 2>/dev/null || true
 }
 
 # fm_cqg_read_weekly
-# Prints "remaining<TAB>resetsAt" for the Claude weekly window, or nothing
+# Prints "remaining<TAB>resetsAt<TAB>windowSeconds" for the Claude weekly window, or nothing
 # when quota-axi cannot report it. Never returns a hard failure for missing
 # data. Callers treat an empty print as the gap: this function runs inside a
 # command substitution, so a flag set here would not reach them.
 fm_cqg_read_weekly() {
-  local toon rc=0 row limited rem reset json
+  local json rc=0 row
   local -a quota_env=() quota_args=(--provider claude)
   if ! command -v quota-axi >/dev/null 2>&1; then
     return 0
@@ -252,24 +184,6 @@ fm_cqg_read_weekly() {
   elif [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
     quota_args+=(--profile-only)
   fi
-  toon=$(fm_run_timed 20 "${quota_env[@]}" quota-axi "${quota_args[@]}" --no-credential-refresh 2>/dev/null) || rc=$?
-  if [ "$rc" -ne 0 ] || [ -z "$toon" ]; then
-    return 0
-  fi
-  row=$(fm_cqg_toon_weekly "$toon") || true
-  if [ -n "$row" ]; then
-    rem=${row%%$'\t'*}
-    limited=${row#*$'\t'}
-    limited=${limited%%$'\t'*}
-    reset=${row##*$'\t'}
-    case "$limited" in
-      seven_day | weekly)
-        printf '%s\t%s\n' "$rem" "$reset"
-        return 0
-        ;;
-    esac
-  fi
-  rc=0
   json=$(fm_run_timed 20 "${quota_env[@]}" quota-axi "${quota_args[@]}" --json --no-credential-refresh 2>/dev/null) || rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$json" ]; then
     return 0
@@ -281,16 +195,16 @@ fm_cqg_read_weekly() {
   printf '%s\n' "$row"
 }
 
-# fm_cqg_ahead <percent-remaining> <resetsAt>
+# fm_cqg_ahead <percent-remaining> <resetsAt> <windowSeconds>
 # Prints how many points used-percent is ahead of elapsed-percent. Returns 2
 # when the window cannot be placed on the clock.
 fm_cqg_ahead() {
-  local rem=$1 reset=$2 now epoch remain ahead
+  local rem=$1 reset=$2 window=$3 now epoch remain ahead
   now=$(date +%s) || return 2
   epoch=$(fm_cqg_iso_epoch "$reset") || return 2
   remain=$((epoch - now))
   [ "$remain" -ge 0 ] || return 2
-  ahead=$(awk -v rem="$rem" -v remain="$remain" -v window="$FM_CQG_WINDOW" 'BEGIN {
+  ahead=$(awk -v rem="$rem" -v remain="$remain" -v window="$window" 'BEGIN {
     if (window + 0 <= 0) exit 2
     if (rem + 0 < 0 || rem + 0 > 100) exit 2
     used = 100 - (rem + 0)
@@ -558,7 +472,7 @@ fm_cqg_write_verdict() {
 # 75 defer. Notices on stdout. Refusals and deferrals on stderr.
 fm_cqg_decide() {
   local config=$1 state=$2 home=$3 id=$4 brief=$5 model=$6 verdict=$7
-  local weekly rem reset ahead route route_model route_effort route_rule type_name route_rc
+  local weekly rem reset window ahead route route_model route_effort route_rule type_name route_rc
   if ! fm_cqg_load "$config"; then
     return 1
   fi
@@ -578,9 +492,8 @@ fm_cqg_decide() {
   if [ -z "$weekly" ]; then
     printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"
   else
-    rem=${weekly%%$'\t'*}
-    reset=${weekly#*$'\t'}
-    ahead=$(fm_cqg_ahead "$rem" "$reset") || ahead=
+    IFS=$'\t' read -r rem reset window <<<"$weekly"
+    ahead=$(fm_cqg_ahead "$rem" "$reset" "$window") || ahead=
     if [ -z "$ahead" ]; then
       printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"
     elif fm_cqg_ahead_of_margin "$ahead"; then

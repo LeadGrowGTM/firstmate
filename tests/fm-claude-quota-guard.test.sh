@@ -52,10 +52,10 @@ link_quota() {
 set -u
 snap=${QUOTA_AXI_SNAPSHOT-}
 [ -n "$snap" ] && [ -f "$snap" ] || exit 1
-rem=$(jq -er '[.providers[]? | select(.provider=="claude") | .windows[]? | select(.id=="seven_day") | .percentRemaining] | first' "$snap") || exit 1
-reset=$(jq -er '[.providers[]? | select(.provider=="claude") | .windows[]? | select(.id=="seven_day") | .resetsAt] | first' "$snap") || exit 1
-printf '%s\n' 'quota[1]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
-printf 'claude,default,all_models,%s,0.1,through_reset,early,seven_day,%s\n' "$rem" "$reset"
+case " $* " in
+  *' --json '*) cat "$snap" ;;
+  *) exit 1 ;;
+esac
 EOF
   chmod +x "$1/quota-axi"
 }
@@ -201,6 +201,58 @@ test_exact_margin_does_not_reroute() {
   pass "usage exactly at the margin stays on the requested model"
 }
 
+test_reported_weekly_window_controls_pace() {
+  local home snap out rc=0
+  home=$(make_home reported-window task-w engineering)
+  prepare_fake reported-window quota grok
+  write_snap "$TMP_ROOT/reported-window/default.json" 50 302400
+  snap="$TMP_ROOT/reported-window/five-day.json"
+  jq '(.providers[0].windows[] | select(.id == "seven_day") | .windowSeconds) = 432000' \
+    "$TMP_ROOT/reported-window/default.json" > "$snap"
+  FM_TEST_SNAP="$snap"
+  out=$(run_check "$home" task-w haiku) || rc=$?
+  expect_code 0 "$rc" "a reported five-day window refused the launch: $out"
+  assert_equals reroute "$(verdict_field "$home/verdict" action)" "pace ignored the reported window length"
+  assert_equals grok "$(verdict_field "$home/verdict" harness)" "the reported window chose the wrong route"
+
+  jq '(.providers[0].windows[] | select(.id == "seven_day") | .id) = "rolling_week"' "$snap" \
+    > "$TMP_ROOT/reported-window/weekly-kind.json"
+  FM_TEST_SNAP="$TMP_ROOT/reported-window/weekly-kind.json"
+  rc=0
+  out=$(run_check "$home" task-w haiku) || rc=$?
+  expect_code 0 "$rc" "a weekly-kind window refused the launch: $out"
+  assert_equals reroute "$(verdict_field "$home/verdict" action)" "the weekly-kind window lost its length"
+
+  jq 'del(.providers[0].windows[] | select(.id == "seven_day") | .windowSeconds)' "$snap" \
+    > "$TMP_ROOT/reported-window/no-length.json"
+  FM_TEST_SNAP="$TMP_ROOT/reported-window/no-length.json"
+  rc=0
+  out=$(run_check "$home" task-w haiku) || rc=$?
+  expect_code 0 "$rc" "a missing window length refused the launch: $out"
+  assert_contains "$out" "$GAP_LINE" "a missing window length hid the quota gap"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a missing window length drove pace"
+
+  jq 'del(.providers[0].windows[] | select(.id == "seven_day") | .resetsAt)' "$snap" \
+    > "$TMP_ROOT/reported-window/no-reset.json"
+  FM_TEST_SNAP="$TMP_ROOT/reported-window/no-reset.json"
+  rc=0
+  out=$(run_check "$home" task-w haiku) || rc=$?
+  expect_code 0 "$rc" "a missing reset time refused the launch: $out"
+  assert_contains "$out" "$GAP_LINE" "a missing reset time hid the quota gap"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a missing reset time drove pace"
+
+  jq '(.providers[0].windows[] | select(.id == "seven_day") | .resetsAt) as $reset
+    | .providers[0].windows += [{"id":"seven_day","kind":"weekly","percentRemaining":30,"resetsAt":$reset}]' \
+    "$snap" > "$TMP_ROOT/reported-window/tighter-without-length.json"
+  FM_TEST_SNAP="$TMP_ROOT/reported-window/tighter-without-length.json"
+  rc=0
+  out=$(run_check "$home" task-w haiku) || rc=$?
+  expect_code 0 "$rc" "a tighter window without length refused the launch: $out"
+  assert_contains "$out" "$GAP_LINE" "the guard borrowed length from a looser window"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a tighter window without length drove pace"
+  pass "pace uses the reported weekly length and missing timing skips pace"
+}
+
 test_pace_prefers_grok_then_muse_then_sonnet() {
   local home out rc=0
   home=$(make_home pace-grok task-w writing)
@@ -283,18 +335,11 @@ test_missing_quota_proceeds_and_still_checks_opus_and_cap() {
   pass "a missing quota reading continues, and opus refusal and the cap still apply"
 }
 
-test_json_fallback_skips_stale_claude_provider() {
+test_json_skips_stale_claude_provider() {
   local home snap out rc=0
   home=$(make_home stale-json task-w engineering)
   prepare_fake stale-json grok
-  cat > "$TMP_ROOT/current-fakebin/quota-axi" <<'SH'
-#!/usr/bin/env bash
-case "$*" in
-  *--json*) cat "$QUOTA_AXI_SNAPSHOT" ;;
-  *) printf '%s\n' 'quota unavailable' ;;
-esac
-SH
-  chmod +x "$TMP_ROOT/current-fakebin/quota-axi"
+  link_quota "$TMP_ROOT/current-fakebin"
   snap="$TMP_ROOT/stale-json/snap.json"
   write_snap "$snap" 30 259200
   FM_TEST_SNAP="$snap"
@@ -391,11 +436,11 @@ test_bad_config_and_unreadable_record_refuse() {
   assert_contains "$out" 'config/claude-quota-guard.json is malformed' "the malformed file was not named"
   assert_not_contains "$out" 'not-a-key' "the malformed file contents were printed"
   local invalid
-  for invalid in '{"enabled":false}' '{"concurrent_claude_cap":null}' '{"opus_refused_types":[]}'; do
+  for invalid in '{"enabled":false}' '{"concurrent_claude_cap":null}' '{"opus_refused_types":[]}' '{"weekly_window_seconds":604800}'; do
     printf '%s\n' "$invalid" > "$home/config/claude-quota-guard.json"
     rc=0
     out=$(run_check "$home" task-w haiku 2>&1) || rc=$?
-    expect_code 1 "$rc" "a guard opt-out was accepted: $invalid"
+    expect_code 1 "$rc" "an invalid guard config was accepted: $invalid"
   done
   printf '%s\n%s\n' '{"concurrent_claude_cap":1}' '{"concurrent_claude_cap":4}' > "$home/config/claude-quota-guard.json"
   rc=0
@@ -1026,23 +1071,15 @@ else
 fi
 case "$*" in
   *--json*)
-    printf '{"providers":[{"provider":"claude","state":{"stale":false},"windows":[{"id":"seven_day","kind":"weekly","percentRemaining":%s,"resetsAt":"%s"}]}]}\n' "$remaining" "$reset"
+    printf '{"providers":[{"provider":"claude","state":{"stale":false},"windows":[{"id":"seven_day","kind":"weekly","percentRemaining":%s,"resetsAt":"%s","windowSeconds":604800}]}]}\n' "$remaining" "$reset"
     ;;
-  *)
-    if [ -f "${FM_FAKE_CALL_LOG%/*}/force-json" ]; then
-      printf '%s\n' 'quota: []'
-    else
-      printf '%s\n' 'quota[1]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
-      printf 'claude,default,all_models,%s,0.1,through_reset,early,seven_day,%s\n' "$remaining" "$reset"
-    fi
-    ;;
+  *) exit 1 ;;
 esac
 SH
   chmod +x "$case_dir/fakebin/claude" "$case_dir/fakebin/quota-axi"
   write_snap "$case_dir/snap.json" 30 259200
   jq -r '.providers[0].windows[] | select(.id == "seven_day") | .resetsAt' "$case_dir/snap.json" > "$case_dir/reset"
   printf '%s\n' "$case_dir/profile-b" > "$home/config/claude-account"
-  : > "$case_dir/force-json"
   FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-a"
   pane=$(new_worktree "$case_dir" task-a)
   out=$(run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
@@ -1050,11 +1087,9 @@ SH
   expect_code 0 "$rc" "a pinned hot account did not route: $out"
   assert_equals grok "$(verdict_field "$home/state/task-a.meta" harness)" "the guard read the ambient account instead of the pin"
   calls=$(cat "$case_dir/quota-calls")
-  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --no-credential-refresh" "TOON did not select the pinned profile"
-  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --json --no-credential-refresh" "JSON fallback did not select the pinned profile"
+  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --json --no-credential-refresh" "the JSON read did not select the pinned profile"
   assert_not_contains "$calls" "$case_dir/profile-a|" "the pinned launch read the ambient profile"
 
-  rm -f "$case_dir/force-json"
   printf '%s\n' ordinary > "$home/config/claude-account"
   FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-b"
   write_brief "$home" task-b engineering
@@ -1067,7 +1102,7 @@ SH
   expect_code 0 "$rc" "an ordinary pin did not use the default account: $out"
   assert_equals claude "$(verdict_field "$home/state/task-b.meta" harness)" "the ordinary pin read the hot ambient profile"
   calls=$(cat "$case_dir/quota-calls")
-  assert_contains "$calls" '__unset__|--provider claude --no-credential-refresh' "the ordinary pin did not select the default profile"
+  assert_contains "$calls" '__unset__|--provider claude --json --no-credential-refresh' "the ordinary pin did not select the default profile"
   assert_not_contains "$calls" '--profile-only' "the ordinary pin asked for a profile without a directory"
   assert_not_contains "$calls" "$case_dir/profile-b|" "the ordinary pin read the ambient profile"
 
@@ -1084,7 +1119,7 @@ SH
   expect_code 0 "$rc" "a raw Claude profile override did not route: $out"
   assert_equals grok "$(verdict_field "$home/state/task-c.meta" harness)" "the raw Claude launch read the ambient profile"
   calls=$(cat "$case_dir/quota-calls")
-  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --no-credential-refresh" "the raw assignment did not select its profile"
+  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --json --no-credential-refresh" "the raw assignment did not select its profile"
   assert_not_contains "$calls" "$case_dir/profile-a|" "the raw launch read the ambient profile"
 
   FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-b"
@@ -1097,7 +1132,7 @@ SH
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
   expect_code 0 "$rc" "an unpinned ambient Claude account did not route: $out"
   assert_equals grok "$(verdict_field "$home/state/task-d.meta" harness)" "the unpinned launch did not use its forwarded profile"
-  assert_contains "$(cat "$case_dir/quota-calls")" "$case_dir/profile-b|--provider claude --profile-only --no-credential-refresh" "the unpinned launch did not select its ambient profile"
+  assert_contains "$(cat "$case_dir/quota-calls")" "$case_dir/profile-b|--provider claude --profile-only --json --no-credential-refresh" "the unpinned launch did not select its ambient profile"
 
   FM_TEST_CLAUDE_CONFIG_DIR=
   write_brief "$home" task-e engineering
@@ -1109,7 +1144,7 @@ SH
     --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
   expect_code 0 "$rc" "an unpinned default Claude account did not launch: $out"
   assert_equals claude "$(verdict_field "$home/state/task-e.meta" harness)" "an unpinned default account was rerouted"
-  assert_contains "$(cat "$case_dir/quota-calls")" '|--provider claude --no-credential-refresh' "the default account did not keep its quota source"
+  assert_contains "$(cat "$case_dir/quota-calls")" '|--provider claude --json --no-credential-refresh' "the default account did not keep its quota source"
   pass "quota pace follows pinned, raw, and unpinned Claude accounts"
 }
 
@@ -1754,10 +1789,11 @@ test_spawn_ignores_non_claude() {
 }
 
 test_exact_margin_does_not_reroute
+test_reported_weekly_window_controls_pace
 test_pace_prefers_grok_then_muse_then_sonnet
 test_opus_refused_for_writing_and_allowed_when_cleared
 test_missing_quota_proceeds_and_still_checks_opus_and_cap
-test_json_fallback_skips_stale_claude_provider
+test_json_skips_stale_claude_provider
 test_status_line_is_written_once
 test_cap_counts_pr_workers_and_ignores_secondmates
 test_bad_config_and_unreadable_record_refuse
