@@ -726,7 +726,7 @@ test_spawn_scheduled_reroute_skips_tried_profile() {
     ]}' > "$case_dir/plan.json"
   FM_TEST_SNAP="$case_dir/snap.json"
   FM_SCHEDULED_WORKER_PLAN="$case_dir/plan.json"
-  FM_CQG_TRIED='[{"harness":"claude","model":"sonnet","effort":"high","reasoning_class":"strong/approved"}]'
+  FM_CQG_TRIED=$(jq -cn '[{harness:"claude",model:"sonnet",effort:"high",reasoning_class:"strong/approved"}]')
   export FM_SCHEDULED_WORKER_PLAN FM_CQG_TRIED
   before=$(call_count "$case_dir")
   trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
