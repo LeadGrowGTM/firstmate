@@ -1792,6 +1792,27 @@ test_gate_no_verify_push_is_allowed_and_other_no_verify_pushes_stay_refused() {
   git -C "$REPO" config branch.fm/gate-nv.merge refs/heads/fm/gate-nv
   out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q 2>&1) ||
     fail "a --no-verify push with the gate as upstream was refused: $out"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q -- origin HEAD 2>&1) &&
+    fail "a --no-verify push of origin after -- was allowed"
+  assert_contains "$out" "--no-verify" "the post-separator origin refusal was not explained"
+  git -C "$REPO" config branch.fm/gate-nv.pushRemote origin
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q 2>&1) &&
+    fail "a --no-verify push followed branch.remote while pushRemote was origin"
+  assert_contains "$out" "--no-verify" "the pushRemote refusal was not explained"
+  git -C "$REPO" config --unset branch.fm/gate-nv.pushRemote
+  git -C "$REPO" config remote.pushDefault origin
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q 2>&1) &&
+    fail "a --no-verify push ignored remote.pushDefault"
+  assert_contains "$out" "--no-verify" "the pushDefault refusal was not explained"
+  git -C "$REPO" config --unset remote.pushDefault
+  git -C "$REPO" config --add remote.no-mistakes.pushurl "$gate"
+  git -C "$REPO" config --add remote.no-mistakes.pushurl "$ORIGIN"
+  out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q no-mistakes HEAD 2>&1) &&
+    fail "a --no-verify push to a gate remote with a second public push URL was allowed"
+  assert_contains "$out" "--no-verify" "the extra push URL refusal was not explained"
+  git -C "$REPO" config --unset-all remote.no-mistakes.pushurl
+  [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/gate-nv)" ] ||
+    fail "a refused --no-verify form reached the public origin"
 
   git -C "$REPO" config branch.fm/gate-nv.remote origin
   out=$(NM_HOME=$nm in_pane "$HOOKS" git -C "$REPO" push --no-verify -q 2>&1) &&

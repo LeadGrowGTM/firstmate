@@ -310,9 +310,10 @@ install_hooks() {
     # itself resolves it under the caller's options and environment (-c,
     # --config-env, GIT_CONFIG_*, include files, an unset override), and the
     # plumbing commands that push without hooks. The one exception is a push
-    # whose target is this repository's no-mistakes remote when that remote's
-    # push URL is the local gate no-mistakes itself configures; the gate scans
-    # that content before publishing it. Every other call runs unchanged. Git
+    # whose destination is the local gate of the remote named exactly
+    # no-mistakes: every push URL of that remote, and of the destination git
+    # will actually use, is that one directory. The gate scans that content
+    # before publishing it. Every other call runs unchanged. Git
     # aliases are outside this shim; a push through one still runs the
     # pre-push hook unless the alias skips hooks.
     {
@@ -372,15 +373,27 @@ gate_dir() {
   [ "$root" = "$home_root" ]
 }
 
-# Repository git will push to. A positional argument wins over --repo, matching
-# git push; with neither, git uses the current branch's upstream remote, or
-# origin when that branch has none.
+# Repository git will push to. A positional argument, including one after --,
+# wins over --repo. With neither, git uses branch.<name>.pushRemote, then
+# remote.pushDefault, then branch.<name>.remote, then origin.
 push_repository() {
-  local j a repo_flag="" repo_pos="" saw_pos=0 branch
+  local j a repo_flag="" repo_pos="" saw_pos=0 separated=0 branch
   j=$((i + 1))
   while [ "$j" -lt "$n" ]; do
     a=${args[j]}
-    [ "$a" = -- ] && break
+    if [ "$separated" -eq 0 ] && [ "$a" = -- ]; then
+      separated=1
+      j=$((j + 1))
+      continue
+    fi
+    if [ "$separated" -eq 1 ]; then
+      if [ "$saw_pos" -eq 0 ]; then
+        repo_pos=$a
+        saw_pos=1
+      fi
+      j=$((j + 1))
+      continue
+    fi
     case "$a" in
       --repo)
         j=$((j + 1))
@@ -412,20 +425,52 @@ push_repository() {
     return
   fi
   branch=$("$real" "${args[@]:0:i}" symbolic-ref --short HEAD 2>/dev/null) || return 1
-  a=$("$real" "${args[@]:0:i}" config --get "branch.${branch}.remote" 2>/dev/null) || a=origin
+  a=$("$real" "${args[@]:0:i}" config --get "branch.${branch}.pushRemote" 2>/dev/null) || a=
+  if [ -z "$a" ]; then
+    a=$("$real" "${args[@]:0:i}" config --get remote.pushDefault 2>/dev/null) || a=
+  fi
+  if [ -z "$a" ]; then
+    a=$("$real" "${args[@]:0:i}" config --get "branch.${branch}.remote" 2>/dev/null) || a=origin
+  fi
   [ -n "$a" ] || return 1
   printf '%s\n' "$a"
 }
 
+# Every push URL of remote $1, one per line. Fails when $1 is not a remote.
+remote_push_urls() {
+  "$real" "${args[@]:0:i}" remote get-url --push --all "$1" 2>/dev/null
+}
+
+# Canonical gate directory when every URL on stdin is that same directory.
+one_gate_path() {
+  local url path first=""
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    path=$(canon_dir "$url") || return 1
+    gate_dir "$path" || return 1
+    if [ -z "$first" ]; then
+      first=$path
+    elif [ "$path" != "$first" ]; then
+      return 1
+    fi
+  done
+  [ -n "$first" ] || return 1
+  printf '%s\n' "$first"
+}
+
 # 0 when this push's target is the configured no-mistakes gate, and nothing else.
+# A remote with several push URLs is the gate only when every one of them is.
 push_targets_gate() {
-  local gate_url gate_path dest_name dest_url dest_path
-  gate_url=$("$real" "${args[@]:0:i}" remote get-url --push no-mistakes 2>/dev/null) || return 1
-  gate_path=$(canon_dir "$gate_url") || return 1
-  gate_dir "$gate_path" || return 1
+  local gate_urls gate_path dest_name dest_urls dest_path
+  gate_urls=$(remote_push_urls no-mistakes) || return 1
+  gate_path=$(printf '%s\n' "$gate_urls" | one_gate_path) || return 1
   dest_name=$(push_repository) || return 1
-  dest_url=$("$real" "${args[@]:0:i}" remote get-url --push "$dest_name" 2>/dev/null) || dest_url=$dest_name
-  dest_path=$(canon_dir "$dest_url") || return 1
+  if dest_urls=$(remote_push_urls "$dest_name"); then
+    dest_path=$(printf '%s\n' "$dest_urls" | one_gate_path) || return 1
+  else
+    dest_path=$(canon_dir "$dest_name") || return 1
+    gate_dir "$dest_path" || return 1
+  fi
   [ "$dest_path" = "$gate_path" ]
 }
 
