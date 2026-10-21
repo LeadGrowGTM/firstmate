@@ -835,6 +835,11 @@ test_watcher_keeps_legacy_nonbusy_escalation_quiet() {
     || fail "legacy non-busy escalation started a retry generation"
   [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
     || fail "legacy non-busy escalation queued another wake"
+  : > "$dir/state/t1.inbox/.escalation-retry"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "a partial marker revived a non-busy escalation"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "a partial non-busy marker queued another wake"
   pass "watcher: a legacy non-busy escalation stays quiet"
 }
 
@@ -853,27 +858,48 @@ test_watcher_dead_after_busy_deferral_stays_quiet() {
 }
 
 test_watcher_paces_retry_when_bookkeeping_fails() {
-  local dir rec marker rings
+  local dir rec marker inbox rings
   dir=$(busy_case escalation-retry-bookkeeping)
   rec="$dir/state/t1.inbox/001.msg"
   busy_steer_check "$dir"
   busy_steer_check "$dir"
-  block_busy_reset "$dir"
-  marker="$dir/state/t1.inbox/.escalation-retry"
-  chmod a-w "$marker"
+  inbox="$dir/state/t1.inbox"
+  marker="$inbox/.escalation-retry"
+  chmod a-w "$inbox"
   busy_steer_check "$dir" "$(idle_capture "$dir")"
-  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
-  [ "$rings" = 1 ] || fail "post-escalation retry did not ring when bookkeeping failed"
-  [ "$(cut -f2 "$marker")" = 0 ] || fail "retry write failure did not leave the old attempt time"
-  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
-  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
-    || fail "retry write failure lost ring spacing"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "an unrecorded retry rang on every poll"
+  [ "$(cut -f2 "$marker")" = 0 ] || fail "retry write failure changed the old attempt time"
   [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
     || fail "post-escalation bookkeeping failure queued another wake"
-  chmod u+w "$marker"
-  rm "$dir/fakebin/rm"
+  chmod u+w "$inbox"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "repaired retry bookkeeping did not resume delivery"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
+    || fail "repaired retry bookkeeping lost ring spacing"
   [ -f "$rec" ] || fail "post-escalation bookkeeping failure lost the record"
   pass "watcher: post-escalation bookkeeping failures preserve spacing and wake deduplication"
+}
+
+test_watcher_recovers_partial_retry_marker() {
+  local dir marker rings
+  dir=$(busy_case partial-retry-marker)
+  busy_steer_check "$dir"
+  busy_steer_check "$dir"
+  marker="$dir/state/t1.inbox/.escalation-retry"
+  : > "$marker"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "a partial retry marker stopped delivery"
+  [ "$(cut -f1 "$marker")" = 001.msg ] || fail "partial retry marker was not repaired"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
+    || fail "repaired partial marker did not pace the next retry"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "repairing a partial marker repeated the escalation wake"
+  pass "watcher: a partial retry marker is repaired without another wake"
 }
 
 test_watcher_busy_budget_resets_on_ring_and_ack() {
@@ -1348,6 +1374,7 @@ test_watcher_rearms_legacy_busy_escalation
 test_watcher_keeps_legacy_nonbusy_escalation_quiet
 test_watcher_dead_after_busy_deferral_stays_quiet
 test_watcher_paces_retry_when_bookkeeping_fails
+test_watcher_recovers_partial_retry_marker
 test_watcher_busy_budget_resets_on_ring_and_ack
 test_watcher_busy_bookkeeping_failure_surfaces
 test_watcher_successor_busy_reset_failure_surfaces idle

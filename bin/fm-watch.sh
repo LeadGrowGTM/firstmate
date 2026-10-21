@@ -531,7 +531,7 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # Runs for secondmates too: their pane-staleness exemption is about quiet panes
 # being healthy, while an unacknowledged instruction can still be a stuck steer.
 inbox_steer_check() {  # <window> <task>
-  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state
+  local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state escalated_retry=0
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
   [ "$verb" != quiet ] || return 0
@@ -587,19 +587,22 @@ inbox_steer_check() {  # <window> <task>
   fi
   case "$verb" in
     ring)
+      if fm_task_inbox_is_escalated "$STATE" "$task" "$rec"; then
+        fm_task_inbox_write_escalation_retry "${rec%/*}" "${rec##*/}" "$(date +%s)" || return 0
+        escalated_retry=1
+      fi
       ring_rc=0
       fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
       if [ "$ring_rc" -eq 3 ]; then
         inbox_steer_escalate_unavailable "$w" "$task" "$rec"
         return 0
       fi
-      if ! fm_task_inbox_record_ring "$STATE" "$task" "$rec"; then
+      if [ "$escalated_retry" -eq 0 ] && ! fm_task_inbox_record_ring "$STATE" "$task" "$rec"; then
         if [ ! -f "$rec" ]; then
           fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true
           return 0
         fi
         if [ -d "${rec%/*}" ]; then
-          fm_task_inbox_is_escalated "$STATE" "$task" "$rec" && return 0
           reason="stale: $w (steering-inbox ladder bookkeeping unwritable: ${rec%/*}/.ring-state cannot be written while $rec stays unhandled; the doorbell cannot advance toward escalation - inspect the inbox directory)"
           fm_wake_append stale "$w" "$reason" || exit 1
           wake "$reason"
