@@ -333,12 +333,6 @@ while [ "$i" -lt "$n" ]; do
   esac
   i=$((i + 1))
 done
-if [ -n "${args[i]:-}" ]; then
-  if "$real" "${args[@]:0:i}" config --get "alias.${args[i]}" >/dev/null 2>&1; then
-    echo "fm-private-names: refusing unchecked git alias; use the full git command" >&2
-    exit 1
-  fi
-fi
 if [ "${args[i]:-}" = push ]; then
   for a in "${args[@]:i+1}"; do
     [ "$a" = -- ] && break

@@ -1099,14 +1099,6 @@ test_tag_messages_and_no_verify_pushes_are_refused() {
   out=$(TEST_OTHER_HOOKS=/dev/null in_pane "$HOOKS" git -C "$REPO" --config-env core.hooksPath=TEST_OTHER_HOOKS push -q origin HEAD 2>&1) &&
     fail "a push using split --config-env skipped the private-name check"
   assert_contains "$out" "core.hooksPath" "the hooksPath refusal was not explained"
-  git -C "$REPO" config alias.publish 'push --no-verify'
-  out=$(in_pane "$HOOKS" git -C "$REPO" publish origin HEAD 2>&1) &&
-    fail "a publishing Git alias bypassed the private-name check"
-  assert_contains "$out" "git alias" "the publishing alias refusal was not explained"
-  git -C "$REPO" config alias.publish '!git -c core.hooksPath=/dev/null push origin HEAD'
-  out=$(in_pane "$HOOKS" git -C "$REPO" publish 2>&1) &&
-    fail "a shell Git alias bypassed the private-name check"
-  assert_contains "$out" "git alias" "the shell alias refusal was not explained"
   [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/clean-tag)" ] || fail "a refused push reached the public origin"
   in_pane "$HOOKS" git -C "$REPO" status --short >/dev/null || fail "the git shim broke an ordinary command"
   pass "annotated tag messages are checked, and git push --no-verify or another hooksPath is refused"

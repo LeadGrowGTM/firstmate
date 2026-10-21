@@ -819,7 +819,8 @@ Existing unchanged content does not block an unrelated push.
 Relay public replies through `bin/fm-x-reply.sh`, including follow-ups, check reply text before posting or previewing, and a missing or unreadable list refuses the reply.
 Attached images are not scanned anywhere.
 These guards target accidental leaks by workers and do not stop a determined bypass.
-The `git` and `gh` shims cover documented command forms only, so other spellings, aliases outside the shim checks, absolute-path `git` or `gh`, direct GitHub API calls, and harness connectors remain accepted residuals.
+The `git` and `gh` shims cover documented command forms only, so other spellings, aliases, absolute-path `git` or `gh`, direct GitHub API calls, and harness connectors remain accepted residuals.
+An alias that runs `git push` still invokes the pre-push hook unless it skips hooks.
 The pre-push hook and pipeline gate still check Git pushes made with hooks enabled, but nothing catches text sent to GitHub outside Git and the shims.
 
 The no-mistakes pipeline commits its own fixes and pushes from its run worktree, outside every worker hook.
