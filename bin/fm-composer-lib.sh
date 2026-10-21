@@ -28,9 +28,10 @@
 #               carrying trailing non-idle text degrades to `unknown` rather
 #               than `pending`: the text may be the harness's own idle
 #               suggestion, and a false `pending` blocks every safe caller.
-#   cursor=1    a cursor row is supplied (tmux #{cursor_y} only). The cursor
+#   cursor=1    a cursor row is supplied (tmux #{cursor_y}). The cursor
 #               anchors shape selection: the shape containing the cursor is the
-#               composer. Without it, the bottom-most shape wins.
+#               composer. tmux also supplies #{cursor_x} for idle hints.
+#               Without a cursor row, the bottom-most shape wins.
 #   identity=1  a native agent identity/state probe exists (herdr `agent get`;
 #               the tmux pi foreground-process probe). Identity is what makes
 #               Pi's blank separated composer provable; with identity=0 that
@@ -733,7 +734,7 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
 
 # --- The screen classifier ---------------------------------------------------
 #
-# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity]
+# fm_composer_classify_screen <caps> <screen> [cursor_row] [identity] [cursor_col]
 #   <caps>       newline-separated key=value capability facts (see header).
 #   <screen>     the captured screen: ANSI-preserving when styled=1, plain
 #                otherwise.
@@ -742,6 +743,7 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
 #   [identity]   "<agent>\t<status>" from the backend's native identity probe,
 #                or `probe-absent` when the probe found no live identity; only
 #                meaningful when caps carry identity=1.
+#   [cursor_col] zero-based cursor column, when the adapter can supply it.
 # Prints exactly one verdict: empty | pending | pending-unproven | unknown,
 # or the internal sentinel `need-identity` when caps declare identity=1, no
 # identity result was supplied, and the verdict depends on it. Adapters answer
@@ -1748,9 +1750,9 @@ fm_composer_dialog_sink_release() {
   fi
 }
 
-fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
-  local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
-  local styled=0 cursor=0 has_identity=0 kv plain
+fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity] [cursor_col]
+  local caps=$1 screen=$2 cy=${3:-} identity=${4:-} cx=${5:-}
+  local styled=0 cursor=0 has_identity=0 kv plain suggestion
   # Note the dialog before any early return so a pending picker is still named.
   fm_composer_note_blocking_dialog "$screen" || true
   while IFS= read -r kv; do
@@ -1786,6 +1788,20 @@ EOF
       return 0
     fi
     if [ "$FM_COMPOSER_SCAN_BARE_ROW" -ge 0 ] && [ "$cy" -eq "$FM_COMPOSER_SCAN_BARE_ROW" ]; then
+      # Claude can render its rotating Try hint without ANSI styling. Its
+      # idle cursor stays beside the glyph; a typed draft moves it past the
+      # text. Require Claude's one-row separator pair as well as that cursor.
+      if [ "$styled" = 1 ] && [ "$cx" = 2 ] \
+         && [ "$FM_COMPOSER_SCAN_PI_PAIR_VALID" = 1 ] \
+         && [ "$FM_COMPOSER_SCAN_PI_OPEN" -eq "$((cy - 1))" ] \
+         && [ "$FM_COMPOSER_SCAN_PI_CLOSE" -eq "$((cy + 1))" ]; then
+        suggestion=$(_fm_composer_screen_row "$cy" "$plain")
+        fm_composer_normalize_spaces_var suggestion
+        fm_composer_normalize_trim_var suggestion
+        if [[ "$suggestion" =~ ^❯[[:space:]]Try[[:space:]]\"[^\"]+\"$ ]]; then
+          printf 'empty'; return 0
+        fi
+      fi
       if [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 1 ] \
          && [ "$cy" -gt "$FM_COMPOSER_SCAN_PI_OPEN" ] \
          && [ "$cy" -lt "$FM_COMPOSER_SCAN_PI_CLOSE" ]; then
