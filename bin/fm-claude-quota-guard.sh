@@ -58,6 +58,8 @@ FM_CQG_REFUSAL_ONLY=0
 FM_CQG_DISPATCH_RULE=
 FM_CQG_EFFORT=default
 FM_CQG_SCHEDULED_PLAN=
+FM_CQG_PROFILE_SELECTED=0
+FM_CQG_PROFILE_DIR=
 while [ $# -gt 0 ]; do
   case "$1" in
     --config)
@@ -112,6 +114,12 @@ while [ $# -gt 0 ]; do
     --dispatch-rule) FM_CQG_DISPATCH_RULE=$2; shift 2 ;;
     --effort) FM_CQG_EFFORT=$2; shift 2 ;;
     --scheduled-plan) FM_CQG_SCHEDULED_PLAN=$2; shift 2 ;;
+    --quota-profile-dir)
+      [ $# -ge 2 ] || { usage; exit 2; }
+      FM_CQG_PROFILE_SELECTED=1
+      FM_CQG_PROFILE_DIR=$2
+      shift 2
+      ;;
     *) usage; exit 2 ;;
   esac
 done

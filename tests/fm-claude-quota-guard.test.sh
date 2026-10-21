@@ -575,7 +575,7 @@ run_spawn() { # <case> <pane> <args...>
       unset QUOTA_AXI_SNAPSHOT || true
     fi
     env -u META_API_KEY \
-      HOME="$case_dir/user-home" CLAUDE_CONFIG_DIR='' \
+      HOME="$case_dir/user-home" CLAUDE_CONFIG_DIR="${FM_TEST_CLAUDE_CONFIG_DIR:-}" \
       GROK_HOME="$case_dir/grok-home" XDG_CONFIG_HOME="$case_dir/xdg" \
       FM_ROOT_OVERRIDE='' FM_HOME="$case_dir/home" \
       FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
@@ -971,6 +971,114 @@ SH
   expect_code 0 "$rc" "an observed dead endpoint kept its seat during startup grace: $out"
   assert_present "$home/state/task-b.meta" "the observed dead seat did not admit the next worker"
   pass "a rechecked live agent is observed and releases its seat when dead"
+}
+
+test_spawn_reads_quota_for_selected_claude_account() {
+  local case_dir home pane out rc=0 calls
+  case_dir=$(make_case account-quota task-a engineering)
+  home="$case_dir/home"
+  mkdir -p "$case_dir/profile-a" "$case_dir/profile-b"
+  fake_tool "$case_dir/fakebin" grok
+  cat > "$case_dir/fakebin/claude" <<'SH'
+#!/usr/bin/env bash
+[ "$*" = 'auth status' ]
+SH
+  cat > "$case_dir/fakebin/quota-axi" <<'SH'
+#!/usr/bin/env bash
+profile=${CLAUDE_CONFIG_DIR-__unset__}
+printf '%s|%s\n' "$profile" "$*" >> "${FM_FAKE_CALL_LOG%/*}/quota-calls"
+reset=$(cat "${FM_FAKE_CALL_LOG%/*}/reset")
+if [ "$profile" = "${FM_FAKE_CALL_LOG%/*}/profile-b" ]; then
+  remaining=30
+else
+  remaining=95
+fi
+case "$*" in
+  *--json*)
+    printf '{"providers":[{"provider":"claude","state":{"stale":false},"windows":[{"id":"seven_day","kind":"weekly","percentRemaining":%s,"resetsAt":"%s"}]}]}\n' "$remaining" "$reset"
+    ;;
+  *)
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/force-json" ]; then
+      printf '%s\n' 'quota: []'
+    else
+      printf '%s\n' 'quota[1]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+      printf 'claude,default,all_models,%s,0.1,through_reset,early,seven_day,%s\n' "$remaining" "$reset"
+    fi
+    ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/claude" "$case_dir/fakebin/quota-axi"
+  write_snap "$case_dir/snap.json" 30 259200
+  jq -r '.providers[0].windows[] | select(.id == "seven_day") | .resetsAt' "$case_dir/snap.json" > "$case_dir/reset"
+  printf '%s\n' "$case_dir/profile-b" > "$home/config/claude-account"
+  : > "$case_dir/force-json"
+  FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-a"
+  pane=$(new_worktree "$case_dir" task-a)
+  out=$(run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "a pinned hot account did not route: $out"
+  assert_equals grok "$(verdict_field "$home/state/task-a.meta" harness)" "the guard read the ambient account instead of the pin"
+  calls=$(cat "$case_dir/quota-calls")
+  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --no-credential-refresh" "TOON did not select the pinned profile"
+  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --json --no-credential-refresh" "JSON fallback did not select the pinned profile"
+  assert_not_contains "$calls" "$case_dir/profile-a|" "the pinned launch read the ambient profile"
+
+  rm -f "$case_dir/force-json"
+  printf '%s\n' ordinary > "$home/config/claude-account"
+  FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-b"
+  write_brief "$home" task-b engineering
+  add_item "$home" task-b
+  pane=$(new_worktree "$case_dir" task-b)
+  : > "$case_dir/quota-calls"
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "an ordinary pin did not use the default account: $out"
+  assert_equals claude "$(verdict_field "$home/state/task-b.meta" harness)" "the ordinary pin read the hot ambient profile"
+  calls=$(cat "$case_dir/quota-calls")
+  assert_contains "$calls" '__unset__|--provider claude --profile-only --no-credential-refresh' "the ordinary pin did not select the default profile"
+  assert_not_contains "$calls" "$case_dir/profile-b|" "the ordinary pin read the ambient profile"
+
+  rm -f "$home/config/claude-account"
+  FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-a"
+  write_brief "$home" task-c engineering
+  add_item "$home" task-c
+  pane=$(new_worktree "$case_dir" task-c)
+  : > "$case_dir/quota-calls"
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-c "$case_dir/sample-project" \
+    --harness "CLAUDE_CONFIG_DIR=$case_dir/profile-b claude --model haiku" \
+    --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "a raw Claude profile override did not route: $out"
+  assert_equals grok "$(verdict_field "$home/state/task-c.meta" harness)" "the raw Claude launch read the ambient profile"
+  calls=$(cat "$case_dir/quota-calls")
+  assert_contains "$calls" "$case_dir/profile-b|--provider claude --profile-only --no-credential-refresh" "the raw assignment did not select its profile"
+  assert_not_contains "$calls" "$case_dir/profile-a|" "the raw launch read the ambient profile"
+
+  FM_TEST_CLAUDE_CONFIG_DIR="$case_dir/profile-b"
+  write_brief "$home" task-d engineering
+  add_item "$home" task-d
+  pane=$(new_worktree "$case_dir" task-d)
+  : > "$case_dir/quota-calls"
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-d "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "an unpinned ambient Claude account did not route: $out"
+  assert_equals grok "$(verdict_field "$home/state/task-d.meta" harness)" "the unpinned launch did not use its forwarded profile"
+  assert_contains "$(cat "$case_dir/quota-calls")" "$case_dir/profile-b|--provider claude --profile-only --no-credential-refresh" "the unpinned launch did not select its ambient profile"
+
+  FM_TEST_CLAUDE_CONFIG_DIR=
+  write_brief "$home" task-e engineering
+  add_item "$home" task-e
+  pane=$(new_worktree "$case_dir" task-e)
+  : > "$case_dir/quota-calls"
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-e "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "an unpinned default Claude account did not launch: $out"
+  assert_equals claude "$(verdict_field "$home/state/task-e.meta" harness)" "an unpinned default account was rerouted"
+  assert_contains "$(cat "$case_dir/quota-calls")" '|--provider claude --no-credential-refresh' "the default account did not keep its quota source"
+  pass "quota pace follows pinned, raw, and unpinned Claude accounts"
 }
 
 test_spawn_malformed_dispatch_refuses() {
@@ -1574,6 +1682,7 @@ test_spawn_keeps_unverified_reserved_seat
 test_spawn_keeps_early_dead_seat_until_startup_grace
 test_spawn_rechecked_dead_seat_uses_startup_grace
 test_spawn_rechecked_alive_records_observation
+test_spawn_reads_quota_for_selected_claude_account
 test_spawn_malformed_dispatch_refuses
 test_failed_claude_spawn_keeps_task_lock_through_rollback
 test_spawn_records_live_agent_before_process_seat

@@ -1468,7 +1468,7 @@ SPAWN_CLAUDE_QUOTA_VERDICT=
 # the task record is published, or released now when the route leaves claude.
 # The guard command owns the decision; this function only applies its verdict.
 spawn_apply_claude_quota_guard() {
-  local quota_rc=0 line key value guard_model=$MODEL
+  local quota_rc=0 line key value guard_model=$MODEL quota_account quota_root
   local verdict_action='' verdict_harness='' verdict_model='' verdict_effort='' verdict_rule=''
   local -a guard_args=()
   [ "$KIND" != secondmate ] || return 0
@@ -1481,6 +1481,14 @@ spawn_apply_claude_quota_guard() {
       exit 1
     fi
     [ "$RAW_CLAUDE_MODEL_SET" = 0 ] || guard_model=$RAW_CLAUDE_MODEL
+  fi
+  quota_account=$(fm_worker_account_resolve claude "$CONFIG") || exit 1
+  if [ -n "$quota_account" ]; then
+    quota_root=${quota_account#*$'\t'}
+    quota_root=${quota_root%%$'\t'*}
+    guard_args+=(--quota-profile-dir "$quota_root")
+  elif [ "$RAW_LAUNCH" = 1 ] && [ "$RAW_CLAUDE_CONFIG_DIR_SET" = 1 ]; then
+    guard_args+=(--quota-profile-dir "$RAW_CLAUDE_CONFIG_DIR")
   fi
   if [ "$RELAUNCH" -eq 1 ]; then
     guard_args+=(--refusal-only)
@@ -2822,9 +2830,13 @@ launch_template() {
 }
 
 raw_claude_option_extract() {
-  local source=$1 mode=$2 length=${#1} i=0 start settings_start c next quote='' word='' expect=0 options_end=0
+  local source=$1 mode=$2 length=${#1} i=0 start settings_start c next quote='' word='' expect=0 options_end=0 command_seen=0
   RAW_CLAUDE_MODEL_SET=0
   RAW_CLAUDE_MODEL=
+  if [ "$mode" = model ]; then
+    RAW_CLAUDE_CONFIG_DIR_SET=0
+    RAW_CLAUDE_CONFIG_DIR=
+  fi
   while (( i < length )); do
     c=${source:i:1}
     if [[ "$c" == [[:space:]] ]]; then
@@ -2876,6 +2888,17 @@ raw_claude_option_extract() {
       ((i += 1))
     done
     [ -z "$quote" ] || return 1
+    if [ "$mode" = model ] && [ "$command_seen" = 0 ]; then
+      case "$word" in
+        CLAUDE_CONFIG_DIR=*)
+          RAW_CLAUDE_CONFIG_DIR=${word#*=}
+          RAW_CLAUDE_CONFIG_DIR_SET=1
+          continue
+          ;;
+        [A-Za-z_]*=*) continue ;;
+        *) command_seen=1 ;;
+      esac
+    fi
     if [ "$expect" = 1 ]; then
       if [ "$mode" = model ]; then
         RAW_CLAUDE_MODEL=$word

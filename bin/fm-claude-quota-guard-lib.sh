@@ -236,10 +236,21 @@ fm_cqg_json_weekly() {
 # command substitution, so a flag set here would not reach them.
 fm_cqg_read_weekly() {
   local toon rc=0 row limited rem reset json
+  local -a quota_env=() quota_args=(--provider claude)
   if ! command -v quota-axi >/dev/null 2>&1; then
     return 0
   fi
-  toon=$(fm_run_timed 20 quota-axi --provider claude --no-credential-refresh 2>/dev/null) || rc=$?
+  if [ "${FM_CQG_PROFILE_SELECTED:-0}" = 1 ]; then
+    if [ -n "$FM_CQG_PROFILE_DIR" ]; then
+      quota_env=(env "CLAUDE_CONFIG_DIR=$FM_CQG_PROFILE_DIR")
+    else
+      quota_env=(env -u CLAUDE_CONFIG_DIR)
+    fi
+  fi
+  if [ "${FM_CQG_PROFILE_SELECTED:-0}" = 1 ] || [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+    quota_args+=(--profile-only)
+  fi
+  toon=$(fm_run_timed 20 "${quota_env[@]}" quota-axi "${quota_args[@]}" --no-credential-refresh 2>/dev/null) || rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$toon" ]; then
     return 0
   fi
@@ -257,7 +268,7 @@ fm_cqg_read_weekly() {
     esac
   fi
   rc=0
-  json=$(fm_run_timed 20 quota-axi --provider claude --json --no-credential-refresh 2>/dev/null) || rc=$?
+  json=$(fm_run_timed 20 "${quota_env[@]}" quota-axi "${quota_args[@]}" --json --no-credential-refresh 2>/dev/null) || rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$json" ]; then
     return 0
   fi
