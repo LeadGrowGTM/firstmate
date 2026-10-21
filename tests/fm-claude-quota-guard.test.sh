@@ -449,6 +449,9 @@ case "${1:-}" in
     exit 0
     ;;
   send-keys)
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/fail-before-delivery" ]; then
+      case "$*" in *'export GOTMPDIR='*) exit 1 ;; esac
+    fi
     # A launch is typed as `. '<staged file>'`. Record that file so the test
     # sees the worker command, not only the short source line.
     prev=
@@ -683,6 +686,57 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   expect_code 0 "$rc" "an exited spawn with no observable agent kept its seat: $out"
   assert_present "$home/state/task-b.meta" "released Claude seat did not admit the next launch"
   pass "a live spawn holds its seat and an exited undelivered spawn releases it"
+}
+
+test_failed_claude_spawn_keeps_task_lock_through_rollback() {
+  local case_dir home pane real_rm spawn_pid tries teardown_out teardown_rc=0 spawn_rc=0
+  case_dir=$(make_case abort-rollback-lock task-a engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  pane=$(new_worktree "$case_dir" task-a)
+  real_rm=$(command -v rm)
+  cat > "$case_dir/fakebin/rm" <<'SH'
+#!/usr/bin/env bash
+for arg; do
+  if [ "$arg" = "${FM_TEST_ROLLBACK_META:-}" ]; then
+    : > "$FM_TEST_ROLLBACK_PAUSED"
+    for ((attempt=0; attempt<300; attempt++)); do
+      [ ! -f "$FM_TEST_ROLLBACK_RELEASE" ] || break
+      sleep 0.05
+    done
+    [ -f "$FM_TEST_ROLLBACK_RELEASE" ] || exit 1
+  fi
+done
+SH
+  printf 'exec %q "$@"\n' "$real_rm" >> "$case_dir/fakebin/rm"
+  chmod +x "$case_dir/fakebin/rm"
+  : > "$case_dir/fail-before-delivery"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  FM_TEST_ROLLBACK_META="$home/state/task-a.meta" \
+    FM_TEST_ROLLBACK_PAUSED="$case_dir/rollback-paused" \
+    FM_TEST_ROLLBACK_RELEASE="$case_dir/release-rollback" \
+    run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
+      --harness claude --model haiku --mode no-mistakes --yolo off > "$case_dir/spawn.out" 2>&1 &
+  spawn_pid=$!
+  for ((tries=0; tries<300; tries++)); do
+    [ ! -f "$case_dir/rollback-paused" ] || break
+    sleep 0.05
+  done
+  [ -f "$case_dir/rollback-paused" ] || fail "failed Claude spawn did not reach record rollback: $(cat "$case_dir/spawn.out")"
+  assert_present "$home/state/task-a.meta" "failed Claude spawn lost its provisional record before rollback"
+  teardown_out=$(HOME="$home/user-home" FM_HOME="$home" "$ROOT/bin/fm-teardown.sh" task-a 2>&1) || teardown_rc=$?
+  [ "$teardown_rc" -ne 0 ] || fail "teardown accepted a provisional Claude record during rollback"
+  assert_contains "$teardown_out" 'teardown refused while a spawn of task-a is in progress' \
+    "teardown did not refuse the active spawn: $teardown_out"
+  assert_present "$home/state/task-a.meta" "teardown removed the provisional Claude record during rollback"
+  : > "$case_dir/release-rollback"
+  wait "$spawn_pid" || spawn_rc=$?
+  [ "$spawn_rc" -ne 0 ] || fail "the failed Claude launch reported success"
+  assert_absent "$home/state/task-a.meta" "failed Claude spawn retained its provisional record after rollback"
+  assert_absent "$home/state/.spawn-task-a.lock" "failed Claude spawn kept its task lock after rollback"
+  pass "failed Claude spawn blocks teardown until provisional rollback completes"
 }
 
 test_spawn_records_live_agent_before_process_seat() {
@@ -1187,6 +1241,7 @@ test_spawn_refuses_opus_for_writing
 test_spawn_refuses_raw_opus_for_writing
 test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
+test_failed_claude_spawn_keeps_task_lock_through_rollback
 test_spawn_records_live_agent_before_process_seat
 test_spawn_observation_preserves_pr_identity
 test_guard_observation_keeps_interleaved_pr_identity

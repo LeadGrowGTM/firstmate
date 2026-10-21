@@ -1777,14 +1777,14 @@ spawn_abort_cleanup() {
       echo "warning: could not restore the prior Orca tab record after aborted relaunch of $ID" >&2
     fi
   fi
-  if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
-    SPAWN_TASK_LOCK_HELD=0
-    fm_lock_release "$SPAWN_TASK_LOCK" || true
-  fi
   if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ] && [ "$ORCA_VIEW_IDENTITY_SENT" != 1 ]; then
     if ! spawn_fresh_commit_rollback; then
       status=1
     fi
+  fi
+  if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
+    SPAWN_TASK_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
   if [ -n "$TMUX_REBIND_ABORT_TARGET" ]; then
     if [ "$SPAWN_LAUNCH_ATTEMPTED" = 0 ] &&
