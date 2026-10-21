@@ -1494,21 +1494,13 @@ Firstmate cannot see which part of a worker's life uses the resource, so the num
 
 ## Claude quota guard (config/claude-quota-guard.json)
 
-A fresh Claude ship or scout reads `config/claude-quota-guard.json` before launch and refuses or reroutes that launch when the Claude subscription would be overspent.
+A fresh Claude ship or scout reads `config/claude-quota-guard.json` before launch and applies its model, weekly pace, and concurrent worker rules.
 [`bin/fm-claude-quota-guard.sh`](../bin/fm-claude-quota-guard.sh) owns the decision and [`bin/fm-spawn.sh`](../bin/fm-spawn.sh) applies it.
 An absent file turns the guard on with the defaults below.
 The subscription can be spent while no file exists, so protection that starts only after a file is created would leave that hole open.
-A relaunch checks the Opus refusal; a `--secondmate` spawn is exempt.
+A relaunch checks the Opus refusal before stopping the working agent and again at the launch boundary; a refused relaunch leaves that agent in place.
+A `--secondmate` spawn is exempt.
 The file belongs to one home and is not copied into a second mate home.
-
-```json
-{
-  "pace_margin_points": 10,
-  "concurrent_claude_cap": 4,
-  "weekly_window_seconds": 604800,
-  "opus_refused_types": ["writing", "execution", "copy-draft", "list-build", "bison-launch"]
-}
-```
 
 `pace_margin_points` is a number greater than or equal to zero and defaults to 10.
 `concurrent_claude_cap` is a whole number greater than or equal to 1 and defaults to 4.
@@ -1520,20 +1512,21 @@ An omitted key keeps its default.
 Any other key, a malformed file, or an unreadable file refuses the launch.
 [`docs/examples/claude-quota-guard.json`](examples/claude-quota-guard.json) is a copyable sample and is never loaded.
 
-Before the other checks, the guard runs `quota-axi --provider claude --no-credential-refresh` and reads the default TOON table.
+For a fresh launch, after validating the config and before the task-type and cap checks, the guard runs `quota-axi --provider claude --no-credential-refresh` and reads the default TOON table.
 It uses the Claude `all_models` row with the lowest percent remaining.
 When that row is limited by `seven_day` or `weekly`, that row is the weekly window.
 Otherwise it reads `quota-axi --json` once and uses the tightest Claude window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
-When quota-axi is missing, times out, fails, or cannot be parsed, the launch continues and the spawn output states that the pace check was skipped.
+When quota-axi is missing, times out, fails, or cannot be parsed, the pace check is skipped and the spawn output states that gap.
 That gap never refuses a launch by itself.
 The Opus-type check and the worker cap still run.
 
 Weekly usage is 100 minus percent remaining.
 Elapsed time is the fraction of `weekly_window_seconds` already gone before `resetsAt`, expressed as a percent.
 The pace check trips only when usage minus elapsed time is strictly greater than `pace_margin_points`.
-A reset time in the past, or one that cannot be parsed, is treated as a missing reading and the launch continues.
+A reset time in the past, or one that cannot be parsed, is treated as a missing reading and skips the pace check.
 When the check trips, the launch goes to the first available preference: Grok, then Muse, then Claude Sonnet.
-With a selected dispatch rule, only profiles listed by that rule are eligible; when none is available, the launch exits 75 and leaves its backlog item queued.
+With a selected or uniquely inferred dispatch rule, only profiles listed by that rule are eligible, and the chosen rule stays attached to a rerouted launch; when none is available, the launch exits 75 and leaves its backlog item queued.
+For a scheduled worker, only profiles in its authorized plan are eligible.
 Grok is skipped when the launch carries client data, which [`bin/fm-muse-client-lib.sh`](../bin/fm-muse-client-lib.sh) decides, and when `grok` is not on `PATH`.
 Muse is skipped when `muse` is not on `PATH`.
 A Muse route uses the normal Muse launch, so contributor mode stays off when the launch carries client data.
@@ -1545,9 +1538,10 @@ An empty model and the model name `default` are not Opus.
 A missing brief is untyped, so Opus stays allowed.
 The check reads the effective model, including a raw Claude command's model and a relaunch's recorded or selected model.
 
-The cap counts Claude ship and scout records in this home's own state directory whose recorded endpoint has not been proven dead, including records with a `pr`.
+The cap counts Claude ship and scout records in this home's own state directory when their launch reservation is active or their recorded endpoint has not been proven dead, including records with a `pr`.
+A newly published Claude record holds its place even before its agent is observable, through a reservation in that task record bounded by the launch-delivery wait; after it expires, the normal endpoint proof decides whether the record still counts.
 A second mate record is not counted, and neither is the task being launched.
-An unreadable state directory or task record refuses the launch.
+An unreadable state directory or task record refuses a Claude-bound launch.
 When the count is already at the cap, the spawn prints one `deferred:` line, exits 75, and leaves the backlog item queued.
 That is the same exit project capacity uses, so a batch keeps the item queued.
 A launch the pace check would have sent to Sonnet, and that the cap then defers, records only the cap line.
@@ -1557,7 +1551,7 @@ Each of those lines is appended once per task, and a retry appends nothing furth
 An Opus refusal appends no status line.
 The admitting spawn holds `state/.claude-quota-guard.lock` from the check until the task record is published, and releases it immediately when the route leaves Claude.
 A second Claude launch that arrives while the lock is held is refused rather than waited on, so the two cannot both take the last place.
-[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, the cap, a missing quota reading, and the single status line.
+[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, the cap including a published launch whose agent is not yet observable, a missing quota reading, and the single status line.
 
 ## Automatic deadweight cleanup
 

@@ -124,7 +124,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-backlog-transition-lib.sh` | Pair task-record changes with their backlog transitions and replay interrupted closes |
 | `fm-quota-axi-lib.sh`    | Shared `quota-axi` compatibility floor and quota snapshot schema validation           |
 | `fm-quota-choose.sh`     | Choose the first candidate with known positive quota from an ordered harness:model list |
-| `fm-claude-quota-guard.sh` | Decide whether one fresh Claude launch may spend the subscription, then reroute or defer it |
+| `fm-claude-quota-guard.sh` | Decide a fresh Claude launch's route or deferral and check an Opus relaunch refusal |
 | `fm-claude-quota-guard-lib.sh` | Shared Claude subscription decision used by the guard command |
 | `fm-vendor-auth-probe.sh`| Run one hard-bounded, non-destructive authentication probe of a named vendor CLI and report the fact |
 | `fm-wake-drain.sh`       | Present and acknowledge the current actor's claimed wake rows alongside status, outcome-backstop, decision, divergence, supervision-host outcome, recovery, and supervision checks; annotate eligible single-PR decisions and warn on unparsed `needs-decision` and `blocked` lines |

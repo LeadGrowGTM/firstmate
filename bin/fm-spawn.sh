@@ -224,6 +224,8 @@
 #   and the gap is stated. The admitting spawn holds
 #   state/.claude-quota-guard.lock until the task record is published, or
 #   releases it immediately when the route leaves claude.
+#   A published Claude record reserves its cap place through the existing
+#   launch-delivery wait, until the endpoint state can decide whether it remains occupied.
 #   With no harness arg, a crewmate/scout spawn resolves the CREW harness only when
 #   config/crew-dispatch.json is absent. When that file exists, crewmate/scout
 #   spawns require an explicit harness so firstmate cannot silently skip dispatch
