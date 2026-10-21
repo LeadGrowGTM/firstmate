@@ -800,7 +800,7 @@ Portable shard evidence and coverage rules are in [fm-test-portable-shards.md](f
 
 ## Private names (config/private-names)
 
-Private names - the names of this fleet's operator homes and the clients they serve - are refused at every public exit a fleet worker uses, without anyone remembering to check.
+Private names - the names of this fleet's operator homes and the clients they serve - are checked at the guarded public exits a fleet worker uses, without anyone remembering to check.
 `bin/fm-private-names.sh refresh` builds the gitignored `config/private-names` list from registered second mates and `gtm-client-` projects and client slugs; each worker launch refreshes it before installing guards.
 The list retains previously registered names, and the optional gitignored `config/private-names.local` can add names.
 Ordinary words and very short names receive narrower context matching; the [guard script](../bin/fm-private-names.sh) and [matching library](../bin/fm-private-names-lib.sh) own the exact sources, list format, matching rules, visibility rules, and neutral-id assignment.
@@ -816,6 +816,11 @@ For public destinations, every check runs before the text leaves the machine and
 Text `gh` would collect in an editor, a browser, a prompt, or a template is refused on public destinations, and so are `git push --no-verify`, a push under another `core.hooksPath`, and making a repository public.
 Private repositories pass untouched, while an unknown network destination is treated as public and a missing list refuses publication.
 Existing unchanged content does not block an unrelated push.
+Relay public replies through `bin/fm-x-reply.sh`, including follow-ups, check reply text before posting or previewing, and a missing or unreadable list refuses the reply.
+Attached images are not scanned anywhere.
+These guards target accidental leaks by workers and do not stop a determined bypass.
+The `git` and `gh` shims cover documented command forms only, so other spellings, aliases outside the shim checks, absolute-path `git` or `gh`, direct GitHub API calls, and harness connectors remain accepted residuals.
+The pre-push hook and pipeline gate still check Git pushes made with hooks enabled, but nothing catches text sent to GitHub outside Git and the shims.
 
 The no-mistakes pipeline commits its own fixes and pushes from its run worktree, outside every worker hook.
 The trusted `gates` entry in this repository's `.no-mistakes.yaml` runs `bin/fm-private-names.sh gate` after lint, before the push step, against the list of every home on this machine whose clones push through that gate; each refresh records its home in the per-user `${XDG_STATE_HOME:-~/.local/state}/firstmate/private-names-gates` index for that lookup.
