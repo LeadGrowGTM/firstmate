@@ -1519,7 +1519,8 @@ An ordinary pin unsets that directory and does not pass `--profile-only`, becaus
 It uses the tightest Claude JSON window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
 That window must report `resetsAt`.
 A positive `windowSeconds` on that window is its length.
-When the weekly window reports no length, the pace check uses 604800 seconds with that reset time.
+When the selected window's own id is `seven_day` and `windowSeconds` is absent, the pace check uses 604800 seconds with its reset time.
+A weekly-kind or unlabeled window without `windowSeconds` skips the pace check, even if another window reports a length.
 A length that is present but not a positive number skips the pace check.
 When quota-axi is missing, times out, fails, or cannot be parsed, the pace check is skipped and the spawn output states that gap.
 That gap never refuses a launch by itself.

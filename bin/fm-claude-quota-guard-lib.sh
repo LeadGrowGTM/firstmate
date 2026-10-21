@@ -160,7 +160,7 @@ fm_cqg_json_weekly() {
         and (.windowSeconds | isinfinite | not)
         and (.windowSeconds | isnan | not)
       then "\(.percentRemaining)\t\(.resetsAt)\t\(.windowSeconds)"
-      elif has("windowSeconds") | not
+      elif .id == "seven_day" and (has("windowSeconds") | not)
       then "\(.percentRemaining)\t\(.resetsAt)\t604800"
       else empty end
   ' <<<"$1" 2>/dev/null || true
