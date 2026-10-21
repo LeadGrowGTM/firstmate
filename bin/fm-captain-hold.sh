@@ -827,9 +827,9 @@ resolve_entry() {  # <origin-or-empty> <entry>; prints "<id> <how>" or fails
   esac
   if [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ]; then
     legacy=$(legacy_hold_id "$origin" "$entry")
-    fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA); the nearest legacy identity $legacy also resolves to nothing"
+    fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA) or its Done retention archive; the nearest legacy identity $legacy also resolves to nothing"
   fi
-  fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA)"
+  fail "no captain-held task $entry and no migrated hold for it in this home's configured backlog (data directory $DATA) or its Done retention archive"
 }
 
 body_hold_set_timestamp() {  # <decoded-task-body>
@@ -927,6 +927,139 @@ refuse_self_inventory() {
   fail "origin $origin cannot be its own captain-call inventory entry; hold a separate captain task for the call and list that task"
 }
 
+# --- aged-out answered calls ------------------------------------------------
+#
+# The archive is consulted only after active backlog absence is confirmed.
+# docs/captain-hold-lifecycle.md owns the inventory contract.
+
+# The configured Done retention archive of the markdown backend; empty on any
+# other backend or when no archive file exists.
+done_archive_file() {
+  local data root backend configured file
+  data=$(fm_backlog_data_absolute "$DATA") || return 0
+  root=$(fm_backlog_root "$data") || return 0
+  backend=$(fm_tasks_axi_backend "$root") || return 0
+  [ "$backend" = markdown ] || return 0
+  configured=$(LC_ALL=C awk '
+    /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec); next }
+    sec == "[markdown]" && /^[[:space:]]*archive[[:space:]]*=/ {
+      v = $0; sub(/^[^=]*=[[:space:]]*/, "", v)
+      q = substr(v, 1, 1)
+      if (q == "\"" || q == "'\''") {
+        v = substr(v, 2); n = index(v, q)
+        if (!n) next
+        v = substr(v, 1, n - 1)
+      } else {
+        sub(/[[:space:]]*#.*/, "", v); sub(/[[:space:]]+$/, "", v)
+      }
+      print v; exit
+    }
+  ' "$root/.tasks.toml" 2>/dev/null) || configured=
+  if [ -n "$configured" ]; then
+    case "$configured" in
+      /*) file=$configured ;;
+      *) file="$root/$configured" ;;
+    esac
+  else
+    file="$data/done-archive.md"
+  fi
+  [ -f "$file" ] && printf '%s\n' "$file"
+  return 0
+}
+
+# Print "<state>" for one id in the archive: answered when a closed row for that
+# exact id carries a recorded captain answer, unanswered when the id is
+# archived without one, and nothing when the archive does not hold it. An
+# answered row appends the origin its body recorded, when it recorded one.
+archived_call_state() {  # <task-id>
+  local archive block line state=before format='' mode='' digest='' stored='' answer='' started=0
+  local prefix='' remaining segment first=1
+  archive=$(done_archive_file)
+  [ -n "$archive" ] || return 0
+  block=$(LC_ALL=C awk -v id="$1" '
+    /^- \[x\] / {
+      take = (index($0, "- [x] " id " - ") == 1)
+      if (take) found = 1
+    }
+    /./ && !/^[[:space:]]/ && !/^- \[x\] / { take = 0 }
+    take { print }
+    END { exit !found }
+  ' "$archive") || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      '') ;;
+      '  '*) line=${line#'  '} ;;
+      *) continue ;;
+    esac
+    case "$state" in
+      before)
+        case "$line" in
+          'Captain hold origin: '*) stored=${line#'Captain hold origin: '} ;;
+          'Resolution recorded by fm-captain-hold.') format=current; state=digest ;;
+          'Resolution recorded by fm-decision-hold.') format=legacy; state=digest ;;
+        esac
+        ;;
+      digest)
+        case "$line" in
+          'Decision digest: '*) digest=${line#'Decision digest: '}; state=mode ;;
+          *) state=invalid ;;
+        esac
+        ;;
+      mode)
+        case "$line" in
+          'Routed identities: '*)
+            [ "$format" = legacy ] || state=invalid
+            ;;
+          'Resolution mode: '*) mode=${line#'Resolution mode: '}; state=gap ;;
+          '')
+            if [ "$format" = legacy ]; then state=label; else state=invalid; fi
+            ;;
+          *) state=invalid ;;
+        esac
+        ;;
+      gap)
+        if [ -z "$line" ]; then state=label; else state=invalid; fi
+        ;;
+      label)
+        if [ "$line" = 'Captain decision:' ]; then state=answer; else state=invalid; fi
+        ;;
+      answer)
+        if [ "$started" -eq 0 ]; then
+          answer=$line
+          started=1
+        else
+          answer+=$'\n'"$line"
+        fi
+        ;;
+    esac
+  done <<< "$block"
+  case "$format:$mode:$state" in
+    current:answered:answer|current:released:answer|current:repaired:answer|current:routed:answer|legacy:answered:answer|legacy:declined:answer|legacy:routed:answer|legacy:repaired:answer|legacy::answer) ;;
+    *) printf 'unanswered'; return 0 ;;
+  esac
+  remaining=$answer
+  while [[ "$remaining" == *$'\n\n'* ]]; do
+    segment=${remaining%%$'\n\n'*}
+    if [ "$first" -eq 1 ]; then
+      prefix=$segment
+      first=0
+    else
+      prefix+=$'\n\n'"$segment"
+    fi
+    remaining=${remaining#"$segment"$'\n\n'}
+    if [ "$(sha256_text "$prefix")" = "$digest" ]; then
+      case "$remaining" in
+        'Captain hold origin: '*)
+          stored=${remaining%%$'\n'*}
+          stored=${stored#'Captain hold origin: '}
+          ;;
+      esac
+      break
+    fi
+  done
+  printf 'answered %s' "$stored"
+}
+
 # Resolve one entry and verify the row it names is durably captain-held. A
 # resolution failure that is not the read bound keeps resolve_entry's own
 # status - its stderr already named the entry; 124 means the backend never
@@ -934,11 +1067,42 @@ refuse_self_inventory() {
 # as absence. The result carries the attestation evidence and whether an
 # origin was recorded, so completion can disclose the legacy fallback.
 verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how> <origin-state>"
-  local origin=$1 entry=$2 resolved resolve_status=0 id how stored origin_state=unrecorded origin_id stored_id
+  local origin=$1 entry=$2 resolved resolve_status=0 id how stored origin_state=unrecorded origin_id stored_id archive_state='' archive_id=$2 legacy
   # The origin task is never its own captain-call inventory: it is the work the
   # calls were found in, so accepting it would let a refused hold look recorded.
   if [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ] && [ "$entry" = "$origin" ]; then
     refuse_self_inventory "$origin" "$entry"
+  fi
+  # A live row wins; only an id absent from the active backlog consults the
+  # Done retention archive, so a task id found nowhere still refuses below.
+  if ! task_show "$entry"; then
+    printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$' \
+      || fail "could not read active backlog entry $entry: $TASK_SHOW_OUTPUT"
+    archive_state=$(archived_call_state "$entry")
+    if [ -z "$archive_state" ] && [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ]; then
+      legacy=$(legacy_hold_id "$origin" "$entry")
+      if [ "$legacy" != "$entry" ] && ! task_show "$legacy"; then
+        printf '%s\n' "$TASK_SHOW_OUTPUT" | grep -q '^code: NOT_FOUND$' \
+          || fail "could not read active backlog entry $legacy: $TASK_SHOW_OUTPUT"
+        archive_state=$(archived_call_state "$legacy")
+        [ -z "$archive_state" ] || archive_id=$legacy
+      fi
+    fi
+    if [ "${archive_state%% *}" = answered ]; then
+      stored=${archive_state#answered}
+      stored=${stored# }
+      if [ -n "$stored" ] && [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ]; then
+        origin_id=$(task_identity "$origin") || exit $?
+        stored_id=$(task_identity "$stored") || exit $?
+        [ "$stored_id" = "$origin_id" ] \
+          || fail "captain-held task $archive_id was held for origin $stored, not $origin; hold a task for $origin or list the right one"
+      fi
+      printf '%s archived archived\n' "$archive_id"
+      return 0
+    fi
+    if [ "$archive_state" = unanswered ]; then
+      fail "$archive_id is archived in the Done retention archive without a recorded captain answer"
+    fi
   fi
   resolved=$(resolve_entry "$origin" "$entry") || resolve_status=$?
   if [ "$resolve_status" -ne 0 ]; then

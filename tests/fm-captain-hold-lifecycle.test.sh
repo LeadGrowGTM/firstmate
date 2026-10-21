@@ -719,6 +719,279 @@ EOF
   pass "report-only unresolved captain call is reproduced and completion refuses before loss"
 }
 
+# An answered captain call ages out of the active backlog into the Done
+# retention archive. It is closed work, so an inventory naming it still passes
+# the completion gate; an id found nowhere, or archived without a recorded
+# answer, still refuses and the refusal names what was looked up.
+test_aged_out_answered_calls_do_not_block_cleanup() {
+  local home id rc digest
+  home=$(make_home aged-out-calls)
+  id=sample-aged-scout
+  mkdir -p "$home/data/$id"
+  cat > "$home/data/backlog.md" <<EOF
+## In flight
+- [ ] $id - Investigate aged calls (repo: sample) (kind: scout) (since 2026-10-10)
+
+## Queued
+
+## Done
+EOF
+  cat > "$home/data/done-archive.md" <<'EOF'
+
+## Archived 2026-10-14
+- [x] aged-call-a - First question (kind: captain) (done 2026-10-13) (hold: captain decision pending) (hold-kind: captain)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: aaa
+  Resolution mode: answered
+
+  Captain decision:
+  Go north.
+- [x] aged-call-b - Second question (kind: captain) (done 2026-10-13) (hold: captain decision pending) (hold-kind: captain)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: bbb
+  Resolution mode: answered
+
+  Captain decision:
+  Go south.
+- [x] aged-call-bare - Closed without an answer (kind: captain) (done 2026-10-13)
+EOF
+  write_origin_meta "$home" "$id"
+  printf 'done: report complete\n' > "$home/state/$id.status"
+  printf '# Aged calls\n\nBoth calls were answered.\n' > "$home/data/$id/report.md"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-a,aged-call-b\n' >> "$home/state/$id.meta"
+
+  run_captain "$home" verify "$id" > "$home/verify.out" 2> "$home/verify.err" \
+    || fail "answered calls aged into the archive were refused: $(cat "$home/verify.err")"
+  assert_contains "$(cat "$home/verify.out")" "verified: $id captain-call inventory" \
+    "verify did not accept the archived answers"
+
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = show ] && [ "${2:-}" = aged-call-a ]; then
+  printf 'error: temporary backlog read failure\n' >&2
+  exit 75
+fi
+exec "${REAL_TASKS_AXI:?}" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  set +e
+  run_captain "$home" verify "$id" > "$home/read-failure.out" 2> "$home/read-failure.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "an archived answer masked an active backlog read failure"
+  assert_grep 'could not read active backlog entry aged-call-a' "$home/read-failure.err" \
+    "the read failure was treated as confirmed absence"
+  rm "$home/fakebin/tasks-axi"
+
+  # Still refusing: archived without a recorded answer.
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-bare\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/bare.out" 2> "$home/bare.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a call archived without an answer passed the gate"
+  assert_grep "aged-call-bare" "$home/bare.err" "the refusal did not name the archived call"
+  assert_grep "without a recorded captain answer" "$home/bare.err" \
+    "the refusal did not say the archive holds no answer"
+
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] aged-call-reconciled - Closed by reconciliation (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: ddd
+  Resolution mode: reconciled
+
+  Reconciliation evidence:
+  The call was closed without a captain answer.
+  Captain decision:
+  Captain hold origin: sample-aged-scout
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-reconciled\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/reconciled.out" 2> "$home/reconciled.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a reconciled archive row without a captain decision passed the gate"
+  assert_grep 'without a recorded captain answer' "$home/reconciled.err" \
+    "the reconciled archive row was treated as a captain answer"
+
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] aged-call-quoted - Answer quoting an origin (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: quoted
+  Resolution mode: answered
+
+  Captain decision:
+  The text quotes a line from another record:
+  Captain hold origin: some-other-origin
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-quoted\n' >> "$home/state/$id.meta"
+  run_captain "$home" verify "$id" > "$home/quoted.out" 2> "$home/quoted.err" \
+    || fail "quoted origin text was treated as recorded provenance: $(cat "$home/quoted.err")"
+
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(printf Go | shasum -a 256 | awk '{print $1}')
+  else
+    digest=$(printf Go | sha256sum | awk '{print $1}')
+  fi
+  cat >> "$home/data/done-archive.md" <<EOF2
+- [x] aged-call-recorded - Answer with a recorded origin (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-captain-hold.
+  Decision digest: $digest
+  Resolution mode: answered
+
+  Captain decision:
+  Go
+
+  Captain hold origin: some-other-origin
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-recorded\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/recorded.out" 2> "$home/recorded.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a recorded origin after an answer was ignored"
+  assert_grep 'was held for origin some-other-origin' "$home/recorded.err" \
+    "the recorded origin after an answer was not checked"
+
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] sample-aged-scout-decision-route - Legacy routed answer (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: route
+  Routed identities: sample-routed-work
+  Resolution mode: routed
+
+  Captain decision:
+  Use the approved route.
+
+  Routed work:
+  - sample-routed-work
+- [x] sample-aged-scout-decision-decline - Legacy declined answer (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: decline
+  Routed identities: none
+  Resolution mode: declined
+
+  Captain decision:
+  Keep the current route.
+- [x] sample-aged-scout-decision-old - Legacy answer without mode (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: old
+  Routed identities: none
+
+  Captain decision:
+  Keep the prior choice.
+- [x] sample-aged-scout-decision-bare - Legacy row without an answer (kind: captain) (done 2026-10-13)
+- [x] shadow - Exact row without an answer (kind: captain) (done 2026-10-13)
+- [x] sample-aged-scout-decision-shadow - Legacy answer behind an exact row (kind: captain) (done 2026-10-13)
+  Resolution recorded by fm-decision-hold.
+  Decision digest: shadow
+  Routed identities: none
+  Resolution mode: answered
+
+  Captain decision:
+  Choose the legacy row.
+EOF2
+  write_origin_meta "$home" "$id"
+  run_captain "$home" complete "$id" route > "$home/legacy-complete.out" 2> "$home/legacy-complete.err" \
+    || fail "a short legacy key did not complete from the archive: $(cat "$home/legacy-complete.err")"
+  run_captain "$home" verify "$id" > "$home/legacy-verify.out" 2> "$home/legacy-verify.err" \
+    || fail "a short legacy key did not verify from the archive: $(cat "$home/legacy-verify.err")"
+  cat > "$home/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = show ] && [ "${2:-}" = sample-aged-scout-decision-route ]; then
+  printf 'error: temporary legacy backlog read failure\n' >&2
+  exit 75
+fi
+exec "${REAL_TASKS_AXI:?}" "$@"
+SH
+  chmod +x "$home/fakebin/tasks-axi"
+  set +e
+  run_captain "$home" verify "$id" > "$home/legacy-read.out" 2> "$home/legacy-read.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a legacy archive answer masked an active backlog read failure"
+  assert_grep 'could not read active backlog entry sample-aged-scout-decision-route' "$home/legacy-read.err" \
+    "the legacy read failure was treated as confirmed absence"
+  rm "$home/fakebin/tasks-axi"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=sample-aged-scout-decision-route\n' >> "$home/state/$id.meta"
+  run_captain "$home" verify "$id" >/dev/null \
+    || fail "the full archived legacy task id was refused"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=decline,old\n' >> "$home/state/$id.meta"
+  run_captain "$home" verify "$id" >/dev/null \
+    || fail "legacy declined or mode-less archived answers were refused"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=bare\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/legacy-bare.out" 2> "$home/legacy-bare.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a legacy archived row without an answer passed the gate"
+  assert_grep 'sample-aged-scout-decision-bare' "$home/legacy-bare.err" \
+    "the legacy refusal did not name the derived archived task"
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=shadow\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/shadow.out" 2> "$home/shadow.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a legacy answer overrode an exact archived row without an answer"
+  assert_grep 'shadow is archived in the Done retention archive without a recorded captain answer' "$home/shadow.err" \
+    "the exact archived row did not take priority over the legacy answer"
+
+  # Still refusing: archived under a different origin.
+  cat >> "$home/data/done-archive.md" <<'EOF2'
+- [x] aged-call-other - Another origin's question (kind: captain) (done 2026-10-13) (hold-kind: captain)
+  Captain hold origin: some-other-origin
+  Resolution recorded by fm-captain-hold.
+  Decision digest: ccc
+  Resolution mode: answered
+
+  Captain decision:
+  Go.
+EOF2
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-other\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/other.out" 2> "$home/other.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "a call archived for another origin passed the gate"
+  assert_grep "was held for origin some-other-origin" "$home/other.err" \
+    "the refusal did not name the archived call's origin"
+
+  # Still refusing: an id found nowhere.
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-nowhere\n' >> "$home/state/$id.meta"
+  set +e
+  run_captain "$home" verify "$id" > "$home/nowhere.out" 2> "$home/nowhere.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "an id found nowhere passed the gate"
+  assert_grep "aged-call-nowhere" "$home/nowhere.err" "the refusal did not name the missing id"
+  assert_grep "Done retention archive" "$home/nowhere.err" \
+    "the refusal did not say the archive was consulted"
+  if run_teardown "$home" "$id" > "$home/refused.out" 2> "$home/refused.err"; then
+    fail "teardown accepted an inventory naming an id found nowhere"
+  fi
+  assert_present "$home/state/$id.meta" "refused cleanup removed the task metadata"
+
+  mv "$home/data/done-archive.md" "$home/data/decisions#2026.md"
+  sed -i 's|archive = "data/done-archive.md"|archive = "data/decisions#2026.md"   |' "$home/.tasks.toml"
+  # Cleanup of the finished task proceeds once its calls are all archived answers.
+  write_origin_meta "$home" "$id"
+  printf 'decisions_reviewed=1\ndecision_keys=aged-call-a,aged-call-b\n' >> "$home/state/$id.meta"
+  run_teardown "$home" "$id" > "$home/teardown.out" 2> "$home/teardown.err" \
+    || fail "cleanup was refused by aged-out answered calls: $(cat "$home/teardown.err")"
+  assert_absent "$home/state/$id.meta" "cleanup kept the finished task's metadata"
+  pass "aged-out answered captain calls do not block cleanup, and unproven ones still refuse"
+}
+
 # The completion gate on the collapsed primitive: an origin with open keyed
 # status decisions refuses --none, refuses an inventory naming absent tasks,
 # attests a verified inventory of captain-held task ids, and transfers every
@@ -5436,6 +5709,7 @@ test_complete_refuses_an_entry_held_for_another_origin
 test_uninventoried_report_decision_refuses_completion
 test_hold_decodes_a_bare_scalar_body_without_the_nonref_default
 test_retained_body_keeps_its_utf8_bytes
+test_aged_out_answered_calls_do_not_block_cleanup
 test_completion_gate_attests_and_transfers
 test_answer_records_and_closes
 test_release_frees_held_work
