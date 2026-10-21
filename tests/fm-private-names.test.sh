@@ -975,6 +975,44 @@ test_scrub_apply_rechecks_live_visibility() {
   pass "scrub apply bypasses stale public visibility before mutating a repository"
 }
 
+test_scrub_ssh_repository_urls() {
+  local d=$TMP_ROOT/scrub-ssh home log remote_log repo out
+  home=$d/home
+  make_home "$home"
+  FAKEBIN=$(make_fake_gh "$d")
+  log=$d/gh.log
+  remote_log=$d/remote.log
+  printf '%s\t%s\t%s\t%s\n' 17 OPEN "$(b64 'Ship acme-test work')" "$(b64 'Clean body')" >"$d/prs.tsv"
+  cat >"$FAKEBIN/git" <<SH
+#!/usr/bin/env bash
+if [ "\$1" = ls-remote ]; then
+  printf '%s\n' "\$3" >>"\${FAKE_GIT_REMOTE_LOG:?}"
+  exit 2
+fi
+exec "$(command -v git)" "\$@"
+SH
+  chmod +x "$FAKEBIN/git"
+  export FAKE_GH_LOG=$log FAKE_GH_PRS=$d/prs.tsv FAKE_GH_VIS=public FAKE_GIT_REMOTE_LOG=$remote_log
+  for repo in git@forge.example.invalid:example/public-repo.git \
+    ssh://git@forge.example.invalid/example/public-repo.git; do
+    : >"$log"
+    : >"$remote_log"
+    out=$(GH_HOST=ambient.example.invalid PATH="$FAKEBIN:$BASE_PATH" FM_HOME=$home \
+      "$SCRUB" --repo "$repo" --pr 17 --apply 2>&1) ||
+      fail "SSH repository scrub failed: $out"
+    assert_contains "$(cat "$log")" "[api] [repos/example/public-repo] [--hostname] [forge.example.invalid]" \
+      "the SSH repository visibility lookup used the wrong destination"
+    assert_contains "$(cat "$log")" "[pr] [view] [17] [--repo] [forge.example.invalid/example/public-repo]" \
+      "the SSH repository PR read used the wrong destination"
+    assert_contains "$(cat "$log")" "[pr] [edit] [17] [--repo] [forge.example.invalid/example/public-repo]" \
+      "the SSH repository PR edit used the wrong destination"
+    assert_equals "https://forge.example.invalid/example/public-repo.git" "$(cat "$remote_log")" \
+      "the SSH repository evidence remote used the wrong destination"
+  done
+  unset FAKE_GH_LOG FAKE_GH_PRS FAKE_GH_VIS FAKE_GIT_REMOTE_LOG
+  pass "scrub normalizes both SSH repository URL forms for PRs and evidence"
+}
+
 test_scrub_refreshes_registered_names() {
   local d=$TMP_ROOT/scrub-stale home bad log out
   home=$d/home
@@ -1724,6 +1762,7 @@ test_no_mistakes_shim_checks_public_inputs
 test_visibility_asks_github_once_and_caches
 test_scrub_tool_dry_run_and_apply
 test_scrub_apply_rechecks_live_visibility
+test_scrub_ssh_repository_urls
 test_scrub_refreshes_registered_names
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard
 test_tag_messages_and_no_verify_pushes_are_refused

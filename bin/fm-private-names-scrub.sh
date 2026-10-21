@@ -72,6 +72,18 @@ case "$REPO" in
     GH_REPO=${REPO#https://"$GH_HOSTNAME"/}
     GH_REPO=${GH_REPO%.git}
     ;;
+  ssh://git@*/*)
+    GH_HOSTNAME=${REPO#ssh://git@}
+    GH_HOSTNAME=${GH_HOSTNAME%%/*}
+    GH_REPO=${REPO#ssh://git@"$GH_HOSTNAME"/}
+    GH_REPO=${GH_REPO%.git}
+    ;;
+  git@*:*/*)
+    GH_HOSTNAME=${REPO#git@}
+    GH_HOSTNAME=${GH_HOSTNAME%%:*}
+    GH_REPO=${REPO#git@"$GH_HOSTNAME":}
+    GH_REPO=${GH_REPO%.git}
+    ;;
   */*) GH_HOSTNAME=github.com; GH_REPO=$REPO ;;
   *) usage ;;
 esac
