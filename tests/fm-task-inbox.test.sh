@@ -802,6 +802,80 @@ test_watcher_retries_doorbell_after_busy_escalation() {
   pass "watcher: after busy escalation an idle pane is rung until acknowledgement, with one wake"
 }
 
+test_watcher_rearms_legacy_busy_escalation() {
+  local dir rec rings
+  dir=$(busy_case legacy-busy-escalation)
+  rec="$dir/state/t1.inbox/001.msg"
+  printf '%s\n' "${rec##*/}" > "$dir/state/t1.inbox/.escalated"
+  printf '%s\t2\n' "${rec##*/}" > "$dir/state/t1.inbox/.busy-state"
+  printf 'existing stale wake\n' > "$dir/state/.wake-queue"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "legacy busy escalation did not resume its doorbell"
+  [ "$(cut -f1 "$dir/state/t1.inbox/.escalation-retry")" = "${rec##*/}" ] \
+    || fail "legacy busy escalation did not start its retry generation"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
+    || fail "legacy busy retry ignored its spacing"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "legacy busy retry queued another escalation wake"
+  pass "watcher: a legacy busy escalation resumes paced retries without another wake"
+}
+
+test_watcher_keeps_legacy_nonbusy_escalation_quiet() {
+  local dir rec
+  dir=$(busy_case legacy-nonbusy-escalation)
+  rec="$dir/state/t1.inbox/001.msg"
+  printf '%s\n' "${rec##*/}" > "$dir/state/t1.inbox/.escalated"
+  printf 'other.msg\t2\n' > "$dir/state/t1.inbox/.busy-state"
+  printf 'existing stale wake\n' > "$dir/state/.wake-queue"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "legacy non-busy escalation rang a doorbell"
+  [ ! -e "$dir/state/t1.inbox/.escalation-retry" ] \
+    || fail "legacy non-busy escalation started a retry generation"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "legacy non-busy escalation queued another wake"
+  pass "watcher: a legacy non-busy escalation stays quiet"
+}
+
+test_watcher_dead_after_busy_deferral_stays_quiet() {
+  local dir
+  dir=$(busy_case dead-after-busy)
+  busy_steer_check "$dir"
+  FM_FAKE_TMUX_AGENT=zsh busy_steer_check "$dir"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  [ ! -s "$dir/send.log" ] || fail "a dead-pane escalation resumed the busy retry"
+  [ ! -e "$dir/state/t1.inbox/.escalation-retry" ] \
+    || fail "a dead-pane escalation opened a busy retry generation"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "a dead-pane escalation queued another wake"
+  pass "watcher: a dead pane after one busy deferral stays quiet"
+}
+
+test_watcher_paces_retry_when_bookkeeping_fails() {
+  local dir rec marker rings
+  dir=$(busy_case escalation-retry-bookkeeping)
+  rec="$dir/state/t1.inbox/001.msg"
+  busy_steer_check "$dir"
+  busy_steer_check "$dir"
+  block_busy_reset "$dir"
+  marker="$dir/state/t1.inbox/.escalation-retry"
+  chmod a-w "$marker"
+  busy_steer_check "$dir" "$(idle_capture "$dir")"
+  rings=$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)
+  [ "$rings" = 1 ] || fail "post-escalation retry did not ring when bookkeeping failed"
+  [ "$(cut -f2 "$marker")" = 0 ] || fail "retry write failure did not leave the old attempt time"
+  busy_steer_check "$dir" "$(idle_capture "$dir")" 2 3600
+  [ "$(grep -cF 'Firstmate instruction waiting' "$dir/send.log" || true)" = 1 ] \
+    || fail "retry write failure lost ring spacing"
+  [ "$(wc -l < "$dir/state/.wake-queue" | tr -d ' ')" = 1 ] \
+    || fail "post-escalation bookkeeping failure queued another wake"
+  chmod u+w "$marker"
+  rm "$dir/fakebin/rm"
+  [ -f "$rec" ] || fail "post-escalation bookkeeping failure lost the record"
+  pass "watcher: post-escalation bookkeeping failures preserve spacing and wake deduplication"
+}
+
 test_watcher_busy_budget_resets_on_ring_and_ack() {
   local dir rec
   dir=$(busy_case busy-reset)
@@ -1270,6 +1344,10 @@ test_ring_ladder_policy
 test_watcher_rerings_idle_pane_quietly
 test_watcher_waits_on_busy_pane
 test_watcher_retries_doorbell_after_busy_escalation
+test_watcher_rearms_legacy_busy_escalation
+test_watcher_keeps_legacy_nonbusy_escalation_quiet
+test_watcher_dead_after_busy_deferral_stays_quiet
+test_watcher_paces_retry_when_bookkeeping_fails
 test_watcher_busy_budget_resets_on_ring_and_ack
 test_watcher_busy_bookkeeping_failure_surfaces
 test_watcher_successor_busy_reset_failure_surfaces idle

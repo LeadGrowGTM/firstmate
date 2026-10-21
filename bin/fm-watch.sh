@@ -514,6 +514,7 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
     fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true
     return 0
   fi
+  fm_task_inbox_clear_busy "$STATE" "$task" "$rec" || true
   fm_wake_append stale "$w" "$reason" || exit 1
   if ! fm_task_inbox_record_escalated "$STATE" "$task" "$rec"; then
     echo "error: stale wake was queued for $task but its inbox escalation marker could not be written" >&2
@@ -580,7 +581,7 @@ inbox_steer_check() {  # <window> <task>
       return 0
     fi
     verb=escalate
-  elif [ "$verb" != retry ] && ! fm_task_inbox_clear_busy "$STATE" "$task"; then
+  elif [ "$verb" != retry ] && ! fm_task_inbox_is_escalated "$STATE" "$task" "$rec" && ! fm_task_inbox_clear_busy "$STATE" "$task" "$rec"; then
     reason="stale: $w (steering-inbox busy bookkeeping unwritable: ${rec%/*}/.busy-state cannot be reset after a non-busy check; inspect the inbox directory)"
     verb=escalate
   fi
@@ -598,6 +599,7 @@ inbox_steer_check() {  # <window> <task>
           return 0
         fi
         if [ -d "${rec%/*}" ]; then
+          fm_task_inbox_is_escalated "$STATE" "$task" "$rec" && return 0
           reason="stale: $w (steering-inbox ladder bookkeeping unwritable: ${rec%/*}/.ring-state cannot be written while $rec stays unhandled; the doorbell cannot advance toward escalation - inspect the inbox directory)"
           fm_wake_append stale "$w" "$reason" || exit 1
           wake "$reason"

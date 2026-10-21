@@ -32,7 +32,7 @@
 #   <task>.inbox/.escalated    oldest-message name already surfaced as stale,
 #                              so later polls suppress another escalation wake
 #   <task>.inbox/.escalation-retry
-#                              stuck-busy retry generation: "<msg>\t<count>\t<epoch>".
+#                              stuck-busy retry generation: "<msg>\t<epoch>".
 #                              Written once when a busy deferral escalates.
 #                              Later non-busy due polls ring until acknowledgement.
 #                              The escalation marker stays, so this generation
@@ -158,10 +158,16 @@ fm_task_inbox_record_busy() {  # <state-dir> <task-id> <record-path>
   printf '%s' "$count"
 }
 
-fm_task_inbox_clear_busy() {  # <state-dir> <task-id>
+fm_task_inbox_clear_busy() {  # <state-dir> <task-id> <record-path>
   local dir
   dir=$(fm_task_inbox_dir "$1" "$2")
-  rm -f "$dir/.busy-state" 2>/dev/null
+  if rm -f "$dir/.busy-state" 2>/dev/null; then
+    return 0
+  fi
+  if [ "$(cut -f1 "$dir/.busy-state" 2>/dev/null || true)" = "${3##*/}" ]; then
+    : > "$dir/.busy-state" 2>/dev/null || true
+  fi
+  return 1
 }
 
 fm_task_inbox_dir() {  # <state-dir> <task-id>
@@ -503,7 +509,10 @@ EOF
   case "$count" in ''|*[!0-9]*) count=0 ;; esac
   case "$last" in ''|*[!0-9]*) last=0 ;; esac
   if [ "$(cat "$dir/.escalated" 2>/dev/null || true)" = "$base" ]; then
-    if fm_task_inbox_escalation_retry_is_due "$dir" "$base" "$grace"; then
+    if [ ! -e "$dir/.escalation-retry" ] && [ "$(cut -f1 "$dir/.busy-state" 2>/dev/null || true)" = "$base" ]; then
+      fm_task_inbox_begin_escalation_retry "$1" "$2" "$oldest" || true
+    fi
+    if fm_task_inbox_escalation_retry_is_due "$dir" "$base" "$grace" "$last"; then
       printf 'ring %s' "$oldest"
       return 0
     fi
@@ -544,9 +553,12 @@ EOF
   [ -d "$dir" ] || return 0
   if ! { printf '%s\t%s\t%s\n' "$base" "$((count + 1))" "$(date +%s)" > "$dir/.ring-state"; } 2>/dev/null; then
     [ -d "$dir" ] || return 0
+    if fm_task_inbox_is_escalated "$1" "$2" "$3" && [ -f "$dir/.escalation-retry" ]; then
+      fm_task_inbox_touch_escalation_retry "$dir" "$base" && return 0
+    fi
     return 1
   fi
-  fm_task_inbox_touch_escalation_retry "$dir" "$base"
+  fm_task_inbox_touch_escalation_retry "$dir" "$base" || fm_task_inbox_is_escalated "$1" "$2" "$3"
 }
 
 # 0 when the current oldest already has its one escalation wake.
@@ -564,7 +576,7 @@ fm_task_inbox_begin_escalation_retry() {  # <state-dir> <task-id> <record-path>
   dir=$(fm_task_inbox_dir "$1" "$2")
   [ -d "$dir" ] || return 0
   [ -f "$3" ] || return 0
-  if ! { printf '%s\t0\t0\n' "${3##*/}" > "$dir/.escalation-retry"; } 2>/dev/null; then
+  if ! { printf '%s\t0\n' "${3##*/}" > "$dir/.escalation-retry"; } 2>/dev/null; then
     [ -d "$dir" ] || return 0
     return 1
   fi
@@ -573,17 +585,16 @@ fm_task_inbox_begin_escalation_retry() {  # <state-dir> <task-id> <record-path>
 # 0 when this basename's stuck-busy generation is due for another doorbell.
 # No generation, another message's generation, or a ring still inside grace
 # is not due. Ring-budget and unavailable escalations therefore stay quiet.
-fm_task_inbox_escalation_retry_is_due() {  # <inbox-dir> <basename> <grace-secs>
-  local gen rec_base count last now
+fm_task_inbox_escalation_retry_is_due() {  # <inbox-dir> <basename> <grace-secs> <ladder-last>
+  local gen rec_base last now
   gen=$(cat "$1/.escalation-retry" 2>/dev/null || true)
   [ -n "$gen" ] || return 1
-  IFS=$(printf '\t') read -r rec_base count last <<EOF
+  IFS=$(printf '\t') read -r rec_base last <<EOF
 $gen
 EOF
   [ "$rec_base" = "$2" ] || return 1
-  case "$count" in ''|*[!0-9]*) return 1 ;; esac
   case "$last" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$last" -gt 0 ] || return 0
+  [ "$last" -ge "$4" ] || last=$4
   now=$(date +%s)
   [ "$((now - last))" -ge "$3" ]
 }
@@ -591,17 +602,16 @@ EOF
 # Advance the stuck-busy generation after a delivery attempt for its message.
 # Absent, or naming another message, it stays untouched.
 fm_task_inbox_touch_escalation_retry() {  # <inbox-dir> <basename>
-  local gen rec_base count last
+  local gen rec_base last
   [ -f "$1/.escalation-retry" ] || return 0
   gen=$(cat "$1/.escalation-retry" 2>/dev/null || true)
-  IFS=$(printf '\t') read -r rec_base count last <<EOF
+  IFS=$(printf '\t') read -r rec_base last <<EOF
 $gen
 EOF
   [ "$rec_base" = "$2" ] || return 0
-  case "$count" in ''|*[!0-9]*) count=0 ;; esac
   case "$last" in ''|*[!0-9]*) return 1 ;; esac
   [ -d "$1" ] || return 0
-  if ! { printf '%s\t%s\t%s\n' "$2" "$((count + 1))" "$(date +%s)" > "$1/.escalation-retry"; } 2>/dev/null; then
+  if ! { printf '%s\t%s\n' "$2" "$(date +%s)" > "$1/.escalation-retry"; } 2>/dev/null; then
     [ -d "$1" ] || return 0
     return 1
   fi
