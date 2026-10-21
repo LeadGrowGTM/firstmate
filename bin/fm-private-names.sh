@@ -123,7 +123,7 @@ emit_project_name() {  # <name>
 emit_home_records() {  # <data-dir> <projects-dir> <with-routes:0|1>
   local data=$1 projects=$2 routes=$3 line name token dir url home
   if [ -f "$data/projects.md" ]; then
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in '- '*) ;; *) continue ;; esac
       name=${line#- }
       name=${name%% \[*}
@@ -143,7 +143,7 @@ emit_home_records() {  # <data-dir> <projects-dir> <with-routes:0|1>
     done
   fi
   [ -f "$data/secondmates.md" ] || return 0
-  while IFS= read -r line; do
+  while IFS= read -r line || [ -n "$line" ]; do
     secondmate_registry_parse_line "$line" || continue
     printf 'mate %s\n' "$SECONDMATE_REGISTRY_ID"
     for token in ${SECONDMATE_REGISTRY_PROJECTS//,/ }; do
@@ -159,10 +159,13 @@ emit_home_records() {  # <data-dir> <projects-dir> <with-routes:0|1>
   done <"$data/secondmates.md"
 }
 
-cmd_refresh() {
+cmd_refresh() (
   [ "$#" -eq 0 ] || usage
   local out=$FM_PN_LIST tmp derived parent
   mkdir -p "$(dirname "$out")" 2>/dev/null || return 1
+  . "$SCRIPT_DIR/fm-wake-lib.sh"
+  fm_lock_acquire_wait "$out.lock" || return 1
+  trap 'fm_lock_release "$out.lock"' EXIT
   # A second mate home on this machine also takes its primary's whole list, so
   # every home refuses the same names. The list is read from disk rather than
   # pushed as inherited config, which would paste it into the mate's context.
@@ -223,17 +226,20 @@ cmd_refresh() {
     return 1
   }
   echo "private-names: $(fm_pn_count) names in config/private-names"
-}
+)
 
 # Record this home against every local no-mistakes gate its clones push
 # through, so the pipeline's own private-names gate (see cmd_gate) finds this
 # home's list from the gate's run worktree, which carries no FM_HOME. One file
 # per gate id, one tab-separated "home config state data projects" line per
 # home; a home rewrites only its own line.
-register_gates() {
+register_gates() (
   local index dir url id file tmp line
   index=$(fm_pn_gate_index) || return 1
   [ -d "$PROJECTS" ] || return 0
+  mkdir -p "$index" && chmod 700 "$index" 2>/dev/null || return 1
+  fm_lock_acquire_wait "$index/.private-names.lock" || return 1
+  trap 'fm_lock_release "$index/.private-names.lock"' EXIT
   line=$(printf '%s\t%s\t%s\t%s\t%s' "$(abs_dir "$FM_HOME")" "$(abs_dir "$CONFIG")" \
     "$(abs_dir "$STATE")" "$(abs_dir "$DATA")" "$(abs_dir "$PROJECTS")")
   for dir in "$PROJECTS"/*/; do
@@ -244,7 +250,6 @@ register_gates() {
     id=${url%.git}
     id=${id##*/}
     case "$id" in '' | *[!A-Za-z0-9_-]*) continue ;; esac
-    mkdir -p "$index" && chmod 700 "$index" 2>/dev/null || return 1
     file=$index/$id
     tmp=$(mktemp "$index/.$id.XXXXXX") || return 1
     {
@@ -260,7 +265,7 @@ register_gates() {
       return 1
     }
   done
-}
+)
 
 abs_dir() {  # <dir>
   (CDPATH='' cd -- "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"
@@ -289,7 +294,7 @@ sources_newer_for_home() {  # <data-dir> <projects-dir>
   local data=$1 projects=$2 line home
   source_newer_in_home "$data" "$projects" && return 0
   if [ -f "$data/secondmates.md" ]; then
-    while IFS= read -r line; do
+    while IFS= read -r line || [ -n "$line" ]; do
       secondmate_registry_parse_line "$line" || continue
       [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] || continue
       home=$SECONDMATE_REGISTRY_HOME
@@ -346,6 +351,10 @@ report_hits() {  # <label> [noline]
     fi
   done <<<"$hits"
   return 1
+}
+
+has_encoded_ascii_escape() {
+  perl -e 'local $/; my $text = <STDIN> // ""; exit 0 if $text =~ /\\[nrtbf]/; while ($text =~ /\\u([0-9a-fA-F]{4})/g) { exit 0 if hex($1) < 128 } exit 1'
 }
 
 cmd_check() {
@@ -414,9 +423,9 @@ new_paths() {  # <sha>
 
 changed_paths() {  # <sha> <filter>
   if git rev-parse -q --verify "$1^" >/dev/null 2>&1; then
-    git diff --name-only -M -C --diff-filter="$2" "$1^" "$1"
+    git diff --name-only -z -M -C --diff-filter="$2" "$1^" "$1"
   else
-    git diff-tree --root --no-commit-id --name-only -r -M -C --diff-filter="$2" "$1"
+    git diff-tree --root --no-commit-id --name-only -z -r -M -C --diff-filter="$2" "$1"
   fi
 }
 
@@ -500,7 +509,7 @@ scan_outgoing() {  # <dest>
       return 1
     }
     for sha in $commits; do
-      if ! git log -1 --format=%B "$sha" | report_hits "the message of commit ${sha:0:12}"; then
+      if ! git cat-file commit "$sha" | report_hits "the object of commit ${sha:0:12}"; then
         rc=1
       fi
       # Only what this commit adds is judged: paths it adds, renames, or
@@ -508,14 +517,14 @@ scan_outgoing() {  # <dest>
       # diff headers, and the paths of files it only modifies or deletes are
       # existing tree, never outgoing content. One pass over the whole commit;
       # only a hit pays for the per-file pass that locates it.
-      if ! { new_paths "$sha"
+      if ! { new_paths "$sha" | tr '\0' '\n'
         added_lines "$sha"; } | report_hits "commit ${sha:0:12}" 2>/dev/null; then
         rc=1
-        while IFS= read -r path; do
+        while IFS= read -r -d '' path; do
           printf '%s\n' "$path" |
             report_hits "a file path added in commit ${sha:0:12} ($(fm_pn_scrub_string "$path"))" noline
         done < <(new_paths "$sha")
-        while IFS= read -r path; do
+        while IFS= read -r -d '' path; do
           [ -n "$path" ] || continue
           added_lines "$sha" "$path" |
             report_hits "an added line of $(fm_pn_scrub_string "$path") in commit ${sha:0:12}" noline
@@ -933,7 +942,11 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
       esac
       ;;
     "repo edit" | "repo rename" | "repo fork")
-      [ "$action" = edit ] && [ -n "${positional[2]:-}" ] && case "${args[${positional[2]}]}" in */*) target=${args[${positional[2]}]} ;; esac
+      case "$action" in
+        edit | fork)
+          [ -n "${positional[2]:-}" ] && case "${args[${positional[2]}]}" in */*) target=${args[${positional[2]}]} ;; esac
+          ;;
+      esac
       ;;
   esac
   if [ -n "$target" ]; then
@@ -991,6 +1004,10 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
   for copy in "${files[@]}"; do
     report_hits "the $command text file" <"$copy" || rc=1
   done
+  if [ -n "$workflow_json" ] && has_encoded_ascii_escape <"$workflow_json"; then
+    echo "fm-private-names: refusing encoded workflow JSON text on a public repository" >&2
+    rc=1
+  fi
   for j in "${texts[@]}"; do
     printf '%s\n' "$j" | report_hits "the $command text" || rc=1
   done
@@ -1029,7 +1046,13 @@ gh_api_guard() {  # <tool> <real> <arg>...
     case "$token" in
       --*=*) option=${token%%=*}; prefix=$option=; value=${token#*=}; value_idx=$i ;;
       --*) ;;
-      -??*) option=${token:0:2}; prefix=$option; value=${token:2}; value_idx=$i ;;
+      -??*)
+        option=${token:0:2}; prefix=$option; value=${token:2}; value_idx=$i
+        if [ "${value:0:1}" = = ]; then
+          prefix+='='
+          value=${value#=}
+        fi
+        ;;
     esac
     case "$option" in
       -X | --method | -f | --raw-field | -F | --field | --input | --hostname | -H | --header | \
@@ -1044,9 +1067,10 @@ gh_api_guard() {  # <tool> <real> <arg>...
     case "$option" in
       -X | --method) method=$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]') ;;
       --hostname) host=$value ;;
-      -f | --raw-field) fields=1; texts+=("${value#*=}"); visibility_fields+=("$value") ;;
+      -f | --raw-field) fields=1; texts+=("${value%%=*}" "${value#*=}"); visibility_fields+=("$value") ;;
       -F | --field)
         fields=1
+        texts+=("${value%%=*}")
         case "${value#*=}" in
           @*)
             copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
@@ -1081,9 +1105,11 @@ gh_api_guard() {  # <tool> <real> <arg>...
   if [ "$endpoint" = graphql ]; then
     for j in "${texts[@]}"; do
       printf '%s\n' "$j" | grep -q -i 'mutation' && mutation=1
+      printf '%s\n' "$j" | has_encoded_ascii_escape && mutation=1
     done
     for copy in "${files[@]}"; do
       grep -q -i 'mutation' "$copy" && mutation=1
+      has_encoded_ascii_escape <"$copy" && mutation=1
     done
     if [ "$mutation" = 0 ]; then
       "$real" "${args[@]}"
@@ -1149,9 +1175,17 @@ gh_api_guard() {  # <tool> <real> <arg>...
   printf '%s\n' "$endpoint" | report_hits "the api endpoint" || rc=1
   for copy in "${files[@]}"; do
     report_hits "the api input" <"$copy" || rc=1
+    if has_encoded_ascii_escape <"$copy"; then
+      echo "fm-private-names: refusing encoded api input on a public destination" >&2
+      rc=1
+    fi
   done
   for j in "${texts[@]}"; do
     printf '%s\n' "$j" | report_hits "an api field" || rc=1
+    if printf '%s\n' "$j" | has_encoded_ascii_escape; then
+      echo "fm-private-names: refusing encoded api field on a public destination" >&2
+      rc=1
+    fi
   done
   if [ "$rc" -ne 0 ]; then
     echo "fm-private-names: refusing $tool api write to a public destination; replace the listed names with their neutral ids" >&2
@@ -1266,7 +1300,8 @@ cmd_gate_check() {
   git diff --no-color --no-ext-diff --unified=0 HEAD |
     awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }' |
     report_hits "an uncommitted change" noline || rc=1
-  git diff --name-only -M --diff-filter=ACR HEAD | report_hits "an uncommitted file path" noline || rc=1
+  git diff --name-only -z -M --diff-filter=ACR HEAD | tr '\0' '\n' |
+    report_hits "an uncommitted file path" noline || rc=1
   while IFS= read -r -d '' path; do
     label="uncommitted binary content of $(fm_pn_scrub_string "$path")"
     report_hits "$label" noline <"$path" || rc=1

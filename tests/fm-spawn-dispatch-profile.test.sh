@@ -600,7 +600,7 @@ test_non_cursor_launch_clears_inherited_cursor_markers() {
 }
 
 test_relative_home_overrides_launch_with_absolute_cross_process_paths() {
-  local rec id out status launch home_real
+  local rec id out status launch home_real origin
   id="profile-relative-paths-z1b"
   rec=$(make_spawn_case profile-relative-paths pi "$id")
   read_case_record "$rec"
@@ -625,6 +625,15 @@ test_relative_home_overrides_launch_with_absolute_cross_process_paths() {
     "relative FM_STATE_OVERRIDE leaked into Pi's cross-process extension path"
   assert_contains "$launch" "< '$home_real/data/$id/launch-brief.md'" \
     "relative FM_DATA_OVERRIDE leaked into the cross-process brief path"
+  origin=$(git -C "$WT_DIR" remote get-url origin)
+  printf '%s public\n' "$origin" >"$HOME_DIR/config/repo-visibility"
+  sleep 1
+  mkdir -p "$HOME_DIR/projects/gtm-client-solar-mock"
+  printf 'Route solar-mock work\n' >"$CASE_DIR/message"
+  out=$(cd "$WT_DIR" && "$HOME_DIR/state/$id.git-hooks/commit-msg" "$CASE_DIR/message" 2>&1)
+  status=$?
+  expect_code 1 "$status" "installed hook must refresh relative projects from the launch directory"
+  assert_contains "$out" 'client-' "the installed hook missed a newly registered client"
   pass "relative home overrides ignore CDPATH and become absolute before spawn launch construction"
 }
 

@@ -622,6 +622,7 @@ fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+case "$PROJECTS" in /*) ;; *) PROJECTS=$PWD/$PROJECTS ;; esac
 # Opt-in attempt receipt; ordinary spawns retain their output and exit codes.
 # shellcheck source=bin/fm-launch-outcome-lib.sh
 . "$SCRIPT_DIR/fm-launch-outcome-lib.sh"

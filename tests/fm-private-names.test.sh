@@ -222,6 +222,22 @@ test_secondmate_commit_refreshes_new_parent_records() {
   pass "a second mate refreshes parent records before a public commit"
 }
 
+test_unterminated_registry_records_are_derived() {
+  local d=$TMP_ROOT/unterminated home out
+  home=$d/home
+  make_home "$home"
+  printf '%s' '- gtm-client-orbit-mock - A made-up project (added 2026-01-01)' >"$home/data/projects.md"
+  printf '%s' '- comet-mate - A made-up route. (home: /nonexistent; scope: x; projects: none; added 2026-01-01)' >"$home/data/secondmates.md"
+  FM_HOME=$home "$PN" refresh >/dev/null || fail "refresh failed for final partial records"
+  assert_contains "$(cat "$home/config/private-names")" "client orbit-mock" "an unterminated project record was skipped"
+  assert_contains "$(cat "$home/config/private-names")" "mate comet-mate" "an unterminated mate record was skipped"
+  out=$(printf 'orbit-mock comet-mate\n' | FM_HOME=$home "$PN" check 2>&1) &&
+    fail "names from final partial records passed the check"
+  assert_contains "$out" "client-" "the final project record was not checked"
+  assert_contains "$out" "mate-" "the final mate record was not checked"
+  pass "refresh includes final registry and project records without newlines"
+}
+
 test_commit_message_is_refused_or_rewritten_on_a_public_repo() {
   local d=$TMP_ROOT/commit home out rc
   home=$d/home
@@ -312,7 +328,7 @@ test_pre_push_refuses_names_in_branch_message_patch_and_path() {
   commit_file "$REPO" m.txt clean "Mention acme-test" --no-verify
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
   fail "a commit message bypassing commit-msg was pushed"
-  assert_contains "$out" "the message of commit" "the refusal must locate the commit message"
+  assert_contains "$out" "the object of commit" "the refusal must locate the commit message"
 
   in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/clean-2 main
   in_pane "$HOOKS" commit_file "$REPO" docs/note.md "Route to Zenith-Sample today" "Add a note"
@@ -365,6 +381,25 @@ test_pre_push_checks_binary_blobs() {
     fail "a modified binary blob holding a listed name was pushed"
   assert_contains "$out" "client-1" "the modified binary refusal omitted the neutral id"
   pass "pre-push checks added and modified binary blobs without exposing matched names"
+}
+
+test_pre_push_checks_commit_metadata_and_quoted_paths() {
+  local d=$TMP_ROOT/metadata-path home out path
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/metadata
+  GIT_AUTHOR_NAME=acme-test in_pane "$HOOKS" commit_file "$REPO" meta.txt clean "Clean metadata test"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "a listed author name reached a public push"
+  assert_contains "$out" "mate-1" "the author metadata refusal omitted the neutral id"
+  git -C "$REPO" checkout -q -b fm/quoted-path main
+  path=$'docs/\tacme-test.txt'
+  in_pane "$HOOKS" commit_file "$REPO" "$path" clean "Clean path test"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "a Git-quoted listed filename reached a public push"
+  assert_contains "$out" "mate-1" "the quoted path refusal omitted the neutral id"
+  pass "pre-push checks commit metadata and lossless added paths"
 }
 
 test_new_public_branch_scans_commits_from_other_remotes() {
@@ -1124,6 +1159,14 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
     fail "workflow JSON stdin with a listed name was sent"
   [ ! -s "$log" ] || fail "the real gh ran for listed workflow JSON"
   : >"$log"
+  out=$(cd "$REPO" && printf '%s\n' '{"who":"\u0061cme-test"}' | in_pane "$HOOKS" gh workflow run ci.yml --json --repo example/public-repo 2>&1) &&
+    fail "encoded workflow JSON published a listed name"
+  [ ! -s "$log" ] || fail "the real gh ran for encoded workflow JSON"
+  : >"$log"
+  out=$(cd "$REPO" && printf '%s\n' '{"who":"\tacme-test"}' | in_pane "$HOOKS" gh workflow run ci.yml --json --repo example/public-repo 2>&1) &&
+    fail "JSON control escape hid a listed name boundary"
+  [ ! -s "$log" ] || fail "the real gh ran for escaped workflow JSON"
+  : >"$log"
   (cd "$REPO" && printf '{"who":"clean"}' | in_pane "$HOOKS" gh workflow run ci.yml --json --repo example/public-repo) ||
     fail "clean workflow JSON was refused"
   assert_contains "$(cat "$log")" 'STDIN<<' "clean workflow JSON did not reach gh stdin"
@@ -1164,6 +1207,14 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
     fail "an explicit public repository target bypassed the guard"
   [ ! -s "$log" ] || fail "real gh ran for an explicit public repository target with listed text"
   : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh repo fork example/public-repo --fork-name acme-test --clone=false 2>&1) &&
+    fail "a public fork published a listed fork name from a private checkout"
+  [ ! -s "$log" ] || fail "real gh ran for a public fork with a listed name"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh repo fork example/public-repo --fork-name clean-fork --clone=false) ||
+    fail "a clean public fork was refused"
+  assert_contains "$(cat "$log")" '[clean-fork]' "a clean public fork did not reach gh"
+  : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh issue create --title Clean --body Clean --repo example/public-repo) ||
     fail "a clean public issue was refused"
   assert_contains "$(cat "$log")" "[issue] [create]" "the clean issue did not reach gh"
@@ -1195,6 +1246,16 @@ test_gh_api_writes_are_checked() {
     fail "a gh api POST published a listed field"
   assert_contains "$out" "mate-1" "the api refusal omitted the neutral id"
   assert_not_contains "$(cat "$log")" "[title=acme-test]" "the real gh ran for a listed api field"
+  for field in -f -F --raw-field --field; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh api gists -F public=true "$field" 'files[acme-test][content]=Clean' 2>&1) &&
+      fail "an API $field key published a listed filename"
+    [ ! -s "$log" ] || fail "real gh ran for a listed API $field key"
+  done
+  : >"$log"
+  out=$(cd "$REPO" && printf 'acme-test\n' | in_pane "$HOOKS" gh api repos/example/public-repo/issues -X POST -F=body=@- 2>&1) &&
+    fail "an attached API short field published listed stdin"
+  [ ! -s "$log" ] || fail "real gh ran for a listed attached API field"
   : >"$log"
   out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/public-repo/issues/3/comments -F "body=@$d/input.json" 2>&1) &&
     fail "an api field file with a listed name was sent"
@@ -1203,12 +1264,20 @@ test_gh_api_writes_are_checked() {
     fail "an api --input with a listed name was sent"
   assert_not_contains "$(cat "$log")" "[PATCH]" "the real gh ran for a listed api input"
   : >"$log"
+  out=$(cd "$REPO" && printf '%s\n' '{"title":"\u0061cme-test"}' | in_pane "$HOOKS" gh api repos/example/public-repo/issues -X POST --input - 2>&1) &&
+    fail "encoded API JSON published a listed title"
+  [ ! -s "$log" ] || fail "real gh ran for encoded API JSON"
+  : >"$log"
   out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=mutation { addComment(input: {body: "acme-test"}) { clientMutationId } }' 2>&1) &&
     fail "a GraphQL mutation with a listed name was sent"
   : >"$log"
   out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=query Q { viewer { login } } mutation M { addComment(input: {body: "acme-test"}) { clientMutationId } }' -f operationName=M 2>&1) &&
     fail "a selected GraphQL mutation after a query was sent"
   [ ! -s "$log" ] || fail "the real gh ran for a selected GraphQL mutation"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=mutation { addComment(input: {body: "\u0061cme-test"}) { clientMutationId } }' 2>&1) &&
+    fail "an encoded GraphQL mutation published a listed body"
+  [ ! -s "$log" ] || fail "real gh ran for an encoded GraphQL mutation"
   : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=query { repository(owner: "o", name: "acme-test") { id } }' >/dev/null) ||
     fail "a read-only GraphQL query was refused"
@@ -1238,6 +1307,10 @@ test_gh_api_writes_are_checked() {
       fail "an API stdin field made a private repository public"
     [ ! -s "$log" ] || fail "real gh ran for an API stdin visibility field"
   done
+  : >"$log"
+  out=$(cd "$REPO" && printf 'false\n' | in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH -F=private=@- 2>&1) &&
+    fail "an attached API stdin field made a private repository public"
+  [ ! -s "$log" ] || fail "real gh ran for an attached API visibility field"
   : >"$log"
   out=$(cd "$REPO" && printf 'public\n' | in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH --field=visibility=@- 2>&1) &&
     fail "an API stdin visibility field made a private repository public"
@@ -1339,15 +1412,92 @@ test_pipeline_gate_checks_what_the_push_would_publish() {
   assert_contains "$(cat "$findings")" "client-1" "the gate missed an untracked file the push step would commit"
   rm -f "$run/pending.txt"
 
+  printf 'clean\n' >"$run/quoted.txt"
+  git -C "$run" add quoted.txt
+  git -C "$run" commit -q -m 'Add a clean path'
+  mv "$run/quoted.txt" "$run/"$'\t'"acme-test.txt"
+  git -C "$run" add -A
+  : >"$findings"
+  (cd "$run" && NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1)
+  assert_contains "$(cat "$findings")" "mate-1" "the gate missed a staged Git-quoted path"
+  git -C "$run" reset -q --hard HEAD
+
   rm -f "$index"
   out=$(cd "$run" && "$PN" gate 2>&1) || fail "an unregistered gate failed instead of passing"
   assert_contains "$out" "nothing to check" "an unregistered gate did not say why it passed"
   pass "the pipeline gate checks commits, uncommitted and untracked changes against every registered home"
 }
 
+test_parallel_refreshes_preserve_lists_and_gate_registrations() {
+  local d=$TMP_ROOT/parallel-refresh home one two gate index marker pid i fakebin real_mv real_awk
+  home=$d/list-home
+  make_home "$home"
+  printf '%s\n' '- gtm-client-early-mock - A made-up client (added 2026-01-01)' >"$home/data/projects.md"
+  fakebin=$d/fakebin
+  mkdir -p "$fakebin"
+  real_mv=$(command -v mv)
+  real_awk=$(command -v awk)
+  cat >"$fakebin/mv" <<'SH'
+#!/usr/bin/env bash
+if [ "${FM_TEST_SLOW_LIST:-0}" = 1 ]; then
+  case "$2" in
+    */config/private-names) : >"$FM_TEST_MARKER"; sleep 1 ;;
+  esac
+fi
+exec "$FM_TEST_REAL_MV" "$@"
+SH
+  cat >"$fakebin/awk" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -F ] && [ "${FM_HOME:-}" = "${FM_TEST_SLOW_GATE_HOME:-}" ]; then
+  saved=$("$FM_TEST_REAL_AWK" "$@") || exit 1
+  : >"$FM_TEST_MARKER"
+  sleep 1
+  [ -z "$saved" ] || printf '%s\n' "$saved"
+  exit 0
+fi
+exec "$FM_TEST_REAL_AWK" "$@"
+SH
+  chmod +x "$fakebin/mv" "$fakebin/awk"
+  marker=$d/list-marker
+  FM_HOME=$home FM_TEST_SLOW_LIST=1 FM_TEST_MARKER=$marker FM_TEST_REAL_MV=$real_mv FM_TEST_REAL_AWK=$real_awk \
+    PATH="$fakebin:$PATH" "$PN" refresh >"$d/list-first.out" 2>&1 &
+  pid=$!
+  for ((i = 0; i < 500; i++)); do [ -f "$marker" ] && break; sleep 0.01; done
+  [ -f "$marker" ] || fail "the first refresh did not reach its list write"
+  printf '%s\n' '- gtm-client-later-mock - A made-up client (added 2026-01-02)' >"$home/data/projects.md"
+  FM_HOME=$home "$PN" refresh >/dev/null || fail "a concurrent list refresh failed"
+  wait "$pid" || fail "the first list refresh failed"
+  assert_contains "$(cat "$home/config/private-names")" 'client later-mock' \
+    "a stale concurrent refresh replaced the new client list"
+
+  one=$d/one
+  two=$d/two
+  gate=$d/abc123def456.git
+  git init -q --bare "$gate"
+  for home in "$one" "$two"; do
+    make_home "$home"
+    git init -q "$home/projects/demo"
+    git -C "$home/projects/demo" remote add no-mistakes "$gate"
+  done
+  FM_HOME=$one "$PN" refresh >/dev/null || fail "initial gate registration failed"
+  index=$XDG_STATE_HOME/firstmate/private-names-gates/abc123def456
+  marker=$d/gate-marker
+  FM_HOME=$one FM_TEST_SLOW_GATE_HOME=$one FM_TEST_MARKER=$marker FM_TEST_REAL_AWK=$real_awk FM_TEST_REAL_MV=$real_mv \
+    PATH="$fakebin:$PATH" "$PN" refresh >"$d/gate-first.out" 2>&1 &
+  pid=$!
+  for ((i = 0; i < 500; i++)); do [ -f "$marker" ] && break; sleep 0.01; done
+  [ -f "$marker" ] || fail "the first gate registration did not reach its index read"
+  FM_HOME=$two "$PN" refresh >/dev/null || fail "a concurrent gate registration failed"
+  wait "$pid" || fail "the first gate registration failed"
+  assert_contains "$(cat "$index")" "$one/config" "the first home vanished from the gate index"
+  assert_contains "$(cat "$index")" "$two/config" "a concurrent home vanished from the gate index"
+  pass "parallel refreshes preserve newly derived names and both gate registrations"
+}
+
 test_refresh_derives_names_from_local_records
 test_secondmate_refresh_merges_the_primary_list
 test_secondmate_commit_refreshes_new_parent_records
+test_unterminated_registry_records_are_derived
 test_existing_tree_never_blocks_an_unrelated_push
 test_commit_message_is_refused_or_rewritten_on_a_public_repo
 test_private_repo_passes_untouched
@@ -1355,6 +1505,7 @@ test_empty_list_on_a_public_repo_refuses
 test_private_home_path_stays_out_of_guard_output
 test_pre_push_refuses_names_in_branch_message_patch_and_path
 test_pre_push_checks_binary_blobs
+test_pre_push_checks_commit_metadata_and_quoted_paths
 test_new_public_branch_scans_commits_from_other_remotes
 test_stale_registered_name_is_refreshed_before_commit
 test_evidence_push_with_a_listed_name_is_refused
@@ -1376,5 +1527,6 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text
 test_gh_api_writes_are_checked
 test_no_mistakes_shim_checks_instructions_and_withholds_intent
 test_pipeline_gate_checks_what_the_push_would_publish
+test_parallel_refreshes_preserve_lists_and_gate_registrations
 
 echo "# all fm-private-names tests passed"
