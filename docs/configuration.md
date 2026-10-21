@@ -1531,6 +1531,7 @@ Elapsed time is the fraction of that length already gone before `resetsAt`, expr
 The pace check trips only when usage minus elapsed time is strictly greater than `pace_margin_points`.
 A reset time in the past, or one that cannot be parsed, is treated as a missing reading and skips the pace check.
 When the check trips, the launch goes to the first available preference: Grok, then Muse, then Claude Sonnet.
+When Sonnet is the remaining preference and the requested model is already Sonnet, the guard keeps the requested model and effort, records that the Sonnet profile was kept, and proceeds under the Claude worker cap.
 That order stands when the chosen profile declares a weaker reasoning class than the requested Claude profile.
 Ordinary dispatch still keeps the strongest reasoning class when this pace check has not tripped.
 With a selected or uniquely inferred dispatch rule, only profiles listed by that rule are eligible, and the chosen rule stays attached to a rerouted launch; when none is available, the launch exits 75 and leaves its backlog item queued.

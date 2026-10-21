@@ -26,6 +26,7 @@ FM_CQG_DEFAULT_TYPES=$'writing\nexecution\ncopy-draft\nlist-build\nbison-launch'
 # the same launch appends nothing when this line is already in the status file.
 # bin/fm-classify-lib.sh status_event_recorded owns that comparison.
 FM_CQG_PACE_STATUS='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so this launch was routed off the requested claude model'
+FM_CQG_PACE_KEPT_STATUS='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so the requested sonnet profile was kept'
 FM_CQG_CAP_STATUS='paused [key=claude-quota-cap]: claude worker cap deferred this launch'
 FM_CQG_ROUTE_STATUS='paused [key=claude-quota-route]: claude weekly usage is ahead of the window, and the selected dispatch rule allows no alternate worker, so this launch was deferred'
 
@@ -554,6 +555,11 @@ fm_cqg_decide() {
       return "$FM_CQG_DEFER_EXIT"
   fi
   if [ "$route" = claude ]; then
+    if [[ "${model,,}" == *sonnet* ]]; then
+      fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_KEPT_STATUS" || return 1
+      fm_cqg_write_verdict "$verdict" proceed claude "$model" "${FM_CQG_EFFORT:-default}" "$route_rule"
+      return 0
+    fi
     fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_STATUS" || return 1
     printf '%s\n' "claude-quota-guard: weekly usage is ahead of the window; routing this launch to claude sonnet"
     fm_cqg_write_verdict "$verdict" reroute claude "$route_model" "$route_effort" "$route_rule"

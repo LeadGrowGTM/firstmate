@@ -21,6 +21,7 @@ if command -v tasks-axi >/dev/null 2>&1; then
   TASKS_BIN=$(command -v tasks-axi)
 fi
 PACE_LINE='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so this launch was routed off the requested claude model'
+PACE_KEPT_LINE='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so the requested sonnet profile was kept'
 CAP_LINE='paused [key=claude-quota-cap]: claude worker cap deferred this launch'
 ROUTE_LINE='paused [key=claude-quota-route]: claude weekly usage is ahead of the window, and the selected dispatch rule allows no alternate worker, so this launch was deferred'
 GAP_LINE='claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check'
@@ -302,6 +303,11 @@ test_pace_prefers_grok_then_muse_then_sonnet() {
   assert_equals reroute "$(verdict_field "$home/verdict" action)" "a hot window did not reroute"
   assert_equals grok "$(verdict_field "$home/verdict" harness)" "a hot window did not prefer grok"
   assert_contains "$out" "routing this launch to grok" "the grok route was not announced"
+  rc=0
+  out=$(run_check "$home" task-w sonnet-4-5) || rc=$?
+  expect_code 0 "$rc" "a Sonnet request refused an available grok route: $out"
+  assert_equals reroute "$(verdict_field "$home/verdict" action)" "a Sonnet request did not reroute to grok"
+  assert_equals grok "$(verdict_field "$home/verdict" harness)" "a Sonnet request skipped available grok"
 
   home=$(make_home pace-muse task-w writing client)
   prepare_fake pace-muse quota grok muse
@@ -311,6 +317,11 @@ test_pace_prefers_grok_then_muse_then_sonnet() {
   expect_code 0 "$rc" "client data refused a muse route: $out"
   assert_equals muse "$(verdict_field "$home/verdict" harness)" "client data was offered to grok"
   assert_contains "$out" "routing this launch to muse" "the muse route was not announced"
+  rc=0
+  out=$(run_check "$home" task-w sonnet-4-5) || rc=$?
+  expect_code 0 "$rc" "a Sonnet request refused an available muse route: $out"
+  assert_equals reroute "$(verdict_field "$home/verdict" action)" "a Sonnet request did not reroute to muse"
+  assert_equals muse "$(verdict_field "$home/verdict" harness)" "a Sonnet request skipped available muse"
 
   home=$(make_home pace-sonnet task-w writing)
   prepare_fake pace-sonnet quota
@@ -321,6 +332,59 @@ test_pace_prefers_grok_then_muse_then_sonnet() {
   assert_equals claude "$(verdict_field "$home/verdict" harness)" "sonnet left claude"
   assert_equals sonnet "$(verdict_field "$home/verdict" model)" "the fallback model was not sonnet"
   pass "a hot window routes to grok, then muse, then claude sonnet"
+}
+
+test_hot_requested_sonnet_keeps_profile() {
+  local case_dir home pane out rc=0
+  case_dir=$(make_case kept-sonnet task-s engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  prepare_fake kept-sonnet quota
+  write_snap "$case_dir/snap.json" 30 259200
+  FM_TEST_SNAP="$case_dir/snap.json"
+  out=$(run_check "$home" task-s sonnet-4-5 --effort high --apply-status) || rc=$?
+  expect_code 0 "$rc" "a requested Sonnet profile was refused: $out"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a requested Sonnet profile was marked as a reroute"
+  assert_equals sonnet-4-5 "$(verdict_field "$home/verdict" model)" "a requested Sonnet model was replaced"
+  assert_equals high "$(verdict_field "$home/verdict" effort)" "a requested Sonnet effort was replaced"
+  assert_not_contains "$out" 'routing this launch to claude sonnet' "a kept Sonnet profile was announced as a reroute"
+  pane=$(new_worktree "$case_dir" task-s)
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-s "$case_dir/sample-project" \
+    --harness claude --model sonnet-4-5 --effort high --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "a requested Sonnet profile did not launch: $out"
+  assert_not_contains "$out" 'routing this launch to claude sonnet' "spawn announced a kept Sonnet profile as a reroute"
+  assert_grep "--model 'sonnet-4-5'" "$case_dir/calls.log" "spawn did not keep the requested Sonnet model"
+  assert_equals high "$(verdict_field "$home/state/task-s.meta" effort)" "spawn did not keep the requested effort"
+  assert_equals 1 "$(canonical_count "$home/state/task-s.status" "$PACE_KEPT_LINE")" "the kept profile status was not recorded once"
+  assert_equals 0 "$(canonical_count "$home/state/task-s.status" "$PACE_LINE")" "the kept profile was recorded as rerouted"
+
+  case_dir=$(make_case kept-rule-sonnet task-s engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  prepare_fake kept-rule-sonnet quota
+  write_snap "$case_dir/snap.json" 30 259200
+  printf '%s\n' '{"default":[{"harness":"claude","model":"sonnet-4-5","effort":"high"}]}' \
+    > "$home/config/crew-dispatch.json"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  rc=0
+  out=$(run_check "$home" task-s sonnet-4-5 --effort high --dispatch-rule '{"default":true}' --apply-status) || rc=$?
+  expect_code 0 "$rc" "a Sonnet-only dispatch rule refused the requested profile: $out"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a Sonnet-only rule marked the requested profile as rerouted"
+  assert_equals sonnet-4-5 "$(verdict_field "$home/verdict" model)" "a Sonnet-only rule replaced the requested model"
+  assert_equals high "$(verdict_field "$home/verdict" effort)" "a Sonnet-only rule replaced the requested effort"
+  pane=$(new_worktree "$case_dir" task-s)
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-s "$case_dir/sample-project" \
+    --harness claude --model sonnet-4-5 --effort high --dispatch-rule '{"default":true}' \
+    --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "a Sonnet-only dispatch rule did not launch: $out"
+  assert_not_contains "$out" 'routing this launch to claude sonnet' "a Sonnet-only rule announced a reroute"
+  assert_grep "--model 'sonnet-4-5'" "$case_dir/calls.log" "a Sonnet-only rule changed the launch model"
+  assert_equals high "$(verdict_field "$home/state/task-s.meta" effort)" "a Sonnet-only rule changed the launch effort"
+  assert_equals 1 "$(canonical_count "$home/state/task-s.status" "$PACE_KEPT_LINE")" "the Sonnet-only rule missed the kept status"
+  assert_equals 0 "$(canonical_count "$home/state/task-s.status" "$PACE_LINE")" "the Sonnet-only rule recorded a reroute"
+  pass "hot Sonnet requests keep their profile with or without a dispatch rule"
 }
 
 test_opus_refused_for_writing_and_allowed_when_cleared() {
@@ -1829,6 +1893,7 @@ test_spawn_ignores_non_claude() {
 test_exact_margin_does_not_reroute
 test_reported_weekly_window_controls_pace
 test_pace_prefers_grok_then_muse_then_sonnet
+test_hot_requested_sonnet_keeps_profile
 test_opus_refused_for_writing_and_allowed_when_cleared
 test_missing_quota_proceeds_and_still_checks_opus_and_cap
 test_json_skips_stale_claude_provider
