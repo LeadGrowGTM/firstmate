@@ -1104,6 +1104,88 @@ test_tag_messages_and_no_verify_pushes_are_refused() {
   pass "annotated tag messages are checked, and git push --no-verify or another hooksPath is refused"
 }
 
+test_push_shim_and_gate_close_hook_bypasses() {
+  local d=$TMP_ROOT/hook-bypass home out blob cfg gate run findings clone index rel
+  home=$d/home
+  make_home "$home"
+  make_repo "$d" "$home" public
+  in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/bypass main
+  commit_file "$REPO" bypass.txt "names acme-test" "Clean subject"
+  out=$(GIT_CONFIG_PARAMETERS="'core.hookspath'='/dev/null'" in_pane "$HOOKS" git -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "a push under GIT_CONFIG_PARAMETERS hooks skipped the check"
+  out=$(in_pane "$HOOKS" env GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
+    git -C "$REPO" push -q origin HEAD 2>&1) && fail "a push under a GIT_CONFIG_COUNT override skipped the check"
+  assert_contains "$out" "core.hooksPath" "the environment override refusal was not explained"
+  out=$(in_pane "$HOOKS" env -u GIT_CONFIG_COUNT git -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "a push with the hooks override unset skipped the check"
+  assert_contains "$out" "core.hooksPath" "the unset override refusal was not explained"
+  cfg=$d/other-hooks.cfg
+  printf '[core]\n\thooksPath = /dev/null\n' >"$cfg"
+  out=$(in_pane "$HOOKS" git -C "$REPO" -c "include.path=$cfg" push -q origin HEAD 2>&1) &&
+    fail "a push under an included hooksPath skipped the check"
+  assert_contains "$out" "core.hooksPath" "the included hooksPath refusal was not explained"
+  out=$(in_pane "$HOOKS" git -C "$REPO" --attr-source HEAD push --no-verify -q origin HEAD 2>&1) &&
+    fail "a push after a valued global option skipped the no-verify refusal"
+  assert_contains "$out" "--no-verify" "the no-verify refusal after a global option was not explained"
+  out=$(in_pane "$HOOKS" git -C "$REPO" send-pack "$ORIGIN" HEAD:refs/heads/fm/bypass 2>&1) &&
+    fail "git send-pack pushed without the pre-push hook"
+  assert_contains "$out" "send-pack" "the send-pack refusal was not explained"
+  out=$(in_pane "$HOOKS" git --unknown-global -C "$REPO" push -q origin HEAD 2>&1) &&
+    fail "an unrecognized global option reached git push"
+  [ -z "$(git -C "$ORIGIN" for-each-ref refs/heads/fm/bypass)" ] || fail "a bypassed push reached the public origin"
+  in_pane "$HOOKS" git --no-pager -C "$REPO" log -1 --format=%s >/dev/null || fail "the git shim broke a --no-pager command"
+  in_pane "$HOOKS" git -C "$REPO" checkout -q main
+
+  blob=$(printf 'zenith-sample\n' | git -C "$REPO" hash-object -w --stdin)
+  git -C "$REPO" tag -a blob-tag "$blob" -m 'Clean blob tag'
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin blob-tag 2>&1) &&
+    fail "an annotated tag of a listed blob was pushed"
+  assert_contains "$out" "blob or tree" "the blob tag refusal was not explained"
+  git -C "$REPO" tag light-tag "$blob"
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin light-tag 2>&1) &&
+    fail "a lightweight tag of a listed blob was pushed"
+  [ -z "$(git -C "$ORIGIN" for-each-ref refs/tags/blob-tag refs/tags/light-tag)" ] || fail "a blob tag reached the public origin"
+
+  printf 'example/odd-host public' >>"$home/config/repo-visibility"
+  assert_equals public "$(FM_HOME=$home bash -c ". '$ROOT/bin/fm-private-names-lib.sh'; fm_pn_init '$home/config' '$home/state'; fm_pn_visibility example/odd-host")" \
+    "a final visibility record without a newline was ignored"
+
+  gate=$d/nm/gate.mock.repo
+  git init -q --bare "$gate"
+  git -C "$gate" remote add origin "$ORIGIN"
+  git -C "$gate" fetch -q origin
+  clone=$home/projects/sample
+  git clone -q "$ORIGIN" "$clone"
+  git -C "$clone" remote add no-mistakes "file://$gate"
+  git clone -q "$ORIGIN" "$home/projects/gone"
+  git -C "$home/projects/gone" remote add no-mistakes "$d/nm/removed.git"
+  FM_HOME=$home "$PN" refresh >/dev/null || fail "refresh failed with a file:// gate and a removed gate"
+  index=$XDG_STATE_HOME/firstmate/private-names-gates/gate.mock.repo
+  [ -f "$index" ] || fail "a file:// gate without a .git suffix was not recorded"
+  git -C "$gate" branch fm/work refs/remotes/origin/main
+  run=$d/run
+  git -C "$gate" worktree add -q "$run" fm/work
+  findings=$d/findings.json
+  : >"$findings"
+  (cd "$run" && GIT_AUTHOR_NAME=acme-test NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1)
+  assert_contains "$(cat "$findings")" "mate-1" "the gate missed a listed commit identity"
+  printf 'serves zenith-sample\n' >"$run/staged.txt"
+  git -C "$run" add staged.txt
+  printf 'clean\n' >"$run/staged.txt"
+  : >"$findings"
+  (cd "$run" && NO_MISTAKES_FINDINGS_FILE=$findings "$PN" gate >/dev/null 2>&1)
+  assert_contains "$(cat "$findings")" "client-1" "the gate missed staged text the working copy no longer shows"
+
+  rel=$d/relative
+  mkdir -p "$rel"
+  fm_git_init_commit "$rel/work"
+  (cd "$rel" && "$STRIP" install hooks work --private-names home/config home/state home home/data home/projects) ||
+    fail "a relative hook install failed"
+  assert_contains "$(cat "$rel/hooks/pre-push")" "FM_CONFIG_OVERRIDE='$rel/home/config'" \
+    "a relative config path was baked into the hooks"
+  pass "the push shim reads git's effective hooks, refuses hook-free pushes, and the gate covers identity and staged text"
+}
+
 test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
   local d=$TMP_ROOT/gh-write home log out cmd
   local -a call
@@ -1199,9 +1281,13 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
     fail "explicitly internal repository creation was refused"
   assert_contains "$(cat "$log")" "[repo] [new]" "internal repository creation did not reach gh"
   : >"$log"
-  (cd "$REPO" && in_pane "$HOOKS" gh repo create example/clean-public --public --description Clean) ||
-    fail "checked public repository creation was refused"
-  assert_contains "$(cat "$log")" "[example/clean-public]" "checked public repository creation did not reach gh"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh repo create example/clean-public --public --description Clean 2>&1) &&
+    fail "a fleet worker created a public repository"
+  [ ! -s "$log" ] || fail "real gh ran for public repository creation"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh-axi repo create clean-project --public 2>&1) &&
+    fail "gh-axi created a public repository"
+  [ ! -s "$log" ] || fail "real gh-axi ran for public repository creation"
   : >"$log"
   out=$(cd "$REPO" && in_pane "$HOOKS" gh repo edit example/public-repo --description acme-test 2>&1) &&
     fail "an explicit public repository target bypassed the guard"
@@ -1211,9 +1297,43 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
     fail "a public fork published a listed fork name from a private checkout"
   [ ! -s "$log" ] || fail "real gh ran for a public fork with a listed name"
   : >"$log"
-  (cd "$REPO" && in_pane "$HOOKS" gh repo fork example/public-repo --fork-name clean-fork --clone=false) ||
-    fail "a clean public fork was refused"
-  assert_contains "$(cat "$log")" '[clean-fork]' "a clean public fork did not reach gh"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh repo fork example/public-repo --fork-name clean-fork --clone=false 2>&1) &&
+    fail "a fleet worker forked a public repository"
+  [ ! -s "$log" ] || fail "real gh ran for a fork of a public repository"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh repo fork --remote-name upstream 2>&1) &&
+    fail "a fork whose source could not be verified private ran"
+  [ ! -s "$log" ] || fail "real gh ran for an unverified fork source"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh repo fork example/private-repo --fork-name acme-test --clone=false) ||
+    fail "a fork of a verified private repository was refused"
+  assert_contains "$(cat "$log")" '[repo] [fork]' "a private fork did not reach gh"
+  for cmd in "repo edit example/private-repo --visibility public" "repo edit --visibility=PUBLIC" \
+    "repo sync example/public-repo" "gist create notes.md" "project item-create 1 --title Clean" \
+    "issue transfer 3 example/public-repo" "codespace ssh" "some-alias run"; do
+    read -r -a call <<<"$cmd"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh "${call[@]}" 2>&1) &&
+      fail "gh $cmd ran from a fleet worker"
+    [ ! -s "$log" ] || fail "real gh ran for gh $cmd"
+  done
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh repo edit example/private-repo --visibility internal) ||
+    fail "an explicit internal visibility change was refused"
+  assert_contains "$(cat "$log")" "[internal]" "an internal visibility change did not reach gh"
+  for cmd in "issue create --title Clean --body Clean --unknown-option x" "pr comment 7 --body Clean --template t" \
+    "workflow run ci.yml --inputs-file x" "release upload v1 --unknown"; do
+    read -r -a call <<<"$cmd"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh "${call[@]}" --repo example/public-repo 2>&1) &&
+      fail "gh $cmd ran with an option outside its checked form"
+    assert_contains "$out" "refusing unchecked" "gh $cmd was not refused as unchecked"
+    [ ! -s "$log" ] || fail "real gh ran for gh $cmd"
+  done
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh run rerun 12 --failed --repo example/public-repo) ||
+    fail "a text-free run rerun was refused"
+  assert_contains "$(cat "$log")" "[run] [rerun]" "a text-free command did not reach gh"
   : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh issue create --title Clean --body Clean --repo example/public-repo) ||
     fail "a clean public issue was refused"
@@ -1321,10 +1441,60 @@ test_gh_api_writes_are_checked() {
     fail "an API file visibility field made a private repository public"
   [ ! -s "$log" ] || fail "real gh ran for an API file visibility field"
   : >"$log"
-  (cd "$REPO" && printf 'true\n' | in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH -F private=@-) ||
-    fail "a private repository's safe API field was refused"
-  assert_contains "$(cat "$log")" "[PATCH]" "a safe API field did not reach gh"
-  assert_contains "$(cat "$log")" "true" "a safe API field lost its staged stdin content"
+  out=$(cd "$REPO" && printf 'true\n' | in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH -F private=@- 2>&1) &&
+    fail "a visibility field read from stdin ran"
+  [ ! -s "$log" ] || fail "real gh ran for a visibility field read from stdin"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH -F private=true) ||
+    fail "an explicit private API choice was refused"
+  assert_contains "$(cat "$log")" "[PATCH]" "an explicit private API choice did not reach gh"
+  printf '{"name":"x","private":true}' >"$d/create.json"
+  for call_line in "user/repos -X POST -f name=x" "orgs/example/repos -f name=x -F private=false" \
+    "repos/example/public-repo/forks -X POST" "repos/example/private-repo/transfer -f new_owner=x" \
+    "repositories/1 -X PATCH -f description=x" "gists -f files[a][content]=x -F public=true" \
+    "repos/example/private-repo -X PATCH -F security_and_analysis[visibility]=public"; do
+    read -r -a call <<<"$call_line"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh api "${call[@]}" 2>&1) &&
+      fail "gh api $call_line ran from a fleet worker"
+    [ ! -s "$log" ] || fail "real gh ran for gh api $call_line"
+  done
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh api user/repos --input "$d/create.json" >/dev/null) ||
+    fail "an explicitly private API repository creation was refused"
+  assert_contains "$(cat "$log")" "[user/repos]" "a private API repository creation did not reach gh"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh api repos/example/private-repo/forks -X POST >/dev/null) ||
+    fail "an API fork of a verified private repository was refused"
+  for call_line in "--unknown-flag x" "-X POST -f title=Clean --silent=true"; do
+    read -r -a call <<<"$call_line"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/public-repo/issues "${call[@]}" 2>&1) &&
+      fail "gh api $call_line ran outside its checked form"
+    [ ! -s "$log" ] || fail "real gh ran for gh api $call_line"
+  done
+  printf 'not json acme\n' >"$d/raw.txt"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/public-repo/issues -X POST --input "$d/raw.txt" 2>&1) &&
+    fail "an undecodable api input reached a public repository"
+  [ ! -s "$log" ] || fail "real gh ran for an undecodable public api input"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=mutation A { addComment(input: {body: "x"}) { clientMutationId } } mutation B { addComment(input: {body: "y"}) { clientMutationId } }' 2>&1) &&
+    fail "a GraphQL document with two operations ran"
+  [ ! -s "$log" ] || fail "real gh ran for a two-operation GraphQL document"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=mutation { updateRepository(input: {repositoryId: "x", hasWikiEnabled: true}) { clientMutationId } }' 2>&1) &&
+    fail "a GraphQL repository mutation ran"
+  [ ! -s "$log" ] || fail "real gh ran for a GraphQL repository mutation"
+  printf '{"query":"\\u006dutation { addComment(input: {body: \\"acme-test\\"}) { clientMutationId } }"}' >"$d/gql.json"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api graphql --input "$d/gql.json" 2>&1) &&
+    fail "an encoded GraphQL mutation in --input ran"
+  [ ! -s "$log" ] || fail "real gh ran for an encoded GraphQL --input mutation"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh api graphql -f 'query=mutation { addComment(input: {subjectId: "x", body: "Clean"}) { clientMutationId } }' >/dev/null) ||
+    fail "a clean single GraphQL mutation was refused"
+  assert_contains "$(cat "$log")" "[graphql]" "a clean GraphQL mutation did not reach gh"
   unset FAKE_GH_LOG FAKE_GH_VIS
   pass "gh api writes to public or unknown destinations have their endpoint, fields, and input checked"
 }
@@ -1557,6 +1727,7 @@ test_scrub_apply_rechecks_live_visibility
 test_scrub_refreshes_registered_names
 test_keep_ai_trailers_install_keeps_the_trailer_and_the_guard
 test_tag_messages_and_no_verify_pushes_are_refused
+test_push_shim_and_gate_close_hook_bypasses
 test_gh_shim_guards_issue_release_label_repo_and_workflow_text
 test_gh_api_writes_are_checked
 test_no_mistakes_shim_checks_instructions_and_withholds_intent

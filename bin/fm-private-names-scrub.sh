@@ -3,7 +3,7 @@
 # pull-request titles and bodies, and files on the no-mistakes evidence branch.
 #
 # Usage:
-#   fm-private-names-scrub.sh --repo <owner/repo> [--pr <number>]...
+#   fm-private-names-scrub.sh --repo <owner/repo|repository URL> [--pr <number>]...
 #       [--no-evidence] [--apply]
 #
 # Default is a dry run: it prints what would change - PR numbers, how many

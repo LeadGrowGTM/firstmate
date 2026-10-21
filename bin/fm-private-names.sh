@@ -38,19 +38,23 @@
 #       no-mistakes gate remote is judged by the repository's origin, because
 #       the gate forwards there.
 #   fm-private-names.sh gh-shim <gh|gh-axi> [<arg>...]
-#       PATH shim for gh and gh-axi. Against a public repository it scans,
-#       before the real tool runs: pull-request titles, bodies, labels, merge
-#       subjects, body files and stdin, and the head branch (pr create, new,
-#       edit, comment, review, merge); every argument and text file of pr close
-#       and reopen, issue create, edit, comment, close, reopen, and develop,
-#       release create, edit, and upload (assets by content), label create and
-#       edit, repo create, edit, rename, and fork, and workflow run; and the
-#       endpoint, fields, field files, and --input of gh api writes (a method
-#       other than GET or HEAD, fields or input without one, or a GraphQL
-#       mutation). Text from an editor, browser, prompt, template, or
-#       attachment is refused, as is making a repository public; the
-#       destination and file paths are not judged; read-only commands run
-#       unchanged.
+#       PATH shim for gh and gh-axi. On every destination it refuses a command
+#       that could make a repository public or create a public copy unless it
+#       makes an explicit private or internal choice: repo create or new
+#       without --private or --internal, repo fork or an api fork of a source
+#       not verified private, repo edit --visibility public, api writes whose
+#       fields or input touch private or visibility, api creates without a
+#       private choice, and transfer, Pages, and repository-mutating GraphQL.
+#       Against a public or unknown repository, writes run only in the forms
+#       the shim fully parses: pull requests, issues, releases (assets by
+#       content), labels, repo edit and rename, workflow run, and api writes
+#       (a method other than GET or HEAD, fields or input without one, or a
+#       GraphQL mutation). It scans their text, files, stdin, head branch,
+#       endpoint, and field keys and values before the real tool runs, and
+#       refuses unknown options, other write commands, text from an editor,
+#       browser, prompt, template, or attachment, JSON escapes it cannot
+#       decode, and GraphQL with more than one operation. Private repositories
+#       and read-only commands run unchanged.
 #   fm-private-names.sh no-mistakes-shim [<arg>...]
 #       PATH shim for no-mistakes. For a public origin it checks the intent, PR
 #       title, fix instructions, added findings, reasons, and current branch
@@ -75,13 +79,15 @@
 # FM_DATA_OVERRIDE / FM_PROJECTS_OVERRIDE like every other fleet script;
 # bin/fm-git-strip-ai-trailers.sh bakes them into each launch's hooks and shims.
 # bin/fm-private-names-lib.sh owns matching, neutral ids, and visibility.
-# Worker launches also get a git shim that refuses git push --no-verify and a
-# push under another core.hooksPath (bin/fm-git-strip-ai-trailers.sh writes it).
-# Accepted residual: a process that runs git or gh by absolute path, rewrites
-# the git environment, or calls the GitHub API directly is not seen, and text
-# the no-mistakes pipeline writes after its gate (the push step's commit subject
-# and the PR text it drafts) is read back by bin/fm-private-names-scrub.sh
-# after creation, as a backstop only.
+# Worker launches also get a git shim that refuses git push --no-verify, a
+# push whose effective core.hooksPath (from -c, --config-env, the environment,
+# or an include) is not the launch's hooks, send-pack, http-push, and unknown
+# options before the command (bin/fm-git-strip-ai-trailers.sh writes it).
+# Accepted residual: a git alias that skips hooks, a process that runs git or
+# gh by absolute path, or one that calls the GitHub API directly is not seen,
+# and text the no-mistakes pipeline writes after its gate (the push step's
+# commit subject and the PR text it drafts) is read back by
+# bin/fm-private-names-scrub.sh after creation, as a backstop only.
 set -u
 unset CDPATH
 
@@ -185,7 +191,13 @@ cmd_refresh() (
     return 1
   }
   trap 'fm_lock_release "$out.lock"' EXIT
+  local attempt=0
   while :; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -gt 5 ]; then
+    echo "fm-private-names: the home's records kept changing during refresh; refusing" >&2
+    return 1
+  fi
   # A second mate home on this machine also takes its primary's whole list, so
   # every home refuses the same names. The list is read from disk rather than
   # pushed as inherited config, which would paste it into the mate's context.
@@ -276,11 +288,24 @@ register_gates() (
   for dir in "$PROJECTS"/*/; do
     [ -d "$dir" ] || continue
     url=$(git -C "$dir" remote get-url no-mistakes 2>/dev/null) || continue
-    case "$url" in /*.git) ;; *) continue ;; esac
-    [ -d "$url" ] || continue
-    id=${url%.git}
-    id=${id##*/}
-    case "$id" in '' | *[!A-Za-z0-9_-]*) continue ;; esac
+    # A local gate: a path or file:// URL naming a git directory on this machine.
+    case "$url" in
+      file://*) url=${url#file://} ;;
+      *://* | *@*:*) continue ;;
+    esac
+    # A gate directory that no longer exists has nothing pushing through it.
+    (cd "$dir" 2>/dev/null && [ -e "$url" ]) || continue
+    url=$(cd "$dir" 2>/dev/null && git -C "$url" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || {
+      echo "fm-private-names: cannot resolve the no-mistakes gate of $(fm_pn_scrub_string "${dir%/}")" >&2
+      return 1
+    }
+    id=$(gate_id "$url")
+    case "$id" in
+      '' | .* | *[!A-Za-z0-9._-]*)
+        echo "fm-private-names: cannot record a no-mistakes gate whose name is not a plain file name" >&2
+        return 1
+        ;;
+    esac
     file=$index/$id
     tmp=$(mktemp "$index/.$id.XXXXXX") || return 1
     {
@@ -297,6 +322,14 @@ register_gates() (
     }
   done
 )
+
+# The index key of a gate: its git directory's name without a .git suffix.
+gate_id() {  # <git-common-dir>
+  local id=${1%/}
+  case "$id" in */.git) id=${id%/.git} ;; esac
+  id=${id%.git}
+  printf '%s\n' "${id##*/}"
+}
 
 abs_dir() {  # <dir>
   (CDPATH='' cd -- "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"
@@ -382,10 +415,6 @@ report_hits() {  # <label> [noline]
     fi
   done <<<"$hits"
   return 1
-}
-
-has_encoded_ascii_escape() {
-  perl -e 'local $/; my $text = <STDIN> // ""; exit 0 if $text =~ /\\[nrtbf]/; while ($text =~ /\\u([0-9a-fA-F]{4})/g) { exit 0 if hex($1) < 128 } exit 1'
 }
 
 cmd_check() {
@@ -534,7 +563,13 @@ scan_outgoing() {  # <dest>
         return 1
       }
     done
-    range=("$local_sha" --not "${known_shas[@]}")
+    # A ref that ends at a blob or tree carries content no commit check sees.
+    if [ "$(git cat-file -t "$sha" 2>/dev/null)" != commit ]; then
+      echo "fm-private-names: refusing to push a ref that points at a blob or tree to a public repository" >&2
+      rc=1
+      continue
+    fi
+    range=("$local_sha" --not ${known_shas[@]+"${known_shas[@]}"})
     commits=$(git rev-list "${range[@]}" 2>/dev/null) || {
       echo "fm-private-names: cannot list the commits being pushed; refusing" >&2
       return 1
@@ -575,238 +610,224 @@ scan_outgoing() {  # <dest>
   return "$rc"
 }
 
-# ---------------------------------------------------------------- gh shim
+# ------------------------------------------------------------ gh and gh-axi
+#
+# Allowlist, not denylist. Every gh or gh-axi call is classified first:
+#   read        never publishes; runs unchanged
+#   safe        changes state without publishing text or visibility; unchanged
+#   write       a checked publishing form (gh_flag_kind lists its options)
+#   visibility  repo create, new, fork, and edit; gh_publish_guard decides
+#               on every destination
+#   api         gh api; gh_api_guard
+#   other       a known command with no checked form: runs only when the
+#               destination is verified private
+#   refuse      gists, projects, repo sync, issue transfer, codespace and
+#               stack writes, aliases, extensions, and unknown commands
+# On a public or unknown destination a write runs only when every option is
+# listed for that form; its text values, field keys and values, file and stdin
+# contents, and release asset basenames are scanned first, and the real tool
+# then runs with stdin from the staged copy or /dev/null so it cannot prompt.
 
-cmd_gh_shim() {
-  local tool=${1:-} real
-  [ -n "$tool" ] || usage
-  shift
-  real=$(fm_pn_real_bin "$tool") || {
-    echo "fm-private-names: no real $tool found on PATH" >&2
-    return 127
-  }
-  local args=("$@") i=0 n=$# repo='' head='' body_file_idx=() body_file_prefix=() text_idx=() text_prefix=() dest action='' command='' target='' target_repo='' repo_id='' target_id=''
-  local has_title=0 has_body=0 has_edit_option=0 no_text_action=0 opaque=0 missing_value=0
-  local token option value prefix value_idx takes_value options=1
-  for ((i = 0; i < n; i++)); do
-    token=${args[i]}
-    if [ "$options" = 1 ] && [ "$token" = -- ]; then
-      options=0
-      continue
-    fi
-    option='' prefix='' value='' value_idx=$i takes_value=0
-    if [ "$options" = 1 ]; then
-      case "$token" in
-        --*=*) option=${token%%=*}; prefix=$option=; value=${token#*=} ;;
-        --*) option=$token ;;
-        -?*)
-          option=${token:0:2}
-          value=${token:2}
-          if [ -n "$value" ]; then
-            prefix=$option
-            if [ "${value:0:1}" = = ]; then
-              prefix+='='
-              value=${value#=}
-            fi
-          fi
-          ;;
+gh_class() {  # <command> <action>
+  case "$1" in
+    '' | help | version | completion | status | browse | search | auth | config | alias | org | \
+    attestation | ruleset | co | setup | update | dashboard) echo read; return ;;
+    api) echo api; return ;;
+    gist | project | codespace | stack)
+      case "$1 $2" in
+        "gist list" | "gist view" | "gist clone" | "gist delete" | "project list" | "project view" | \
+        "project field-list" | "project item-list" | "codespace list" | "codespace view" | "stack view") echo read ;;
+        *) echo refuse ;;
       esac
-    fi
-    if [ -z "$option" ]; then
-      if [ -z "$command" ]; then
-        command=$token
-      elif [ -z "$action" ]; then
-        action=$token
-      elif [ -z "$target" ]; then
-        target=$token
-      fi
-      continue
-    fi
-    case "$option" in
-      --repo | -R | --head | -H | --body-file | -F | --title | -t | --body | -b | \
-      --subject | --label | -l | --add-label | --remove-label | --base | -B | \
-      --assignee | --add-assignee | --remove-assignee | --reviewer | --add-reviewer | --remove-reviewer | \
-      --milestone | --project | -p | --add-project | --remove-project | \
-      --template | -T | --recover | --author-email | -A | --match-head-commit | --attach)
-        takes_value=1
-        ;;
-      -a | -r) [ "$action" != create ] || takes_value=1 ;;
-      -m) [ "$action" != create ] && [ "$action" != edit ] || takes_value=1 ;;
-    esac
-    if [ "$takes_value" = 1 ] && [ -z "$prefix" ]; then
-      value_idx=$((i + 1))
-      value=${args[value_idx]:-}
-    fi
-    if [ "$takes_value" = 1 ] && [ "$value_idx" -ge "$n" ]; then
-      missing_value=1
-    fi
-    case "$option" in
-      --repo | -R) repo=$value ;;
-      --head | -H) head=$value ;;
-      --body-file | -F) body_file_idx+=("$value_idx"); body_file_prefix+=("$prefix"); has_body=1 ;;
-      --title | -t) text_idx+=("$value_idx"); text_prefix+=("$prefix"); has_title=1 ;;
-      --body | -b) text_idx+=("$value_idx"); text_prefix+=("$prefix"); has_body=1 ;;
-      --subject | --label | -l | --add-label)
-        text_idx+=("$value_idx"); text_prefix+=("$prefix"); has_edit_option=1 ;;
-      --remove-label | --base | -B | --assignee | --add-assignee | --remove-assignee | \
-      --reviewer | --add-reviewer | --remove-reviewer | --milestone | -m | --remove-milestone | \
-      --project | -p | --add-project | --remove-project) has_edit_option=1 ;;
-      --approve | --delete-last) no_text_action=1 ;;
-      -a) [ "$action" != review ] || no_text_action=1 ;;
-      --template | -T | --fill | -f | --fill-first | --fill-verbose | --recover | --editor | -e | --web | -w | --attach) opaque=1 ;;
-    esac
-    [ "$takes_value" = 0 ] || [ -n "$prefix" ] || i=$((i + 1))
-  done
-  if [ "$command" = api ]; then
-    gh_api_guard "$tool" "$real" "$@"
-    return
-  fi
-  if [ "$command" = pr ]; then
-    case "$action" in
-      create | new | edit | comment | review | merge) ;;
-      close | reopen) gh_write_guard "$tool" "$real" "$command" "$action" "$@"; return ;;
-      *) exec "$real" "$@" ;;
-    esac
-  elif gh_writes_text "$command" "$action"; then
-    gh_write_guard "$tool" "$real" "$command" "$action" "$@"
-    return
-  else
-    exec "$real" "$@"
-  fi
-  case "$target" in
-    https://*/*/*/pull/*)
-      case "${target##*/}" in '' | *[!0-9]*) ;; *) target_repo=${target%/pull/*} ;; esac
+      return
       ;;
-    */*\#*)
-      case "${target#*#}" in '' | *[!0-9]*) ;; *) target_repo=${target%#*} ;; esac
-      ;;
+    pr | issue | repo | release | run | workflow | label | secret | variable | cache | extension | \
+    gpg-key | ssh-key) ;;
+    *) echo refuse; return ;;
   esac
-  if [ -n "$target_repo" ] && [ -n "$repo" ]; then
-    case "$repo" in
-      https://*) repo_id=${repo#https://} ;;
-      */*/*) repo_id=$repo ;;
-      *) repo_id=github.com/$repo ;;
-    esac
-    case "$target_repo" in
-      https://*) target_id=${target_repo#https://} ;;
-      */*/*) target_id=$target_repo ;;
-      *) target_id=github.com/$target_repo ;;
-    esac
-    if [ "$(printf '%s' "$repo_id" | tr '[:upper:]' '[:lower:]')" != \
-      "$(printf '%s' "$target_id" | tr '[:upper:]' '[:lower:]')" ]; then
-      echo "fm-private-names: conflicting pull-request destinations; refusing" >&2
-      return 1
-    fi
-  fi
-  dest=$target_repo
-  [ -n "$dest" ] || dest=$repo
-  [ -n "$dest" ] || dest=$(origin_url) || dest=
-  if [ -n "$dest" ] && ! fm_pn_dest_is_public "$dest"; then
-    exec "$real" "$@"
-  fi
-  require_current_list "this pull-request text" || return 3
-  if [ "$missing_value" = 1 ]; then
-    echo "fm-private-names: missing pull-request option value; refusing" >&2
-    return 1
-  fi
-  if [ "$opaque" = 1 ]; then
-    echo "fm-private-names: refusing unchecked pull-request text source" >&2
-    return 1
-  fi
-  case "$action" in
-    create | new)
-      if [ "$has_title" = 0 ] || [ "$has_body" = 0 ]; then
-        echo "fm-private-names: refusing PR creation: title and body must be supplied as checked arguments" >&2
-        return 1
-      fi
-      ;;
-    comment | review)
-      if [ "$has_body" = 0 ] && [ "$no_text_action" = 0 ]; then
-        echo "fm-private-names: refusing interactive pull-request text" >&2
-        return 1
-      fi
-      ;;
-    edit)
-      if [ "$has_title" = 0 ] && [ "$has_body" = 0 ] && [ "$has_edit_option" = 0 ]; then
-        echo "fm-private-names: refusing interactive pull-request text" >&2
-        return 1
-      fi
-      ;;
+  [ -n "$2" ] || { echo read; return; }
+  case "$1 $2" in
+    "pr list" | "pr view" | "pr status" | "pr diff" | "pr checks" | "pr checkout" | \
+    "issue list" | "issue view" | "issue status" | \
+    "repo list" | "repo view" | "repo clone" | "repo set-default" | "repo gitignore" | "repo license" | \
+    "release list" | "release view" | "release download" | "release verify" | "release verify-asset" | \
+    "run list" | "run view" | "run watch" | "run download" | "workflow list" | "workflow view" | \
+    "label list" | "cache list" | "secret list" | "variable list" | "variable get" | \
+    "extension list" | "extension search" | "extension browse" | "extension install" | \
+    "extension upgrade" | "extension remove" | "gpg-key list" | "ssh-key list") echo read ;;
+    "pr ready" | "pr lock" | "pr unlock" | "pr update-branch" | "issue delete" | "issue lock" | \
+    "issue unlock" | "issue pin" | "issue unpin" | "issue subissue" | "release delete" | \
+    "release delete-asset" | "label delete" | "repo delete" | "repo archive" | "repo unarchive" | \
+    "repo deploy-key" | "run rerun" | "run cancel" | "run delete" | "workflow enable" | \
+    "workflow disable" | "cache delete" | "secret set" | "secret delete" | "variable set" | \
+    "variable delete" | "gpg-key add" | "gpg-key delete" | "ssh-key add" | "ssh-key delete") echo safe ;;
+    "pr create" | "pr new" | "pr edit" | "pr comment" | "pr review" | "pr merge" | "pr close" | \
+    "pr reopen" | "issue create" | "issue new" | "issue edit" | "issue comment" | "issue close" | \
+    "issue reopen" | "issue develop" | "release create" | "release new" | "release edit" | \
+    "release upload" | "label create" | "label edit" | "repo rename" | "workflow run") echo write ;;
+    "repo create" | "repo new" | "repo fork" | "repo edit") echo visibility ;;
+    "repo sync" | "issue transfer") echo refuse ;;
+    *) echo other ;;
   esac
-  if [ -z "$head" ] && { [ "$action" = create ] || [ "$action" = new ]; }; then
-    head=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || head=
-  fi
-
-  # Stage stdin and body files as private temp copies so they are scanned and,
-  # in rewrite mode, replaced by their scrubbed copy.
-  local idx src copy rc=0 copies=() j
-  GH_SHIM_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-private-names-gh.XXXXXX") || return 1
-  trap 'rm -rf "$GH_SHIM_TMP"' EXIT
-  for ((j = 0; j < ${#body_file_idx[@]}; j++)); do
-    idx=${body_file_idx[j]}
-    prefix=${body_file_prefix[j]}
-    src=${args[idx]:-}
-    src=${src#"$prefix"}
-    copy=$GH_SHIM_TMP/body-$idx
-    if [ "$src" = - ]; then
-      cat >"$copy" || return 1
-    else
-      cat -- "$src" >"$copy" 2>/dev/null || {
-        echo "fm-private-names: cannot read the body file" >&2
-        return 1
-      }
-    fi
-    args[idx]=$prefix$copy
-    copies+=("$copy")
-    report_hits "the pull-request body file" <"$copy" 2>/dev/null || rc=1
-  done
-  for ((j = 0; j < ${#text_idx[@]}; j++)); do
-    idx=${text_idx[j]}
-    printf '%s\n' "${args[idx]#"${text_prefix[j]}"}" | report_hits "the pull-request text" 2>/dev/null || rc=1
-  done
-  if [ -n "$head" ] && ! printf '%s\n' "$head" | report_hits "the head branch name"; then
-    echo "fm-private-names: refusing: the head branch name holds a listed private name; rename the branch, for example to: $(fm_pn_scrub_string "$head")" >&2
-    return 1
-  fi
-  if [ "$rc" -ne 0 ]; then
-    if [ "${FM_PRIVATE_NAMES_MODE:-}" != rewrite ]; then
-      for copy in "${copies[@]}"; do
-        report_hits "the pull-request body file" <"$copy"
-      done
-      for ((j = 0; j < ${#text_idx[@]}; j++)); do
-        idx=${text_idx[j]}
-        printf '%s\n' "${args[idx]#"${text_prefix[j]}"}" | report_hits "the pull-request text"
-      done
-      echo "fm-private-names: refusing $tool pr $action on a public repository; reword it, or rerun with FM_PRIVATE_NAMES_MODE=rewrite to rewrite names to neutral ids" >&2
-      return 1
-    fi
-    for copy in "${copies[@]}"; do
-      if ! fm_pn_scrub_stream <"$copy" >"$copy.scrubbed" || ! mv "$copy.scrubbed" "$copy"; then
-        return 1
-      fi
-    done
-    for ((j = 0; j < ${#text_idx[@]}; j++)); do
-      idx=${text_idx[j]}
-      args[idx]=${text_prefix[j]}$(fm_pn_scrub_string "${args[idx]#"${text_prefix[j]}"}")
-    done
-    echo "fm-private-names: rewrote listed private names in the pull-request text to neutral ids" >&2
-  fi
-  "$real" "${args[@]}"
 }
 
-# gh commands other than the PR text paths above that publish text to a
-# repository: issues, releases, labels, repository settings, and workflow
-# inputs. Read-only commands are not listed and run unchanged.
-gh_writes_text() {  # <command> <action>
-  case "$1 $2" in
-    "issue create" | "issue new" | "issue edit" | "issue comment" | "issue close" | \
-    "issue reopen" | "issue develop" | \
-    "release create" | "release new" | "release edit" | "release upload" | \
-    "label create" | "label edit" | \
-    "repo create" | "repo new" | "repo edit" | "repo rename" | "repo fork" | \
-    "workflow run") return 0 ;;
+# Kind of <option> in the checked form "<command> <action>": t a published
+# text value, f a file path or - whose content is published, k a workflow
+# field (key=value, or key=@file for -F), j workflow JSON read from stdin,
+# d the destination repository, h its host, b a flag without a value, x text
+# gh would collect where the shim cannot see it, u not part of the checked
+# form. Long options may also be written --option=value.
+gh_flag_kind() {  # <command> <action> <option>
+  local o=$3
+  case "$o" in
+    -R | --repo) echo d; return ;;
+    --hostname) echo h; return ;;
+    --attach) echo x; return ;;
   esac
-  return 1
+  case "$1 $2" in
+    "pr create" | "pr new")
+      case "$o" in
+        -t | --title | -b | --body | -H | --head | -B | --base | -l | --label | -a | --assignee | \
+        -r | --reviewer | -m | --milestone | -p | --project) echo t ;;
+        -F | --body-file) echo f ;;
+        -d | --draft | --no-maintainer-edit | --dry-run) echo b ;;
+        -f | --fill | --fill-first | --fill-verbose | -e | --editor | -w | --web | -T | --template | --recover) echo x ;;
+        *) echo u ;;
+      esac ;;
+    "pr edit")
+      case "$o" in
+        -t | --title | -b | --body | -B | --base | --add-label | --remove-label | --add-assignee | \
+        --remove-assignee | --add-reviewer | --remove-reviewer | --add-project | --remove-project | \
+        -m | --milestone) echo t ;;
+        -F | --body-file) echo f ;;
+        --remove-milestone) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "pr comment" | "issue comment")
+      case "$o" in
+        -b | --body) echo t ;;
+        -F | --body-file) echo f ;;
+        --edit-last | --create-if-none | --delete-last | --yes) echo b ;;
+        -e | --editor | -w | --web) echo x ;;
+        *) echo u ;;
+      esac ;;
+    "pr review")
+      case "$o" in
+        -b | --body) echo t ;;
+        -F | --body-file) echo f ;;
+        -a | --approve | -r | --request-changes | -c | --comment) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "pr merge")
+      case "$o" in
+        -t | --subject | -b | --body | -A | --author-email | --match-head-commit | --method) echo t ;;
+        -F | --body-file) echo f ;;
+        -s | --squash | -m | --merge | -r | --rebase | --auto | --disable-auto | -d | --delete-branch | --admin) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "pr close")
+      case "$o" in
+        -c | --comment) echo t ;;
+        -d | --delete-branch) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "pr reopen" | "issue reopen")
+      case "$o" in
+        -c | --comment) echo t ;;
+        *) echo u ;;
+      esac ;;
+    "issue create" | "issue new")
+      case "$o" in
+        -t | --title | -b | --body | -l | --label | -a | --assignee | -m | --milestone | -p | --project | --type) echo t ;;
+        -F | --body-file) echo f ;;
+        -e | --editor | -w | --web | -T | --template | --recover) echo x ;;
+        *) echo u ;;
+      esac ;;
+    "issue edit")
+      case "$o" in
+        -t | --title | -b | --body | --add-label | --remove-label | --add-assignee | --remove-assignee | \
+        --add-project | --remove-project | -m | --milestone | --type) echo t ;;
+        -F | --body-file) echo f ;;
+        --remove-milestone) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "issue close")
+      case "$o" in
+        -c | --comment | -r | --reason | --duplicate-of) echo t ;;
+        *) echo u ;;
+      esac ;;
+    "issue develop")
+      case "$o" in
+        -n | --name | -b | --base) echo t ;;
+        -c | --checkout | -l | --list) echo b ;;
+        --branch-repo) echo x ;;
+        *) echo u ;;
+      esac ;;
+    "release create" | "release new")
+      case "$o" in
+        -t | --title | -n | --notes | --body | --notes-start-tag | --target | --discussion-category) echo t ;;
+        -F | --notes-file | --body-file) echo f ;;
+        -d | --draft | -p | --prerelease | --generate-notes | --notes-from-tag | --verify-tag | \
+        --fail-on-no-commits | --latest) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "release edit")
+      case "$o" in
+        --tag | -t | --title | -n | --notes | --body | --target | --discussion-category) echo t ;;
+        -F | --notes-file | --body-file) echo f ;;
+        --draft | --prerelease | --latest | --verify-tag) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "release upload")
+      case "$o" in
+        --clobber) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "label create")
+      case "$o" in
+        -c | --color | -d | --description | --name) echo t ;;
+        -f | --force) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "label edit")
+      case "$o" in
+        -n | --name | -c | --color | -d | --description) echo t ;;
+        *) echo u ;;
+      esac ;;
+    "repo edit")
+      case "$o" in
+        -d | --description | -h | --homepage | --add-topic | --remove-topic | --default-branch | --visibility) echo t ;;
+        --enable-* | --allow-* | --delete-branch-on-merge | --template | --accept-visibility-change-consequences) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "repo create" | "repo new")
+      case "$o" in
+        -d | --description | -h | --homepage | --team | -g | --gitignore | -l | --license | --template | \
+        -s | --source | -r | --remote) echo t ;;
+        --public | --private | --internal | --push | -c | --clone | --include-all-branches | \
+        --disable-issues | --disable-wiki | --add-readme) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "repo fork")
+      case "$o" in
+        --fork-name | --org | --remote-name) echo t ;;
+        --clone | --remote | --default-branch-only) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "repo rename")
+      case "$o" in
+        -y | --yes) echo b ;;
+        *) echo u ;;
+      esac ;;
+    "workflow run")
+      case "$o" in
+        -r | --ref) echo t ;;
+        -f | --raw-field | -F | --field) echo k ;;
+        --json) echo j ;;
+        *) echo u ;;
+      esac ;;
+    *) echo u ;;
+  esac
 }
 
 # Stage a text-file argument (a path, or - for stdin) as a private copy under
@@ -816,7 +837,7 @@ gh_stage_file() {  # <path|-> <tag>
   if [ "$src" = - ]; then
     cat >"$copy" || return 1
   else
-    cat -- "$src" >"$copy" 2>/dev/null || return 1
+    [ -n "$src" ] && cat -- "$src" >"$copy" 2>/dev/null || return 1
   fi
   printf '%s\n' "$copy"
 }
@@ -827,17 +848,135 @@ gh_shim_tmp() {
   trap 'rm -rf "$GH_SHIM_TMP"' EXIT
 }
 
-# Guard one text-writing gh command (see gh_writes_text, plus pr close and
-# reopen comments). On a public destination every argument except the
-# destination and file paths is scanned, text files and release assets are
-# scanned by content, text gh would collect in an editor, browser, or prompt
-# is refused, and the real tool runs only when nothing matched. Never rewrites.
-gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
-  local tool=$1 real=$2 command=$3 action=$4
-  shift 4
-  local args=("$@") n=$# i token option value prefix value_idx options=1 dest='' target='' rc=0 takes_value
-  local positional=() texts=() files=() opaque=0 has_title=0 has_body=0 has_notes=0 has_flag=0
-  local visibility='' make_public=0 copy j workflow_json=''
+# JSON helpers over a staged file, through JSON::PP. text prints every key and
+# every scalar value (decoded) so they can be scanned; it fails on input that
+# is not JSON. vis fails when a key named private, visibility, or public holds
+# anything but an explicit private choice (private true, visibility private or
+# internal, public false). private-choice succeeds only when such a choice is
+# present.
+gh_json() {  # <text|vis|private-choice> <file>
+  perl -MJSON::PP -e '
+    my $mode = shift; local $/; open my $fh, "<", shift or exit 2; my $raw = <$fh>;
+    my $data = eval { JSON::PP->new->allow_nonref->decode($raw) }; exit 2 if $@;
+    my ($bad, $choice) = (0, 0);
+    sub flag { my ($k, $v) = @_; my $lk = lc $k;
+      return unless $lk =~ /private|visibility|public/;
+      my $sv = ref($v) eq "JSON::PP::Boolean" ? ($v ? "true" : "false") : lc(defined $v ? "$v" : "");
+      if (($lk eq "private" && $sv eq "true") || ($lk eq "visibility" && $sv =~ /^(private|internal)$/)) { $choice = 1 }
+      elsif ($lk eq "public" && $sv eq "false") { }
+      else { $bad = 1 } }
+    sub walk { my ($v) = @_;
+      if (ref $v eq "HASH") { for my $k (sort keys %$v) { print "$k\n" if $mode eq "text"; flag($k, $v->{$k}); walk($v->{$k}) } }
+      elsif (ref $v eq "ARRAY") { walk($_) for @$v }
+      elsif (defined $v && $mode eq "text") { print ref($v) ? ($v ? "true" : "false") : "$v", "\n" } }
+    walk($data);
+    exit($bad ? 1 : 0) if $mode eq "vis";
+    exit($choice ? 0 : 1) if $mode eq "private-choice";
+    exit 0;
+  ' "$1" "$2"
+}
+
+# 0 when the text holds a \uXXXX escape of an ASCII character, which a
+# GraphQL string decodes into text the scan never saw.
+has_unicode_ascii_escape() {
+  perl -e 'local $/; my $text = <STDIN> // ""; while ($text =~ /\\u(?:\{([0-9a-fA-F]{1,6})\}|([0-9a-fA-F]{4}))/g) { exit 0 if hex($1 // $2) < 128 } exit 1'
+}
+
+# Number of executable operations in a GraphQL document on stdin.
+graphql_operation_count() {
+  perl -e '
+    local $/; my $d = <STDIN> // "";
+    $d =~ s/"""(?:\\"""|.)*?"""/""/gs; $d =~ s/"(?:\\.|[^"\\\n])*"/""/g; $d =~ s/#[^\n]*//g;
+    my ($depth, $paren, $ops, $head) = (0, 0, 0, "");
+    for my $c (split //, $d) {
+      if ($depth == 0 && $c eq "(") { $paren++ } elsif ($depth == 0 && $c eq ")") { $paren-- if $paren }
+      elsif ($paren == 0 && $c eq "{") { if ($depth == 0) { $ops++ unless $head =~ /^\s*fragment\b/; $head = "" } $depth++ }
+      elsif ($paren == 0 && $c eq "}") { $depth-- if $depth }
+      elsif ($depth == 0) { $head .= $c }
+    }
+    print "$ops\n";'
+}
+
+# Destination from a pull-request or issue URL or owner/repo#number target.
+gh_target_repo() {  # <token>
+  case "$1" in
+    https://*/*/*/pull/* | https://*/*/*/issues/*)
+      local t=${1%/pull/*}
+      t=${t%/issues/*}
+      printf '%s\n' "$t"
+      ;;
+    */*\#*) printf '%s\n' "${1%%#*}" ;;
+    *) return 1 ;;
+  esac
+}
+
+gh_same_repo() {  # <a> <b>
+  local a=$1 b=$2
+  case "$a" in https://*) a=${a#https://} ;; */*/*) ;; *) a=github.com/$a ;; esac
+  case "$b" in https://*) b=${b#https://} ;; */*/*) ;; *) b=github.com/$b ;; esac
+  [ "$(printf '%s' "$a" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$b" | tr '[:upper:]' '[:lower:]')" ]
+}
+
+cmd_gh_shim() {
+  local tool=${1:-} real
+  [ -n "$tool" ] || usage
+  shift
+  real=$(fm_pn_real_bin "$tool") || {
+    echo "fm-private-names: no real $tool found on PATH" >&2
+    return 127
+  }
+  # Find the command and action, past any leading destination option.
+  local args=("$@") n=$# i=0 token command='' action='' class
+  while [ "$i" -lt "$n" ]; do
+    token=${args[i]}
+    case "$token" in
+      --) break ;;
+      -R | --repo | --hostname) i=$((i + 2)); continue ;;
+      -R?* | --repo=* | --hostname=*) i=$((i + 1)); continue ;;
+      -h | --help | --version | -v | -V)
+        [ -n "$command" ] || exec "$real" "$@"
+        i=$((i + 1))
+        continue
+        ;;
+      -*)
+        if [ -z "$command" ]; then
+          echo "fm-private-names: refusing $tool with an unchecked leading option" >&2
+          return 1
+        fi
+        i=$((i + 1))
+        continue
+        ;;
+    esac
+    if [ -z "$command" ]; then
+      command=$token
+      [ "$command" != api ] || break
+    else
+      action=$token
+      break
+    fi
+    i=$((i + 1))
+  done
+  class=$(gh_class "$command" "$action")
+  case "$class" in
+    read | safe) exec "$real" "$@" ;;
+    api) gh_api_guard "$tool" "$real" "$@"; return ;;
+    refuse)
+      echo "fm-private-names: refusing $tool $(fm_pn_scrub_string "$command${action:+ $action}"): not a checked form, so it could publish text or change visibility unseen" >&2
+      return 1
+      ;;
+  esac
+  gh_publish_guard "$tool" "$real" "$class" "$command" "$action" "$@"
+}
+
+# Guard one write, visibility, or other gh call (see gh_class).
+gh_publish_guard() {  # <tool> <real> <class> <command> <action> <arg>...
+  local tool=$1 real=$2 class=$3 command=$4 action=$5
+  shift 5
+  local args=("$@") n=$# i token option value prefix value_idx kind options=1 seen=0 copy key j
+  local repo='' host='' target='' dest='' head='' visibility='' public=0 private_choice=0
+  local positional=() texts=() text_idx=() text_prefix=() files=()
+  local unknown=0 opaque=0 missing=0 has_title=0 has_body=0 has_notes=0 has_flag=0 no_text=0 json='' rc=0
+  local ca="$command $action"
   gh_shim_tmp || return 1
   for ((i = 0; i < n; i++)); do
     token=${args[i]}
@@ -846,6 +985,10 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
       continue
     fi
     if [ "$options" = 0 ] || [ "${token:0:1}" != - ] || [ "$token" = - ]; then
+      if [ "$seen" -lt 2 ] && [ "$options" = 1 ]; then
+        seen=$((seen + 1))
+        continue
+      fi
       positional+=("$i")
       continue
     fi
@@ -864,151 +1007,171 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
         value_idx=$i
         ;;
     esac
-    takes_value=0
+    kind=$(gh_flag_kind "$command" "$action" "$option")
     case "$option" in
-      -R | --repo | -F | --body-file | --notes-file | -t | --title | -b | --body | -n | --notes | \
-      --comment | --description | -l | --label | --add-label | --remove-label | \
-      -a | --assignee | --add-assignee | --remove-assignee | -m | --milestone | --project | \
-      --add-project | --remove-project | --target | --discussion-category | --notes-start-tag | \
-      --name | --base | -B | --branch-repo | --color | -f | --raw-field | --field | -r | --ref | \
-      --visibility | --homepage | --fork-name | --org | --default-branch | --source | --remote | \
-      --license | --gitignore | --team | --template | --add-topic | --remove-topic | --reason)
-        takes_value=1 ;;
-      -c) [ "$command" = release ] || takes_value=1 ;;
-      -d) case "$command" in label | repo) takes_value=1 ;; esac ;;
-      -p) [ "$command" != issue ] || takes_value=1 ;;
+      --public) public=1 ;;
+      --private | --internal) private_choice=1 ;;
     esac
-    if [ "$takes_value" = 1 ] && [ -z "$value_idx" ]; then
+    case "$kind" in
+      u) unknown=1; continue ;;
+      x) opaque=1; continue ;;
+      j) json=1; continue ;;
+      b)
+        has_flag=1
+        case "$ca:$option" in
+          "pr review:-a" | "pr review:--approve" | *:--delete-last) no_text=1 ;;
+          *:--generate-notes | *:--notes-from-tag) has_notes=1 ;;
+        esac
+        continue
+        ;;
+    esac
+    if [ -z "$value_idx" ]; then
       value_idx=$((i + 1))
-      value=${args[value_idx]:-}
+      if [ "$value_idx" -ge "$n" ]; then
+        missing=1
+        break
+      fi
+      value=${args[value_idx]}
       i=$value_idx
     fi
-    [ "$option" = -R ] || [ "$option" = --repo ] || has_flag=1
-    case "$option" in
-      -R | --repo) dest=$value; continue ;;
-      -F | --field | --body-file | --notes-file)
-        if [ "$command $action" = "workflow run" ] && { [ "$option" = -F ] || [ "$option" = --field ]; }; then
-          case "$value" in
-            *=@*)
-              copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
-                echo "fm-private-names: cannot read the workflow field file" >&2
-                return 1
-              }
-              args[value_idx]=$prefix${value%%=*}=@$copy
-              files+=("$copy")
-              texts+=("${value%%=*}")
-              continue
-              ;;
-          esac
-          texts+=("$value")
-          continue
-        fi
-        if [ "$option" = --field ]; then
-          texts+=("$value")
-          continue
-        fi
+    case "$kind" in
+      d) repo=$value ;;
+      h) host=$value ;;
+      t)
+        has_flag=1
+        text_idx+=("$value_idx")
+        text_prefix+=("$prefix")
+        case "$option" in
+          -t | --title | --subject) [ "$ca" = "pr merge" ] || has_title=1 ;;
+          -b | --body) case "$command" in release) has_notes=1 ;; *) has_body=1 ;; esac ;;
+          -n | --notes) has_notes=1 ;;
+          -H | --head) head=$value ;;
+          --visibility) visibility=$value ;;
+        esac
+        ;;
+      f)
+        has_flag=1
         copy=$(gh_stage_file "$value" "file-$value_idx") || {
-          echo "fm-private-names: cannot read the text file" >&2
+          echo "fm-private-names: cannot read the $command text file" >&2
           return 1
         }
         args[value_idx]=$prefix$copy
         files+=("$copy")
-        if [ "$option" = --notes-file ] || [ "$command" = release ]; then
-          has_notes=1
-        else
-          has_body=1
-        fi
-        continue
+        if [ "$command" = release ]; then has_notes=1; else has_body=1; fi
         ;;
-      -t | --title) has_title=1 ;;
-      -b | --body) has_body=1 ;;
-      -n | --notes | --generate-notes | --notes-from-tag) has_notes=1 ;;
-      --visibility) visibility=$value ;;
-      --json)
-        if [ "$command $action" = "workflow run" ]; then
-          workflow_json=$(gh_stage_file - workflow-json) || {
-            echo "fm-private-names: cannot read workflow JSON input" >&2
+      k)
+        case "$value" in
+          *=*) ;;
+          *) echo "fm-private-names: refusing a workflow field without key=value" >&2; return 1 ;;
+        esac
+        key=${value%%=*}
+        texts+=("$key")
+        j=${value#*=}
+        if { [ "$option" = -F ] || [ "$option" = --field ]; } && [ "${j:0:1}" = @ ]; then
+          copy=$(gh_stage_file "${j#@}" "field-$value_idx") || {
+            echo "fm-private-names: cannot read the workflow field file" >&2
             return 1
           }
-          files+=("$workflow_json")
+          args[value_idx]=$prefix$key=@$copy
+          files+=("$copy")
+        else
+          texts+=("$j")
         fi
         ;;
-      --public) visibility=public ;;
-      --private) visibility=private ;;
-      --internal) visibility=internal ;;
-      -e | --editor | -w | --web | -T | --recover | --attach | --edit-last) opaque=1 ;;
-      --template) [ "$command" = repo ] || opaque=1 ;;
     esac
-    [ -n "$value_idx" ] && texts+=("${args[value_idx]#"$prefix"}")
-    texts+=("$option")
   done
-  case "$command $action" in
-    "repo edit") [ "$visibility" = public ] && make_public=1 ;;
-  esac
-  if [ "$make_public" = 1 ]; then
-    echo "fm-private-names: refusing to make a repository public from a fleet worker" >&2
+  if [ "$missing" = 1 ]; then
+    echo "fm-private-names: missing $tool $command $action option value; refusing" >&2
     return 1
   fi
-  for i in "${positional[@]}"; do
-    token=${args[i]}
-    case "$token" in
-      https://*/*/*/pull/* | https://*/*/*/issues/*) target=${token%/pull/*}; target=${target%/issues/*} ;;
-      */*\#*) target=${token%#*} ;;
-    esac
-  done
-  case "$command $action" in
-    "repo create" | "repo new")
-      [ -n "${positional[2]:-}" ] && target=${args[${positional[2]}]}
-      case "$visibility" in
-        private | internal) "$real" "${args[@]}"; return ;;
-        public)
-          if [ -z "$target" ]; then
-            echo "fm-private-names: refusing public repository creation without a checked name" >&2
-            return 1
-          fi
-          ;;
-        *)
-          echo "fm-private-names: refusing repository creation without an explicit visibility choice" >&2
+
+  # Visibility, on every destination.
+  if [ "$class" = visibility ]; then
+    case "$action" in
+      create | new)
+        if [ "$public" = 1 ] || [ "$private_choice" = 0 ]; then
+          echo "fm-private-names: refusing $tool repo $action: only an explicit --private or --internal repository can be created from a fleet worker" >&2
           return 1
-          ;;
-      esac
-      ;;
-    "repo edit" | "repo rename" | "repo fork")
-      case "$action" in
-        edit | fork)
-          [ -n "${positional[2]:-}" ] && case "${args[${positional[2]}]}" in */*) target=${args[${positional[2]}]} ;; esac
-          ;;
-      esac
-      ;;
-  esac
-  if [ -n "$target" ]; then
-    dest=$target
-  elif [ -z "$dest" ]; then
-    dest=$(origin_url) || dest=
+        fi
+        "$real" "${args[@]}" </dev/null
+        return
+        ;;
+      fork)
+        target=
+        [ -n "${positional[0]:-}" ] && target=${args[${positional[0]}]}
+        [ -n "$target" ] || target=$(origin_url) || target=
+        # Only a GitHub repository can be verified private; a local path cannot.
+        case "$target" in /* | ./* | ../* | ~* | file://*) target= ;; */* | *:*) ;; *) target= ;; esac
+        if [ "$unknown" = 1 ] || [ -z "$target" ] || [ "$(fm_pn_visibility "$target")" != private ]; then
+          echo "fm-private-names: refusing $tool repo fork: only a fork of a verified private repository is allowed from a fleet worker" >&2
+          return 1
+        fi
+        "$real" "${args[@]}" </dev/null
+        return
+        ;;
+      edit)
+        if [ -n "$visibility" ]; then
+          case "$(printf '%s' "$visibility" | tr '[:upper:]' '[:lower:]')" in
+            private | internal) ;;
+            *)
+              echo "fm-private-names: refusing to make a repository public from a fleet worker" >&2
+              return 1
+              ;;
+          esac
+        fi
+        [ -n "${positional[0]:-}" ] && target=${args[${positional[0]}]}
+        ;;
+    esac
   fi
-  if [ -n "$dest" ] && [ "$command $action" != "repo create" ] && [ "$command $action" != "repo new" ] &&
-    ! fm_pn_dest_is_public "$dest"; then
-    if [ -n "$workflow_json" ]; then
-      "$real" "${args[@]}" <"$workflow_json"
-    else
-      "$real" "${args[@]}"
-    fi
+
+  # Destination.
+  for i in "${positional[@]}"; do
+    target=$(gh_target_repo "${args[i]}") && break
+    target=
+  done
+  [ "$ca" = "repo edit" ] && [ -n "${positional[0]:-}" ] && target=${args[${positional[0]}]}
+  if [ -n "$target" ] && [ -n "$repo" ] && ! gh_same_repo "$target" "$repo"; then
+    case "$command" in pr) value=pull-request ;; *) value=$command ;; esac
+    echo "fm-private-names: conflicting $value destinations; refusing" >&2
+    return 1
+  fi
+  dest=$target
+  [ -n "$dest" ] || dest=$repo
+  if [ -n "$dest" ] && [ -n "$host" ]; then
+    case "$dest" in https://* | */*/*) ;; *) dest=$host/$dest ;; esac
+  fi
+  [ -n "$dest" ] || dest=$(origin_url) || dest=
+  if [ -n "$dest" ] && [ "$(fm_pn_visibility "$dest")" = private ]; then
+    "$real" "${args[@]}"
     return
   fi
-  require_current_list "this $tool $command $action" || return 3
-  if [ "$opaque" = 1 ]; then
-    echo "fm-private-names: refusing unchecked $command text source (editor, browser, template, or attachment) on a public repository" >&2
+
+  # Public or unknown destination: only the checked forms run.
+  if [ "$class" = other ]; then
+    echo "fm-private-names: refusing $tool $command $action on a public or unknown repository: not a checked form" >&2
     return 1
   fi
-  case "$command $action" in
-    "issue create" | "issue new")
+  require_current_list "this $tool $command $action" || return 3
+  if [ "$unknown" = 1 ]; then
+    echo "fm-private-names: refusing unchecked $tool $command $action option on a public repository: it is not part of the checked form" >&2
+    return 1
+  fi
+  if [ "$opaque" = 1 ]; then
+    echo "fm-private-names: refusing unchecked $command text source (editor, browser, template, fill, or another repository) on a public repository" >&2
+    return 1
+  fi
+  case "$ca" in
+    "pr create" | "pr new" | "issue create" | "issue new")
       { [ "$has_title" = 1 ] && [ "$has_body" = 1 ]; } || {
-        echo "fm-private-names: refusing issue creation: title and body must be supplied as checked arguments" >&2
+        echo "fm-private-names: refusing $command creation: title and body must be supplied as checked arguments" >&2
         return 1
       } ;;
-    "issue comment")
-      [ "$has_body" = 1 ] || { echo "fm-private-names: refusing interactive issue text" >&2; return 1; } ;;
-    "issue edit" | "repo edit")
+    "pr comment" | "issue comment" | "pr review")
+      { [ "$has_body" = 1 ] || [ "$no_text" = 1 ]; } || {
+        echo "fm-private-names: refusing interactive $command text" >&2
+        return 1
+      } ;;
+    "pr edit" | "issue edit" | "repo edit")
       [ "$has_flag" = 1 ] || { echo "fm-private-names: refusing interactive $command text" >&2; return 1; } ;;
     "release create" | "release new")
       [ "$has_notes" = 1 ] || {
@@ -1016,11 +1179,33 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
         return 1
       } ;;
   esac
+  if [ -z "$head" ] && { [ "$ca" = "pr create" ] || [ "$ca" = "pr new" ]; }; then
+    head=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || head=
+  fi
+  if [ -n "$head" ] && ! printf '%s\n' "$head" | report_hits "the head branch name"; then
+    echo "fm-private-names: refusing: the head branch name holds a listed private name; rename the branch, for example to: $(fm_pn_scrub_string "$head")" >&2
+    return 1
+  fi
+  if [ -n "$json" ]; then
+    json=$(gh_stage_file - workflow-json) || {
+      echo "fm-private-names: cannot read workflow JSON input" >&2
+      return 1
+    }
+    gh_json text "$json" >"$json.text" || {
+      echo "fm-private-names: refusing workflow JSON input the shim cannot decode" >&2
+      return 1
+    }
+    files+=("$json.text")
+  fi
+  local pos_rc=0
+  for i in "${positional[@]}"; do
+    printf '%s\n' "${args[i]}" | report_hits "the $command text" 2>/dev/null || pos_rc=1
+  done
   for i in "${positional[@]}"; do
     token=${args[i]}
-    case "$command $action" in
+    case "$ca" in
       "release create" | "release new" | "release upload")
-        # Assets after the tag: scan the file content and any display label.
+        # Assets after the tag: scan the file content, basename, and label.
         if [ "$i" != "${positional[0]}" ] && [ -f "${token%%#*}" ]; then
           value="release asset $(fm_pn_scrub_string "${token%%#*}")"
           report_hits "$value" noline <"${token%%#*}" || rc=1
@@ -1034,43 +1219,92 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
     texts+=("$token")
   done
   for copy in "${files[@]}"; do
-    report_hits "the $command text file" <"$copy" || rc=1
+    report_hits "the $command text file" <"$copy" 2>/dev/null || rc=1
   done
-  if [ -n "$workflow_json" ] && has_encoded_ascii_escape <"$workflow_json"; then
-    echo "fm-private-names: refusing encoded workflow JSON text on a public repository" >&2
-    rc=1
-  fi
   for j in "${texts[@]}"; do
-    printf '%s\n' "$j" | report_hits "the $command text" || rc=1
+    printf '%s\n' "$j" | report_hits "the $command text" 2>/dev/null || rc=1
+  done
+  for ((j = 0; j < ${#text_idx[@]}; j++)); do
+    printf '%s\n' "${args[${text_idx[j]}]#"${text_prefix[j]}"}" | report_hits "the $command text" 2>/dev/null || rc=1
   done
   if [ "$rc" -ne 0 ]; then
-    echo "fm-private-names: refusing $tool $command $action on a public repository; replace the listed names with their neutral ids" >&2
+    case "$ca" in
+      "pr create" | "pr new" | "pr edit" | "pr comment" | "pr review" | "pr merge")
+        if [ "${FM_PRIVATE_NAMES_MODE:-}" = rewrite ] && [ "$pos_rc" = 0 ]; then
+          gh_rewrite_and_run
+          return
+        fi
+        ;;
+    esac
+    for copy in "${files[@]}"; do
+      report_hits "the $command text file" <"$copy"
+    done
+    for j in "${texts[@]}"; do
+      printf '%s\n' "$j" | report_hits "the $command text"
+    done
+    for ((j = 0; j < ${#text_idx[@]}; j++)); do
+      printf '%s\n' "${args[${text_idx[j]}]#"${text_prefix[j]}"}" | report_hits "the $command text"
+    done
+    case "$command" in
+      pr) echo "fm-private-names: refusing $tool $command $action on a public repository; reword it, or rerun with FM_PRIVATE_NAMES_MODE=rewrite to rewrite names to neutral ids" >&2 ;;
+      *) echo "fm-private-names: refusing $tool $command $action on a public repository; replace the listed names with their neutral ids" >&2 ;;
+    esac
     return 1
   fi
-  if [ -n "$workflow_json" ]; then
-    "$real" "${args[@]}" <"$workflow_json"
+  if [ -n "$json" ]; then
+    "$real" "${args[@]}" <"$json"
   else
-    "$real" "${args[@]}"
+    "$real" "${args[@]}" </dev/null
   fi
 }
 
-# Guard gh api. A write - a method other than GET or HEAD, fields or --input
-# without a method, or a GraphQL mutation - to a public repository endpoint,
-# or to any endpoint not under repos/<owner>/<repo>, has its endpoint, every
-# field value (and @file content), and --input content scanned first.
+# Rewrite mode for pull-request text: scrub every option value and staged file
+# to neutral ids, then run the real tool. Uses the caller's args, text_idx,
+# text_prefix, and files.
+gh_rewrite_and_run() {
+  local copy j
+  for copy in "${files[@]}"; do
+    if ! fm_pn_scrub_stream <"$copy" >"$copy.scrubbed" || ! mv "$copy.scrubbed" "$copy"; then
+      return 1
+    fi
+  done
+  for ((j = 0; j < ${#text_idx[@]}; j++)); do
+    args[text_idx[j]]=${text_prefix[j]}$(fm_pn_scrub_string "${args[${text_idx[j]}]#"${text_prefix[j]}"}")
+  done
+  echo "fm-private-names: rewrote listed private names in the pull-request text to neutral ids" >&2
+  "$real" "${args[@]}" </dev/null
+}
+
+# Guard gh api. Reads (GET or HEAD, or a GraphQL document with no mutation)
+# run unchanged. A write is refused on every destination when it can change
+# visibility or create a copy - a field or JSON key named private, visibility,
+# or public that is not an explicit private choice, a repository create
+# endpoint without one, a fork of a repository not verified private, a
+# transfer or Pages endpoint, or a GraphQL mutation touching repositories or
+# visibility. A write to a public or unknown destination then runs only in the
+# fully parsed form: every option known, every field key and value, @file and
+# @- content, and decoded --input JSON scanned; GraphQL with one operation and
+# no ASCII \u escapes.
 gh_api_guard() {  # <tool> <real> <arg>...
   local tool=$1 real=$2
   shift 2
-  local args=("$@") n=$# i token option value prefix value_idx endpoint='' method='' host='' fields=0 input=0
-  local texts=() files=() visibility_fields=() copy rc=0 j rest owner repo dest='' seen_api=0 mutation=0 make_public=0 input_copy=''
+  local args=("$@") n=$# i token option value prefix value_idx kind endpoint='' method='' host='' options=1 seen_api=0
+  local keys=() vals=() plain=() files=() inputs=() headers=() docs=() rc=0 j copy ep owner repo rest sub dest='' write=0
   gh_shim_tmp || return 1
   for ((i = 0; i < n; i++)); do
     token=${args[i]}
-    if [ "${token:0:1}" != - ] || [ "$token" = - ]; then
+    if [ "$options" = 1 ] && [ "$token" = -- ]; then
+      options=0
+      continue
+    fi
+    if [ "$options" = 0 ] || [ "${token:0:1}" != - ] || [ "$token" = - ]; then
       if [ "$seen_api" = 0 ] && [ "$token" = api ]; then
         seen_api=1
       elif [ -z "$endpoint" ] && [ "$seen_api" = 1 ]; then
         endpoint=$token
+      else
+        echo "fm-private-names: refusing $tool api with an unexpected argument" >&2
+        return 1
       fi
       continue
     fi
@@ -1088,142 +1322,252 @@ gh_api_guard() {  # <tool> <real> <arg>...
     esac
     case "$option" in
       -X | --method | -f | --raw-field | -F | --field | --input | --hostname | -H | --header | \
-      -q | --jq | -t | --template | --cache | -p | --preview | -R | --repo)
-        if [ -z "$value_idx" ]; then
-          value_idx=$((i + 1))
-          value=${args[value_idx]:-}
-          i=$value_idx
-        fi
+      -q | --jq | -t | --template | --cache | -p | --preview) kind=v ;;
+      -i | --include | --paginate | --slurp | --silent | --verbose) kind=b ;;
+      *)
+        echo "fm-private-names: refusing $tool api with an option outside its checked form" >&2
+        return 1
         ;;
     esac
+    if [ "$kind" = b ]; then
+      [ -z "$value_idx" ] || {
+        echo "fm-private-names: refusing $tool api with a value on a flag" >&2
+        return 1
+      }
+      continue
+    fi
+    if [ -z "$value_idx" ]; then
+      value_idx=$((i + 1))
+      if [ "$value_idx" -ge "$n" ]; then
+        echo "fm-private-names: missing $tool api option value; refusing" >&2
+        return 1
+      fi
+      value=${args[value_idx]}
+      i=$value_idx
+    fi
     case "$option" in
       -X | --method) method=$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]') ;;
       --hostname) host=$value ;;
-      -f | --raw-field) fields=1; texts+=("${value%%=*}" "${value#*=}"); visibility_fields+=("$value") ;;
-      -F | --field)
-        fields=1
-        texts+=("${value%%=*}")
-        case "${value#*=}" in
-          @*)
-            copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
-              echo "fm-private-names: cannot read the api field file" >&2
-              return 1
-            }
-            args[value_idx]=$prefix${value%%=*}=@$copy
-            files+=("$copy")
-            case "${value%%=*}" in
-              private | visibility)
-                j=${value%%=*}
-                value=$(tr -d '[:space:]' <"$copy") || return 1
-                visibility_fields+=("$j=$value")
-                ;;
-            esac
-            ;;
-          *) texts+=("${value#*=}"); visibility_fields+=("$value") ;;
+      -H | --header) headers+=("$value") ;;
+      -f | --raw-field | -F | --field)
+        case "$value" in
+          *=*) ;;
+          *) echo "fm-private-names: refusing an api field without key=value" >&2; return 1 ;;
         esac
+        keys+=("${value%%=*}")
+        j=${value#*=}
+        if { [ "$option" = -F ] || [ "$option" = --field ]; } && [ "${j:0:1}" = @ ]; then
+          copy=$(gh_stage_file "${j#@}" "field-$value_idx") || {
+            echo "fm-private-names: cannot read the api field file" >&2
+            return 1
+          }
+          args[value_idx]=$prefix${value%%=*}=@$copy
+          files+=("$copy")
+          vals+=("@$copy")
+          plain+=(0)
+        else
+          vals+=("$j")
+          plain+=(1)
+        fi
         ;;
       --input)
-        input=1
         copy=$(gh_stage_file "$value" "input-$value_idx") || {
           echo "fm-private-names: cannot read the api input" >&2
           return 1
         }
         args[value_idx]=$prefix$copy
-        files+=("$copy")
-        input_copy=$copy
+        inputs+=("$copy")
         ;;
     esac
   done
-  if [ "$endpoint" = graphql ]; then
-    for j in "${texts[@]}"; do
-      printf '%s\n' "$j" | grep -q -i 'mutation' && mutation=1
-      printf '%s\n' "$j" | has_encoded_ascii_escape && mutation=1
+  if [ -z "$endpoint" ]; then
+    "$real" "${args[@]}"
+    return
+  fi
+  ep=$endpoint
+  case "$ep" in *://*) ep=${ep#*://}; ep=${ep#*/} ;; esac
+  ep=${ep#/}
+  ep=${ep#api/v3/}
+  ep=${ep%%\?*}
+  ep=${ep%/}
+  ep=$(printf '%s' "$ep" | tr '[:upper:]' '[:lower:]')
+
+  if [ "$ep" = graphql ]; then
+    for ((j = 0; j < ${#keys[@]}; j++)); do
+      [ "${keys[j]}" = query ] || continue
+      if [ "${plain[j]}" = 1 ]; then
+        printf '%s\n' "${vals[j]}" >"$GH_SHIM_TMP/doc-$j"
+      else
+        cp -- "${vals[j]#@}" "$GH_SHIM_TMP/doc-$j" || return 1
+      fi
+      docs+=("$GH_SHIM_TMP/doc-$j")
     done
-    for copy in "${files[@]}"; do
-      grep -q -i 'mutation' "$copy" && mutation=1
-      has_encoded_ascii_escape <"$copy" && mutation=1
+    for copy in "${inputs[@]}"; do
+      perl -MJSON::PP -e 'local $/; my $d = eval { decode_json(<STDIN>) }; exit 2 unless ref $d eq "HASH";
+        print defined $d->{query} ? $d->{query} : ""' <"$copy" >"$copy.query" || {
+        echo "fm-private-names: refusing GraphQL --input the shim cannot decode" >&2
+        return 1
+      }
+      docs+=("$copy.query")
     done
-    if [ "$mutation" = 0 ]; then
+    for copy in "${docs[@]}"; do
+      grep -q 'mutation' "$copy" && write=1
+    done
+    if [ "$write" = 0 ]; then
       "$real" "${args[@]}"
       return
     fi
+    for copy in "${docs[@]}" "${inputs[@]}" "${files[@]}"; do
+      if grep -q -i -E 'visibility|private|public' "$copy" || grep -q -E '[a-z]Repository([^A-Za-z0-9_]|$)' "$copy"; then
+        echo "fm-private-names: refusing a GraphQL mutation that touches repositories or visibility from a fleet worker" >&2
+        return 1
+      fi
+    done
+    for ((j = 0; j < ${#vals[@]}; j++)); do
+      if printf '%s\n%s\n' "${keys[j]}" "${vals[j]}" | grep -q -i -E 'visibility|private|public'; then
+        echo "fm-private-names: refusing a GraphQL mutation that touches repositories or visibility from a fleet worker" >&2
+        return 1
+      fi
+    done
   else
-    case "$method" in
-      '') if [ "$fields" = 0 ] && [ "$input" = 0 ]; then "$real" "${args[@]}"; return; fi ;;
-      GET | HEAD) "$real" "${args[@]}"; return ;;
-    esac
-    rest=${endpoint#/}
-    case "$rest" in
+    if [ -z "$method" ]; then
+      if [ "${#keys[@]}" -gt 0 ] || [ "${#inputs[@]}" -gt 0 ]; then method=POST; else method=GET; fi
+    fi
+    case "$method" in GET | HEAD) ;; *) write=1 ;; esac
+    for j in "${headers[@]}"; do
+      printf '%s\n' "$j" | grep -q -i 'method-override' && write=1
+    done
+    if [ "$write" = 0 ]; then
+      "$real" "${args[@]}"
+      return
+    fi
+    # Visibility and copies, on every destination.
+    owner='' repo='' sub=''
+    case "$ep" in
       repos/*/*)
-        rest=${rest#repos/}
+        rest=${ep#repos/}
         owner=${rest%%/*}
         rest=${rest#*/}
         repo=${rest%%/*}
-        repo=${repo%%\?*}
-        if [ "$owner" = '{owner}' ] || [ "$repo" = '{repo}' ]; then
-          dest=$(origin_url) || dest=
-        elif [ -z "$host" ] || [ "$host" = github.com ]; then
-          dest=$owner/$repo
-        else
-          dest=$host/$owner/$repo
-        fi
+        case "$rest" in */*) sub=${rest#*/}; sub=${sub%%/*} ;; esac
         ;;
     esac
-    if [ "$method" = PATCH ]; then
-      rest=${endpoint%%\?*}
-      rest=${rest#/}
-      case "${rest#repos/}" in
-        */*/*) ;;
-        */*)
-          case "$rest" in
-            repos/*)
-              for j in "${visibility_fields[@]}"; do
-                case "$(printf '%s' "$j" | tr '[:upper:]' '[:lower:]')" in
-                  private=false | visibility=public) make_public=1 ;;
-                esac
-              done
-              if [ -n "$input_copy" ] && perl -MJSON::PP -e '
-                local $/; my $data = eval { decode_json(<STDIN>) } || {};
-                exit(!((exists $data->{private} && !$data->{private}) ||
-                  (exists $data->{visibility} && lc($data->{visibility}) eq "public")));
-              ' <"$input_copy"; then
-                make_public=1
-              fi
-              ;;
-          esac
+    for ((j = 0; j < ${#keys[@]}; j++)); do
+      case "$(printf '%s' "${keys[j]}" | tr '[:upper:]' '[:lower:]')" in
+        *private* | *visibility* | *public*) ;;
+        *) continue ;;
+      esac
+      if [ "${plain[j]}" = 1 ]; then
+        case "$(printf '%s=%s' "${keys[j]}" "${vals[j]}" | tr '[:upper:]' '[:lower:]')" in
+          private=true | visibility=private | visibility=internal | public=false) continue ;;
+        esac
+      fi
+      echo "fm-private-names: refusing a gh api write that can make a repository or gist public from a fleet worker" >&2
+      return 1
+    done
+    for copy in "${inputs[@]}"; do
+      gh_json vis "$copy" 2>/dev/null
+      case $? in
+        0) ;;
+        1)
+          echo "fm-private-names: refusing a gh api write that can make a repository or gist public from a fleet worker" >&2
+          return 1
+          ;;
+        *)
+          if grep -q -i -E 'visibility|private|public' "$copy"; then
+            echo "fm-private-names: refusing a gh api write that can make a repository or gist public from a fleet worker" >&2
+            return 1
+          fi
           ;;
       esac
+    done
+    case "$ep:$sub" in
+      user/repos: | orgs/*/repos: | repos/*:generate)
+        j=0
+        for ((i = 0; i < ${#keys[@]}; i++)); do
+          [ "${plain[i]}" = 1 ] || continue
+          case "$(printf '%s=%s' "${keys[i]}" "${vals[i]}" | tr '[:upper:]' '[:lower:]')" in
+            private=true | visibility=private | visibility=internal) j=1 ;;
+          esac
+        done
+        for copy in "${inputs[@]}"; do
+          gh_json private-choice "$copy" 2>/dev/null && j=1
+        done
+        if [ "$j" = 0 ]; then
+          echo "fm-private-names: refusing gh api repository creation without an explicit private choice" >&2
+          return 1
+        fi
+        ;;
+      repos/*:forks)
+        if [ "$owner" = '{owner}' ] || [ "$repo" = '{repo}' ] ||
+          [ "$(fm_pn_visibility "${host:+$host/}$owner/$repo")" != private ]; then
+          echo "fm-private-names: refusing gh api fork: only a fork of a verified private repository is allowed from a fleet worker" >&2
+          return 1
+        fi
+        ;;
+      repos/*:transfer | repos/*:pages | repositories/*)
+        echo "fm-private-names: refusing a gh api repository transfer, Pages, or id-addressed write from a fleet worker" >&2
+        return 1
+        ;;
+    esac
+    if [ -n "$owner" ] && [ -n "$repo" ]; then
+      if [ "$owner" = '{owner}' ] && [ "$repo" = '{repo}' ]; then
+        dest=$(origin_url) || dest=
+      elif [ "$owner" != '{owner}' ] && [ "$repo" != '{repo}' ]; then
+        dest=${host:+$host/}$owner/$repo
+        [ -n "$host" ] && [ "$host" != github.com ] || dest=$owner/$repo
+      fi
     fi
-    if [ "$make_public" = 1 ]; then
-      echo "fm-private-names: refusing to make a repository public from a fleet worker" >&2
-      return 1
-    fi
-    if [ -n "$dest" ] && ! fm_pn_dest_is_public "$dest"; then
+    if [ -n "$dest" ] && [ "$(fm_pn_visibility "$dest")" = private ]; then
       "$real" "${args[@]}"
       return
     fi
   fi
+
+  # Public or unknown destination: the fully parsed form only.
   require_current_list "this $tool api write" || return 3
   printf '%s\n' "$endpoint" | report_hits "the api endpoint" || rc=1
+  for ((j = 0; j < ${#keys[@]}; j++)); do
+    printf '%s\n' "${keys[j]}" | report_hits "an api field name" || rc=1
+    [ "${plain[j]}" = 1 ] || continue
+    printf '%s\n' "${vals[j]}" | report_hits "an api field" || rc=1
+  done
   for copy in "${files[@]}"; do
-    report_hits "the api input" <"$copy" || rc=1
-    if has_encoded_ascii_escape <"$copy"; then
-      echo "fm-private-names: refusing encoded api input on a public destination" >&2
-      rc=1
-    fi
+    report_hits "an api field file" <"$copy" || rc=1
   done
-  for j in "${texts[@]}"; do
-    printf '%s\n' "$j" | report_hits "an api field" || rc=1
-    if printf '%s\n' "$j" | has_encoded_ascii_escape; then
-      echo "fm-private-names: refusing encoded api field on a public destination" >&2
-      rc=1
-    fi
+  for copy in "${inputs[@]}"; do
+    gh_json text "$copy" >"$copy.text" || {
+      echo "fm-private-names: refusing api --input the shim cannot decode as JSON on a public destination" >&2
+      return 1
+    }
+    report_hits "the api input" <"$copy.text" || rc=1
   done
+  if [ "$ep" = graphql ]; then
+    for copy in "${docs[@]}"; do
+      if [ "$(graphql_operation_count <"$copy")" != 1 ]; then
+        echo "fm-private-names: refusing a GraphQL document without exactly one operation" >&2
+        return 1
+      fi
+    done
+    for copy in "${docs[@]}" "${files[@]}"; do
+      if has_unicode_ascii_escape <"$copy"; then
+        echo "fm-private-names: refusing encoded GraphQL text on a public destination" >&2
+        rc=1
+      fi
+    done
+    for ((j = 0; j < ${#vals[@]}; j++)); do
+      [ "${plain[j]}" = 1 ] || continue
+      if printf '%s\n' "${vals[j]}" | has_unicode_ascii_escape; then
+        echo "fm-private-names: refusing encoded GraphQL text on a public destination" >&2
+        rc=1
+      fi
+    done
+  fi
   if [ "$rc" -ne 0 ]; then
     echo "fm-private-names: refusing $tool api write to a public destination; replace the listed names with their neutral ids" >&2
     return 1
   fi
-  "$real" "${args[@]}"
+  "$real" "${args[@]}" </dev/null
 }
 
 cmd_no_mistakes_shim() {
@@ -1285,16 +1629,14 @@ cmd_gate() {
     echo "fm-private-names: the gate must run inside a git worktree" >&2
     return 1
   }
-  id=${common%/}
-  id=${id%.git}
-  id=${id##*/}
+  id=$(gate_id "$common")
   file=$(fm_pn_gate_index)/$id
   if [ ! -f "$file" ]; then
     echo "fm-private-names: no firstmate home on this machine pushes through this gate; nothing to check"
     return 0
   fi
   out=$(
-    while IFS=$'\t' read -r home config state data projects; do
+    while IFS=$'\t' read -r home config state data projects || [ -n "$home" ]; do
       [ -n "$home" ] || continue
       FM_HOME=$home FM_CONFIG_OVERRIDE=$config FM_STATE_OVERRIDE=$state \
         FM_DATA_OVERRIDE=$data FM_PROJECTS_OVERRIDE=$projects "$0" gate-check 2>&1 || echo "rc=$?"
@@ -1327,13 +1669,20 @@ cmd_gate_check() {
   branch=$(git symbolic-ref --short -q HEAD) || branch=
   printf 'HEAD %s refs/heads/%s %s\n' "$sha" "${branch:-HEAD}" "$ZERO_SHA" |
     scan_outgoing "$dest" || rc=1
-  # Uncommitted changes the push step will commit: added lines, added or
-  # renamed paths, and untracked files with their content.
-  git diff --no-color --no-ext-diff --unified=0 HEAD |
-    awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }' |
+  # The identity the push step commits pending changes under.
+  { git var GIT_AUTHOR_IDENT; git var GIT_COMMITTER_IDENT; } 2>/dev/null |
+    report_hits "the commit identity" noline || rc=1
+  # Uncommitted changes the push step will commit, staged or not: added lines,
+  # added or renamed paths, and untracked files with their content.
+  {
+    git diff --no-color --no-ext-diff --unified=0 HEAD
+    git diff --cached --no-color --no-ext-diff --unified=0 HEAD
+  } | awk '/^diff / { header = 1; next } /^@@/ { header = 0; next } !header && /^\+/ { print substr($0, 2) }' |
     report_hits "an uncommitted change" noline || rc=1
-  git diff --name-only -z -M --diff-filter=ACR HEAD | tr '\0' '\n' |
-    report_hits "an uncommitted file path" noline || rc=1
+  {
+    git diff --name-only -z -M --diff-filter=ACR HEAD
+    git diff --cached --name-only -z -M --diff-filter=ACR HEAD
+  } | tr '\0' '\n' | report_hits "an uncommitted file path" noline || rc=1
   while IFS= read -r -d '' path; do
     label="uncommitted binary content of $(fm_pn_scrub_string "$path")"
     report_hits "$label" noline <"$path" || rc=1

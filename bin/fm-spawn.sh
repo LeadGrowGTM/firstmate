@@ -5808,7 +5808,11 @@ EOF
 # refreshed from this home's records first, and a failed refresh leaves the
 # guard refusing public exits rather than passing them.
 GIT_HOOKS_DIR="$STATE_REAL/$ID.git-hooks"
-PRIVATE_NAMES_CONFIG=$(CDPATH='' cd -- "$CONFIG" 2>/dev/null && pwd -P) || PRIVATE_NAMES_CONFIG=$CONFIG
+mkdir -p -- "$CONFIG" 2>/dev/null
+PRIVATE_NAMES_CONFIG=$(CDPATH='' cd -- "$CONFIG" 2>/dev/null && pwd -P) || {
+  echo "error: cannot resolve the config directory for $ID's private-name guard" >&2
+  exit 1
+}
 FM_HOME="$FM_HOME" FM_CONFIG_OVERRIDE="$PRIVATE_NAMES_CONFIG" FM_STATE_OVERRIDE="$STATE_REAL" \
   FM_DATA_OVERRIDE="$DATA" FM_PROJECTS_OVERRIDE="$PROJECTS" \
   "$FM_ROOT/bin/fm-private-names.sh" refresh >/dev/null || {

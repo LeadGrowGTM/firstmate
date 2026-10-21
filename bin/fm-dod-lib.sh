@@ -634,11 +634,12 @@ EOF
       state_path=${FM_STATE_OVERRIDE:-$home_path/state}
       data_path=${FM_DATA_OVERRIDE:-$home_path/data}
       projects_path=${FM_PROJECTS_OVERRIDE:-$home_path/projects}
-      for path_name in home_path config_path state_path data_path projects_path; do
+      root_path=${FM_ROOT:-.}
+      for path_name in home_path config_path state_path data_path projects_path root_path; do
         path_value=${!path_name}
         case "$path_value" in /*) ;; *) printf -v "$path_name" '%s/%s' "$PWD" "$path_value" ;; esac
       done
-      scrub_cmd="FM_HOME=$(printf '%q' "$home_path") FM_CONFIG_OVERRIDE=$(printf '%q' "$config_path") FM_STATE_OVERRIDE=$(printf '%q' "$state_path") FM_DATA_OVERRIDE=$(printf '%q' "$data_path") FM_PROJECTS_OVERRIDE=$(printf '%q' "$projects_path") $(printf '%q' "${FM_ROOT:-.}/bin/fm-private-names-scrub.sh") --repo <full-repository-url> --pr <number> --no-evidence --apply"
+      scrub_cmd="FM_HOME=$(printf '%q' "$home_path") FM_CONFIG_OVERRIDE=$(printf '%q' "$config_path") FM_STATE_OVERRIDE=$(printf '%q' "$state_path") FM_DATA_OVERRIDE=$(printf '%q' "$data_path") FM_PROJECTS_OVERRIDE=$(printf '%q' "$projects_path") $(printf '%q' "$root_path/bin/fm-private-names-scrub.sh") --repo <full-repository-url> --pr <number> --no-evidence --apply"
       if [ "$forge" != gerrit ]; then
         early_scrub="While the no-mistakes drive continues, use a separate call to \`no-mistakes axi status\` to watch for its PR URL.
 As soon as the URL appears, run \`$scrub_cmd\` with the repository URL (including host) and number from that URL; do not wait for CI green.

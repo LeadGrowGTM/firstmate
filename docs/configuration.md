@@ -808,18 +808,20 @@ Ordinary words and very short names receive narrower context matching; the [guar
 Worker launches install commit and push hooks plus `git`, `gh`, `gh-axi`, and no-mistakes shims, including when `config/keep-ai-trailers` is set.
 For public destinations, every check runs before the text leaves the machine and refuses listed names in:
 
-- outgoing commit messages, annotated tag messages, pushed branch and tag names, added lines, added or renamed paths, and binary content;
+- outgoing commit messages and identities, annotated tag messages and headers, pushed branch and tag names, added lines, added or renamed paths, and binary content;
 - `gh` and `gh-axi` text: pull-request titles, bodies, comments, reviews, and close or reopen comments; issue text; release titles, notes, and assets; labels; repository settings; workflow inputs; and `gh api` writes;
 - no-mistakes intent, PR title, fix instructions, added findings, and reasons, and every run for a public origin starts with `--no-publish-intent`.
 
 `FM_PRIVATE_NAMES_MODE=rewrite` can replace names in commit messages and pull-request text with neutral ids; every other hit refuses.
-Text `gh` would collect in an editor, a browser, a prompt, or a template is refused on public destinations, and so are `git push --no-verify`, a push under another `core.hooksPath`, and making a repository public.
+On every destination, a `gh` command that could make a repository public or create a public copy is refused unless it makes an explicit private or internal choice; a fork needs a source verified private.
+On public or unknown destinations, `gh` writes run only in the forms the shim fully parses, so unknown options, other write commands, text `gh` would collect in an editor, a browser, a prompt, or a template, JSON escapes it cannot decode, and GraphQL with more than one operation are refused.
+`git push --no-verify`, a push whose effective `core.hooksPath` is not the launch's hooks, `git send-pack`, and `git http-push` are refused.
 Private repositories pass untouched, while an unknown network destination is treated as public and a missing list refuses publication.
 Existing unchanged content does not block an unrelated push.
 Relay public replies through `bin/fm-x-reply.sh`, including follow-ups, check reply text before posting or previewing, and a missing or unreadable list refuses the reply.
 Attached images are not scanned anywhere.
 These guards target accidental leaks by workers and do not stop a determined bypass.
-The `git` and `gh` shims cover documented command forms only, so other spellings, aliases, absolute-path `git` or `gh`, direct GitHub API calls, and harness connectors remain accepted residuals.
+Git aliases, absolute-path `git` or `gh`, direct GitHub API calls, and harness connectors remain accepted residuals.
 An alias that runs `git push` still invokes the pre-push hook unless it skips hooks.
 The pre-push hook and pipeline gate still check Git pushes made with hooks enabled, but nothing catches text sent to GitHub outside Git and the shims.
 

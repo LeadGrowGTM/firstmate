@@ -191,7 +191,7 @@ fm_pn_real_bin() {  # <name>
 fm_pn_explicit_visibility() {  # <repo-id> <raw>
   local id=$1 raw=$2 key value
   [ -f "$FM_PN_VISIBILITY" ] || return 1
-  while read -r key value _; do
+  while read -r key value _ || [ -n "$key" ]; do
     case "$key" in '' | '#'*) continue ;; esac
     [ "$value" = public ] || continue
     if [ "$key" = "$raw" ] || [ "$(fm_pn_repo_id "$key")" = "$id" ]; then
@@ -206,7 +206,7 @@ fm_pn_cached_visibility() {  # <repo-id>
   local id=$1 now key value at
   [ -f "$FM_PN_CACHE" ] || return 1
   now=$(date +%s)
-  while read -r key value at; do
+  while read -r key value at || [ -n "$key" ]; do
     [ "$key" = "$id" ] || continue
     [ "$value" = public ] || continue
     case "$at" in '' | *[!0-9]*) continue ;; esac

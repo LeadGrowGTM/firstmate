@@ -228,6 +228,15 @@ private_names_command() {  # <subcommand>
     "$(quote_for_hook "$PN_GUARD")" "$1"
 }
 
+# <path> made absolute against the current directory, so hooks that run from
+# another directory still read the launching home.
+absolute_path() {  # <path>
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "$PWD" "$1" ;;
+  esac
+}
+
 # The first git on PATH that is not in a private-name shim directory.
 real_git_path() {
   local dir old_ifs=$IFS
@@ -296,8 +305,13 @@ install_hooks() {
       echo "error: no git found on PATH" >&2
       return 1
     }
-    # git push --no-verify, or a push under another core.hooksPath, would skip
-    # the pre-push guard; refuse both, and run every other git call unchanged.
+    # A push that would skip the pre-push guard is refused: --no-verify in any
+    # form git accepts, any core.hooksPath other than this directory as git
+    # itself resolves it under the caller's options and environment (-c,
+    # --config-env, GIT_CONFIG_*, include files, an unset override), and the
+    # plumbing commands that push without hooks. Every other call runs
+    # unchanged. Git aliases are outside this shim; a push through one still
+    # runs the pre-push hook unless the alias skips hooks.
     {
       printf '%s\n' '#!/usr/bin/env bash' \
         "real=$(quote_for_hook "$real_git")" \
@@ -306,46 +320,55 @@ install_hooks() {
 args=("$@")
 n=$#
 i=0
-other_hooks=0
-lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 while [ "$i" -lt "$n" ]; do
-  a=${args[i]}
-  case "$a" in
-    -c)
-      i=$((i + 1))
-      v=${args[i]:-}
-      case "$(lower "$v")" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
+  case "${args[i]}" in
+    -C | -c | --git-dir | --work-tree | --namespace | --super-prefix | --config-env | --attr-source | --list-cmds)
+      i=$((i + 2))
+      continue
       ;;
-    -c?*)
-      v=${a:2}
-      case "$(lower "$v")" in core.hookspath=*) [ "${v#*=}" = "$hooks" ] || other_hooks=1 ;; esac
+    -C?* | -c?* | --git-dir=* | --work-tree=* | --namespace=* | --super-prefix=* | --config-env=* | \
+      --attr-source=* | --exec-path=* | --list-cmds=* | -p | --paginate | -P | --no-pager | --bare | \
+      --no-replace-objects | --no-lazy-fetch | --no-optional-locks | --no-advice | --literal-pathspecs | \
+      --glob-pathspecs | --noglob-pathspecs | --icase-pathspecs | --exec-path | --html-path | --man-path | \
+      --info-path | -v | --version | -h | --help) ;;
+    -*)
+      echo "fm-private-names: unrecognized git option before the command; refusing so a push cannot skip the private-name check" >&2
+      exit 1
       ;;
-    --config-env)
-      i=$((i + 1))
-      case "$(lower "${args[i]:-}")" in core.hookspath=*) other_hooks=1 ;; esac
-      ;;
-    --config-env=*)
-      case "${a#*=}" in [cC][oO][rR][eE].[hH][oO][oO][kK][sS][pP][aA][tT][hH]=*) other_hooks=1 ;; esac
-      ;;
-    -C | --git-dir | --work-tree | --namespace | --super-prefix) i=$((i + 1)) ;;
-    -*) ;;
     *) break ;;
   esac
   i=$((i + 1))
 done
-if [ "${args[i]:-}" = push ]; then
-  for a in "${args[@]:i+1}"; do
-    [ "$a" = -- ] && break
-    case "$a" in --no-veri | --no-verif | --no-verify)
-      echo "fm-private-names: git push --no-verify would skip the private-name check; push without it" >&2
-      exit 1
+case "${args[i]:-}" in
+  push)
+    for a in "${args[@]:i+1}"; do
+      [ "$a" = -- ] && break
+      case "$a" in
+        --no-veri | --no-verif | --no-verify)
+          echo "fm-private-names: git push --no-verify would skip the private-name check; push without it" >&2
+          exit 1
+          ;;
+      esac
+    done
+    effective=$("$real" "${args[@]:0:i}" config --type=path --get core.hooksPath 2>/dev/null) || effective=
+    case "$effective" in
+      '' | /*) ;;
+      *)
+        top=$("$real" "${args[@]:0:i}" rev-parse --show-toplevel 2>/dev/null) || top=
+        effective=$top/$effective
+        ;;
     esac
-  done
-  if [ "$other_hooks" = 1 ]; then
-    echo "fm-private-names: git push under another core.hooksPath would skip the private-name check" >&2
+    resolved=$(cd -- "$effective" 2>/dev/null && pwd -P) || resolved=
+    if [ -z "$effective" ] || [ "$resolved" != "$hooks" ]; then
+      echo "fm-private-names: git push under another core.hooksPath would skip the private-name check" >&2
+      exit 1
+    fi
+    ;;
+  send-pack | http-push)
+    echo "fm-private-names: git ${args[i]} pushes without the pre-push hook; use git push" >&2
     exit 1
-  fi
-fi
+    ;;
+esac
 exec "$real" "$@"
 GIT
     } | write_executable "$hooks_dir/bin/git" || return 1
@@ -386,11 +409,11 @@ install)
       ;;
     --private-names)
       [ "$#" -ge 6 ] && [ -n "$2" ] && [ -n "$3" ] && [ -n "$4" ] && [ -n "$5" ] && [ -n "$6" ] || usage
-      PN_CONFIG=$2
-      PN_STATE=$3
-      PN_HOME=$4
-      PN_DATA=$5
-      PN_PROJECTS=$6
+      PN_CONFIG=$(absolute_path "$2")
+      PN_STATE=$(absolute_path "$3")
+      PN_HOME=$(absolute_path "$4")
+      PN_DATA=$(absolute_path "$5")
+      PN_PROJECTS=$(absolute_path "$6")
       shift 6
       ;;
     *) usage ;;
