@@ -361,7 +361,7 @@ fm_cqg_mark_observed() {
     if [ "$observed_count" = 0 ]; then
       staged=$(mktemp "$state/.${meta##*/}.quota-observed.XXXXXX") || result=1
       if [ "$result" = 0 ] &&
-        { ! awk '1; END { print "quota_agent_observed=1" }' "$meta" >"$staged" ||
+        { ! awk -F= '$1 == "pr" && !inserted { print "quota_agent_observed=1"; inserted=1 } { print } END { if (!inserted) print "quota_agent_observed=1" }' "$meta" >"$staged" ||
           ! fm_backlog_atomic_transition publish "$staged" "$meta" "task record" "$state"; }; then
         result=1
       fi
