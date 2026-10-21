@@ -1520,7 +1520,7 @@ It uses the tightest Claude JSON window whose id is `seven_day`, or whose kind i
 That window must report `resetsAt`.
 A positive `windowSeconds` on that window is its length.
 When the selected window's own id is `seven_day` and `windowSeconds` is absent, the pace check uses 604800 seconds with its reset time.
-A weekly-kind or unlabeled window without `windowSeconds` skips the pace check, even if another window reports a length.
+A selected window whose id is not `seven_day` and that lacks `windowSeconds` skips the pace check, even if another window reports a length.
 A length that is present but not a positive number skips the pace check.
 When quota-axi is missing, times out, fails, or cannot be parsed, the pace check is skipped and the spawn output states that gap.
 That gap never refuses a launch by itself.

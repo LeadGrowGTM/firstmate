@@ -642,6 +642,9 @@ case "${1:-}" in
     fi
     ;;
   display-message)
+    # Give process custody a pane lineage so unrelated unreadable host processes
+    # cannot make this isolated fixture look occupied.
+    case "$*" in *pane_pid*) printf '%s\n' "$FM_FAKE_PANE_PID"; exit 0 ;; esac
     if [ -f "${FM_FAKE_CALL_LOG%/*}/agent-window" ]; then
       case "$*" in *pane_current_command*) printf 'claude\n'; exit 0 ;; esac
     fi
@@ -737,6 +740,7 @@ run_spawn() { # <case> <pane> <args...>
       FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' \
       FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" FM_BACKEND=tmux \
       FM_FAKE_PANE_PATH="$pane" FM_FAKE_CALL_LOG="$case_dir/calls.log" \
+      FM_FAKE_PANE_PID="$$" \
       FM_FAKE_PAUSE_LAUNCH="${FM_FAKE_PAUSE_LAUNCH:-0}" \
       PATH="$(guard_path "$case_dir/fakebin")" \
       "$SPAWN" "$@"
