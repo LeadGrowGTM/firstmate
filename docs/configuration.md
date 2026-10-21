@@ -1531,6 +1531,7 @@ With a selected or uniquely inferred dispatch rule, only profiles listed by that
 An omitted launch model is read as `default` before that rule is inferred, matching the dispatch profile checker.
 For a scheduled worker, only profiles in its authorized plan are eligible, excluding any profile already tried in that episode.
 A repeated destination is rejected before a worker is provisioned.
+An unavailable reroute records the destination from its launch receipt, so a later selection of that destination is already tried.
 Grok is skipped when the launch carries client data, which [`bin/fm-muse-client-lib.sh`](../bin/fm-muse-client-lib.sh) decides, and when `grok` is not on `PATH`.
 Muse is skipped when `muse` is not on `PATH`.
 A Muse route uses the normal Muse launch, so contributor mode stays off when the launch carries client data.

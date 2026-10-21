@@ -23,6 +23,7 @@ case "$mode" in
   missing) exit 1 ;;
   capacity) outcome=capacity; code=75 ;;
   unavailable) outcome=worker-unavailable; code=1 ;;
+  unavailable-reroute) outcome=worker-unavailable; code=1 ;;
   unsafe) outcome=unsafe-refusal; code=1 ;;
   uncertain) outcome=uncertain; code=1 ;;
   published) outcome=worker-published; code=0 ;;
@@ -53,9 +54,15 @@ if [ "$outcome" = worker-published ]; then
   printf 'spawn_gen=gen-1\nbackend=tmux\nmode=direct-PR\nyolo=off\nproject=%s\nharness=%s\nmodel=%s\neffort=%s\n' \
     "$project" "$harness" "$model" "$effort" > "$FM_HOME/state/$id.meta"
 fi
-jq -n --arg task "$id" --arg outcome "$outcome" --argjson code "$code" \
-  '{version:1,task:$task,outcome:$outcome,exit_code:$code,spawn_gen:"gen-1",reason:"fixture"}' \
-  > "$FM_SPAWN_OUTCOME_FILE"
+if [ "$mode" = unavailable-reroute ]; then
+  jq -n --arg task "$id" \
+    '{version:1,task:$task,outcome:"worker-unavailable",reason:"selected-account-check-refused",harness:"claude",model:"sonnet",effort:"high",exit_code:1,spawn_gen:"gen-1"}' \
+    > "$FM_SPAWN_OUTCOME_FILE"
+else
+  jq -n --arg task "$id" --arg outcome "$outcome" --argjson code "$code" \
+    '{version:1,task:$task,outcome:$outcome,exit_code:$code,spawn_gen:"gen-1",reason:"fixture"}' \
+    > "$FM_SPAWN_OUTCOME_FILE"
+fi
 exit "$code"
 STUB
   cat > "$dir/bin/fm-control.sh" <<'STUB'
@@ -269,6 +276,33 @@ check_tried_destination_is_rejected_before_provisioning() {
   pass 'a quota reroute rejects an already-tried destination before provisioning'
 }
 
+check_unavailable_reroute_records_destination() {
+  local dir out rc journal at
+  dir=$(make_case unavailable-reroute)
+  jq '.profiles=[{"harness":"claude","model":"opus","effort":"high","reasoning_class":"standard"},{"harness":"claude","model":"sonnet","effort":"high","reasoning_class":"standard"}]' \
+    "$dir/plan.json" > "$dir/other.json"; mv "$dir/other.json" "$dir/plan.json"
+  at=$(( $(date +%s) - 2 ))
+  jq -n --argjson at "$at" \
+    '{profile:{harness:"claude",model:"opus",effort:"high",reasoning_class:"standard"},observed_at:$at,evidence:"current candidates checked"}' > "$dir/selection.json"
+  printf '%s\n' unavailable-reroute > "$dir/home/result"
+  out=$(run_case "$dir"); rc=$?
+  expect_code 1 "$rc" "an unavailable Sonnet reroute should stay reselectable: $out"
+  journal="$dir/home/state/scheduled-worker/occ/journal.json"
+  assert_equals reselect "$(jq -r .phase "$journal")" 'unavailable reroute did not stay reselectable'
+  assert_equals sonnet "$(jq -r .profile.model "$journal")" 'journal kept the requested Opus profile'
+  assert_equals sonnet "$(jq -r '.tried[0].model' "$journal")" 'tried list kept Opus instead of the unavailable Sonnet destination'
+  assert_equals 1 "$(jq '.tried|length' "$journal")" 'unavailable reroute left both profiles tried'
+  assert_absent "$dir/home/state/job.meta" 'unavailable reroute published a worker'
+  sleep 1
+  jq -n --argjson at "$(date +%s)" \
+    '{profile:{harness:"claude",model:"sonnet",effort:"high",reasoning_class:"standard"},observed_at:$at,evidence:"current candidates checked"}' > "$dir/selection.json"
+  out=$(run_case "$dir"); rc=$?
+  expect_code 1 "$rc" "the unavailable Sonnet destination was selected again: $out"
+  assert_contains "$out" 'candidate already attempted' 'unavailable Sonnet was not excluded'
+  assert_equals 1 "$(count_calls "$dir")" 'the repeated Sonnet destination reached spawn'
+  pass 'an unavailable quota reroute records the destination before reselection'
+}
+
 check_relative_state_receipt() {
   local dir out rc
   dir=$(make_case relative-state)
@@ -357,6 +391,7 @@ check_failure_barriers
 check_attempt_and_exhaustion
 check_published_reroute_updates_journal_profile
 check_tried_destination_is_rejected_before_provisioning
+check_unavailable_reroute_records_destination
 check_relative_state_receipt
 check_generation_change_at_control_admission
 check_branch_prefix_forwarding

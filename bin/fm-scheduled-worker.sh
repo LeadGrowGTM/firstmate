@@ -256,7 +256,22 @@ case "$OUTCOME:$RC" in
       --arg outcome "$OUTCOME" --arg gen "$NEW_GEN" --argjson actual "$ACTUAL_PROFILE"
     ;;
   worker-unavailable:1)
-    write_journal '.phase="reselect" | .reason=$reason' --arg reason "$(jq -r .reason "$RECEIPT")"
+    REASON=$(jq -r '.reason // empty' "$RECEIPT")
+    if jq -e '(.harness|type) == "string" and .harness != "" and (.model|type) == "string" and .model != "" and (.effort|type) == "string" and .effort != ""' "$RECEIPT" >/dev/null; then
+      ACTUAL_PROFILE=$(jq -ce \
+        --arg harness "$(jq -r .harness "$RECEIPT")" \
+        --arg model "$(jq -r .model "$RECEIPT")" \
+        --arg effort "$(jq -r .effort "$RECEIPT")" \
+        '[.profiles[] | select(.harness == $harness and .model == $model and .effort == $effort)] | if length == 1 then .[0] else error("unavailable profile is not uniquely authorized") end' \
+        "$DIR/plan.json") || {
+        write_journal '.phase="blocked" | .reason="unavailable-profile-mismatch"'
+        die 'unavailable profile is not uniquely authorized'
+      }
+      write_journal '.phase="reselect" | .reason=$reason | .tried -= [.profile, $actual] | .profile=$actual | .tried += [$actual]' \
+        --arg reason "$REASON" --argjson actual "$ACTUAL_PROFILE"
+    else
+      write_journal '.phase="reselect" | .reason=$reason' --arg reason "$REASON"
+    fi
     ;;
   capacity:75)
     write_journal '.phase="capacity" | .tried -= [.profile]'
