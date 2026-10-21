@@ -1466,29 +1466,19 @@ SPAWN_CLAUDE_QUOTA_VERDICT=
 # the task record is published, or released now when the route leaves claude.
 # The guard command owns the decision; this function only applies its verdict.
 spawn_apply_claude_quota_guard() {
-  local quota_rc=0 line key value word expect_model=0 guard_model=$MODEL
+  local quota_rc=0 line key value guard_model=$MODEL
   local verdict_action='' verdict_harness='' verdict_model='' verdict_effort=''
   local -a guard_args=()
   [ "$KIND" != secondmate ] || return 0
   [ "$HARNESS" = claude ] || return 0
   if [ "$RAW_LAUNCH" = 1 ]; then
-    for word in $ARG3; do
-      if [ "$expect_model" = 1 ]; then
-        guard_model=${word#\'}
-        guard_model=${guard_model%\'}
-        guard_model=${guard_model#\"}
-        guard_model=${guard_model%\"}
-        expect_model=0
-      elif [ "$word" = --model ]; then
-        expect_model=1
-      elif [[ "$word" == --model=* ]]; then
-        guard_model=${word#--model=}
-        guard_model=${guard_model#\'}
-        guard_model=${guard_model%\'}
-        guard_model=${guard_model#\"}
-        guard_model=${guard_model%\"}
-      fi
-    done
+    if ! raw_claude_option_extract "$ARG3" model; then
+      echo "error: raw Claude model syntax cannot be checked safely" >&2
+      FM_LAUNCH_OUTCOME=unsafe-refusal
+      FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+      exit 1
+    fi
+    [ "$RAW_CLAUDE_MODEL_SET" = 0 ] || guard_model=$RAW_CLAUDE_MODEL
   fi
   if [ "$RELAUNCH" -eq 1 ]; then
     guard_args+=(--refusal-only)
@@ -1526,6 +1516,7 @@ spawn_apply_claude_quota_guard() {
     --verdict "$SPAWN_CLAUDE_QUOTA_VERDICT" \
     --dispatch-rule "$DISPATCH_RULE" \
     --effort "${EFFORT:-default}" \
+    --scheduled-plan "${FM_SCHEDULED_WORKER_PLAN:-}" \
     "${guard_args[@]}" || quota_rc=$?
   if [ "$quota_rc" -ne 0 ]; then
     rm -f "$SPAWN_CLAUDE_QUOTA_VERDICT"
@@ -2826,11 +2817,14 @@ launch_template() {
   esac
 }
 
-raw_claude_settings_extract() {
-  local source=$1 length=${#1} i=0 start settings_start c next quote='' word='' expect=0
+raw_claude_option_extract() {
+  local source=$1 mode=$2 length=${#1} i=0 start settings_start c next quote='' word='' expect=0 options_end=0
+  RAW_CLAUDE_MODEL_SET=0
+  RAW_CLAUDE_MODEL=
   while (( i < length )); do
     c=${source:i:1}
     if [[ "$c" == [[:space:]] ]]; then
+      [ "$mode" != model ] || [ "$c" != $'\n' ] || return 1
       ((i += 1))
       continue
     fi
@@ -2844,10 +2838,13 @@ raw_claude_settings_extract() {
       elif [ "$quote" = '"' ]; then
         if [ "$c" = '"' ]; then
           quote=
+        elif [ "$mode" = model ] && { [ "$c" = '$' ] || [ "$c" = '`' ]; }; then
+          return 1
         elif [ "$c" = "\\" ]; then
           ((i += 1))
           (( i < length )) || return 1
           next=${source:i:1}
+          [ "$mode" != model ] || [ "$next" != $'\n' ] || return 1
           case "$next" in
           '"'|'$'|'`'|"\\") word+=$next ;;
           *) word+="\\$next" ;;
@@ -2858,11 +2855,15 @@ raw_claude_settings_extract() {
       else
         if [[ "$c" == [[:space:]] ]]; then break; fi
         case "$c" in ';'|'|'|'&') break ;; esac
+        if [ "$mode" = model ]; then
+          case "$c" in '$'|'`'|'<'|'>'|'('|')'|'{'|'}'|'*'|'?'|'['|'#') return 1 ;; esac
+        fi
         if [ "$c" = "'" ] || [ "$c" = '"' ]; then
           quote=$c
         elif [ "$c" = "\\" ]; then
           ((i += 1))
           (( i < length )) || return 1
+          [ "$mode" != model ] || [ "${source:i:1}" != $'\n' ] || return 1
           word+=${source:i:1}
         else
           word+=$c
@@ -2872,9 +2873,25 @@ raw_claude_settings_extract() {
     done
     [ -z "$quote" ] || return 1
     if [ "$expect" = 1 ]; then
+      if [ "$mode" = model ]; then
+        RAW_CLAUDE_MODEL=$word
+        RAW_CLAUDE_MODEL_SET=1
+        expect=0
+        continue
+      fi
       RAW_CLAUDE_SETTINGS_VALUE=$word
       RAW_CLAUDE_SETTINGS_COMMAND=${source:0:settings_start}--disallowedTools\ $CLAUDE_PUBLISHING_TOOLS\ ${source:settings_start:start-settings_start}__CLAUDESETTINGS__${source:i}
       return 0
+    fi
+    if [ "$mode" = model ]; then
+      if [ "$options_end" = 0 ]; then
+        case "$word" in
+          --model) expect=1 ;;
+          --model=*) RAW_CLAUDE_MODEL=${word#--model=}; RAW_CLAUDE_MODEL_SET=1 ;;
+          --) options_end=1 ;;
+        esac
+      fi
+      continue
     fi
     if [ "$word" = --settings ] && [ "${source:start:10}" = --settings ]; then
       expect=1
@@ -2885,6 +2902,10 @@ raw_claude_settings_extract() {
       return 0
     fi
   done
+  if [ "$mode" = model ]; then
+    [ "$expect" = 0 ]
+    return
+  fi
   return 1
 }
 
@@ -6374,7 +6395,7 @@ if [ "$HARNESS" = claude ]; then
         | if ($o | length) == 0 then error("no recognized key") else $o end
       end' \
       "$WT/config/skill-overrides.json" 2>/dev/null); then
-      if [ "$RAW_LAUNCH" = 1 ] && raw_claude_settings_extract "$ARG3"; then
+      if [ "$RAW_LAUNCH" = 1 ] && raw_claude_option_extract "$ARG3" settings; then
         LAUNCH=$RAW_CLAUDE_SETTINGS_COMMAND
         CLAUDE_SETTINGS=$RAW_CLAUDE_SETTINGS_VALUE
       fi

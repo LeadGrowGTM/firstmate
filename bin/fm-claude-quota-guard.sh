@@ -34,6 +34,8 @@ usage() {
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-control-lib.sh
+. "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-claude-quota-guard-lib.sh
 . "$SCRIPT_DIR/fm-claude-quota-guard-lib.sh"
 
@@ -52,6 +54,7 @@ apply=0
 FM_CQG_REFUSAL_ONLY=0
 FM_CQG_DISPATCH_RULE=
 FM_CQG_EFFORT=default
+FM_CQG_SCHEDULED_PLAN=
 while [ $# -gt 0 ]; do
   case "$1" in
     --config)
@@ -105,6 +108,7 @@ while [ $# -gt 0 ]; do
     --refusal-only) FM_CQG_REFUSAL_ONLY=1; shift ;;
     --dispatch-rule) FM_CQG_DISPATCH_RULE=$2; shift 2 ;;
     --effort) FM_CQG_EFFORT=$2; shift 2 ;;
+    --scheduled-plan) FM_CQG_SCHEDULED_PLAN=$2; shift 2 ;;
     *) usage; exit 2 ;;
   esac
 done

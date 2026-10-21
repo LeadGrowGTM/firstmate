@@ -58,9 +58,10 @@ fm_cqg_load() {
     return 1
   fi
   local parsed
-  if ! parsed=$(jq -c '
+  if ! parsed=$(jq -ces '
     def num: type == "number" and (isinfinite | not) and (isnan | not);
     def whole: num and . == floor;
+    if length != 1 then error("expected one JSON object") else .[0] end |
     if type != "object" then error("expected a JSON object")
     elif (keys - ["pace_margin_points","concurrent_claude_cap","weekly_window_seconds","opus_refused_types"]) != []
       then error("unknown key")
@@ -292,8 +293,10 @@ fm_cqg_ahead_of_margin() {
 # bin/fm-muse-client-lib.sh owns that decision. Sonnet needs no extra binary
 # because the launch is already Claude.
 fm_cqg_pick_route() {
-  local home=$1 brief=$2 config=$3 rule=$4 model=$5 effort=$6 profiles choice
-  if [ -f "$config/crew-dispatch.json" ]; then
+  local home=$1 brief=$2 config=$3 rule=$4 model=$5 effort=$6 plan=$7 profiles='' choice
+  if [ -n "$plan" ]; then
+    profiles=$(jq -ces 'if length != 1 then error("expected one scheduled plan") else .[0] end | select(.authorized == true and (.profiles | type) == "array" and (.profiles | length) > 0) | .profiles' "$plan" 2>/dev/null) || return 1
+  elif [ -f "$config/crew-dispatch.json" ]; then
     profiles=$(jq -ce --arg rule "$rule" --arg model "$model" --arg effort "$effort" '
       def profiles: if type == "array" then . else [.] end;
       (if $rule != "" then ($rule | fromjson) else null end) as $selected |
@@ -303,6 +306,8 @@ fm_cqg_pick_route() {
       else map(select(any(.items[]; .harness == "claude" and (.model // "default") == $model and (.effort // "default") == $effort))) end |
       if length != 1 then error("selected dispatch rule is unavailable") else .[0].items end
     ' "$config/crew-dispatch.json" 2>/dev/null) || return 1
+  fi
+  if [ -n "$profiles" ]; then
     if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
       choice=$(jq -r '[.[] | select(.harness == "grok")] | if length == 0 then empty else .[0] | [.harness, (.model // "default"), (.effort // "default")] | @tsv end' <<<"$profiles")
       [ -z "$choice" ] || { printf '%s\n' "$choice"; return 0; }
@@ -330,7 +335,7 @@ fm_cqg_pick_route() {
 # Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home whose
 # recorded endpoint has not been proven dead. Returns 1 when a record cannot be read.
 fm_cqg_count() {
-  local state=$1 self=$2 list f id harness kind backend target socket alive
+  local state=$1 self=$2 list f id harness kind backend target socket alive proof
   FM_CQG_OCCUPANTS=0
   if [ ! -d "$state" ] || [ ! -r "$state" ]; then
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
@@ -359,11 +364,17 @@ fm_cqg_count() {
     target=$(fm_backend_target_of_meta "$f")
     socket=$(fm_meta_get "$f" tmux_socket)
     if [ "$backend" = tmux ] && grep -q '^tmux_socket=' "$f"; then
-      alive=$(fm_backend_agent_alive "$backend" "$target" "$socket")
+      alive=$(fm_backend_agent_state "$backend" "$target" "$socket")
     else
-      alive=$(fm_backend_agent_alive "$backend" "$target")
+      alive=$(fm_backend_agent_state "$backend" "$target")
     fi
-    [ "$alive" != dead ] || continue
+    case "$alive" in
+      dead) continue ;;
+      missing)
+        proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")
+        case "${proof%%$'\t'*}" in gone|dead) continue ;; esac
+        ;;
+    esac
     FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
   done <<<"$list"
 }
@@ -415,7 +426,7 @@ fm_cqg_decide() {
     if [ -z "$ahead" ]; then
       printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"
     elif fm_cqg_ahead_of_margin "$ahead"; then
-      if ! route=$(fm_cqg_pick_route "$home" "$brief" "$config" "${FM_CQG_DISPATCH_RULE:-}" "$model" "${FM_CQG_EFFORT:-default}"); then
+      if ! route=$(fm_cqg_pick_route "$home" "$brief" "$config" "${FM_CQG_DISPATCH_RULE:-}" "$model" "${FM_CQG_EFFORT:-default}" "${FM_CQG_SCHEDULED_PLAN:-}"); then
         fm_cqg_status_once "$state" "$id" "$FM_CQG_ROUTE_STATUS" || return 1
         printf 'deferred: selected dispatch rule allows no alternate worker for task %s\n' "$id" >&2
         return "$FM_CQG_DEFER_EXIT"
