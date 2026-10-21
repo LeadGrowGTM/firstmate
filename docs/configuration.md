@@ -816,10 +816,11 @@ For public destinations, every check runs before the text leaves the machine and
 On every destination, a `gh` command that could make a repository public or create a public copy is refused unless it makes an explicit private or internal choice; a fork needs a source verified private.
 On public or unknown destinations, `gh` writes run only in the forms the shim fully parses, so unknown options, other write commands, text `gh` would collect in an editor, a browser, a prompt, or a template, JSON escapes it cannot decode, and GraphQL with more than one operation are refused.
 `git push --no-verify`, a push whose effective `core.hooksPath` is not the launch's hooks, `git send-pack`, and `git http-push` are refused.
-Private repositories pass untouched, while an unknown network destination is treated as public and a missing list refuses publication.
+Verified private repositories skip the name checks, but the Git shim still refuses pushes that bypass the installed hooks and the GitHub CLI shim still guards visibility changes.
+An unknown network destination is treated as public, and a missing list refuses publication to public or unknown destinations.
 Existing unchanged content does not block an unrelated push.
 Relay public replies through `bin/fm-x-reply.sh`, including follow-ups, check reply text before posting or previewing, and a missing or unreadable list refuses the reply.
-Attached images are not scanned anywhere.
+Images attached to Relay replies are not scanned.
 These guards target accidental leaks by workers and do not stop a determined bypass.
 Git aliases, absolute-path `git` or `gh`, direct GitHub API calls, and harness connectors remain accepted residuals.
 An alias that runs `git push` still invokes the pre-push hook unless it skips hooks.
