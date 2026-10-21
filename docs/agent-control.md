@@ -169,6 +169,7 @@ The worktree and the task's records are unaffected either way.
 ### Retiring a stale pool claim
 
 A record for a proven-stopped worker can be retired through the records-only `--retire-claim` teardown path.
+Retirement refuses when a recorded PR is unmerged or its merge state cannot be confirmed, preserving the task record for merge monitoring.
 The original metadata is archived with the task material; the worktree and remaining task artifacts, including hooks and the steering inbox, stay in place.
 Another holder's slot marker remains untouched.
 Retirement refuses a surviving process under the copy or recorded task temp root, an attributable active validation run, and a same-id marker whose home cannot be proved to match.

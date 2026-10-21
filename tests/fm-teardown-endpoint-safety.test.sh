@@ -1519,6 +1519,24 @@ SH
   printf '%s\n' "$dir"
 }
 
+add_retire_gh_pr_state() {  # <case> <state: open|merged>
+  local dir=$1 state=$2
+  cat > "$dir/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "error: gh unavailable" >&2
+exit 1
+SH
+  cat > "$dir/fakebin/gh-axi" <<SH
+#!/usr/bin/env bash
+case "\${1:-} \${2:-}" in
+  "pr view")
+    printf '%s\\n' "pull_request:" "  number: 7" "  state: $state" ; exit 0 ;;
+esac
+exit 0
+SH
+  chmod +x "$dir/fakebin/gh" "$dir/fakebin/gh-axi"
+}
+
 assert_retire_refused_unchanged() {  # <case> <id> <reason> [extra flags]
   local dir=$1 id=$2 reason=$3 rc before_meta before_claim before_head
   shift 3
@@ -1593,6 +1611,60 @@ test_retire_claim_archives_only_the_gone_agents_record() {
   assert_no_grep 'kill-window' "$dir/runtime.log" "retirement closed an endpoint"
   assert_no_grep 'treehouse <return>' "$dir/runtime.log" "retirement returned the pool copy"
   pass "a gone agent retires only its old claim and archives its original record"
+}
+
+test_retire_claim_refuses_while_recorded_pr_is_open() {
+  local dir id=retire-open-pr
+  dir=$(make_retire_claim_case retire-open-pr "$id")
+  printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$dir/home/state/$id.meta"
+  add_retire_gh_pr_state "$dir" open
+  assert_retire_refused_unchanged "$dir" "$id" "open recorded PR"
+  assert_grep "recorded PR https://github.com/example/repo/pull/7 is not confirmed merged" \
+    "$dir/retire.err" "retire-claim refusal did not name the recorded PR"
+  assert_grep "nothing was changed" "$dir/retire.err" \
+    "retire-claim refusal did not state that nothing was changed"
+  pass "retire-claim refuses while the recorded PR is open and changes nothing"
+}
+
+test_retire_claim_refuses_without_recorded_pr_merge_confirmation() {
+  local dir id scenario expected
+  for scenario in failed-lookup invalid-url; do
+    id=retire-pr-$scenario
+    dir=$(make_retire_claim_case "$id" "$id")
+    case "$scenario" in
+      failed-lookup)
+        printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$dir/home/state/$id.meta"
+        cat > "$dir/fakebin/gh-axi" <<'SH'
+#!/usr/bin/env bash
+echo 'error: PR state unavailable' >&2
+exit 1
+SH
+        chmod +x "$dir/fakebin/gh-axi"
+        expected='recorded PR https://github.com/example/repo/pull/7 is not confirmed merged'
+        ;;
+      invalid-url)
+        printf '%s\n' 'pr=not-a-pr-url' >> "$dir/home/state/$id.meta"
+        expected="recorded PR for $id cannot be verified as merged"
+        ;;
+    esac
+    assert_retire_refused_unchanged "$dir" "$id" "$scenario recorded PR"
+    assert_grep "$expected" "$dir/retire.err" "$scenario: wrong refusal"
+  done
+  pass "retire-claim retains task state when a recorded PR cannot be verified"
+}
+
+test_retire_claim_proceeds_when_recorded_pr_is_merged() {
+  local dir id=retire-merged-pr archive
+  dir=$(make_retire_claim_case retire-merged-pr "$id")
+  printf '%s\n' 'pr=https://github.com/example/repo/pull/7' >> "$dir/home/state/$id.meta"
+  add_retire_gh_pr_state "$dir" merged
+  run_retire_claim "$dir" "$id" > "$dir/retire.out" 2> "$dir/retire.err" \
+    || fail "retire-claim with a merged recorded PR failed: $(cat "$dir/retire.err")"
+  assert_absent "$dir/home/state/$id.meta" "merged-PR retirement kept the active record"
+  archive=$(printf '%s\n' "$dir/home/data/$id"/retired-worktree-claim.*.meta)
+  assert_present "$archive" "merged-PR retirement did not archive the record"
+  assert_absent "$dir/pool/1/.fm-slot-owner" "merged-PR retirement kept its old slot marker"
+  pass "retire-claim still archives the record once the recorded PR is merged"
 }
 
 test_retire_claim_preserves_archives_across_task_id_reuse() {
@@ -2616,6 +2688,9 @@ test_own_and_absent_slot_claims_still_tear_down
 test_recycled_slot_of_another_clone_is_already_gone
 test_absent_recorded_slot_still_holds_project_lock
 test_retire_claim_archives_only_the_gone_agents_record
+test_retire_claim_refuses_while_recorded_pr_is_open
+test_retire_claim_refuses_without_recorded_pr_merge_confirmation
+test_retire_claim_proceeds_when_recorded_pr_is_merged
 test_retire_claim_preserves_archives_across_task_id_reuse
 test_retire_claim_archives_without_spawn_generation
 test_retire_claim_requeues_unlanded_work

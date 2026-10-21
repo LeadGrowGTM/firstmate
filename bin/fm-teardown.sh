@@ -64,10 +64,10 @@
 # accepting unlanded edits to the same paths. Teardown still accepts a merged PR
 # whose head contains the current local work (ancestor or equivalent patch ids),
 # or a clean content-in-default tree match. Anything else refuses.
-# Before any of that, ordinary teardown and --only-if-stopped require a recorded
-# pr= to be confirmed merged: a pushed branch with an open PR would otherwise
-# read as landed and lose the record its merge needs. --retire-claim keeps its
-# records-only path outside this refusal.
+# Before any of that, a recorded pr= must be confirmed merged for every
+# non-forced teardown, including --retire-claim: a pushed branch with an open
+# PR would otherwise read as landed and lose the record its merge needs,
+# and a retired claim archives that same record.
 # The PR itself is resolved from the task's recorded pr= when present, or - when
 # no pr= was ever recorded (e.g. a yolo-authorized merge on a repo with no PR CI,
 # where the usual "checks green" fm-pr-check.sh trigger never fires) - by looking
@@ -1260,8 +1260,9 @@ if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
-if [ -n "$PR_URL" ] && [ "$FORCE" != --force ] \
-  && { [ "$ONLY_IF_STOPPED" = 1 ] || [ "$RETIRE_CLAIM" != 1 ]; }; then
+# --retire-claim is not exempt: retiring the claim archives the same record
+# a later merge needs, so an unmerged recorded PR refuses here as well.
+if [ -n "$PR_URL" ] && [ "$FORCE" != --force ]; then
   if ! fm_pr_url_parse "$PR_URL"; then
     echo "REFUSED: recorded PR for $ID cannot be verified as merged; nothing was changed" >&2
     exit 1
