@@ -487,7 +487,7 @@ scan_outgoing() {  # <dest>
     # An annotated tag carries its own message, which no commit check sees.
     sha=$local_sha
     while [ "$(git cat-file -t "$sha" 2>/dev/null)" = tag ]; do
-      git cat-file tag "$sha" | sed '1,/^$/d' | report_hits "the tag message" || rc=1
+      git cat-file tag "$sha" | report_hits "the tag object" || rc=1
       sha=$(git cat-file tag "$sha" | sed -n '1s/^object //p')
       [ -n "$sha" ] || {
         echo "fm-private-names: cannot read the outgoing tag chain; refusing" >&2
@@ -845,8 +845,8 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
     [ "$option" = -R ] || [ "$option" = --repo ] || has_flag=1
     case "$option" in
       -R | --repo) dest=$value; continue ;;
-      -F | --body-file | --notes-file)
-        if [ "$command $action" = "workflow run" ] && [ "$option" = -F ]; then
+      -F | --field | --body-file | --notes-file)
+        if [ "$command $action" = "workflow run" ] && { [ "$option" = -F ] || [ "$option" = --field ]; }; then
           case "$value" in
             *=@*)
               copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
@@ -859,6 +859,10 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
               continue
               ;;
           esac
+          texts+=("$value")
+          continue
+        fi
+        if [ "$option" = --field ]; then
           texts+=("$value")
           continue
         fi
@@ -913,14 +917,23 @@ gh_write_guard() {  # <tool> <real> <command> <action> <arg>...
   done
   case "$command $action" in
     "repo create" | "repo new")
-      [ -n "${positional[0]:-}" ] && target=${args[${positional[0]}]}
-      if [ "$visibility" != public ]; then
-        "$real" "${args[@]}"
-        return
-      fi
+      [ -n "${positional[2]:-}" ] && target=${args[${positional[2]}]}
+      case "$visibility" in
+        private | internal) "$real" "${args[@]}"; return ;;
+        public)
+          if [ -z "$target" ]; then
+            echo "fm-private-names: refusing public repository creation without a checked name" >&2
+            return 1
+          fi
+          ;;
+        *)
+          echo "fm-private-names: refusing repository creation without an explicit visibility choice" >&2
+          return 1
+          ;;
+      esac
       ;;
     "repo edit" | "repo rename" | "repo fork")
-      [ "$action" = edit ] && [ -n "${positional[0]:-}" ] && case "${args[${positional[0]}]}" in */*) target=${args[${positional[0]}]} ;; esac
+      [ "$action" = edit ] && [ -n "${positional[2]:-}" ] && case "${args[${positional[2]}]}" in */*) target=${args[${positional[2]}]} ;; esac
       ;;
   esac
   if [ -n "$target" ]; then
@@ -1034,7 +1047,6 @@ gh_api_guard() {  # <tool> <real> <arg>...
       -f | --raw-field) fields=1; texts+=("${value#*=}"); visibility_fields+=("$value") ;;
       -F | --field)
         fields=1
-        visibility_fields+=("$value")
         case "${value#*=}" in
           @*)
             copy=$(gh_stage_file "${value#*=@}" "field-$value_idx") || {
@@ -1043,8 +1055,15 @@ gh_api_guard() {  # <tool> <real> <arg>...
             }
             args[value_idx]=$prefix${value%%=*}=@$copy
             files+=("$copy")
+            case "${value%%=*}" in
+              private | visibility)
+                j=${value%%=*}
+                value=$(tr -d '[:space:]' <"$copy") || return 1
+                visibility_fields+=("$j=$value")
+                ;;
+            esac
             ;;
-          *) texts+=("${value#*=}") ;;
+          *) texts+=("${value#*=}"); visibility_fields+=("$value") ;;
         esac
         ;;
       --input)
@@ -1103,11 +1122,6 @@ gh_api_guard() {  # <tool> <real> <arg>...
               for j in "${visibility_fields[@]}"; do
                 case "${j,,}" in
                   private=false | visibility=public) make_public=1 ;;
-                  private=@* | visibility=@*)
-                    copy=${j#*=@}
-                    value=$(tr -d '[:space:]' <"$copy")
-                    case "${j%%=*}:${value,,}" in private:false | visibility:public) make_public=1 ;; esac
-                    ;;
                 esac
               done
               if [ -n "$input_copy" ] && perl -MJSON::PP -e '

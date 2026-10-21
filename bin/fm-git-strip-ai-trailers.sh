@@ -335,10 +335,10 @@ done
 if [ "${args[i]:-}" = push ]; then
   for a in "${args[@]:i+1}"; do
     [ "$a" = -- ] && break
-    if [ "$a" = --no-verify ]; then
+    case "$a" in --no-veri | --no-verif | --no-verify)
       echo "fm-private-names: git push --no-verify would skip the private-name check; push without it" >&2
       exit 1
-    fi
+    esac
   done
   if [ "$other_hooks" = 1 ]; then
     echo "fm-private-names: git push under another core.hooksPath would skip the private-name check" >&2

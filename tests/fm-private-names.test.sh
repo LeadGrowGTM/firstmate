@@ -46,9 +46,11 @@ printf ' [%s]' "$@" >>"$log"
 printf '\n' >>"$log"
 prev=
 for a in "$@"; do
-  if [ "$prev" = --body-file ] || [ "$prev" = -F ]; then
+  if [ "$prev" = --body-file ] || [ "$prev" = -F ] || [ "$prev" = --field ]; then
+    src=$a
+    case "$src" in *=@*) src=${src#*=@} ;; esac
     printf 'BODY<<\n' >>"$log"
-    cat -- "$a" >>"$log"
+    cat -- "$src" >>"$log"
     printf '>>BODY\n' >>"$log"
   fi
   prev=$a
@@ -1021,7 +1023,7 @@ test_tag_messages_and_no_verify_pushes_are_refused() {
   git -C "$REPO" tag -a v1 -m "Release for acme-test"
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin v1 2>&1) &&
     fail "an annotated tag message holding a listed name was pushed"
-  assert_contains "$out" "the tag message" "the tag refusal must locate the tag message"
+  assert_contains "$out" "the tag object" "the tag refusal must locate the tag object"
   assert_contains "$out" "mate-1" "the tag refusal must name the neutral id"
   assert_not_contains "$out" "acme-test" "the tag refusal printed the private name"
   git -C "$REPO" tag -a v2 -m "Clean release"
@@ -1031,12 +1033,26 @@ test_tag_messages_and_no_verify_pushes_are_refused() {
   out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin outer 2>&1) &&
     fail "a nested annotated tag with a listed message was pushed"
   assert_contains "$out" "client-1" "the nested tag refusal omitted the neutral id"
+  git -C "$REPO" tag -a acme-test -m 'Clean inner release'
+  git -C "$REPO" tag -a outer-header acme-test -m 'Clean outer release'
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin outer-header 2>&1) &&
+    fail "a nested annotated tag with a listed header was pushed"
+  assert_contains "$out" "mate-1" "the nested tag header refusal omitted the neutral id"
+  GIT_COMMITTER_EMAIL=acme-test@example.invalid git -C "$REPO" tag -a metadata-clean -m 'Clean tag message'
+  out=$(in_pane "$HOOKS" git -C "$REPO" push -q origin metadata-clean 2>&1) &&
+    fail "a tag with listed tagger metadata was pushed"
+  assert_contains "$out" "mate-1" "the tagger refusal omitted the neutral id"
 
   in_pane "$HOOKS" git -C "$REPO" checkout -q -b fm/clean-tag main
   commit_file "$REPO" bypass.txt "names acme-test" "Clean subject"
   out=$(in_pane "$HOOKS" git -C "$REPO" push --no-verify -q origin HEAD 2>&1) &&
     fail "git push --no-verify skipped the private-name check"
   assert_contains "$out" "--no-verify" "the no-verify refusal was not explained"
+  for option in --no-veri --no-verif; do
+    out=$(in_pane "$HOOKS" git -C "$REPO" push "$option" -q origin HEAD 2>&1) &&
+      fail "git push $option skipped the private-name check"
+    assert_contains "$out" "--no-verify" "the abbreviated no-verify refusal was not explained"
+  done
   out=$(in_pane "$HOOKS" git -C "$REPO" -c core.hooksPath=/dev/null push -q origin HEAD 2>&1) &&
     fail "a push under another core.hooksPath skipped the private-name check"
   assert_contains "$out" "core.hooksPath" "the hooksPath refusal was not explained"
@@ -1096,6 +1112,13 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
   out=$(cd "$REPO" && in_pane "$HOOKS" gh workflow run ci.yml -F "who=@$d/workflow-input.txt" --repo example/public-repo 2>&1) &&
     fail "a workflow field file with a listed name was sent"
   [ ! -s "$log" ] || fail "the real gh ran for a listed workflow field file"
+  for field in "--field who=@$d/workflow-input.txt" "--field=who=@$d/workflow-input.txt"; do
+    read -r -a call <<<"$field"
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh workflow run ci.yml "${call[@]}" --repo example/public-repo 2>&1) &&
+      fail "a workflow $field file with a listed name was sent"
+    [ ! -s "$log" ] || fail "the real gh ran for a listed workflow $field file"
+  done
   : >"$log"
   out=$(cd "$REPO" && printf '{"who":"acme-test"}' | in_pane "$HOOKS" gh workflow run ci.yml --json --repo example/public-repo 2>&1) &&
     fail "workflow JSON stdin with a listed name was sent"
@@ -1114,6 +1137,32 @@ test_gh_shim_guards_issue_release_label_repo_and_workflow_text() {
   : >"$log"
   out=$(cd "$REPO" && in_pane "$HOOKS" gh repo edit example/public-repo --visibility public 2>&1) &&
     fail "a worker made a repository public"
+  for action in create new; do
+    : >"$log"
+    out=$(cd "$REPO" && in_pane "$HOOKS" gh repo "$action" 2>&1) &&
+      fail "gh repo $action accepted unchecked interactive public text"
+    [ ! -s "$log" ] || fail "real gh ran for interactive repository creation"
+  done
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh repo create --public 2>&1) &&
+    fail "public repository creation accepted an unchecked name prompt"
+  [ ! -s "$log" ] || fail "real gh ran for public repository creation without a name"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh repo create --private) ||
+    fail "explicitly private repository creation was refused"
+  assert_contains "$(cat "$log")" "[repo] [create]" "private repository creation did not reach gh"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh repo new --internal) ||
+    fail "explicitly internal repository creation was refused"
+  assert_contains "$(cat "$log")" "[repo] [new]" "internal repository creation did not reach gh"
+  : >"$log"
+  (cd "$REPO" && in_pane "$HOOKS" gh repo create example/clean-public --public --description Clean) ||
+    fail "checked public repository creation was refused"
+  assert_contains "$(cat "$log")" "[example/clean-public]" "checked public repository creation did not reach gh"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh repo edit example/public-repo --description acme-test 2>&1) &&
+    fail "an explicit public repository target bypassed the guard"
+  [ ! -s "$log" ] || fail "real gh ran for an explicit public repository target with listed text"
   : >"$log"
   (cd "$REPO" && in_pane "$HOOKS" gh issue create --title Clean --body Clean --repo example/public-repo) ||
     fail "a clean public issue was refused"
@@ -1182,6 +1231,27 @@ test_gh_api_writes_are_checked() {
   out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH --input "$d/visibility.json" 2>&1) &&
     fail "an API JSON visibility change made a private repository public"
   [ ! -s "$log" ] || fail "the real gh ran for an API JSON visibility change"
+  for field in '-F private=@-' '--field private=@-' '--field=private=@-'; do
+    read -r -a call <<<"$field"
+    : >"$log"
+    out=$(cd "$REPO" && printf 'false\n' | in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH "${call[@]}" 2>&1) &&
+      fail "an API stdin field made a private repository public"
+    [ ! -s "$log" ] || fail "real gh ran for an API stdin visibility field"
+  done
+  : >"$log"
+  out=$(cd "$REPO" && printf 'public\n' | in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH --field=visibility=@- 2>&1) &&
+    fail "an API stdin visibility field made a private repository public"
+  [ ! -s "$log" ] || fail "real gh ran for an API stdin visibility field"
+  printf 'false\n' >"$d/private.txt"
+  : >"$log"
+  out=$(cd "$REPO" && in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH -F "private=@$d/private.txt" 2>&1) &&
+    fail "an API file visibility field made a private repository public"
+  [ ! -s "$log" ] || fail "real gh ran for an API file visibility field"
+  : >"$log"
+  (cd "$REPO" && printf 'true\n' | in_pane "$HOOKS" gh api repos/example/private-repo -X PATCH -F private=@-) ||
+    fail "a private repository's safe API field was refused"
+  assert_contains "$(cat "$log")" "[PATCH]" "a safe API field did not reach gh"
+  assert_contains "$(cat "$log")" "true" "a safe API field lost its staged stdin content"
   unset FAKE_GH_LOG FAKE_GH_VIS
   pass "gh api writes to public or unknown destinations have their endpoint, fields, and input checked"
 }
