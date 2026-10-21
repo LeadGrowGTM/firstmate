@@ -20,7 +20,6 @@ if command -v tasks-axi >/dev/null 2>&1; then
   HAVE_TASKS_AXI=1
   TASKS_BIN=$(command -v tasks-axi)
 fi
-QUOTA_BIN=$(command -v quota-axi)
 PACE_LINE='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so this launch was routed off the requested claude model'
 CAP_LINE='paused [key=claude-quota-cap]: claude worker cap deferred this launch'
 ROUTE_LINE='paused [key=claude-quota-route]: claude weekly usage is ahead of the window, and the selected dispatch rule allows no alternate worker, so this launch was deferred'
@@ -48,7 +47,17 @@ fake_tool() {
 }
 
 link_quota() {
-  ln -sfn "$QUOTA_BIN" "$1/quota-axi"
+  cat > "$1/quota-axi" <<'EOF'
+#!/bin/sh
+set -u
+snap=${QUOTA_AXI_SNAPSHOT-}
+[ -n "$snap" ] && [ -f "$snap" ] || exit 1
+rem=$(jq -er '[.providers[]? | select(.provider=="claude") | .windows[]? | select(.id=="seven_day") | .percentRemaining] | first' "$snap") || exit 1
+reset=$(jq -er '[.providers[]? | select(.provider=="claude") | .windows[]? | select(.id=="seven_day") | .resetsAt] | first' "$snap") || exit 1
+printf '%s\n' 'quota[1]{provider,accountKey,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:'
+printf 'claude,default,all_models,%s,0.1,through_reset,early,seven_day,%s\n' "$rem" "$reset"
+EOF
+  chmod +x "$1/quota-axi"
 }
 
 write_snap() { # <path> <percent-remaining> <seconds-until-reset>
@@ -626,13 +635,12 @@ test_spawn_refuses_opus_for_writing() {
 
 test_spawn_refuses_raw_opus_for_writing() {
   local case_dir home out rc before trees command variant
-  for variant in plain joined separate continued multiple; do
+  for variant in plain joined separate continued; do
     case "$variant" in
       plain) command='claude --model opus' ;;
       joined) command='claude --model=o"pus"' ;;
       separate) command='claude --model o"pus"' ;;
       continued) command=$'claude --model=op\\\nus' ;;
-      multiple) command=$'claude --model=haiku\nclaude --model=opus' ;;
     esac
     case_dir=$(make_case "raw-opus-$variant" task-w writing)
     home="$case_dir/home"
@@ -642,7 +650,7 @@ test_spawn_refuses_raw_opus_for_writing() {
     out=$(run_spawn "$case_dir" "$case_dir/unused" task-w "$case_dir/sample-project" \
       "$command" --mode no-mistakes --yolo off 2>&1) || rc=$?
     expect_code 1 "$rc" "a raw Opus writing launch was allowed: $out"
-    if [ "$variant" = continued ] || [ "$variant" = multiple ]; then
+    if [ "$variant" = continued ]; then
       assert_contains "$out" "raw Claude model syntax cannot be checked safely" "line continuation was not refused"
     else
       assert_contains "$out" "refused: Opus is not allowed for task type writing" "raw Opus refusal was not reached"
@@ -651,6 +659,29 @@ test_spawn_refuses_raw_opus_for_writing() {
     assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota')" "raw Opus refusal wrote status"
   done
   pass "raw Claude Opus model syntax refuses before launch"
+}
+
+test_spawn_leaves_compound_raw_claude_unguarded() {
+  local case_dir home out rc variant command pane
+  for variant in semicolon pipe ampersand newline; do
+    case "$variant" in
+      semicolon) command='claude --model opus; printf done' ;;
+      pipe) command='claude --model opus | cat' ;;
+      ampersand) command='claude --model opus && printf done' ;;
+      newline) command=$'claude --model haiku\nclaude --model opus' ;;
+    esac
+    case_dir=$(make_case "raw-compound-$variant" task-w writing)
+    home="$case_dir/home"
+    pane=$(new_worktree "$case_dir" task-w)
+    rc=0
+    out=$(run_spawn "$case_dir" "$pane" task-w "$case_dir/sample-project" \
+      "$command" --mode no-mistakes --yolo off 2>&1) || rc=$?
+    expect_code 0 "$rc" "a compound raw Claude command was refused: $out"
+    assert_not_contains "$out" "raw Claude model syntax cannot be checked safely" "a compound command was treated as unsafe model syntax"
+    assert_not_contains "$out" "refused: Opus is not allowed for task type writing" "a compound command was guarded"
+    assert_equals claude "$(awk -F= '$1=="harness"{print $2}' "$home/state/task-w.meta")" "a compound command did not launch"
+  done
+  pass "compound raw Claude commands launch without the quota guard"
 }
 
 test_spawn_selected_opus_rule_defers() {
@@ -1707,6 +1738,7 @@ test_refusal_only_relaunch_model
 test_valid_margin_keeps_allowed_model
 test_spawn_refuses_opus_for_writing
 test_spawn_refuses_raw_opus_for_writing
+test_spawn_leaves_compound_raw_claude_unguarded
 test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
 test_spawn_keeps_unverified_reserved_seat

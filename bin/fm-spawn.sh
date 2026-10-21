@@ -1468,13 +1468,18 @@ SPAWN_CLAUDE_QUOTA_VERDICT=
 # the task record is published, or released now when the route leaves claude.
 # The guard command owns the decision; this function only applies its verdict.
 spawn_apply_claude_quota_guard() {
-  local quota_rc=0 line key value guard_model=$MODEL quota_account quota_root
+  local quota_rc=0 raw_rc=0 line key value guard_model=$MODEL quota_account quota_root
   local verdict_action='' verdict_harness='' verdict_model='' verdict_effort='' verdict_rule=''
   local -a guard_args=()
   [ "$KIND" != secondmate ] || return 0
   [ "$HARNESS" = claude ] || return 0
   if [ "$RAW_LAUNCH" = 1 ]; then
-    if ! raw_claude_option_extract "$ARG3" model; then
+    raw_claude_option_extract "$ARG3" model || raw_rc=$?
+    # A compound raw command is not guarded and is not refused for its separators.
+    if [ "$raw_rc" -eq 2 ]; then
+      return 0
+    fi
+    if [ "$raw_rc" -ne 0 ]; then
       echo "error: raw Claude model syntax cannot be checked safely" >&2
       FM_LAUNCH_OUTCOME=unsafe-refusal
       FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
@@ -2845,11 +2850,15 @@ raw_claude_option_extract() {
   while (( i < length )); do
     c=${source:i:1}
     if [[ "$c" == [[:space:]] ]]; then
-      [ "$mode" != model ] || [ "$c" != $'\n' ] || return 1
+      # A newline starts another command. That compound form is not guarded.
+      if [ "$mode" = model ] && [ "$c" = $'\n' ]; then
+        return 2
+      fi
       ((i += 1))
       continue
     fi
-    case "$c" in ';'|'|'|'&') return 1 ;; esac
+    # Semicolon, pipe, and ampersand are compound separators, not model syntax.
+    case "$c" in ';'|'|'|'&') return 2 ;; esac
     start=$i
     word=
     while (( i < length )); do

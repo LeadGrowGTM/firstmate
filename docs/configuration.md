@@ -1548,6 +1548,7 @@ An empty model and the model name `default` are not Opus.
 A missing brief is untyped, so Opus stays allowed.
 The check reads the effective model, including a raw Claude command's model and a relaunch's recorded or selected model.
 Env-wrapped and compound raw Claude launches, quoted command names, and quoted or escaped leading assignments are not guarded.
+A raw command separated by a newline, semicolon, pipe, or ampersand is left to launch.
 
 The cap counts Claude ship and scout records in this home's own state directory, including records with a `pr`, while a matching spawning process or agent is alive, an unobserved dead endpoint is within startup grace, or endpoint absence remains unproved.
 For a newly published Claude record, the guard records an already-alive agent before counting a spawning process whose PID and start-time identity match, keeps that observation ahead of any recorded PR identity, and still counts a later missing endpoint until normal absence proof says the agent is gone.
