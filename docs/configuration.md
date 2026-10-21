@@ -815,7 +815,8 @@ For public destinations, every check runs before the text leaves the machine and
 `FM_PRIVATE_NAMES_MODE=rewrite` can replace names in commit messages and pull-request text with neutral ids; every other hit refuses.
 On every destination, a `gh` command that could make a repository public or create a public copy is refused unless it makes an explicit private or internal choice; a fork needs a source verified private.
 On public or unknown destinations, `gh` writes run only in the forms the shim fully parses, so unknown options, other write commands, text `gh` would collect in an editor, a browser, a prompt, or a template, JSON escapes it cannot decode, and GraphQL with more than one operation are refused.
-`git push --no-verify`, a push whose effective `core.hooksPath` is not the launch's hooks, `git send-pack`, and `git http-push` are refused.
+`git push --no-verify` is refused unless every push URL of this repository's `no-mistakes` remote, and of the destination git will actually use, is the same local gate no-mistakes configures (`<NM_HOME>/repos/<12-hex>.git`, or `~/.no-mistakes/repos/<12-hex>.git` when `NM_HOME` is unset); the gate scans that outgoing content before publishing it.
+A push whose effective `core.hooksPath` is not the launch's hooks, `git send-pack`, and `git http-push` are refused.
 Verified private repositories skip the name checks, but the Git shim still refuses pushes that bypass the installed hooks and the GitHub CLI shim still guards visibility changes.
 An unknown network destination is treated as public, and a missing list refuses publication to public or unknown destinations.
 Existing unchanged content does not block an unrelated push.

@@ -309,14 +309,171 @@ install_hooks() {
     # form git accepts, any core.hooksPath other than this directory as git
     # itself resolves it under the caller's options and environment (-c,
     # --config-env, GIT_CONFIG_*, include files, an unset override), and the
-    # plumbing commands that push without hooks. Every other call runs
-    # unchanged. Git aliases are outside this shim; a push through one still
-    # runs the pre-push hook unless the alias skips hooks.
+    # plumbing commands that push without hooks. The one exception is a push
+    # whose destination is the local gate of the remote named exactly
+    # no-mistakes: every push URL of that remote, and of the destination git
+    # will actually use, is that one directory. The gate scans that content
+    # before publishing it. Every other call runs unchanged. Git
+    # aliases are outside this shim; a push through one still runs the
+    # pre-push hook unless the alias skips hooks.
     {
       printf '%s\n' '#!/usr/bin/env bash' \
         "real=$(quote_for_hook "$real_git")" \
         "hooks=$(quote_for_hook "$hooks_dir")"
       cat <<'GIT'
+# Canonical directory for a local path or file:// URL, else failure. A URL
+# with a host, and an scp-style path, is not a local gate.
+canon_dir() {
+  local url=$1 top
+  case "$url" in
+    file://localhost/*) url="/${url#file://localhost/}" ;;
+    file:///*) url=${url#file://} ;;
+    *://* | *:*) return 1 ;;
+  esac
+  case "$url" in
+    /*) ;;
+    *)
+      top=$("$real" "${args[@]:0:i}" rev-parse --show-toplevel 2>/dev/null) || return 1
+      url=$top/$url
+      ;;
+  esac
+  (cd -- "$url" 2>/dev/null && pwd -P)
+}
+
+# 0 when $1 is the gate directory no-mistakes init writes: the push URL of the
+# remote it names exactly "no-mistakes", shaped <root>/repos/<id>.git. <id> is
+# 12 lowercase hex digits (SHA-256 of the repo path, first 6 bytes). <root> is
+# $NM_HOME when that is set, otherwise $HOME/.no-mistakes. A remote whose name
+# merely contains that word is not this directory.
+gate_dir() {
+  local path=$1 base parent root nm_home home_root top
+  base=${path##*/}
+  parent=${path%/*}
+  [ "${parent##*/}" = repos ] || return 1
+  root=${parent%/*}
+  case "$base" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].git) ;;
+    *) return 1 ;;
+  esac
+  if [ -n "${NM_HOME:-}" ]; then
+    nm_home=$NM_HOME
+    case "$nm_home" in
+      /*) ;;
+      *)
+        top=$("$real" "${args[@]:0:i}" rev-parse --show-toplevel 2>/dev/null) || return 1
+        nm_home=$top/$nm_home
+        ;;
+    esac
+    nm_home=$(cd -- "$nm_home" 2>/dev/null && pwd -P) || return 1
+    [ "$root" = "$nm_home" ]
+    return
+  fi
+  [ -n "${HOME:-}" ] || return 1
+  home_root=$(cd -- "$HOME/.no-mistakes" 2>/dev/null && pwd -P) || return 1
+  [ "$root" = "$home_root" ]
+}
+
+# Repository git will push to. A positional argument, including one after --,
+# wins over --repo. With neither, git uses branch.<name>.pushRemote, then
+# remote.pushDefault, then branch.<name>.remote, then origin.
+push_repository() {
+  local j a repo_flag="" repo_pos="" saw_pos=0 separated=0 branch
+  j=$((i + 1))
+  while [ "$j" -lt "$n" ]; do
+    a=${args[j]}
+    if [ "$separated" -eq 0 ] && [ "$a" = -- ]; then
+      separated=1
+      j=$((j + 1))
+      continue
+    fi
+    if [ "$separated" -eq 1 ]; then
+      if [ "$saw_pos" -eq 0 ]; then
+        repo_pos=$a
+        saw_pos=1
+      fi
+      j=$((j + 1))
+      continue
+    fi
+    case "$a" in
+      --repo)
+        j=$((j + 1))
+        [ "$j" -lt "$n" ] || return 1
+        repo_flag=${args[j]}
+        ;;
+      --receive-pack | --exec | --push-option | -o | --recurse-submodules)
+        j=$((j + 1))
+        ;;
+      --repo=*)
+        repo_flag=${a#--repo=}
+        ;;
+      -*) ;;
+      *)
+        if [ "$saw_pos" -eq 0 ]; then
+          repo_pos=$a
+          saw_pos=1
+        fi
+        ;;
+    esac
+    j=$((j + 1))
+  done
+  if [ "$saw_pos" -eq 1 ]; then
+    printf '%s\n' "$repo_pos"
+    return
+  fi
+  if [ -n "$repo_flag" ]; then
+    printf '%s\n' "$repo_flag"
+    return
+  fi
+  branch=$("$real" "${args[@]:0:i}" symbolic-ref --short HEAD 2>/dev/null) || return 1
+  a=$("$real" "${args[@]:0:i}" config --get "branch.${branch}.pushRemote" 2>/dev/null) || a=
+  if [ -z "$a" ]; then
+    a=$("$real" "${args[@]:0:i}" config --get remote.pushDefault 2>/dev/null) || a=
+  fi
+  if [ -z "$a" ]; then
+    a=$("$real" "${args[@]:0:i}" config --get "branch.${branch}.remote" 2>/dev/null) || a=origin
+  fi
+  [ -n "$a" ] || return 1
+  printf '%s\n' "$a"
+}
+
+# Every push URL of remote $1, one per line. Fails when $1 is not a remote.
+remote_push_urls() {
+  "$real" "${args[@]:0:i}" remote get-url --push --all "$1" 2>/dev/null
+}
+
+# Canonical gate directory when every URL on stdin is that same directory.
+one_gate_path() {
+  local url path first=""
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    path=$(canon_dir "$url") || return 1
+    gate_dir "$path" || return 1
+    if [ -z "$first" ]; then
+      first=$path
+    elif [ "$path" != "$first" ]; then
+      return 1
+    fi
+  done
+  [ -n "$first" ] || return 1
+  printf '%s\n' "$first"
+}
+
+# 0 when this push's target is the configured no-mistakes gate, and nothing else.
+# A remote with several push URLs is the gate only when every one of them is.
+push_targets_gate() {
+  local gate_urls gate_path dest_name dest_urls dest_path
+  gate_urls=$(remote_push_urls no-mistakes) || return 1
+  gate_path=$(printf '%s\n' "$gate_urls" | one_gate_path) || return 1
+  dest_name=$(push_repository) || return 1
+  if dest_urls=$(remote_push_urls "$dest_name"); then
+    dest_path=$(printf '%s\n' "$dest_urls" | one_gate_path) || return 1
+  else
+    dest_path=$(canon_dir "$dest_name") || return 1
+    gate_dir "$dest_path" || return 1
+  fi
+  [ "$dest_path" = "$gate_path" ]
+}
+
 args=("$@")
 n=$#
 i=0
@@ -341,15 +498,17 @@ while [ "$i" -lt "$n" ]; do
 done
 case "${args[i]:-}" in
   push)
+    skip_hook=0
     for a in "${args[@]:i+1}"; do
       [ "$a" = -- ] && break
       case "$a" in
-        --no-veri | --no-verif | --no-verify)
-          echo "fm-private-names: git push --no-verify would skip the private-name check; push without it" >&2
-          exit 1
-          ;;
+        --no-veri | --no-verif | --no-verify) skip_hook=1 ;;
       esac
     done
+    if [ "$skip_hook" -eq 1 ] && ! push_targets_gate; then
+      echo "fm-private-names: git push --no-verify would skip the private-name check; push without it" >&2
+      exit 1
+    fi
     effective=$("$real" "${args[@]:0:i}" config --type=path --get core.hooksPath 2>/dev/null) || effective=
     case "$effective" in
       '' | /*) ;;
