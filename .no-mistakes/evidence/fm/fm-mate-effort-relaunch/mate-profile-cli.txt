@@ -1,9 +1,0 @@
-Configured pin: claude opus medium; alexander-media: opus low
-alexander-media -> harness=claude
-alexander-media -> model=opus
-alexander-media -> effort=low
-another-content-mate -> harness=claude
-another-content-mate -> model=opus
-another-content-mate -> effort=medium
-Unqualified pin effort=medium
-Fresh invocation, alexander-media effort=low

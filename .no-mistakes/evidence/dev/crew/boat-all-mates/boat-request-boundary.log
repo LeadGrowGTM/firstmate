@@ -1,4 +1,0 @@
-project=firstmate: exit=0; output=accepted
-project=dev-loop: exit=0; output=accepted
-project=launchclub: exit=1; output=error: invalid code-only Boat request
-project=health: exit=1; output=error: invalid code-only Boat request

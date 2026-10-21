@@ -1,8 +1,0 @@
-ordinary held-lock exit=1, record=yes, worktree=no
-REFUSED: another Treehouse slot allocation or return is in progress for /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M515M0Q3ZGVXSC4SBW8EPQMQ/.fm-live-lock.pNfQlT/projects/legion; nothing was changed
-ordinary released-lock exit=0, record=no, worktree=no
-teardown absent complete (window fixture:fm-absent, worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M515M0Q3ZGVXSC4SBW8EPQMQ/.fm-live-lock.pNfQlT/pool/1/legion)
-descendant held-lock exit=1, record=yes, worktree=no
-REFUSED: another Treehouse slot allocation or return is in progress for child child; forced teardown changed nothing
-descendant released-lock exit=0, record=no, worktree=no
-teardown website-genie complete (window fixture:fm-website-genie, worktree /home/mitch/.no-mistakes/worktrees/5782b7185c5e/01M515M0Q3ZGVXSC4SBW8EPQMQ/.fm-live-lock-subhome.sSdOYq)
