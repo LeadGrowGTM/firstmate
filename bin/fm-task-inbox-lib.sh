@@ -17,10 +17,10 @@
 # line does not need to be reliable because ringing it again is free. A
 # duplicated doorbell is a no-op by construction (the worker finds the inbox
 # empty or already handled), and a swallowed doorbell is detected by the
-# absence of the worker's acknowledgement and re-rung on a bounded schedule.
+# absence of the worker's acknowledgement and retried with minimum spacing.
 # A positively dead or missing endpoint bypasses that schedule without being
-# typed into, and its unhandled record surfaces through the ordinary stale wake
-# into stuck-crewmate-recovery.
+# typed into, and an unhandled record without a prior wake surfaces through the
+# ordinary stale wake into stuck-crewmate-recovery.
 #
 # Layout under <state-dir>:
 #   <task>.inbox/NNN.msg       one durable steer, numeric sequence, atomic rename
@@ -64,14 +64,14 @@
 # caller owns the busy and recovery-grade endpoint checks: due actions deferred
 # by a busy pane consume a separate durable consecutive-poll budget,
 # FM_TASK_INBOX_BUSY_MAX. At that bound the same escalation path surfaces a
-# stuck-busy reason without typing, then opens one retry generation for that
-# record. Later due polls ring again once the pane is not busy, until the
-# worker acknowledges the record. Busy polls still defer and do not type.
+# stuck-busy reason without typing and opens one retry generation for that
+# record. Later due polls attempt delivery once the pane is not busy, until
+# the worker acknowledges the record. Busy polls still defer and do not type.
 # The escalation marker is not removed on those polls, so the generation
 # cannot queue a second wake. Before escalation, a non-busy due check resets
 # the busy budget; acknowledgement clears it. Fire-and-forget retries remain
-# outside escalation. A positively dead or missing endpoint skips delivery
-# and the ladder and escalates directly.
+# outside escalation. Before the one wake, a positively dead or missing endpoint
+# skips delivery and the ladder and escalates directly.
 # This library owns the schedule, durable budgets, and escalation marker.
 # If ordinary delivery-attempt or busy-deferral bookkeeping fails while the record remains unhandled,
 # the caller surfaces that failure instead of retrying silently; a concurrently

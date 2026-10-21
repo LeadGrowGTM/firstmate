@@ -252,7 +252,7 @@ fm_composer_normalize_trim_var() {  # <varname>
 #     over-stripping would inject over real input).
 # Raising FM_COMPOSER_GHOST_LUMA_MAX is not free: muse draws its `⟩` prompt glyph
 # in truecolor 38;2;90;160;255, luminance ~149.9 (verified, muse 0.1.0-R708.1),
-# the tightest margin over the 128 default in the fleet. Above ~150 that glyph is
+# the tightest margin over the fleet default. Above ~150 that glyph is
 # stripped as ghost text, which is why the bare-glyph fallback below must also
 # recognise every agent glyph from the UNSTRIPPED plain row.
 # The dim/faint and dark-foreground states are tracked together as "de-emphasis";
