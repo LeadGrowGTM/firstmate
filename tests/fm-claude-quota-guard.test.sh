@@ -906,6 +906,73 @@ SH
   pass "a rechecked dead endpoint keeps its seat only during startup grace"
 }
 
+test_spawn_rechecked_alive_records_observation() {
+  local case_dir home pane out rc=0 before trees now_epoch dead_pid
+  case_dir=$(make_case rechecked-alive-seat task-b engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  now_epoch=$(date +%s)
+  dead_pid=$(unused_dead_pid)
+  fm_write_meta "$home/state/task-a.meta" \
+    harness=claude kind=ship backend=herdr \
+    window=test-session:proof-pane worktree="$case_dir/wt-a" \
+    spawn_gen="s${now_epoch}.1.1" \
+    quota_spawn_pid="$dead_pid" quota_spawn_identity=exited-spawn
+  cat > "$case_dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get proof-pane --session test-session')
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/server-started" ]; then
+      printf '%s\n' '{"result":{"pane":{"pane_id":"proof-pane"}}}'
+    else
+      printf '%s\n' '{"error":{"code":"unavailable"}}'
+    fi
+    ;;
+  'status --json --session test-session')
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/server-started" ]; then
+      printf '%s\n' '{"server":{"running":true}}'
+    else
+      printf '%s\n' '{"server":{"running":false}}'
+    fi
+    ;;
+  'server --session test-session') : > "${FM_FAKE_CALL_LOG%/*}/server-started" ;;
+  'agent get proof-pane --session test-session')
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/agent-stopped" ]; then
+      printf '%s\n' '{"error":{"code":"agent_not_found"}}'
+    else
+      printf '%s\n' '{"result":{"agent":{"agent_status":"working"}}}'
+    fi
+    ;;
+  'pane process-info --pane proof-pane --session test-session')
+    printf '%s\n' '{"result":{"type":"pane_process_info","process_info":{"pane_id":"proof-pane","shell_pid":123,"foreground_processes":[{"pid":456,"name":"claude","argv0":"claude","argv":["claude"],"cmdline":"claude"}]}}}'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/herdr"
+  pane=$(new_worktree "$case_dir" task-b)
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "a rechecked live agent did not hold its seat: $out"
+  assert_present "$case_dir/server-started" "the missing endpoint was not rechecked with its server running"
+  assert_equals 1 "$(key_count "$home/state/task-a.meta" 'quota_agent_observed=1')" "rechecked live agent was not recorded"
+  assert_nothing_created "$case_dir" task-b "$before" "$trees"
+
+  : > "$case_dir/agent-stopped"
+  rm -f "$case_dir/server-started"
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "an observed dead endpoint kept its seat during startup grace: $out"
+  assert_present "$home/state/task-b.meta" "the observed dead seat did not admit the next worker"
+  pass "a rechecked live agent is observed and releases its seat when dead"
+}
+
 test_spawn_malformed_dispatch_refuses() {
   local case_dir home out rc=0 before trees
   case_dir=$(make_case malformed-dispatch task-w engineering)
@@ -1506,6 +1573,7 @@ test_spawn_keeps_published_claude_seat_during_delivery
 test_spawn_keeps_unverified_reserved_seat
 test_spawn_keeps_early_dead_seat_until_startup_grace
 test_spawn_rechecked_dead_seat_uses_startup_grace
+test_spawn_rechecked_alive_records_observation
 test_spawn_malformed_dispatch_refuses
 test_failed_claude_spawn_keeps_task_lock_through_rollback
 test_spawn_records_live_agent_before_process_seat

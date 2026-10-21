@@ -481,6 +481,14 @@ fm_cqg_count() {
     else
       alive=$(fm_backend_agent_state "$backend" "$target")
     fi
+    if [ "$alive" = missing ] && [ "$spawn_live" != 1 ]; then
+      proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")
+      proof=${proof%%$'\t'*}
+      case "$proof" in
+        gone) continue ;;
+        alive|dead) alive=$proof ;;
+      esac
+    fi
     case "$alive" in
       alive)
         if [ "$reserved" = 1 ] && [ "$observed_count" = 0 ]; then
@@ -497,13 +505,6 @@ fm_cqg_count() {
     if [ "$spawn_live" = 1 ]; then
       FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
       continue
-    fi
-    if [ "$alive" = missing ]; then
-      proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")
-      case "${proof%%$'\t'*}" in
-        gone) continue ;;
-        dead) alive=dead ;;
-      esac
     fi
     if [ "$alive" = dead ]; then
       if [ "$observed_count" = 0 ]; then
