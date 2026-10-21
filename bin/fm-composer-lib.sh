@@ -641,6 +641,28 @@ fm_composer_idle_matches() {
   esac
 }
 
+# 0 when <text> is exactly Claude's idle suggestion, `Try "..."`.
+# Claude Code 2.1.306 draws that suggestion as an SGR 2 run after `❯` and
+# U+00A0. Ink's focused placeholder path can also invert only the first cell
+# (SGR 7) and dim the rest, so ghost stripping keeps that one cell.
+# This pattern stays out of FM_COMPOSER_IDLE_RE_DEFAULT. That set treats an
+# unstyled bordered match as empty, and a typed copy of the suggestion must
+# stay pending. Callers use this only as plain-row proof that a strictly
+# shorter ghost-strip survivor is the cursor cell of an idle hint.
+_fm_composer_claude_try_hint() {  # <text>
+  local body=$1 inner
+  case "$body" in
+    'Try "'*'"') ;;
+    *) return 1 ;;
+  esac
+  inner=${body#Try \"}
+  inner=${inner%\"}
+  case "$inner" in
+    ''|*'"'*) return 1 ;;
+  esac
+  return 0
+}
+
 # fm_composer_classify_content: the single shared composer-content verdict.
 #   <bordered> 1 when <content> came from a genuine agent-composer container (a
 #              bordered composer box, an identity-proven separated composer, or
@@ -698,8 +720,9 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
   # character survives a stripper built for the other two. cursor-agent renders
   # exactly this shape: a dim `Plan, search, build anything` whose first
   # character is reverse-video, leaving a lone `P` (verified live on
-  # cursor-agent 2026.08.11-e8db854). Judging that remnant on its own reads
-  # `pending` on a genuinely idle pane.
+  # cursor-agent 2026.08.11-e8db854). Claude's idle `Try "..."` suggestion
+  # has the same shape when its first cell is inverted and the rest is dim.
+  # Judging that remnant on its own reads `pending` on a genuinely idle pane.
   # The plain row is the styling-independent signal, so consult it here. This
   # stays safe in the false-EMPTY direction because it demands the remnant be a
   # PROPER, strictly shorter substring of a plain row that matches a full
@@ -714,7 +737,8 @@ fm_composer_classify_content() {  # <bordered> <content> [idle_re] [idle_case] [
     fi
     fm_composer_normalize_trim_var plain_body
     if [ "${#content}" -lt "${#plain_body}" ] \
-       && fm_composer_idle_matches "$plain_body" "$idle_re" "$idle_case"; then
+       && { fm_composer_idle_matches "$plain_body" "$idle_re" "$idle_case" \
+            || _fm_composer_claude_try_hint "$plain_body"; }; then
       case "$plain_body" in
         *"$content"*) printf 'empty'; return 0 ;;
       esac
