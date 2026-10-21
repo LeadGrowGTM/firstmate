@@ -1216,11 +1216,20 @@ test_push_shim_and_gate_close_hook_bypasses() {
 
   rel=$d/relative
   mkdir -p "$rel"
+  make_home "$rel/home"
   fm_git_init_commit "$rel/work"
+  git init -q --bare "$rel/origin.git"
+  git -C "$rel/work" remote add origin "$rel/origin.git"
+  git -C "$rel/work" push -q origin main
+  printf '%s public\n' "$rel/origin.git" >>"$rel/home/config/repo-visibility"
   (cd "$rel" && "$STRIP" install hooks work --private-names home/config home/state home home/data home/projects) ||
     fail "a relative hook install failed"
-  assert_contains "$(cat "$rel/hooks/pre-push")" "FM_CONFIG_OVERRIDE='$rel/home/config'" \
-    "a relative config path was baked into the hooks"
+  commit_file "$rel/work" relative.txt "route acme-test" "Clean subject"
+  out=$(cd "$d" && in_pane "$rel/hooks" git -C "$rel/work" push -q origin HEAD 2>&1) &&
+    fail "a push from another directory skipped the relative private-name paths"
+  assert_contains "$out" "listed private name" "the relative-path hook did not refuse the named commit"
+  assert_equals "$(git -C "$rel/work" rev-parse main^)" "$(git -C "$rel/origin.git" rev-parse main)" \
+    "the named commit reached the public origin"
   pass "the push shim reads git's effective hooks, refuses hook-free pushes, and the gate covers identity and staged text"
 }
 
