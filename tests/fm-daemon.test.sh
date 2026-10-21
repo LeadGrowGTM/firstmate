@@ -374,7 +374,7 @@ test_busy_inbox_escalation_reaches_supervision() {
     stale_window_is_busy "$win" "$state" || fail "inbox consumer fixture is not busy"
   case "$variant" in
     stuck)
-      detail="unread firstmate instruction: stuck-busy after 2 consecutive busy-deferred due doorbells; $state/$task.inbox/001.msg stays unhandled and no doorbell was typed; inspect the worker"
+      detail="unacknowledged firstmate instruction: stuck-busy after 2 consecutive busy-deferred due doorbells; $state/$task.inbox/001.msg stays unhandled and this retry was deferred because the agent was busy; inspect the worker"
       ;;
     write)
       detail="steering-inbox busy bookkeeping unwritable: $state/$task.inbox/.busy-state cannot be written while $state/$task.inbox/001.msg stays unhandled; inspect the inbox directory"
@@ -431,7 +431,7 @@ test_busy_inbox_dispatch_preserves_other_stale_reasons() {
   for detail in \
     '' \
     'busy for 4000s without a turn boundary' \
-    "unread firstmate instruction: $state/ordinary.inbox/001.msg still unhandled after 3 doorbell delivery attempts with an idle pane; inspect the worker" \
+    "unacknowledged firstmate instruction: $state/ordinary.inbox/001.msg still unhandled after 3 doorbell delivery attempts with an idle pane; inspect the worker" \
     'steering-inbox ladder bookkeeping unwritable: .ring-state cannot be written' \
     'steering-inbox retry mark unremovable: .retry-ring cannot be removed'; do
     FM_ESCALATE_BATCH_SECS=999999 handle_wake "stale: sess:fm-ordinary${detail:+ ($detail)}" "$state" \
