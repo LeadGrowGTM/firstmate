@@ -416,9 +416,9 @@ fm_cqg_mark_observed() {
 
 # fm_cqg_count <state-dir> <self-id>
 # Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home that still
-# hold a seat. A reserved seat stays occupied unless the agent is dead or a
-# missing endpoint's absence proof says it is gone. An unverified endpoint
-# stays occupied. Returns 1 when a record cannot be read.
+# hold a seat. An unobserved dead endpoint keeps its seat during startup grace;
+# docs/configuration.md owns the full seat-release rules. Returns 1 when a
+# record cannot be read.
 fm_cqg_count() {
   local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity spawn_gen spawn_epoch now current_identity reserved observed observed_count spawn_live
   FM_CQG_OCCUPANTS=0
