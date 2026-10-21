@@ -217,7 +217,7 @@ fm_cqg_toon_weekly() {
 fm_cqg_json_weekly() {
   jq -r '
     def rows(which):
-      [.providers[]? | select(.provider == "claude") | .windows[]?
+      [.providers[]? | select(.provider == "claude" and .state.stale != true) | .windows[]?
         | select(which)
         | select(.percentRemaining | type == "number")
         | select(.resetsAt | type == "string")
@@ -498,6 +498,13 @@ fm_cqg_count() {
       FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
       continue
     fi
+    if [ "$alive" = missing ]; then
+      proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")
+      case "${proof%%$'\t'*}" in
+        gone) continue ;;
+        dead) alive=dead ;;
+      esac
+    fi
     if [ "$alive" = dead ]; then
       if [ "$observed_count" = 0 ]; then
         spawn_gen=$(fm_meta_get "$f" spawn_gen)
@@ -511,12 +518,6 @@ fm_cqg_count() {
       fi
       continue
     fi
-    case "$alive" in
-      missing)
-        proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")
-        case "${proof%%$'\t'*}" in gone|dead) continue ;; esac
-        ;;
-    esac
     FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
   done <<<"$list"
 }

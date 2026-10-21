@@ -274,6 +274,37 @@ test_missing_quota_proceeds_and_still_checks_opus_and_cap() {
   pass "a missing quota reading continues, and opus refusal and the cap still apply"
 }
 
+test_json_fallback_skips_stale_claude_provider() {
+  local home snap out rc=0
+  home=$(make_home stale-json task-w engineering)
+  prepare_fake stale-json grok
+  cat > "$TMP_ROOT/current-fakebin/quota-axi" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *--json*) cat "$QUOTA_AXI_SNAPSHOT" ;;
+  *) printf '%s\n' 'quota unavailable' ;;
+esac
+SH
+  chmod +x "$TMP_ROOT/current-fakebin/quota-axi"
+  snap="$TMP_ROOT/stale-json/snap.json"
+  write_snap "$snap" 30 259200
+  FM_TEST_SNAP="$snap"
+  out=$(run_check "$home" task-w haiku 2>&1) || rc=$?
+  expect_code 0 "$rc" "a fresh JSON quota reading refused the launch: $out"
+  assert_equals reroute "$(verdict_field "$home/verdict" action)" "a fresh JSON quota reading was ignored"
+  assert_equals grok "$(verdict_field "$home/verdict" harness)" "a fresh JSON quota reading chose the wrong route"
+
+  jq '.providers[0].state.stale = true' "$snap" > "$TMP_ROOT/stale-json/stale.json"
+  FM_TEST_SNAP="$TMP_ROOT/stale-json/stale.json"
+  rc=0
+  out=$(run_check "$home" task-w haiku 2>&1) || rc=$?
+  expect_code 0 "$rc" "a stale JSON quota reading refused the launch: $out"
+  assert_contains "$out" "$GAP_LINE" "a stale JSON quota reading hid the missing-reading notice"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a stale JSON quota reading drove the pace check"
+  assert_equals haiku "$(verdict_field "$home/verdict" model)" "a stale JSON quota reading changed the model"
+  pass "JSON fallback uses fresh Claude quota and skips stale providers"
+}
+
 test_status_line_is_written_once() {
   local home out rc=0 file
   home=$(make_home once task-p writing)
@@ -815,6 +846,64 @@ SH
   expect_code 0 "$rc" "a still-dead endpoint held its seat after startup grace: $out"
   assert_present "$home/state/task-b.meta" "the expired dead seat did not admit the second worker"
   pass "an early dead endpoint keeps its seat until startup grace expires"
+}
+
+test_spawn_rechecked_dead_seat_uses_startup_grace() {
+  local case_dir home pane out rc=0 before trees now_epoch old_epoch
+  case_dir=$(make_case rechecked-dead-seat task-b engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  now_epoch=$(date +%s)
+  fm_write_meta "$home/state/task-a.meta" \
+    harness=claude kind=ship backend=herdr \
+    window=test-session:proof-pane worktree="$case_dir/wt-a" \
+    spawn_gen="s${now_epoch}.1.1"
+  cat > "$case_dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get proof-pane --session test-session')
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/server-started" ]; then
+      printf '%s\n' '{"result":{"pane":{"pane_id":"proof-pane"}}}'
+    else
+      printf '%s\n' '{"error":{"code":"unavailable"}}'
+    fi
+    ;;
+  'status --json --session test-session')
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/server-started" ]; then
+      printf '%s\n' '{"server":{"running":true}}'
+    else
+      printf '%s\n' '{"server":{"running":false}}'
+    fi
+    ;;
+  'server --session test-session') : > "${FM_FAKE_CALL_LOG%/*}/server-started" ;;
+  'agent get proof-pane --session test-session') printf '%s\n' '{"error":{"code":"agent_not_found"}}' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/herdr"
+  pane=$(new_worktree "$case_dir" task-b)
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "a rechecked dead endpoint freed its seat during startup grace: $out"
+  assert_present "$case_dir/server-started" "the missing endpoint was not rechecked with its server running"
+  assert_nothing_created "$case_dir" task-b "$before" "$trees"
+
+  old_epoch=$(( $(date +%s) - 120 ))
+  awk -F= -v gen="s$old_epoch.1.1" '$1 == "spawn_gen" { print "spawn_gen=" gen; next } { print }' \
+    "$home/state/task-a.meta" > "$case_dir/task-a.meta"
+  mv "$case_dir/task-a.meta" "$home/state/task-a.meta"
+  rm -f "$case_dir/server-started"
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "a rechecked dead endpoint kept its seat after startup grace: $out"
+  assert_present "$home/state/task-b.meta" "the expired rechecked dead seat did not admit the second worker"
+  pass "a rechecked dead endpoint keeps its seat only during startup grace"
 }
 
 test_spawn_malformed_dispatch_refuses() {
@@ -1403,6 +1492,7 @@ test_exact_margin_does_not_reroute
 test_pace_prefers_grok_then_muse_then_sonnet
 test_opus_refused_for_writing_and_allowed_when_cleared
 test_missing_quota_proceeds_and_still_checks_opus_and_cap
+test_json_fallback_skips_stale_claude_provider
 test_status_line_is_written_once
 test_cap_counts_pr_workers_and_ignores_secondmates
 test_bad_config_and_unreadable_record_refuse
@@ -1415,6 +1505,7 @@ test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
 test_spawn_keeps_unverified_reserved_seat
 test_spawn_keeps_early_dead_seat_until_startup_grace
+test_spawn_rechecked_dead_seat_uses_startup_grace
 test_spawn_malformed_dispatch_refuses
 test_failed_claude_spawn_keeps_task_lock_through_rollback
 test_spawn_records_live_agent_before_process_seat
