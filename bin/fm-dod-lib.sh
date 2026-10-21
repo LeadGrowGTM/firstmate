@@ -510,7 +510,8 @@ fm_brief_direct_pr_origin_repo() {  # <home> <repo-name-or-path>
 
 fm_dod_block() {  # <mode> <task-id> [branch] [<forge>] [<base>] [<origin-repo>]
   local mode=$1 id=$2 forge=${4:-none} base=${5:-} origin_repo=${6:-}
-  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove proof_path create_cmd
+  local branch=${3:-fm/$id} pr_base='' nm_base='' base_q prove proof_path create_cmd scrub_cmd early_scrub=''
+  local home_path config_path state_path data_path projects_path path_name path_value
   proof_path="\`${FM_HOME:-.}/data/$id/proof.md\`"
   prove=$(fm_prove_it_clause ship "$proof_path")
   fm_forge_valid_for_mode "$forge" "$mode" fm_dod_block || return 1
@@ -628,6 +629,23 @@ The configured merge authority approves the ready branch, then firstmate merges 
 EOF
       ;;
     no-mistakes:*)
+      home_path=${FM_HOME:-.}
+      config_path=${FM_CONFIG_OVERRIDE:-$home_path/config}
+      state_path=${FM_STATE_OVERRIDE:-$home_path/state}
+      data_path=${FM_DATA_OVERRIDE:-$home_path/data}
+      projects_path=${FM_PROJECTS_OVERRIDE:-$home_path/projects}
+      root_path=${FM_ROOT:-.}
+      for path_name in home_path config_path state_path data_path projects_path root_path; do
+        path_value=${!path_name}
+        case "$path_value" in /*) ;; *) printf -v "$path_name" '%s/%s' "$PWD" "$path_value" ;; esac
+      done
+      scrub_cmd="FM_HOME=$(printf '%q' "$home_path") FM_CONFIG_OVERRIDE=$(printf '%q' "$config_path") FM_STATE_OVERRIDE=$(printf '%q' "$state_path") FM_DATA_OVERRIDE=$(printf '%q' "$data_path") FM_PROJECTS_OVERRIDE=$(printf '%q' "$projects_path") $(printf '%q' "$root_path/bin/fm-private-names-scrub.sh") --repo <full-repository-url> --pr <number> --no-evidence --apply"
+      if [ "$forge" != gerrit ]; then
+        early_scrub="While the no-mistakes drive continues, use a separate call to \`no-mistakes axi status\` to watch for its PR URL.
+As soon as the URL appears, run \`$scrub_cmd\` with the repository URL (including host) and number from that URL; do not wait for CI green.
+Keep the drive call running and continue to its next gate or outcome.
+"
+      fi
       cat <<EOF
 # Definition of done
 Delivery contract: mode=no-mistakes
@@ -641,8 +659,9 @@ EOF
       fm_nm_driving_block "$forge"
       cat <<EOF
 
-After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
+${early_scrub}After /no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), read the PR back from the forge and confirm it is not a draft (\`gh-axi pr view <number>\` must print \`draft: no\`, where <number> is the PR number from your PR URL); if it is a draft, mark it ready with \`gh-axi pr ready <number>\`.
 A draft cannot be merged, so a done report on one leaves the merge unasked.
+The pipeline wrote the PR title and body itself, outside this copy's private-name checks, so run \`$scrub_cmd\` again with the repository URL (including host) and number from your PR URL; it rewrites any listed private name there to a neutral id and prints only counts.
 Then append \`done [at=<epoch>]: PR {url} checks green\` and stop. You are finished.
 That CI-ready \`done:\` is accepted only when this copy's HEAD - your latest commit - is one the /no-mistakes run pushed, so commit nothing after the run; the check tests that commit, not merely that a branch moved.
 If you deliberately keep the PR a draft, append \`paused [at=<epoch>]: {why the draft is held}\` instead of done.

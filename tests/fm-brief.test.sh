@@ -427,6 +427,12 @@ test_no_mistakes_dod_green_detection() {
     "no-mistakes DOD must reattach the drive call after a bounded return"
   assert_grep "once checks are green it returns \`checks-passed\` immediately" "$brief" \
     "no-mistakes DOD must say a reattach reports an already-green PR"
+  assert_grep "As soon as the URL appears, run \`FM_HOME=" "$brief" \
+    "no-mistakes DOD must scrub the PR before CI green"
+  assert_grep "use a separate call to \`no-mistakes axi status\`" "$brief" \
+    "no-mistakes DOD must watch for a new PR while the drive continues"
+  assert_grep "--no-evidence --apply\` again with the repository URL (including host)" "$brief" \
+    "no-mistakes DOD must scrub the PR again after CI green"
   assert_no_grep "poll \`no-mistakes axi status\` from a separate call" "$brief" \
     "no-mistakes DOD still makes a status poll the wait for the next gate or outcome"
   pass "fm-brief.sh: no-mistakes DOD detects a green PR from the drive call, not a status poll"

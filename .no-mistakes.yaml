@@ -33,8 +33,12 @@ document:
 commands:
   lint: 'bin/fm-lint.sh'
 
-# Publish each run's test evidence to the orphan no-mistakes/evidence branch linked from the PR.
-# The evidence is not committed to the feature or default branch.
+# Keep each run's test evidence private on this machine (under the no-mistakes
+# home): this repository is public, and evidence logs can carry private names.
+# store_in_repo: false publishes nothing to the no-mistakes/evidence branch, and
+# attach_media: false uploads no screenshots or recordings to GitHub. These two
+# keys are read from the pushed branch, so they apply to every run of a branch
+# that carries them.
 test:
   instructions: |
     Run live Herdr scenarios only through bin/fm-herdr-lab.sh with a named non-default fm-lab-* session, following that helper's prepare, provision, run, and teardown contract exactly.
@@ -46,4 +50,22 @@ test:
     Read docs/herdr-backend.md and the bin/fm-herdr-lab.sh header as the owners of Herdr lab mechanics rather than reproducing that manual here.
     Ship or scout briefs that will drive Herdr lifecycle still require --herdr-lab at scaffold time; these Test-agent instructions are not a substitute for that brief flag.
   evidence:
-    store_in_repo: true
+    store_in_repo: false
+    attach_media: false
+
+# Keep the run's intent out of the public PR body; every step still receives it.
+# no-mistakes honors this from the trusted default-branch copy, so a pushed branch
+# cannot turn it back on.
+pr:
+  publish_intent: false
+
+# The pipeline commits its own fixes and pushes from its run worktree, outside
+# every worker hook, so check what the push would publish after lint: commit
+# messages, added lines and paths, binary content, uncommitted changes, and the
+# branch name, against the private-name list of every firstmate home on this
+# machine that pushes through this gate (bin/fm-private-names.sh gate).
+# Trusted-only: honored from the default-branch copy of this file.
+gates:
+  - name: private-names
+    after: lint
+    command: 'bin/fm-private-names.sh gate'

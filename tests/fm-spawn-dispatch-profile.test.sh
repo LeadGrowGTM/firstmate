@@ -287,7 +287,7 @@ task_inbox_export() {  # <home> <id>
 ai_trailer_hooks_prefix() {  # <home> <id>
   local state
   state=$(CDPATH='' cd -- "$1/state" && pwd -P) || fail "cannot resolve state dir $1/state"
-  printf "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s'; " "$state/$2.git-hooks"
+  printf "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='%s' PATH='%s':\"\$PATH\"; " "$state/$2.git-hooks" "$state/$2.git-hooks/bin"
 }
 
 run_spawn() {
@@ -600,7 +600,7 @@ test_non_cursor_launch_clears_inherited_cursor_markers() {
 }
 
 test_relative_home_overrides_launch_with_absolute_cross_process_paths() {
-  local rec id out status launch home_real
+  local rec id out status launch home_real origin
   id="profile-relative-paths-z1b"
   rec=$(make_spawn_case profile-relative-paths pi "$id")
   read_case_record "$rec"
@@ -625,6 +625,15 @@ test_relative_home_overrides_launch_with_absolute_cross_process_paths() {
     "relative FM_STATE_OVERRIDE leaked into Pi's cross-process extension path"
   assert_contains "$launch" "< '$home_real/data/$id/launch-brief.md'" \
     "relative FM_DATA_OVERRIDE leaked into the cross-process brief path"
+  origin=$(git -C "$WT_DIR" remote get-url origin)
+  printf '%s public\n' "$origin" >"$HOME_DIR/config/repo-visibility"
+  sleep 1
+  mkdir -p "$HOME_DIR/projects/gtm-client-solar-mock"
+  printf 'Route solar-mock work\n' >"$CASE_DIR/message"
+  out=$(cd "$WT_DIR" && "$HOME_DIR/state/$id.git-hooks/commit-msg" "$CASE_DIR/message" 2>&1)
+  status=$?
+  expect_code 1 "$status" "installed hook must refresh relative projects from the launch directory"
+  assert_contains "$out" 'client-' "the installed hook missed a newly registered client"
   pass "relative home overrides ignore CDPATH and become absolute before spawn launch construction"
 }
 
@@ -2037,11 +2046,11 @@ test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks() {
   expect_code 0 "$status" "claude spawn with keep-ai-trailers should succeed"$'\n'"$out"
   launch=$(cat "$LAUNCH_LOG")
   assert_attribution_policy_absent "$launch" "opted-in claude"
-  assert_not_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
-    "opted-in launch still overrides the repository hooksPath"
-  [ ! -e "$HOME_DIR/state/$id.git-hooks" ] \
-    || fail "opted-in launch installed AI trailer strip hooks"
-  pass "keep-ai-trailers omits Claude attribution settings and the pane strip hooks"
+  assert_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
+    "opted-in launch must still select the pane's private-name hooks"
+  [ -d "$HOME_DIR/state/$id.git-hooks/bin" ] \
+    || fail "opted-in launch did not install the private-name hooks and gh shims"
+  pass "keep-ai-trailers omits Claude attribution settings but keeps the private-name hooks"
 }
 
 test_keep_ai_trailers_reaches_secondmate_crew_launches() {
@@ -2067,10 +2076,8 @@ test_keep_ai_trailers_reaches_secondmate_crew_launches() {
   expect_code 0 "$status" "secondmate crew spawn should succeed"$'\n'"$out"
   launch=$(cat "$LAUNCH_LOG")
   assert_attribution_policy_absent "$launch" "secondmate crew claude"
-  assert_not_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
-    "secondmate crew launch still overrides the repository hooksPath"
-  [ ! -e "$HOME_DIR/state/$crew_id.git-hooks" ] \
-    || fail "secondmate crew launch installed AI trailer strip hooks"
+  assert_contains "$launch" 'GIT_CONFIG_KEY_0=core.hooksPath' \
+    "secondmate crew launch must still select the pane's private-name hooks"
   pass "keep-ai-trailers is inherited so a secondmate's crew launch keeps AI trailers"
 }
 
@@ -2525,7 +2532,7 @@ SH
         enabled) expected=$(printf '%s\n' unset "$value" '' unset) ;;
         empty) expected=$(printf '%s\n' unset unset unset unset) ;;
       esac
-      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
+      expected="$expected"$'\n'"$HOME_DIR/user-home"$'\n'"$(CDPATH='' cd -- "$HOME_DIR/state" && pwd -P)/$id.git-hooks/bin:$pane_path"$'\nxterm\nsynthetic-pane\n/synthetic/gotmp'
       [ "$result" = "$expected" ] || fail "allowlist=$setting worker environment mismatch: $result"
     done
     pass "allowlist=$setting preserves the operational floor and filters only when opted in"

@@ -522,13 +522,14 @@
 # ~/.cursor/cli-config.json attribution-off is not durable (it does not travel
 # with this repo, defaults back to on when unset, and only feeds the CLI's
 # request to the server, so it suppresses the trailer rather than preventing
-# it). Unless config/keep-ai-trailers is present, every spawn installs
-# state/<id>.git-hooks as a GIT_CONFIG core.hooksPath for the pane, so git
-# commit-msg strips known AI trailers at the commit object for every launched
-# runtime, Claude included as defense in depth. bin/fm-git-strip-ai-trailers.sh
-# owns the identities, the hook install, and chaining the repository git is
-# actually running in so a project husky hook still runs. Author identity is
-# not rewritten.
+# it). Every spawn installs state/<id>.git-hooks as a GIT_CONFIG core.hooksPath
+# for the pane; unless config/keep-ai-trailers is present, its commit-msg
+# strips known AI trailers at the commit object for every launched runtime,
+# Claude included as defense in depth. bin/fm-git-strip-ai-trailers.sh owns the
+# identities, the hook install, and chaining the repository git is actually
+# running in so a project husky hook still runs. Author identity is not
+# rewritten. The same directory always carries the private-name guard and gh
+# shims that bin/fm-private-names.sh owns.
 # Publishing the record and moving this home's backlog item to In flight are one
 # step, not two: bin/fm-backlog-transition-lib.sh owns that invariant, and this
 # script performs the transition under the task's own meta lock before it reports
@@ -621,6 +622,7 @@ fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+case "$PROJECTS" in /*) ;; *) PROJECTS=$PWD/$PROJECTS ;; esac
 # Opt-in attempt receipt; ordinary spawns retain their output and exit codes.
 # shellcheck source=bin/fm-launch-outcome-lib.sh
 . "$SCRIPT_DIR/fm-launch-outcome-lib.sh"
@@ -5800,13 +5802,29 @@ EOF
 # chains the previous hooks so they still run. Real secondmate
 # homes are firstmate clones; a launch whose worktree is not git fails closed
 # rather than shipping a runtime that cannot strip.
+# The same directory carries the private-name guard on commit-msg and pre-push
+# and the gh/gh-axi/no-mistakes shims in its bin/, for every launch whether or not the home
+# keeps AI trailers; bin/fm-private-names.sh owns the guard. The list is
+# refreshed from this home's records first, and a failed refresh leaves the
+# guard refusing public exits rather than passing them.
 GIT_HOOKS_DIR="$STATE_REAL/$ID.git-hooks"
-if [ "$KEEP_AI_TRAILERS" = 0 ]; then
-  "$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "$GIT_HOOKS_DIR" "$WT" || {
-    echo "error: could not install the AI-trailer strip hooks for $ID" >&2
+mkdir -p -- "$CONFIG" 2>/dev/null
+PRIVATE_NAMES_CONFIG=$(CDPATH='' cd -- "$CONFIG" 2>/dev/null && pwd -P) || {
+  echo "error: cannot resolve the config directory for $ID's private-name guard" >&2
+  exit 1
+}
+FM_HOME="$FM_HOME" FM_CONFIG_OVERRIDE="$PRIVATE_NAMES_CONFIG" FM_STATE_OVERRIDE="$STATE_REAL" \
+  FM_DATA_OVERRIDE="$DATA" FM_PROJECTS_OVERRIDE="$PROJECTS" \
+  "$FM_ROOT/bin/fm-private-names.sh" refresh >/dev/null || {
+    echo "error: could not refresh the private-name list for $ID" >&2
     exit 1
   }
-fi
+GIT_HOOKS_ARGS=(--private-names "$PRIVATE_NAMES_CONFIG" "$STATE_REAL" "$FM_HOME" "$DATA" "$PROJECTS")
+[ "$KEEP_AI_TRAILERS" = 0 ] || GIT_HOOKS_ARGS+=(--keep-ai-trailers)
+"$FM_ROOT/bin/fm-git-strip-ai-trailers.sh" install "$GIT_HOOKS_DIR" "$WT" "${GIT_HOOKS_ARGS[@]}" || {
+  echo "error: could not install the AI-trailer strip and private-name hooks for $ID" >&2
+  exit 1
+}
 
 # Delivery posture recorded in meta so fm-teardown's safety check and the
 # validate/merge stages can branch on it. A ship task carries the explicit
@@ -6347,15 +6365,15 @@ if [ "$KIND" = secondmate ]; then
   # injected carrier and this on/off snapshot are guaranteed to agree.
   LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model $LAUNCH"
 fi
-# Pane-scoped override: git in this worker reads our commit-msg strip without
-# rewriting the project's core.hooksPath. GIT_CONFIG_* takes precedence over
-# config files and is inherited by child git processes. When the home opts in
-# to keeping trailers, leave core.hooksPath alone so the repository's hooks run
-# directly. An export statement inside the pane command carries the override
-# across every step of a compound raw launch while firstmate's own git is unchanged.
-if [ "$KEEP_AI_TRAILERS" = 0 ]; then
-  LAUNCH="export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=$(shell_quote "$GIT_HOOKS_DIR"); $LAUNCH"
-fi
+# Pane-scoped override: git in this worker reads our commit-msg strip and the
+# private-name hooks without rewriting the project's core.hooksPath, and gh or
+# gh-axi and no-mistakes resolve to the private-name shims first. GIT_CONFIG_* takes
+# precedence over config files and is inherited by child git processes. An
+# export statement inside the pane command carries the override across every
+# step of a compound raw launch while firstmate's own git and gh are unchanged;
+# "$PATH" is expanded by the pane's shell, not here.
+# shellcheck disable=SC2016 # the pane, not this script, expands $PATH
+LAUNCH="export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=$(shell_quote "$GIT_HOOKS_DIR") PATH=$(shell_quote "$GIT_HOOKS_DIR/bin")"':"$PATH"; '"$LAUNCH"
 # Every agent this fleet launches - crewmate, scout, and secondmate, on a fresh
 # spawn and on a relaunch alike - runs with the compact-adviser kill switch on.
 # This is an export statement rather than a forwarded ambient name or a

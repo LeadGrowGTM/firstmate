@@ -6,9 +6,11 @@
 #   fm-git-strip-ai-trailers.sh <msgfile>
 #       Commit-msg hook mode. Git passes the proposed message file as $1.
 #       Rewrites that file in place, then exits 0 so the commit proceeds.
-#   fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree>
+#   fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree> [--keep-ai-trailers]
+#                                  [--private-names <config-dir> <state-dir> <home-dir> <data-dir> <projects-dir>]
 #       Recreate <hooks-dir> as a core.hooksPath for this launch: a commit-msg
-#       hook that runs this strip, plus one wrapper per client-side hook name
+#       hook that runs this strip (omitted with --keep-ai-trailers), plus one
+#       wrapper per client-side hook name
 #       git documents except reference-transaction and post-index-change,
 #       which are deliberately excluded (see FM_GIT_CLIENT_HOOKS below).
 #       Each wrapper unsets GIT_CONFIG_* and then resolves
@@ -24,6 +26,12 @@
 #       nonzero rather than skipping the repository's hook. Does not touch the
 #       project's git config; the caller prefixes the pane with
 #       GIT_CONFIG_COUNT / GIT_CONFIG_KEY_0 / GIT_CONFIG_VALUE_0.
+#       --private-names adds the private-name guard (bin/fm-private-names.sh,
+#       reading that home's config, state, data, and project directories) to the commit-msg
+#       and pre-push hooks before the repository's own hook runs, and writes
+#       git, gh, gh-axi, and no-mistakes shims into <hooks-dir>/bin for the caller to put first
+#       on the pane's PATH. The pre-push wrapper replays git's ref lines to
+#       the repository's own pre-push hook after the guard reads them.
 #
 # WHY THIS EXISTS. Claude launches already carry attribution-off in their
 # per-launch --settings JSON. Cursor and other non-Claude runtimes inject a
@@ -64,7 +72,8 @@ usage() {
   cat >&2 <<'EOF'
 usage:
   fm-git-strip-ai-trailers.sh <msgfile>
-  fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree>
+  fm-git-strip-ai-trailers.sh install <hooks-dir> <worktree> [--keep-ai-trailers]
+                                 [--private-names <config-dir> <state-dir> <home-dir> <data-dir> <projects-dir>]
 EOF
   exit 2
 }
@@ -209,8 +218,44 @@ FM_GIT_CLIENT_HOOKS='applypatch-msg pre-applypatch post-applypatch pre-commit
 pre-merge-commit prepare-commit-msg post-commit pre-rebase post-checkout
 post-merge pre-push post-rewrite pre-auto-gc sendemail-validate'
 
+# The guard command line a hook runs, with the launching home's config and
+# state directories baked in; empty when the private-name guard is off.
+private_names_command() {  # <subcommand>
+  [ -n "$PN_CONFIG" ] || return 0
+  printf 'FM_HOME=%s FM_DATA_OVERRIDE=%s FM_PROJECTS_OVERRIDE=%s FM_CONFIG_OVERRIDE=%s FM_STATE_OVERRIDE=%s %s %s' \
+    "$(quote_for_hook "$PN_HOME")" "$(quote_for_hook "$PN_DATA")" "$(quote_for_hook "$PN_PROJECTS")" \
+    "$(quote_for_hook "$PN_CONFIG")" "$(quote_for_hook "$PN_STATE")" \
+    "$(quote_for_hook "$PN_GUARD")" "$1"
+}
+
+# <path> made absolute against the current directory, so hooks that run from
+# another directory still read the launching home.
+absolute_path() {  # <path>
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "$PWD" "$1" ;;
+  esac
+}
+
+# The first git on PATH that is not in a private-name shim directory.
+real_git_path() {
+  local dir old_ifs=$IFS
+  IFS=:
+  for dir in $PATH; do
+    IFS=$old_ifs
+    [ -n "$dir" ] && [ ! -e "$dir/.fm-private-names-shim" ] || continue
+    if [ -x "$dir/git" ] && [ ! -d "$dir/git" ]; then
+      printf '%s\n' "$dir/git"
+      return 0
+    fi
+  done
+  IFS=$old_ifs
+  return 1
+}
+
+# shellcheck disable=SC2016 # hook bodies are written literally for git to run
 install_hooks() {
-  local hooks_dir=$1 wt=$2 name
+  local hooks_dir=$1 wt=$2 name tool real_git
   [ -n "$hooks_dir" ] && [ -n "$wt" ] || usage
   [ -d "$wt" ] || {
     echo "error: worktree is not a directory: $wt" >&2
@@ -226,28 +271,155 @@ install_hooks() {
   chmod 700 "$hooks_dir" 2>/dev/null || true
   hooks_dir=$(CDPATH='' cd -- "$hooks_dir" && pwd -P) || return 1
 
-  write_executable "$hooks_dir/commit-msg" <<EOF
-#!/usr/bin/env bash
-set -u
-$(quote_for_hook "$SELF") "\$1" || exit \$?
-$(runtime_chain_body "$hooks_dir")
-EOF
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -u'
+    if [ "$KEEP_TRAILERS" = 0 ]; then
+      printf '%s "$1" || exit $?\n' "$(quote_for_hook "$SELF")"
+    fi
+    if [ -n "$PN_CONFIG" ]; then
+      printf '%s "$1" || exit $?\n' "$(private_names_command commit-msg)"
+    fi
+    runtime_chain_body "$hooks_dir"
+  } | write_executable "$hooks_dir/commit-msg" || return 1
 
   for name in $FM_GIT_CLIENT_HOOKS; do
-    write_executable "$hooks_dir/$name" <<EOF
-#!/usr/bin/env bash
-set -u
-$(runtime_chain_body "$hooks_dir")
-EOF
+    {
+      printf '%s\n' '#!/usr/bin/env bash' 'set -u'
+      if [ "$name" = pre-push ] && [ -n "$PN_CONFIG" ]; then
+        # Keep git's ref lines for the repository's own pre-push hook: the
+        # unlinked file stays readable on stdin after the guard consumed it.
+        printf '%s\n' 'refs=$(mktemp "${TMPDIR:-/tmp}/fm-pre-push.XXXXXX") || exit 1' \
+          'cat >"$refs" || { rm -f "$refs"; exit 1; }'
+        printf '%s "$@" <"$refs" || { rc=$?; rm -f "$refs"; exit "$rc"; }\n' \
+          "$(private_names_command pre-push)"
+        printf '%s\n' 'exec <"$refs"' 'rm -f "$refs"'
+      fi
+      runtime_chain_body "$hooks_dir"
+    } | write_executable "$hooks_dir/$name" || return 1
   done
+
+  if [ -n "$PN_CONFIG" ]; then
+    mkdir -p "$hooks_dir/bin" || return 1
+    : >"$hooks_dir/bin/.fm-private-names-shim" || return 1
+    real_git=$(real_git_path) || {
+      echo "error: no git found on PATH" >&2
+      return 1
+    }
+    # A push that would skip the pre-push guard is refused: --no-verify in any
+    # form git accepts, any core.hooksPath other than this directory as git
+    # itself resolves it under the caller's options and environment (-c,
+    # --config-env, GIT_CONFIG_*, include files, an unset override), and the
+    # plumbing commands that push without hooks. Every other call runs
+    # unchanged. Git aliases are outside this shim; a push through one still
+    # runs the pre-push hook unless the alias skips hooks.
+    {
+      printf '%s\n' '#!/usr/bin/env bash' \
+        "real=$(quote_for_hook "$real_git")" \
+        "hooks=$(quote_for_hook "$hooks_dir")"
+      cat <<'GIT'
+args=("$@")
+n=$#
+i=0
+while [ "$i" -lt "$n" ]; do
+  case "${args[i]}" in
+    -C | -c | --git-dir | --work-tree | --namespace | --super-prefix | --config-env | --attr-source | --list-cmds)
+      i=$((i + 2))
+      continue
+      ;;
+    -C?* | -c?* | --git-dir=* | --work-tree=* | --namespace=* | --super-prefix=* | --config-env=* | \
+      --attr-source=* | --exec-path=* | --list-cmds=* | -p | --paginate | -P | --no-pager | --bare | \
+      --no-replace-objects | --no-lazy-fetch | --no-optional-locks | --no-advice | --literal-pathspecs | \
+      --glob-pathspecs | --noglob-pathspecs | --icase-pathspecs | --exec-path | --html-path | --man-path | \
+      --info-path | -v | --version | -h | --help) ;;
+    -*)
+      echo "fm-private-names: unrecognized git option before the command; refusing so a push cannot skip the private-name check" >&2
+      exit 1
+      ;;
+    *) break ;;
+  esac
+  i=$((i + 1))
+done
+case "${args[i]:-}" in
+  push)
+    for a in "${args[@]:i+1}"; do
+      [ "$a" = -- ] && break
+      case "$a" in
+        --no-veri | --no-verif | --no-verify)
+          echo "fm-private-names: git push --no-verify would skip the private-name check; push without it" >&2
+          exit 1
+          ;;
+      esac
+    done
+    effective=$("$real" "${args[@]:0:i}" config --type=path --get core.hooksPath 2>/dev/null) || effective=
+    case "$effective" in
+      '' | /*) ;;
+      *)
+        top=$("$real" "${args[@]:0:i}" rev-parse --show-toplevel 2>/dev/null) || top=
+        effective=$top/$effective
+        ;;
+    esac
+    resolved=$(cd -- "$effective" 2>/dev/null && pwd -P) || resolved=
+    if [ -z "$effective" ] || [ "$resolved" != "$hooks" ]; then
+      echo "fm-private-names: git push under another core.hooksPath would skip the private-name check" >&2
+      exit 1
+    fi
+    ;;
+  send-pack | http-push)
+    echo "fm-private-names: git ${args[i]} pushes without the pre-push hook; use git push" >&2
+    exit 1
+    ;;
+esac
+exec "$real" "$@"
+GIT
+    } | write_executable "$hooks_dir/bin/git" || return 1
+    for tool in gh gh-axi no-mistakes; do
+      if [ "$tool" = no-mistakes ]; then
+        printf '%s\n' '#!/usr/bin/env bash' \
+          "exec env $(private_names_command no-mistakes-shim) \"\$@\"" |
+          write_executable "$hooks_dir/bin/$tool" || return 1
+        continue
+      fi
+      printf '%s\n' '#!/usr/bin/env bash' \
+        "exec env $(private_names_command gh-shim) $tool \"\$@\"" |
+        write_executable "$hooks_dir/bin/$tool" || return 1
+    done
+  fi
   chmod 500 "$hooks_dir"
 }
 
 CMD=${1:-}
 case "$CMD" in
 install)
-  [ "$#" -eq 3 ] || usage
-  install_hooks "$2" "$3"
+  [ "$#" -ge 3 ] || usage
+  hooks_arg=$2
+  wt_arg=$3
+  shift 3
+  KEEP_TRAILERS=0
+  PN_CONFIG=
+  PN_STATE=
+  PN_HOME=
+  PN_DATA=
+  PN_PROJECTS=
+  PN_GUARD="$(cd "$(dirname "$SELF")" && pwd -P)/fm-private-names.sh"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --keep-ai-trailers)
+      KEEP_TRAILERS=1
+      shift
+      ;;
+    --private-names)
+      [ "$#" -ge 6 ] && [ -n "$2" ] && [ -n "$3" ] && [ -n "$4" ] && [ -n "$5" ] && [ -n "$6" ] || usage
+      PN_CONFIG=$(absolute_path "$2")
+      PN_STATE=$(absolute_path "$3")
+      PN_HOME=$(absolute_path "$4")
+      PN_DATA=$(absolute_path "$5")
+      PN_PROJECTS=$(absolute_path "$6")
+      shift 6
+      ;;
+    *) usage ;;
+    esac
+  done
+  install_hooks "$hooks_arg" "$wt_arg"
   ;;
 -h | --help)
   usage

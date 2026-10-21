@@ -1,0 +1,43 @@
+# Ordinary English and Firstmate vocabulary that bin/fm-private-names.sh
+# refresh places in the context tier, one case-insensitive word per line.
+# This list contains ordinary words only, never real home or client names.
+agent
+boat
+branch
+build
+captain
+client
+clients
+code
+config
+content
+crew
+data
+deploy
+docs
+fleet
+gate
+gtm-client
+health
+home
+homes
+host
+lane
+main
+mate
+mates
+merge
+pipeline
+project
+projects
+review
+scout
+ship
+state
+status
+task
+tasks
+test
+tests
+worker
+workers

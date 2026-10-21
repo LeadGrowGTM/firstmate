@@ -3190,6 +3190,9 @@ test_poll_inbox_commit_failure_reports_error
 test_poll_inbox_private_publication_rejects_unsafe_paths
 test_poll_empty_text_is_silent
 test_poll_rejects_unsafe_request_id
+mkdir -p "$TMP_ROOT/reply-default-config"
+printf '%s\n' '# no registered names' >"$TMP_ROOT/reply-default-config/private-names"
+export FM_CONFIG_OVERRIDE="$TMP_ROOT/reply-default-config"
 test_reply_success_posts_request_bound_only
 test_reply_text_file_and_stdin
 test_reply_non_2xx_fails
@@ -3198,7 +3201,42 @@ test_reply_usage_error
 test_reply_help_mentions_image
 test_reply_whitespace_text_rejected
 test_reply_rejects_flag_like_arguments
+test_reply_refuses_listed_private_names() {
+  local home out rc
+  home="$TMP_ROOT/reply-private-name"; mkdir -p "$home/config"
+  printf '%s\n' 'mate acme-test' 'client zenith-sample' > "$home/config/private-names"
+  out=$(PATH="$BASE_PATH" FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FMX_DRY_RUN=1 \
+    "$ROOT/bin/fm-x-reply.sh" "req-pn" "Shipped the fix for Zenith-Sample." 2>&1); rc=$?
+  expect_code 1 "$rc" "a reply with a listed private name"
+  assert_contains "$out" "client-1" "the reply refusal must name the neutral id"
+  case "$out" in *Zenith-Sample*|*zenith-sample*) fail "the reply refusal printed the private name" ;; esac
+  [ ! -e "$home/state/x-outbox/req-pn.json" ] || fail "a refused reply was still recorded for posting"
+  out=$(PATH="$BASE_PATH" FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FMX_DRY_RUN=1 \
+    "$ROOT/bin/fm-x-reply.sh" "req-pn-ok" "Shipped the fix for client-1." 2>/dev/null); rc=$?
+  expect_code 0 "$rc" "a clean reply"
+  assert_present "$home/state/x-outbox/req-pn-ok.json" "a clean reply must still be previewed"
+  pass "fm-x-reply refuses a public reply holding a listed private name, naming only neutral ids"
+}
+
+test_reply_refuses_missing_private_name_list() {
+  local home out rc
+  home="$TMP_ROOT/reply-missing-list"; mkdir -p "$home/config"
+  out=$(PATH="$BASE_PATH" FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FMX_DRY_RUN=1 \
+    "$ROOT/bin/fm-x-reply.sh" "req-pn-missing" "Shipped for client-1." 2>&1); rc=$?
+  expect_code 1 "$rc" "a reply with a missing private-name list"
+  assert_contains "$out" "config/private-names is missing or unreadable" "the refusal must name the missing list neutrally"
+  [ ! -e "$home/state/x-outbox/req-pn-missing.json" ] || fail "a reply passed a missing private-name list"
+  printf '%s\n' '# no registered names' >"$home/config/private-names"
+  out=$(PATH="$BASE_PATH" FM_HOME="$home" FM_CONFIG_OVERRIDE="$home/config" FMX_DRY_RUN=1 \
+    "$ROOT/bin/fm-x-reply.sh" "req-pn-empty" "Shipped for client-1." 2>&1); rc=$?
+  expect_code 0 "$rc" "a reply with a readable empty private-name list"
+  assert_present "$home/state/x-outbox/req-pn-empty.json" "a readable empty list should permit a clean reply"
+  pass "fm-x-reply refuses a missing list and permits a readable empty list"
+}
+
 test_reply_dry_run_records_not_posts
+test_reply_refuses_listed_private_names
+test_reply_refuses_missing_private_name_list
 test_reply_dry_run_needs_no_token
 test_reply_dry_run_from_env_file
 test_reply_empty_env_dry_run_overrides_env_file
@@ -3278,6 +3316,7 @@ test_followup_post_dry_run_increments_counter_keeps_link
 test_followup_post_dry_run_final_clears_link
 test_followup_usage_errors
 test_followup_rejects_flag_like_arguments
+unset FM_CONFIG_OVERRIDE
 test_bootstrap_activates_on_env_token
 test_bootstrap_relative_home_writes_absolute_poll_shim
 test_bootstrap_reports_missing_x_dependency

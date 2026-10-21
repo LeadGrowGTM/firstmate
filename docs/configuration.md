@@ -17,6 +17,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Worktree copies and disk use | [Project capacity](#project-capacity-configproject-capacity), [worktree pool guard](#worktree-pool-guard), [data management](#data-management-configdata-management), and [disk guard](#disk-guard-configdisk-guard) |
 | Recurring specialist types for one domain | [Task types](#task-types-configtask-typesjson) |
 | Opt-in recurring task intake | [Recurring intake](#recurring-intake-configschedulesjson) |
+| Keeping private home and client names off public repositories | [Private names](#private-names-configprivate-names) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
 ## FM_HOME
@@ -785,16 +786,54 @@ The flag is a home-local supervision-noise preference and is not inherited by se
 
 ## Gate defaults (.no-mistakes.yaml)
 
-The tracked `.no-mistakes.yaml` sets `test.evidence.store_in_repo: true` and pins `commands.lint` to `bin/fm-lint.sh`, the same owner CI invokes.
-Storing evidence in the repo publishes each run's test artifacts to the orphan `no-mistakes/evidence` branch and links them from the PR body, instead of keeping them on local disk under the no-mistakes home.
+The tracked `.no-mistakes.yaml` sets `test.evidence.store_in_repo: false`, `test.evidence.attach_media: false`, and `pr.publish_intent: false`, and pins `commands.lint` to `bin/fm-lint.sh`, the same owner CI invokes.
+This repository is public, so each run's test evidence stays on local disk under the no-mistakes home: nothing is published to the `no-mistakes/evidence` branch, no screenshots or recordings are uploaded to GitHub, and the PR body carries no Intent section.
+Evidence published before this setting stays on that branch; [`bin/fm-private-names-scrub.sh`](#private-names-configprivate-names) can remove files holding listed names from its current tip, but does not erase earlier commits.
 
-That branch shares no history with code branches, so evidence never enters a pushed feature branch or the default branch; the worktree's `.no-mistakes/` stays local and CI rejects tracked entries under that path.
+The worktree's `.no-mistakes/` stays local and CI rejects tracked entries under that path.
 The [`firstmate-coding-guidelines` skill](../.agents/skills/firstmate-coding-guidelines/SKILL.md#no-mistakes-test-configuration) owns why `commands.test` stays absent and targeted validation belongs to the evidence path.
 
 `commands.test` executes code, so no-mistakes honors it only from the default-branch copy of `.no-mistakes.yaml`; a pushed branch cannot change what the gate runs.
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the firstmate-specific local test policy and entry points.
 
 Portable shard evidence and coverage rules are in [fm-test-portable-shards.md](fm-test-portable-shards.md); [herdr-backend.md](herdr-backend.md#destructive-lab-safety) owns the real-Herdr lane's isolation boundary, and [runtime-backends.md](verification/runtime-backends.md#herdr) owns active evidence.
+
+## Private names (config/private-names)
+
+Private names - the names of this fleet's operator homes and the clients they serve - are checked at the guarded public exits a fleet worker uses, without anyone remembering to check.
+`bin/fm-private-names.sh refresh` builds the gitignored `config/private-names` list from registered second mates and `gtm-client-` projects and client slugs; each worker launch refreshes it before installing guards.
+The list retains previously registered names, and the optional gitignored `config/private-names.local` can add names.
+Ordinary words and very short names receive narrower context matching; the [guard script](../bin/fm-private-names.sh) and [matching library](../bin/fm-private-names-lib.sh) own the exact sources, list format, matching rules, visibility rules, and neutral-id assignment.
+
+Worker launches install commit and push hooks plus `git`, `gh`, `gh-axi`, and no-mistakes shims, including when `config/keep-ai-trailers` is set.
+For public destinations, every check runs before the text leaves the machine and refuses listed names in:
+
+- outgoing commit messages and identities, annotated tag messages and headers, pushed branch and tag names, added lines, added or renamed paths, and binary content;
+- `gh` and `gh-axi` text: pull-request titles, bodies, comments, reviews, and close or reopen comments; issue text; release titles, notes, and assets; labels; repository settings; workflow inputs; and `gh api` writes;
+- no-mistakes intent, PR title, fix instructions, added findings, and reasons, and every run for a public origin starts with `--no-publish-intent`.
+
+`FM_PRIVATE_NAMES_MODE=rewrite` can replace names in commit messages and pull-request text with neutral ids; every other hit refuses.
+On every destination, a `gh` command that could make a repository public or create a public copy is refused unless it makes an explicit private or internal choice; a fork needs a source verified private.
+On public or unknown destinations, `gh` writes run only in the forms the shim fully parses, so unknown options, other write commands, text `gh` would collect in an editor, a browser, a prompt, or a template, JSON escapes it cannot decode, and GraphQL with more than one operation are refused.
+`git push --no-verify`, a push whose effective `core.hooksPath` is not the launch's hooks, `git send-pack`, and `git http-push` are refused.
+Verified private repositories skip the name checks, but the Git shim still refuses pushes that bypass the installed hooks and the GitHub CLI shim still guards visibility changes.
+An unknown network destination is treated as public, and a missing list refuses publication to public or unknown destinations.
+Existing unchanged content does not block an unrelated push.
+Relay public replies through `bin/fm-x-reply.sh`, including follow-ups, check reply text before posting or previewing, and a missing or unreadable list refuses the reply.
+Images attached to Relay replies are not scanned.
+These guards target accidental leaks by workers and do not stop a determined bypass.
+Git aliases, absolute-path `git` or `gh`, direct GitHub API calls, and harness connectors remain accepted residuals.
+An alias that runs `git push` still invokes the pre-push hook unless it skips hooks.
+The pre-push hook and pipeline gate still check Git pushes made with hooks enabled, but nothing catches text sent to GitHub outside Git and the shims.
+
+The no-mistakes pipeline commits its own fixes and pushes from its run worktree, outside every worker hook.
+The trusted `gates` entry in this repository's `.no-mistakes.yaml` runs `bin/fm-private-names.sh gate` after lint, before the push step, against the list of every home on this machine whose clones push through that gate; each refresh records its home in the per-user `${XDG_STATE_HOME:-~/.local/state}/firstmate/private-names-gates` index for that lookup.
+Text the pipeline writes after that gate - the push step's commit subject and the PR title and body it drafts - cannot be checked before publication, so the worker's delivery instructions read the PR back and scrub it as soon as its URL appears, then again after CI green, as a backstop only.
+Firstmate itself never commits to or opens pull requests on project repositories; its own changes ship through workers and the pipeline, which carry these guards, so the guards are installed in worker launches only.
+
+[`bin/fm-private-names-scrub.sh`](../bin/fm-private-names-scrub.sh) dry-runs by default and reports matching PRs and evidence-branch files using neutral ids.
+With `--apply`, it rewrites existing PR titles and bodies and removes matching files from the `no-mistakes/evidence` branch tip in one ordinary commit.
+It does not rewrite history: earlier evidence commits and PR edit history remain accessible; its header owns the exact options, and [`tests/fm-private-names.test.sh`](../tests/fm-private-names.test.sh) covers the guards and scrub tool.
 
 ## Captain Preferences (data/captain.md / data/captain-shared.md)
 
@@ -1388,10 +1427,10 @@ This applies only to agents Firstmate launches; the captain's own primary Firstm
 
 The optional local, gitignored `config/keep-ai-trailers` presence flag opts this home into keeping AI co-author trailers on its launched workers.
 With the flag absent, every standard Claude launch's inline `--settings` JSON carries `"attribution":{"commit":"","pr":"","sessionUrl":false}`, every Devin worker config sets `"attribution": false`, and every fleet launch receives a pane-scoped `GIT_CONFIG` `core.hooksPath` pointing at `state/<id>.git-hooks`, where git's `commit-msg` hook strips known AI trailers even when a runtime injects them after the typed message.
-When the flag is present, Claude launches omit those attribution-off settings, Devin worker configs keep the user config's `attribution` setting (Devin's default is on), and fleet launches do not install or select the strip hooks, so Git uses the repository's configured hooks directly.
-`bin/fm-git-strip-ai-trailers.sh` owns the identities, the install, and chaining the hooks of whichever repository git is running in, including when `git -c core.hooksPath` supplies the pane's hook override, so a project hook such as husky still runs when stripping is enabled.
+When the flag is present, Claude launches omit those attribution-off settings, Devin worker configs keep the user config's `attribution` setting (Devin's default is on), and the launch's `commit-msg` hook keeps AI trailers; the hooks directory is still installed and selected because it carries the [private-name guard](#private-names-configprivate-names), and its wrappers still chain the repository's own hooks.
+`bin/fm-git-strip-ai-trailers.sh` owns the identities, the install, and chaining the hooks of whichever repository git is running in, including when `git -c core.hooksPath` supplies the pane's hook override, so a project hook such as husky still runs.
 A repository whose config sets `core.hooksPath` to the empty string runs no project hook, as in plain git; if the wrapper otherwise cannot resolve that repository's hooks directory, the git operation fails rather than silently skipping a project hook such as a pre-push guard.
-When stripping is enabled, the hooks directory is read-only, so a hook manager run inside a fleet pane (lefthook's npm postinstall, `pre-commit install`) fails instead of displacing the strip; install a project's hooks from outside the pane, where the wrappers chain them.
+The hooks directory is read-only, so a hook manager run inside a fleet pane (lefthook's npm postinstall, `pre-commit install`) fails instead of displacing the strip; install a project's hooks from outside the pane, where the wrappers chain them.
 The flag is a home-wide attribution choice, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract and a secondmate's own workers keep AI trailers too.
 Per-machine Cursor `cli-config.json` attribution-off is not this contract: it does not travel with Firstmate, defaults back to on when unset, and only feeds the CLI's request to the server, so it suppresses the trailer rather than preventing it.
 

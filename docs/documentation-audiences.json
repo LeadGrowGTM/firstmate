@@ -269,6 +269,10 @@
       "audience": "agent-runtime"
     },
     {
+      "path": "bin/fm-private-names-generic.txt",
+      "audience": "operator-current"
+    },
+    {
       "path": "CLAUDE.md",
       "audience": "agent-runtime"
     },
