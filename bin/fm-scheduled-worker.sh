@@ -26,8 +26,10 @@
 # selection.<n>.json and outcome.<n>.json. Private attempt receipts and a per-
 # occurrence lock prevent replay/crash/concurrent calls from duplicating work.
 # Only typed pre-provisioning worker-unavailable permits reselect; every profile
-# is tried once per launch/continuation episode. Capacity (exit 75) stays queued,
-# consumes no candidate, and cannot switch profile. Unsafe refusal is blocked.
+# is tried once per launch/continuation episode. A quota reroute receives those
+# tried profiles and rejects a repeated destination before provisioning.
+# Capacity (exit 75) stays queued, consumes no candidate, and cannot switch profile.
+# Unsafe refusal is blocked.
 # Missing/malformed receipts, interrupted delivery, or journal phase attempting
 # require reconciliation, never a second spawn. Published workers replay quietly.
 # New proven exhaustion of the current incarnation begins a new continuation
@@ -214,7 +216,8 @@ if [ "$ACTION" = spawn ]; then
   ARGS+=(--branch-prefix "$BRANCH_PREFIX")
   BASE=$(jq -r '.base_branch // empty' "$PLAN")
   [ -z "$BASE" ] || ARGS+=(--base-branch "$BASE")
-  FM_SPAWN_OUTCOME_FILE=$RECEIPT FM_SCHEDULED_WORKER_PLAN=$DIR/plan.json \
+  TRIED_JSON=$(jq -c --argjson selected "$PROFILE" '.tried | map(select(. != $selected))' "$JOURNAL")
+  FM_CQG_TRIED=$TRIED_JSON FM_SPAWN_OUTCOME_FILE=$RECEIPT FM_SCHEDULED_WORKER_PLAN=$DIR/plan.json \
     "$SCRIPT_DIR/fm-spawn.sh" "$ID" "$(jq -r .project "$PLAN")" "${ARGS[@]}" || RC=$?
 else
   FM_SPAWN_OUTCOME_FILE=$RECEIPT FM_SCHEDULED_WORKER_PLAN=$DIR/plan.json \

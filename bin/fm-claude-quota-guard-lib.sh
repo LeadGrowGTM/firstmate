@@ -293,7 +293,12 @@ fm_cqg_ahead_of_margin() {
 # bin/fm-muse-client-lib.sh owns that decision. Sonnet needs no extra binary
 # because the launch is already Claude.
 fm_cqg_pick_route() {
-  local home=$1 brief=$2 config=$3 rule=$4 model=$5 effort=$6 plan=$7 profiles='' choice selection source=''
+  local home=$1 brief=$2 config=$3 rule=$4 model=${5:-default} effort=${6:-default} plan=$7 profiles='' choice selection source='' tried='[]'
+  # An empty launch model is the dispatch checker's "default". FM_CQG_TRIED is
+  # this scheduled episode's already-tried profiles; a repeated destination is skipped.
+  if [ -n "${FM_CQG_TRIED:-}" ]; then
+    tried=$(jq -ce 'if type == "array" and all(.[]; type == "object") then . else empty end' <<<"${FM_CQG_TRIED}") || return 2
+  fi
   if [ -n "$plan" ]; then
     profiles=$(jq -ces 'if length != 1 then error("expected one scheduled plan") else .[0] end | select(.authorized == true and (.profiles | type) == "array" and (.profiles | length) > 0) | .profiles' "$plan" 2>/dev/null) || return 1
   elif [ -f "$config/crew-dispatch.json" ]; then
@@ -310,6 +315,12 @@ fm_cqg_pick_route() {
     source=$(jq -c '.key' <<<"$selection") || return 1
   fi
   if [ -n "$profiles" ]; then
+    profiles=$(jq -c --argjson tried "$tried" '
+      [.[] | . as $profile | select(any($tried[];
+        .harness == $profile.harness and
+        (.model // "default") == ($profile.model // "default") and
+        (.effort // "default") == ($profile.effort // "default")) | not)]
+    ' <<<"$profiles") || return 1
     if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
       choice=$(jq -r '[.[] | select(.harness == "grok")] | if length == 0 then empty else .[0] | [.harness, (.model // "default"), (.effort // "default")] | @tsv end' <<<"$profiles")
       [ -z "$choice" ] || { printf '%s\t%s\n' "$choice" "$source"; return 0; }
@@ -415,7 +426,7 @@ fm_cqg_write_verdict() {
 # 75 defer. Notices on stdout. Refusals and deferrals on stderr.
 fm_cqg_decide() {
   local config=$1 state=$2 home=$3 id=$4 brief=$5 model=$6 verdict=$7
-  local weekly rem reset ahead route route_model route_effort route_rule type_name
+  local weekly rem reset ahead route route_model route_effort route_rule type_name route_rc
   if ! fm_cqg_load "$config"; then
     return 1
   fi
@@ -441,7 +452,13 @@ fm_cqg_decide() {
     if [ -z "$ahead" ]; then
       printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"
     elif fm_cqg_ahead_of_margin "$ahead"; then
-      if ! route=$(fm_cqg_pick_route "$home" "$brief" "$config" "${FM_CQG_DISPATCH_RULE:-}" "$model" "${FM_CQG_EFFORT:-default}" "${FM_CQG_SCHEDULED_PLAN:-}"); then
+      route_rc=0
+      route=$(fm_cqg_pick_route "$home" "$brief" "$config" "${FM_CQG_DISPATCH_RULE:-}" "$model" "${FM_CQG_EFFORT:-default}" "${FM_CQG_SCHEDULED_PLAN:-}") || route_rc=$?
+      if [ "$route_rc" -eq 2 ]; then
+        fm_cqg_die "scheduled tried profiles could not be read"
+        return 1
+      fi
+      if [ "$route_rc" -ne 0 ]; then
         fm_cqg_status_once "$state" "$id" "$FM_CQG_ROUTE_STATUS" || return 1
         printf 'deferred: selected dispatch rule allows no alternate worker for task %s\n' "$id" >&2
         return "$FM_CQG_DEFER_EXIT"

@@ -690,6 +690,57 @@ test_spawn_reroute_keeps_inferred_dispatch_rule() {
   pass "quota reroute preserves an inferred dispatch rule"
 }
 
+test_spawn_omitted_model_infers_dispatch_rule() {
+  local case_dir home pane out rc=0
+  unset FM_SCHEDULED_WORKER_PLAN || true
+  unset FM_CQG_TRIED || true
+  case_dir=$(make_case omitted-model task-w engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  fake_tool "$case_dir/fakebin" grok
+  write_snap "$case_dir/snap.json" 30 259200
+  jq -n '{default:[{harness:"claude"},{harness:"grok",model:"grok-4.7",effort:"medium"}]}' \
+    > "$home/config/crew-dispatch.json"
+  pane=$(new_worktree "$case_dir" task-w)
+  FM_TEST_SNAP="$case_dir/snap.json"
+  out=$(run_spawn "$case_dir" "$pane" task-w "$case_dir/sample-project" \
+    --harness claude --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "an omitted model deferred a unique default rule: $out"
+  assert_equals grok "$(awk -F= '$1=="harness"{print $2}' "$home/state/task-w.meta")" "omitted model did not reroute to grok"
+  assert_equals '{"default":true}' "$(awk -F= '$1=="dispatch_rule"{print $2}' "$home/state/task-w.meta")" "omitted model lost the default rule"
+  assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$PACE_LINE")" "omitted model missed its pace line"
+  pass "an omitted model infers the unique default rule and reroutes"
+}
+
+test_spawn_scheduled_reroute_skips_tried_profile() {
+  local case_dir home out rc=0 before trees
+  case_dir=$(make_case tried-sonnet task-w engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  fake_tool "$case_dir/fakebin" grok
+  fake_tool "$case_dir/fakebin" muse
+  write_snap "$case_dir/snap.json" 30 259200
+  jq -n '{authorized:true,reasoning_class:"strong/approved",profiles:[
+      {harness:"claude",model:"opus",effort:"high",reasoning_class:"strong/approved"},
+      {harness:"claude",model:"sonnet",effort:"high",reasoning_class:"strong/approved"}
+    ]}' > "$case_dir/plan.json"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  FM_SCHEDULED_WORKER_PLAN="$case_dir/plan.json"
+  FM_CQG_TRIED='[{"harness":"claude","model":"sonnet","effort":"high","reasoning_class":"strong/approved"}]'
+  export FM_SCHEDULED_WORKER_PLAN FM_CQG_TRIED
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-w "$case_dir/sample-project" \
+    --harness claude --model opus --effort high --mode no-mistakes --yolo off 2>&1) || rc=$?
+  unset FM_SCHEDULED_WORKER_PLAN || true
+  unset FM_CQG_TRIED || true
+  expect_code "$DEFER_EXIT" "$rc" "a tried Sonnet destination was provisioned: $out"
+  assert_nothing_created "$case_dir" task-w "$before" "$trees"
+  assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "tried destination missed its route line"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota-pace')" "tried destination wrote a pace line"
+  pass "a scheduled reroute skips a profile already tried in the episode"
+}
+
 test_spawn_scheduled_plan_routes_only_listed_profiles() {
   local case_dir home pane out rc=0 before trees
   case_dir=$(make_case plan-sonnet task-w engineering)
@@ -904,6 +955,8 @@ test_spawn_refuses_raw_opus_for_writing
 test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
 test_spawn_reroute_keeps_inferred_dispatch_rule
+test_spawn_omitted_model_infers_dispatch_rule
+test_spawn_scheduled_reroute_skips_tried_profile
 test_spawn_scheduled_plan_routes_only_listed_profiles
 test_spawn_reroutes_hot_window
 test_spawn_sonnet_and_cap

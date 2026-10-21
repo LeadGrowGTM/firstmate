@@ -1525,8 +1525,12 @@ Elapsed time is the fraction of `weekly_window_seconds` already gone before `res
 The pace check trips only when usage minus elapsed time is strictly greater than `pace_margin_points`.
 A reset time in the past, or one that cannot be parsed, is treated as a missing reading and skips the pace check.
 When the check trips, the launch goes to the first available preference: Grok, then Muse, then Claude Sonnet.
+That order stands when the chosen profile declares a weaker reasoning class than the requested Claude profile.
+Ordinary dispatch still keeps the strongest reasoning class when this pace check has not tripped.
 With a selected or uniquely inferred dispatch rule, only profiles listed by that rule are eligible, and the chosen rule stays attached to a rerouted launch; when none is available, the launch exits 75 and leaves its backlog item queued.
-For a scheduled worker, only profiles in its authorized plan are eligible.
+An omitted launch model is read as `default` before that rule is inferred, matching the dispatch profile checker.
+For a scheduled worker, only profiles in its authorized plan are eligible, excluding any profile already tried in that episode.
+A repeated destination is rejected before a worker is provisioned.
 Grok is skipped when the launch carries client data, which [`bin/fm-muse-client-lib.sh`](../bin/fm-muse-client-lib.sh) decides, and when `grok` is not on `PATH`.
 Muse is skipped when `muse` is not on `PATH`.
 A Muse route uses the normal Muse launch, so contributor mode stays off when the launch carries client data.
@@ -1551,7 +1555,7 @@ Each of those lines is appended once per task, and a retry appends nothing furth
 An Opus refusal appends no status line.
 The admitting spawn holds `state/.claude-quota-guard.lock` from the check until the task record is published, and releases it immediately when the route leaves Claude.
 A second Claude launch that arrives while the lock is held is refused rather than waited on, so the two cannot both take the last place.
-[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, the cap including a published launch whose agent is not yet observable, a missing quota reading, and the single status line.
+[`tests/fm-claude-quota-guard.test.sh`](../tests/fm-claude-quota-guard.test.sh) covers the Opus refusal, the pace reroute, an omitted model inferred as `default`, a scheduled destination already tried in the episode, the cap including a published launch whose agent is not yet observable, a missing quota reading, and the single status line.
 
 ## Automatic deadweight cleanup
 

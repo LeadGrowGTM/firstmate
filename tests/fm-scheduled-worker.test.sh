@@ -27,6 +27,16 @@ case "$mode" in
   uncertain) outcome=uncertain; code=1 ;;
   published) outcome=worker-published; code=0 ;;
   published-reroute) outcome=worker-published; code=0 ;;
+  reroute-respecting-tried)
+    if [ -n "${FM_CQG_TRIED:-}" ] && printf '%s' "$FM_CQG_TRIED" | jq -e 'any(.[]; .harness == "claude" and .model == "sonnet")' >/dev/null; then
+      outcome=capacity
+      code=75
+    else
+      outcome=worker-published
+      code=0
+      mode=published-reroute
+    fi
+    ;;
 esac
 if [ "$outcome" = worker-published ]; then
   project=$(CDPATH='' cd -- "$2" && pwd)
@@ -228,6 +238,37 @@ check_published_reroute_updates_journal_profile() {
   pass 'published quota reroute updates journal profile and next exhaustion exclusion'
 }
 
+check_tried_destination_is_rejected_before_provisioning() {
+  local dir out rc journal at
+  dir=$(make_case tried-destination)
+  jq '.profiles=[{"harness":"claude","model":"sonnet","effort":"high","reasoning_class":"standard"},{"harness":"claude","model":"opus","effort":"high","reasoning_class":"standard"}]' \
+    "$dir/plan.json" > "$dir/other.json"; mv "$dir/other.json" "$dir/plan.json"
+  at=$(( $(date +%s) - 2 ))
+  jq -n --argjson at "$at" \
+    '{profile:{harness:"claude",model:"sonnet",effort:"high",reasoning_class:"standard"},observed_at:$at,evidence:"current candidates checked"}' > "$dir/selection.json"
+  printf '%s\n' unavailable > "$dir/home/result"
+  out=$(run_case "$dir"); rc=$?
+  expect_code 1 "$rc" "the first Sonnet attempt should be unavailable: $out"
+  assert_equals reselect "$(phase "$dir")" 'unavailable Sonnet did not stay reselectable'
+  assert_absent "$dir/home/state/job.meta" 'unavailable Sonnet published a worker'
+  sleep 1
+  jq -n --argjson at "$(date +%s)" \
+    '{profile:{harness:"claude",model:"opus",effort:"high",reasoning_class:"standard"},observed_at:$at,evidence:"current candidates checked"}' > "$dir/selection.json"
+  printf '%s\n' reroute-respecting-tried > "$dir/home/result"
+  out=$(run_case "$dir"); rc=$?
+  expect_code 75 "$rc" "Opus rerouted onto tried Sonnet was provisioned: $out"
+  journal="$dir/home/state/scheduled-worker/occ/journal.json"
+  assert_equals capacity "$(jq -r .phase "$journal")" 'repeated destination blocked a published worker'
+  assert_absent "$dir/home/state/job.meta" 'repeated destination published a worker'
+  assert_equals 2 "$(count_calls "$dir")" 'route selection was not asked to reject the tried destination'
+  assert_equals sonnet "$(jq -r '.tried[0].model' "$journal")" 'the tried Sonnet profile was dropped'
+  assert_equals 1 "$(jq '.tried|length' "$journal")" 'the deferred Opus selection consumed an extra profile'
+  if grep -q 'published profile was already attempted' <<<"$out"; then
+    fail 'the repeated destination was rejected only after publication'
+  fi
+  pass 'a quota reroute rejects an already-tried destination before provisioning'
+}
+
 check_relative_state_receipt() {
   local dir out rc
   dir=$(make_case relative-state)
@@ -315,6 +356,7 @@ check_capacity_and_reselect
 check_failure_barriers
 check_attempt_and_exhaustion
 check_published_reroute_updates_journal_profile
+check_tried_destination_is_rejected_before_provisioning
 check_relative_state_receipt
 check_generation_change_at_control_admission
 check_branch_prefix_forwarding

@@ -13,6 +13,9 @@
 # trusted. Exit 75 on a cap or dispatch-route deferral.
 # Exit 2 when the command line is unusable.
 # --model may be empty. Pass it as --model= so an empty value is explicit.
+# An empty model is read as default before a dispatch rule is inferred.
+# FM_CQG_TRIED, when the scheduled worker sets it, is a JSON array of profiles
+# that route selection skips. A repeated destination is not provisioned.
 # A missing quota reading never refuses the launch by itself.
 # --apply-status appends the one pace, cap, or route line for this task. A retry of
 # that same line appends nothing.
