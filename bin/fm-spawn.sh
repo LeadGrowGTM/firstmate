@@ -212,6 +212,18 @@
 #   launch side effect, when the root home's state/disk-guard.pause is a
 #   regular file or symlink. bin/fm-disk-guard.sh owns that flag. A relaunch and a
 #   --secondmate spawn are not deferred by it.
+#   Claude quota guard: a fresh Claude ship or scout is also bounded by
+#   config/claude-quota-guard.json. bin/fm-claude-quota-guard.sh owns the
+#   decision and docs/configuration.md "Claude quota guard" owns the file.
+#   An absent file uses the documented defaults. Opus on a refused task type is
+#   refused before any launch side effect. Weekly pace ahead of the window
+#   reroutes to grok, muse, or Claude sonnet. A home already at its Claude
+#   worker cap prints one deferred: line and exits 75. A relaunch and a
+#   --secondmate spawn are exempt. When quota-axi cannot report Claude weekly
+#   usage the launch continues and the gap is stated. enabled false restores
+#   unrestricted Claude launches. The admitting spawn holds
+#   state/.claude-quota-guard.lock until the task record is published, or
+#   releases it immediately when the route leaves claude.
 #   With no harness arg, a crewmate/scout spawn resolves the CREW harness only when
 #   config/crew-dispatch.json is absent. When that file exists, crewmate/scout
 #   spawns require an explicit harness so firstmate cannot silently skip dispatch
@@ -1445,6 +1457,114 @@ SPAWN_LAUNCH_SENT=0
 SPAWN_LAUNCH_ATTEMPTED=0
 TMUX_REBIND_ABORT_TARGET=
 SPAWN_ENDPOINT_CLOSED=0
+SPAWN_CLAUDE_QUOTA_LOCK=
+SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
+SPAWN_CLAUDE_QUOTA_VERDICT=
+
+# Apply the Claude subscription decision and, when it reroutes, rebuild the
+# launch from the destination template. The lock is held by this process until
+# the task record is published, or released now when the route leaves claude.
+# The guard command owns the decision; this function only applies its verdict.
+spawn_apply_claude_quota_guard() {
+  local quota_rc=0 line key value
+  local verdict_action='' verdict_harness='' verdict_model=''
+  [ "$RELAUNCH" -eq 0 ] || return 0
+  [ "$KIND" != secondmate ] || return 0
+  [ "$HARNESS" = claude ] || return 0
+  if [ ! -d "$STATE" ] || [ ! -w "$STATE" ]; then
+    echo "error: cannot admit a Claude launch because the state directory is not writable" >&2
+    FM_LAUNCH_OUTCOME=unsafe-refusal
+    FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+    exit 1
+  fi
+  SPAWN_CLAUDE_QUOTA_LOCK=$STATE/.claude-quota-guard.lock
+  if ! fm_lock_try_acquire "$SPAWN_CLAUDE_QUOTA_LOCK"; then
+    echo "error: another Claude launch is being admitted for this home; refusing to race its subscription cap" >&2
+    FM_LAUNCH_OUTCOME=unsafe-refusal
+    FM_LAUNCH_OUTCOME_REASON=claude-quota-lock
+    exit 1
+  fi
+  SPAWN_CLAUDE_QUOTA_LOCK_HELD=1
+  SPAWN_CLAUDE_QUOTA_VERDICT=$(mktemp) || {
+    echo "error: could not record the Claude quota decision" >&2
+    FM_LAUNCH_OUTCOME=unsafe-refusal
+    FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+    exit 1
+  }
+  quota_rc=0
+  "$SCRIPT_DIR/fm-claude-quota-guard.sh" check \
+    --config "$CONFIG" \
+    --state "$STATE" \
+    --home "$FM_HOME" \
+    --id "$ID" \
+    --brief "$DATA/$ID/brief.md" \
+    --model="$MODEL" \
+    --verdict "$SPAWN_CLAUDE_QUOTA_VERDICT" \
+    --apply-status || quota_rc=$?
+  if [ "$quota_rc" -ne 0 ]; then
+    rm -f "$SPAWN_CLAUDE_QUOTA_VERDICT"
+    SPAWN_CLAUDE_QUOTA_VERDICT=
+    if [ "$quota_rc" -eq 75 ]; then
+      FM_LAUNCH_OUTCOME=capacity
+      FM_LAUNCH_OUTCOME_REASON=claude-quota-cap
+    else
+      FM_LAUNCH_OUTCOME=unsafe-refusal
+      FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+    fi
+    exit "$quota_rc"
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      action) verdict_action=$value ;;
+      harness) verdict_harness=$value ;;
+      model) verdict_model=$value ;;
+    esac
+  done <"$SPAWN_CLAUDE_QUOTA_VERDICT"
+  rm -f "$SPAWN_CLAUDE_QUOTA_VERDICT"
+  SPAWN_CLAUDE_QUOTA_VERDICT=
+  case "$verdict_action" in
+    proceed) return 0 ;;
+    reroute) ;;
+    *)
+      echo "error: Claude quota guard returned an unusable verdict" >&2
+      FM_LAUNCH_OUTCOME=unsafe-refusal
+      FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+      exit 1
+      ;;
+  esac
+  case "$verdict_harness" in
+    grok | muse) ;;
+    claude)
+      if [ "$verdict_model" != sonnet ]; then
+        echo "error: Claude quota guard returned an unusable verdict" >&2
+        FM_LAUNCH_OUTCOME=unsafe-refusal
+        FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+        exit 1
+      fi
+      ;;
+    *)
+      echo "error: Claude quota guard returned an unusable verdict" >&2
+      FM_LAUNCH_OUTCOME=unsafe-refusal
+      FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+      exit 1
+      ;;
+  esac
+  HARNESS=$verdict_harness
+  MODEL=$verdict_model
+  RAW_LAUNCH=0
+  LAUNCH=$(launch_template "$HARNESS" "$KIND") || {
+    echo "error: no launch template for harness '$HARNESS' after the Claude quota guard rerouted this launch" >&2
+    FM_LAUNCH_OUTCOME=unsafe-refusal
+    FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
+    exit 1
+  }
+  if [ "$HARNESS" != claude ]; then
+    SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
+    fm_lock_release "$SPAWN_CLAUDE_QUOTA_LOCK" || true
+  fi
+}
 
 spawn_fresh_commit_rollback() {
   local result=0 acquired=0
@@ -1693,6 +1813,14 @@ spawn_abort_cleanup() {
   if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
     SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
     fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK" || true
+  fi
+  if [ -n "$SPAWN_CLAUDE_QUOTA_VERDICT" ]; then
+    rm -f "$SPAWN_CLAUDE_QUOTA_VERDICT"
+    SPAWN_CLAUDE_QUOTA_VERDICT=
+  fi
+  if [ "$SPAWN_CLAUDE_QUOTA_LOCK_HELD" = 1 ]; then
+    SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
+    fm_lock_release "$SPAWN_CLAUDE_QUOTA_LOCK" || true
   fi
   spawn_release_task_set
   if [ "$SPAWN_CONTROL_LOCK_HELD" = 1 ]; then
@@ -2790,6 +2918,8 @@ if [ "$RAW_LAUNCH" = 1 ] && fm_muse_carries_client_data "$FM_HOME" "$DATA/$ID/br
   echo "error: a raw Muse launch carrying client data cannot guarantee --contributor-mode off; use --harness muse" >&2
   exit 1
 fi
+
+spawn_apply_claude_quota_guard
 
 # muse, gemini, agy, and devin are verified as CREWMATE/SCOUT adapters only. A secondmate is
 # a firstmate instance, so it needs a primary supervision protocol.
@@ -6150,6 +6280,10 @@ fi
 if [ "$SPAWN_TREEHOUSE_PROJECT_LOCK_HELD" = 1 ]; then
   SPAWN_TREEHOUSE_PROJECT_LOCK_HELD=0
   fm_lock_release "$SPAWN_TREEHOUSE_PROJECT_LOCK"
+fi
+if [ "$SPAWN_CLAUDE_QUOTA_LOCK_HELD" = 1 ]; then
+  SPAWN_CLAUDE_QUOTA_LOCK_HELD=0
+  fm_lock_release "$SPAWN_CLAUDE_QUOTA_LOCK" || true
 fi
 # The record is published, so this task is now part of the set a teardown
 # enumerates and locks per task. The set lock, or a secondmate's publisher lock,

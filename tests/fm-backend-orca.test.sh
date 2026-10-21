@@ -501,6 +501,7 @@ test_spawn_preserves_orca_metadata_when_pathless_worktree_cleanup_fails() {
   config="$TMP_ROOT/pathless-cleanup-config"
   fm_git_init_commit "$proj"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   write_spawn_brief "$data" "$id"
   touch "$state/.last-watcher-beat"
   orca_case pathless-cleanup-fail
@@ -537,6 +538,7 @@ test_spawn_writes_orca_metadata_and_launches_harness() {
   config="$TMP_ROOT/spawn-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   write_spawn_brief "$data" "$id"
   touch "$state/.last-watcher-beat"
   orca_case spawn
@@ -607,6 +609,7 @@ test_spawn_refuses_orca_when_runtime_not_ready() {
   config="$TMP_ROOT/runtime-down-config"
   fm_git_init_commit "$proj"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   write_spawn_brief "$data" "$id"
   touch "$state/.last-watcher-beat"
   orca_case runtime-down-spawn
@@ -636,6 +639,7 @@ test_spawn_refuses_orca_nonisolated_worktree() {
   config="$TMP_ROOT/bad-spawn-config"
   fm_git_init_commit "$proj"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   write_spawn_brief "$data" "$id"
   touch "$state/.last-watcher-beat"
   orca_case bad-spawn
@@ -670,6 +674,7 @@ test_spawn_removes_orca_worktree_when_terminal_create_fails() {
   config="$TMP_ROOT/terminal-fail-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   write_spawn_brief "$data" "$id"
   touch "$state/.last-watcher-beat"
   orca_case terminal-fail
@@ -703,6 +708,7 @@ test_spawn_preserves_orca_metadata_when_abort_cleanup_fails() {
   config="$TMP_ROOT/cleanup-fail-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   write_spawn_brief "$data" "$id"
   touch "$state/.last-watcher-beat"
   orca_case cleanup-fail
@@ -737,6 +743,7 @@ test_spawn_releases_orca_resources_when_metadata_write_fails() {
   config="$TMP_ROOT/meta-fail-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state/$id.meta" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   write_spawn_brief "$data" "$id"
   orca_case meta-fail
   printf '1\n' > "$RESP/1.exit"
@@ -852,6 +859,7 @@ test_scout_teardown_removes_orca_worktree_via_helper() {
   config="$TMP_ROOT/teardown-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   printf 'report\n' > "$data/$id/report.md"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
@@ -889,6 +897,7 @@ test_scout_teardown_refuses_orca_id_path_mismatch() {
   fm_git_worktree "$proj" "$wt" "fm/$id"
   git -C "$proj" worktree add --quiet -b "fm/$id-other" "$other_wt"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   printf 'report\n' > "$data/$id/report.md"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
@@ -925,6 +934,7 @@ test_teardown_removes_orca_worktree_when_path_missing() {
   state="$TMP_ROOT/missing-path-state"
   config="$TMP_ROOT/missing-path-config"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   printf 'report\n' > "$data/$id/report.md"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
@@ -958,6 +968,7 @@ test_teardown_preserves_metadata_when_orca_remove_error_json() {
   state="$TMP_ROOT/remove-error-state"
   config="$TMP_ROOT/remove-error-config"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   printf 'report\n' > "$data/$id/report.md"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
@@ -990,6 +1001,7 @@ test_scout_teardown_refuses_orca_missing_report_when_path_missing() {
   state="$TMP_ROOT/missing-report-state"
   config="$TMP_ROOT/missing-report-config"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "terminal=term-missing-report" "worktree=$wt" "project=$proj" \
@@ -1020,6 +1032,7 @@ test_ship_teardown_refuses_orca_missing_worktree_path() {
   config="$TMP_ROOT/missing-ship-config"
   fm_git_init_commit "$proj"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "terminal=term-missing-ship" "worktree=$wt" "project=$proj" \
@@ -1051,6 +1064,7 @@ test_ship_teardown_removes_orca_worktree_when_id_path_matches() {
   config="$TMP_ROOT/ship-match-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "terminal=term-ship-match" "worktree=$wt" "project=$proj" \
@@ -1086,6 +1100,7 @@ test_ship_teardown_refuses_orca_unresolvable_worktree_id() {
   config="$TMP_ROOT/ship-unresolved-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "terminal=term-ship-unresolved" "worktree=$wt" "project=$proj" \
@@ -1125,6 +1140,7 @@ test_ship_teardown_refuses_orca_id_path_mismatch() {
   fm_git_worktree "$proj" "$wt" "fm/$id"
   git -C "$proj" worktree add --quiet -b "fm/$id-other" "$other_wt"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "terminal=term-ship-mismatch" "worktree=$wt" "project=$proj" \
@@ -1162,6 +1178,7 @@ test_teardown_refuses_orca_missing_worktree_id() {
   config="$TMP_ROOT/missing-id-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   printf 'report\n' > "$data/$id/report.md"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \
@@ -1193,6 +1210,7 @@ test_teardown_refuses_orca_worktree_without_terminal_handle() {
   config="$TMP_ROOT/no-terminal-config"
   fm_git_worktree "$proj" "$wt" "fm/$id"
   mkdir -p "$data/$id" "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   printf 'report\n' > "$data/$id/report.md"
   touch "$state/.last-watcher-beat"
   fm_write_meta "$state/$id.meta" \

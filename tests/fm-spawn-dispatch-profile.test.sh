@@ -2501,7 +2501,7 @@ test_launch_environment_allowlist() {
     rec=$(make_spawn_case "$id" codex "$id")
     read_case_record "$rec"
     case "$setting" in
-      missing-config) rm "$HOME_DIR/config/crew-harness"; rmdir "$HOME_DIR/config" ;;
+      missing-config) rm -f "$HOME_DIR/config/crew-harness" "$HOME_DIR/config/claude-quota-guard.json"; rmdir "$HOME_DIR/config" ;;
       enabled) printf '# Synthetic credential name\nFM_TEST_ALLOWED\nFM_TEST_EMPTY\nFM_TEST_UNSET\n' > "$HOME_DIR/config/launch-env-allowlist" ;;
       empty) : > "$HOME_DIR/config/launch-env-allowlist" ;;
     esac

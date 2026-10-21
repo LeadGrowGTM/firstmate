@@ -409,6 +409,10 @@
       "audience": "operator-example"
     },
     {
+      "path": "docs/examples/claude-quota-guard.json",
+      "audience": "operator-example"
+    },
+    {
       "path": "docs/examples/task-types.json",
       "audience": "operator-example"
     },

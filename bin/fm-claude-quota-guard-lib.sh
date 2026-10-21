@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+# Decide whether one fresh Claude ship or scout launch may spend the
+# subscription. bin/fm-claude-quota-guard.sh is the command tests and
+# bin/fm-spawn.sh call. docs/configuration.md "Claude quota guard" owns the
+# config file. This file owns the decision: read quota-axi, refuse Opus for
+# configured task types, reroute when weekly usage is ahead of the window, and
+# defer when this home is already at its Claude worker cap.
+#
+# An absent config file turns the guard on with the built-in defaults. The
+# subscription was spent while no file existed, so a file that must be created
+# before anything is protected would leave that hole open. "enabled": false is
+# the opt-out and restores an uncapped Claude launch.
+#
+# Missing quota evidence never refuses a launch. The command prints one gap
+# line and continues with the Opus-type and concurrency checks, which do not
+# need a usage reading. A malformed config file or an unreadable task record
+# refuses the launch instead of guessing.
+
+# Built-in defaults. A present key replaces that default. opus_refused_types,
+# when present, replaces this list entirely, including when the array is empty.
+FM_CQG_DEFAULT_MARGIN=10
+FM_CQG_DEFAULT_CAP=4
+FM_CQG_DEFAULT_WINDOW=604800
+FM_CQG_DEFAULT_TYPES=$'writing\nexecution\ncopy-draft\nlist-build\nbison-launch'
+
+# Stable supervisor lines. The text is the retry identity: a later attempt for
+# the same launch appends nothing when this line is already in the status file.
+# bin/fm-classify-lib.sh status_event_recorded owns that comparison.
+FM_CQG_PACE_STATUS='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so this launch was routed off the requested claude model'
+FM_CQG_CAP_STATUS='paused [key=claude-quota-cap]: claude worker cap deferred this launch'
+
+# Same deferral as project capacity, so a batch keeps the item queued.
+FM_CQG_DEFER_EXIT=75
+
+fm_cqg_die() {
+  printf 'error: %s\n' "$1" >&2
+  return 1
+}
+
+# fm_cqg_load <config-dir>
+# Sets FM_CQG_ENABLED, FM_CQG_MARGIN, FM_CQG_CAP, FM_CQG_CAP_OFF,
+# FM_CQG_WINDOW, and FM_CQG_TYPES. Returns 1 when the file is present and
+# unusable. An absent file keeps the defaults and returns 0.
+fm_cqg_load() {
+  local dir=$1 file
+  FM_CQG_ENABLED=1
+  FM_CQG_MARGIN=$FM_CQG_DEFAULT_MARGIN
+  FM_CQG_CAP=$FM_CQG_DEFAULT_CAP
+  FM_CQG_CAP_OFF=0
+  FM_CQG_WINDOW=$FM_CQG_DEFAULT_WINDOW
+  FM_CQG_TYPES=$FM_CQG_DEFAULT_TYPES
+  file=$dir/claude-quota-guard.json
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    return 0
+  fi
+  if [ ! -f "$file" ] || [ ! -r "$file" ]; then
+    fm_cqg_die "config/claude-quota-guard.json must be a readable regular file"
+    return 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    fm_cqg_die "config/claude-quota-guard.json cannot be read because jq is not installed"
+    return 1
+  fi
+  local parsed
+  if ! parsed=$(jq -c '
+    def num: type == "number" and (isinfinite | not) and (isnan | not);
+    def whole: num and . == floor;
+    if type != "object" then error("expected a JSON object")
+    elif (keys - ["enabled","pace_margin_points","concurrent_claude_cap","weekly_window_seconds","opus_refused_types"]) != []
+      then error("unknown key")
+    else
+      {
+        enabled: (if has("enabled") then (if (.enabled | type) == "boolean" then .enabled else error("enabled") end) else true end),
+        margin: (if has("pace_margin_points") then (if (.pace_margin_points | num) and .pace_margin_points >= 0 then .pace_margin_points else error("pace_margin_points") end) else 10 end),
+        cap_off: (if has("concurrent_claude_cap") and .concurrent_claude_cap == null then true else false end),
+        cap: (if has("concurrent_claude_cap") and .concurrent_claude_cap == null then 0
+              elif has("concurrent_claude_cap") then (if (.concurrent_claude_cap | whole) and .concurrent_claude_cap >= 1 then .concurrent_claude_cap else error("concurrent_claude_cap") end)
+              else 4 end),
+        window: (if has("weekly_window_seconds") then (if (.weekly_window_seconds | whole) and .weekly_window_seconds >= 1 then .weekly_window_seconds else error("weekly_window_seconds") end) else 604800 end),
+        types_set: has("opus_refused_types"),
+        types: (if has("opus_refused_types") then
+                  (if (.opus_refused_types | type) == "array"
+                     and all(.opus_refused_types[]; type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))
+                   then .opus_refused_types else error("opus_refused_types") end)
+                else ["writing","execution","copy-draft","list-build","bison-launch"] end)
+      }
+    end
+  ' "$file" 2>/dev/null); then
+    fm_cqg_die "config/claude-quota-guard.json is malformed; see docs/configuration.md \"Claude quota guard\""
+    return 1
+  fi
+  FM_CQG_ENABLED=$(jq -r '.enabled' <<<"$parsed")
+  FM_CQG_MARGIN=$(jq -r '.margin' <<<"$parsed")
+  FM_CQG_CAP=$(jq -r '.cap' <<<"$parsed")
+  FM_CQG_WINDOW=$(jq -r '.window' <<<"$parsed")
+  if [ "$(jq -r '.cap_off' <<<"$parsed")" = true ]; then
+    FM_CQG_CAP_OFF=1
+  fi
+  if [ "$(jq -r '.types_set' <<<"$parsed")" = true ]; then
+    FM_CQG_TYPES=$(jq -r '.types[]' <<<"$parsed")
+  fi
+  case "$FM_CQG_ENABLED" in
+    true) FM_CQG_ENABLED=1 ;;
+    false) FM_CQG_ENABLED=0 ;;
+    *) fm_cqg_die "config/claude-quota-guard.json is malformed; see docs/configuration.md \"Claude quota guard\""
+      return 1
+      ;;
+  esac
+}
+
+# fm_cqg_task_type <brief>
+# Prints the Name: value from the brief's Task type section, or nothing when
+# the brief or the section is absent. A missing brief is an untyped launch.
+fm_cqg_task_type() {
+  local brief=$1 body line value
+  [ -f "${brief:-}" ] || return 0
+  body=$(fm_brief_task_heading_body "$brief" "## Task type") || true
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      'Name: '*)
+        value=${line#'Name: '}
+        value=${value%%[[:space:]]*}
+        printf '%s' "$value"
+        return 0
+        ;;
+    esac
+  done <<<"$body"
+}
+
+# True when the requested model is an Opus model. Empty and "default" are not.
+fm_cqg_model_is_opus() {
+  local model=${1,,}
+  case "$model" in
+    '' | default) return 1 ;;
+    *opus*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fm_cqg_type_refused() {
+  local want=$1 one
+  [ -n "$want" ] || return 1
+  while IFS= read -r one || [ -n "$one" ]; do
+    [ -n "$one" ] || continue
+    [ "$one" = "$want" ] && return 0
+  done <<<"$FM_CQG_TYPES"
+  return 1
+}
+
+fm_cqg_iso_epoch() {
+  local raw=$1 base
+  case "$raw" in
+    *.*)
+      base=${raw%%.*}
+      case "$raw" in
+        *Z) case "$base" in *Z) ;; *) base=${base}Z ;; esac ;;
+      esac
+      raw=$base
+      ;;
+  esac
+  date -u -d "$raw" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$raw" +%s 2>/dev/null
+}
+
+# fm_cqg_toon_weekly <toon-text>
+# Prints remaining, limitedBy, and resetsAt for the tightest Claude all_models
+# row, separated by tabs. Prints nothing when that row is absent.
+fm_cqg_toon_weekly() {
+  awk '
+    function split_csv(line, out,    i, n, c, q, cur) {
+      n = 0
+      q = 0
+      cur = ""
+      for (i = 1; i <= length(line); i++) {
+        c = substr(line, i, 1)
+        if (c == "\"") {
+          q = !q
+          continue
+        }
+        if (c == "," && !q) {
+          out[++n] = cur
+          cur = ""
+          continue
+        }
+        cur = cur c
+      }
+      out[++n] = cur
+      return n
+    }
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    BEGIN { count = -1; k = 0 }
+    {
+      line = trim($0)
+      if (count < 0 && line ~ /^quota\[[0-9]+\]\{/) {
+        if (index(line, "{provider,accountKey,") > 0) k = 1
+        header = line
+        sub(/^quota\[/, "", header)
+        sub(/\].*/, "", header)
+        count = header + 0
+        next
+      }
+      if (count > 0 && seen < count) {
+        seen++
+        n = split_csv(line, f)
+        provider = f[1]
+        scope = f[2 + k]
+        remaining = f[3 + k]
+        limited = f[7 + k]
+        reset = f[8 + k]
+        if (provider == "claude" && scope == "all_models" && remaining ~ /^-?[0-9]+(\.[0-9]+)?$/) {
+          if (!picked || remaining + 0 < best + 0) {
+            picked = 1
+            best = remaining + 0
+            best_limited = limited
+            best_reset = reset
+          }
+        }
+      }
+    }
+    END {
+      if (picked) printf "%s\t%s\t%s\n", best, best_limited, best_reset
+    }
+  ' <<<"$1"
+}
+
+# fm_cqg_json_weekly <json>
+# Prints percentRemaining and resetsAt for the tightest Claude seven_day
+# window, or a weekly-kind window when seven_day is absent.
+fm_cqg_json_weekly() {
+  jq -r '
+    def rows(which):
+      [.providers[]? | select(.provider == "claude") | .windows[]?
+        | select(which)
+        | select(.percentRemaining | type == "number")
+        | select(.resetsAt | type == "string")
+        | {rem: .percentRemaining, reset: .resetsAt}];
+    (rows(.id == "seven_day")) as $named
+    | (if ($named | length) > 0 then $named else rows(.kind == "weekly") end)
+    | min_by(.rem) // empty
+    | if . == null then "" else "\(.rem)\t\(.reset)" end
+  ' <<<"$1" 2>/dev/null || true
+}
+
+# fm_cqg_read_weekly
+# Prints "remaining<TAB>resetsAt" for the Claude weekly window, or nothing
+# when quota-axi cannot report it. Never returns a hard failure for missing
+# data. Callers treat an empty print as the gap: this function runs inside a
+# command substitution, so a flag set here would not reach them.
+fm_cqg_read_weekly() {
+  local toon rc=0 row limited rem reset json
+  if ! command -v quota-axi >/dev/null 2>&1; then
+    return 0
+  fi
+  toon=$(fm_run_timed 20 quota-axi --provider claude --no-credential-refresh 2>/dev/null) || rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$toon" ]; then
+    return 0
+  fi
+  row=$(fm_cqg_toon_weekly "$toon") || true
+  if [ -n "$row" ]; then
+    rem=${row%%$'\t'*}
+    limited=${row#*$'\t'}
+    limited=${limited%%$'\t'*}
+    reset=${row##*$'\t'}
+    case "$limited" in
+      seven_day | weekly)
+        printf '%s\t%s\n' "$rem" "$reset"
+        return 0
+        ;;
+    esac
+  fi
+  rc=0
+  json=$(fm_run_timed 20 quota-axi --provider claude --json --no-credential-refresh 2>/dev/null) || rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$json" ]; then
+    return 0
+  fi
+  row=$(fm_cqg_json_weekly "$json") || true
+  if [ -z "$row" ]; then
+    return 0
+  fi
+  printf '%s\n' "$row"
+}
+
+# fm_cqg_ahead <percent-remaining> <resetsAt>
+# Prints how many points used-percent is ahead of elapsed-percent. Returns 2
+# when the window cannot be placed on the clock.
+fm_cqg_ahead() {
+  local rem=$1 reset=$2 now epoch remain ahead
+  now=$(date +%s) || return 2
+  epoch=$(fm_cqg_iso_epoch "$reset") || return 2
+  remain=$((epoch - now))
+  [ "$remain" -ge 0 ] || return 2
+  ahead=$(awk -v rem="$rem" -v remain="$remain" -v window="$FM_CQG_WINDOW" 'BEGIN {
+    if (window + 0 <= 0) exit 2
+    if (rem + 0 < 0 || rem + 0 > 100) exit 2
+    used = 100 - (rem + 0)
+    elapsed = (window - remain) / window * 100
+    printf "%.6f\n", used - elapsed
+  }') || return 2
+  printf '%s\n' "$ahead"
+}
+
+fm_cqg_ahead_of_margin() {
+  awk -v ahead="$1" -v margin="$FM_CQG_MARGIN" 'BEGIN { exit !(ahead + 0 > margin + 0) }'
+}
+
+# First allowed, installed preference. Client data never selects grok.
+# bin/fm-muse-client-lib.sh owns that decision. Sonnet needs no extra binary
+# because the launch is already Claude.
+fm_cqg_pick_route() {
+  local home=$1 brief=$2
+  if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
+    printf '%s\n' grok
+    return 0
+  fi
+  if command -v muse >/dev/null 2>&1; then
+    printf '%s\n' muse
+    return 0
+  fi
+  printf '%s\n' claude
+}
+
+# fm_cqg_count <state-dir> <self-id>
+# Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home with no
+# recorded pr. Returns 1 when a record cannot be read.
+fm_cqg_count() {
+  local state=$1 self=$2 list f id harness kind pr
+  FM_CQG_OCCUPANTS=0
+  if [ ! -d "$state" ] || [ ! -r "$state" ]; then
+    fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
+    return 1
+  fi
+  if ! list=$(find "$state" -maxdepth 1 \( -type f -o -type l \) -name '*.meta' -print); then
+    fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
+    return 1
+  fi
+  while IFS= read -r f || [ -n "$f" ]; do
+    [ -n "$f" ] || continue
+    if [ ! -r "$f" ]; then
+      fm_cqg_die "cannot count Claude workers because a task record is unreadable"
+      return 1
+    fi
+    id=$(basename "$f" .meta)
+    [ "$id" = "$self" ] && continue
+    harness=$(fm_meta_get "$f" harness)
+    [ "$harness" = claude ] || continue
+    kind=$(fm_meta_get "$f" kind)
+    case "$kind" in
+      '' | ship | scout) ;;
+      *) continue ;;
+    esac
+    pr=$(fm_meta_get "$f" pr)
+    [ -z "$pr" ] || continue
+    FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
+  done <<<"$list"
+}
+
+fm_cqg_status_once() {
+  local state=$1 id=$2 line=$3 file stamped
+  [ "${FM_CQG_APPLY_STATUS:-0}" = 1 ] || return 0
+  file=$state/$id.status
+  if status_event_recorded "$file" "$line"; then
+    return 0
+  fi
+  stamped=$(status_stamp_line "$line") || return 1
+  printf '%s\n' "$stamped" >>"$file"
+}
+
+fm_cqg_write_verdict() {
+  local path=$1 action=$2 harness=$3 model=$4
+  printf 'action=%s\nharness=%s\nmodel=%s\n' "$action" "$harness" "$model" >"$path"
+}
+
+# fm_cqg_decide <config-dir> <state-dir> <home> <id> <brief> <model> <verdict>
+# Exit 0 proceed or reroute, 1 refuse or bad config or unreadable records,
+# 75 defer. Notices on stdout. Refusals and deferrals on stderr.
+fm_cqg_decide() {
+  local config=$1 state=$2 home=$3 id=$4 brief=$5 model=$6 verdict=$7
+  local weekly rem reset ahead rc=0 route type_name
+  if ! fm_cqg_load "$config"; then
+    return 1
+  fi
+  if [ "$FM_CQG_ENABLED" = 0 ]; then
+    fm_cqg_write_verdict "$verdict" proceed claude "$model"
+    return 0
+  fi
+  weekly=$(fm_cqg_read_weekly) || weekly=
+  route=
+  if [ -z "$weekly" ]; then
+    printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"
+  else
+    rem=${weekly%%$'\t'*}
+    reset=${weekly#*$'\t'}
+    ahead=$(fm_cqg_ahead "$rem" "$reset") || ahead=
+    if [ -z "$ahead" ]; then
+      printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"
+    elif fm_cqg_ahead_of_margin "$ahead"; then
+      route=$(fm_cqg_pick_route "$home" "$brief")
+    fi
+  fi
+  if [ -z "$route" ] && fm_cqg_model_is_opus "$model"; then
+    type_name=$(fm_cqg_task_type "$brief") || true
+    if fm_cqg_type_refused "$type_name"; then
+      printf 'refused: Opus is not allowed for task type %s; task %s was not launched\n' "$type_name" "$id" >&2
+      return 1
+    fi
+  fi
+  if [ "$route" = grok ] || [ "$route" = muse ]; then
+    fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_STATUS" || return 1
+    printf 'claude-quota-guard: weekly usage is ahead of the window; routing this launch to %s\n' "$route"
+    fm_cqg_write_verdict "$verdict" reroute "$route" ""
+    return 0
+  fi
+  if [ "$FM_CQG_CAP_OFF" = 0 ]; then
+    if ! fm_cqg_count "$state" "$id"; then
+      return 1
+    fi
+    if [ "$FM_CQG_OCCUPANTS" -ge "$FM_CQG_CAP" ]; then
+      fm_cqg_status_once "$state" "$id" "$FM_CQG_CAP_STATUS" || return 1
+      printf 'deferred: this home already holds %s Claude worker(s) and the cap is %s; task %s was not launched and its backlog item stays queued\n' \
+        "$FM_CQG_OCCUPANTS" "$FM_CQG_CAP" "$id" >&2
+      return "$FM_CQG_DEFER_EXIT"
+    fi
+  fi
+  if [ "$route" = claude ]; then
+    fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_STATUS" || return 1
+    printf '%s\n' "claude-quota-guard: weekly usage is ahead of the window; routing this launch to claude sonnet"
+    fm_cqg_write_verdict "$verdict" reroute claude sonnet
+    return 0
+  fi
+  fm_cqg_write_verdict "$verdict" proceed claude "$model"
+  return 0
+}

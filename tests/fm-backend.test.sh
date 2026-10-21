@@ -965,6 +965,7 @@ run_spawn_symlink_case() {  # <label> <physical|logical>
   write_spawn_brief "$data/$id/brief.md" "$id"
   state="$TMP_ROOT/symlink-state-$label"; config="$TMP_ROOT/symlink-config-$label"
   mkdir -p "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
   log="$TMP_ROOT/symlink-spawn-$label.log"
 
   out=$(run_spawn_case "$ROOT" "$fb" "$log" "$state" "$data" "$config" "$proj" -- "$id" "$proj" claude --mode no-mistakes --yolo off 2>&1)
@@ -1137,6 +1138,7 @@ test_spawn_default_backend_writes_no_meta_field() {
   mkdir -p "$data/$id"; write_spawn_brief "$data/$id/brief.md" "$id"
   state="$TMP_ROOT/nobackend-state"; config="$TMP_ROOT/nobackend-config"
   mkdir -p "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
 
   out=$(PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" HOME="$SPAWN_HOME" CLAUDE_CONFIG_DIR='' \
     FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
@@ -1159,6 +1161,7 @@ test_spawn_explicit_backend_flag_beats_autodetect_herdr_env() {
   mkdir -p "$data/$id"; write_spawn_brief "$data/$id/brief.md" "$id"
   state="$TMP_ROOT/explicit-backend-state"; config="$TMP_ROOT/explicit-backend-config"
   mkdir -p "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
 
   # HERDR_ENV=1 is present (as if firstmate itself were running under herdr),
   # but an explicit --backend tmux flag must still win outright.
@@ -1183,6 +1186,7 @@ test_spawn_autodetect_nesting_resolves_tmux_silently() {
   mkdir -p "$data/$id"; write_spawn_brief "$data/$id/brief.md" "$id"
   state="$TMP_ROOT/nest-state"; config="$TMP_ROOT/nest-config"
   mkdir -p "$state" "$config"
+  printf '%s\n' '{"enabled":false}' > "$config/claude-quota-guard.json"
 
   # No --backend, no FM_BACKEND, no config/backend: nothing is explicitly
   # configured, so auto-detect runs. $TMUX and HERDR_ENV=1 are both present

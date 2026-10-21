@@ -1061,6 +1061,7 @@ test_reordered_rule_refuses_before_stop() {
   : > "$dir/fake/windows"
   printf zsh > "$dir/fake/command"
   fm_fake_exit0 "$dir/fakebin" treehouse
+  printf '%s\n' '{"enabled":false}' > "$dir/home/config/claude-quota-guard.json"
   out=$(run_spawn "$dir" "$id" "$dir/proj" --harness claude --model opus --effort xhigh \
     --mode no-mistakes --yolo off --dispatch-rule '{"rule":"rule_1"}'); rc=$?
   expect_code 0 "$rc" "configured spawn should publish the selected rule"$'\n'"$out"

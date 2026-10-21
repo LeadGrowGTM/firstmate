@@ -41,6 +41,7 @@ cmux ping >/dev/null 2>&1 || fail "FM_CMUX_CLAUDE_COMPOSER_LIVE=1 but the cmux s
 LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-cmux-claude-composer.XXXXXX") || fail "could not create an isolated cmux Claude lab"
 trap 'cleanup; fm_test_tmux_cleanup' EXIT
 mkdir -p "$LAB/config" "$LAB/data/$TASK" "$LAB/projects/comms" "$LAB/state"
+printf '%s\n' '{"enabled":false}' > "$LAB/config/claude-quota-guard.json"
 printf 'cmux\n' > "$LAB/config/backend"
 
 git -C "$LAB/projects/comms" init -q -b main || fail "could not initialize the isolated probe repository"
