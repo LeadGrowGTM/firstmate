@@ -14,11 +14,13 @@
 # line and continues with the Opus-type and concurrency checks, which do not
 # need a usage reading. A malformed config file or an unreadable task record
 # refuses the launch instead of guessing.
+# Env-wrapped and compound raw Claude launches are not guarded.
 
 # Built-in defaults. A present key replaces that default.
 FM_CQG_DEFAULT_MARGIN=10
 FM_CQG_DEFAULT_CAP=4
 FM_CQG_DEFAULT_WINDOW=604800
+FM_CQG_STARTUP_GRACE=90
 FM_CQG_DEFAULT_TYPES=$'writing\nexecution\ncopy-draft\nlist-build\nbison-launch'
 
 # Stable supervisor lines. The text is the retry identity: a later attempt for
@@ -418,7 +420,7 @@ fm_cqg_mark_observed() {
 # missing endpoint's absence proof says it is gone. An unverified endpoint
 # stays occupied. Returns 1 when a record cannot be read.
 fm_cqg_count() {
-  local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity spawn_gen current_identity reserved observed observed_count spawn_live
+  local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity spawn_gen spawn_epoch now current_identity reserved observed observed_count spawn_live
   FM_CQG_OCCUPANTS=0
   if [ ! -d "$state" ] || [ ! -r "$state" ]; then
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
@@ -496,7 +498,19 @@ fm_cqg_count() {
       FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
       continue
     fi
-    case "$alive" in dead) continue ;; esac
+    if [ "$alive" = dead ]; then
+      if [ "$observed_count" = 0 ]; then
+        spawn_gen=$(fm_meta_get "$f" spawn_gen)
+        if [[ $spawn_gen =~ ^s([1-9][0-9]{0,11})\.[0-9]+\.[0-9]+$ ]]; then
+          spawn_epoch=${BASH_REMATCH[1]}
+          now=$(date +%s)
+          if [ "$now" -lt "$((spawn_epoch + FM_CQG_STARTUP_GRACE))" ]; then
+            FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
+          fi
+        fi
+      fi
+      continue
+    fi
     case "$alive" in
       missing)
         proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")

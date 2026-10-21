@@ -698,7 +698,7 @@ test_spawn_keeps_unverified_reserved_seat() {
   link_quota "$case_dir/fakebin"
   write_snap "$case_dir/snap.json" 95 259200
   printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
-  sleep 30 &
+  (trap - EXIT; exec sleep 30) &
   dead_pid=$!
   kill "$dead_pid" 2>/dev/null || fail "could not stop the reservation process"
   wait "$dead_pid" 2>/dev/null || true
@@ -726,6 +726,54 @@ test_spawn_keeps_unverified_reserved_seat() {
   expect_code "$DEFER_EXIT" "$rc" "an unverified reserved seat admitted a retry: $out"
   assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "unverified seat retry wrote another cap line"
   pass "an unverified reserved Claude seat keeps the cap full"
+}
+
+test_spawn_keeps_early_dead_seat_until_startup_grace() {
+  local case_dir home pane out rc=0 before trees old_epoch
+  case_dir=$(make_case early-dead-seat task-a engineering)
+  home="$case_dir/home"
+  write_brief "$home" task-b engineering
+  add_item "$home" task-b
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  pane=$(new_worktree "$case_dir" task-a)
+  out=$(run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "first Claude launch failed: $out"
+  assert_equals 0 "$(key_count "$home/state/task-a.meta" 'quota_spawn_pid=')" "completed launch kept its process reservation"
+  awk -F= '$1 == "window" { print "window=test-session:sample-pane"; next } { print }' \
+    "$home/state/task-a.meta" > "$case_dir/task-a.meta"
+  printf '%s\n' 'backend=herdr' >> "$case_dir/task-a.meta"
+  mv "$case_dir/task-a.meta" "$home/state/task-a.meta"
+  cat > "$case_dir/fakebin/herdr" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  'pane get sample-pane --session test-session') printf '%s\n' '{"result":{"pane":{"pane_id":"sample-pane"}}}' ;;
+  'agent get sample-pane --session test-session') printf '%s\n' '{"error":{"code":"agent_not_found"}}' ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/herdr"
+  pane=$(new_worktree "$case_dir" task-b)
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an early dead read freed the first Claude seat: $out"
+  assert_nothing_created "$case_dir" task-b "$before" "$trees"
+  old_epoch=$(( $(date +%s) - 120 ))
+  awk -F= -v gen="s$old_epoch.1.1" '$1 == "spawn_gen" { print "spawn_gen=" gen; next } { print }' \
+    "$home/state/task-a.meta" > "$case_dir/task-a.meta"
+  mv "$case_dir/task-a.meta" "$home/state/task-a.meta"
+  rc=0
+  out=$(run_spawn "$case_dir" "$pane" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 0 "$rc" "a still-dead endpoint held its seat after startup grace: $out"
+  assert_present "$home/state/task-b.meta" "the expired dead seat did not admit the second worker"
+  pass "an early dead endpoint keeps its seat until startup grace expires"
 }
 
 test_spawn_malformed_dispatch_refuses() {
@@ -1325,6 +1373,7 @@ test_spawn_refuses_raw_opus_for_writing
 test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
 test_spawn_keeps_unverified_reserved_seat
+test_spawn_keeps_early_dead_seat_until_startup_grace
 test_spawn_malformed_dispatch_refuses
 test_failed_claude_spawn_keeps_task_lock_through_rollback
 test_spawn_records_live_agent_before_process_seat

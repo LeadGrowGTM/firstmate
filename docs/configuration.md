@@ -1544,11 +1544,13 @@ A requested model whose name contains `opus` is refused, with exit 1 and no laun
 An empty model and the model name `default` are not Opus.
 A missing brief is untyped, so Opus stays allowed.
 The check reads the effective model, including a raw Claude command's model and a relaunch's recorded or selected model.
+Env-wrapped and compound raw Claude launches are not guarded.
 
 The cap counts Claude ship and scout records in this home's own state directory when their launch reservation is active or their recorded endpoint has not been proven dead, including records with a `pr`.
 For a newly published Claude record, the guard records an already-alive agent before counting a spawning process whose PID and start-time identity match, keeps that observation ahead of any recorded PR identity, and still counts a later missing endpoint until normal absence proof says the agent is gone.
 A reserved seat whose spawning process has exited stays counted when the endpoint is unverified, unreadable, or only unproven, including a cmux endpoint.
-The seat is released when the agent is dead, or when a missing endpoint's absence proof says the agent is gone.
+An unobserved new launch keeps its seat for 90 seconds from its recorded `spawn_gen` epoch when the endpoint reads dead, giving the agent time to start without delaying spawn.
+After that grace, the seat is released when the agent is dead, or when a missing endpoint's absence proof says the agent is gone.
 A second mate record is not counted, and neither is the task being launched.
 An unreadable state directory or task record refuses a Claude-bound launch.
 When the count is already at the cap, the spawn prints one `deferred:` line, exits 75, and leaves the backlog item queued.
