@@ -449,8 +449,18 @@ case "${1:-}" in
       printf 'unavailable\n' >&2
       exit 1
     fi
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/agent-window" ]; then
+      cat "${FM_FAKE_CALL_LOG%/*}/agent-window"
+      exit 0
+    fi
     ;;
-  display-message) printf 'firstmate\n'; exit 0 ;;
+  display-message)
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/agent-window" ]; then
+      case "$*" in *pane_current_command*) printf 'claude\n'; exit 0 ;; esac
+    fi
+    printf 'firstmate\n'
+    exit 0
+    ;;
   send-keys)
     # A launch is typed as `. '<staged file>'`. Record that file so the test
     # sees the worker command, not only the short source line.
@@ -687,6 +697,60 @@ test_spawn_keeps_published_claude_seat_during_delivery() {
   expect_code 0 "$rc" "an exited spawn with no observable agent kept its seat: $out"
   assert_present "$home/state/task-b.meta" "released Claude seat did not admit the next launch"
   pass "a live spawn holds its seat and an exited undelivered spawn releases it"
+}
+
+test_spawn_observed_agent_keeps_seat_when_endpoint_goes_missing() {
+  local case_dir home pane out rc=0 first_pid rooted_pid tries window
+  case_dir=$(make_case observed-seat task-a engineering)
+  home="$case_dir/home"
+  write_brief "$home" task-b engineering
+  add_item "$home" task-b
+  link_quota "$case_dir/fakebin"
+  write_snap "$case_dir/snap.json" 95 259200
+  printf '%s\n' '{"concurrent_claude_cap":1}' > "$home/config/claude-quota-guard.json"
+  pane=$(new_worktree "$case_dir" task-a)
+  FM_TEST_SNAP="$case_dir/snap.json"
+  FM_FAKE_PAUSE_LAUNCH=1 run_spawn "$case_dir" "$pane" task-a "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off > "$case_dir/first.out" 2>&1 &
+  first_pid=$!
+  for ((tries=0; tries<300; tries++)); do
+    [ ! -f "$case_dir/launch-paused" ] || break
+    sleep 0.05
+  done
+  [ -f "$case_dir/launch-paused" ] || fail "first Claude launch did not publish before delivery: $(cat "$case_dir/first.out")"
+  assert_present "$home/state/task-a.meta" "first launch had no published record"
+  cp "$home/state/task-a.meta" "$case_dir/reserved.meta"
+  assert_equals 0 "$(key_count "$case_dir/reserved.meta" 'quota_agent_observed=')" "observation preceded the guard"
+  : > "$case_dir/release-launch"
+  wait "$first_pid" || fail "first Claude launch failed after release: $(cat "$case_dir/first.out")"
+  cp "$case_dir/reserved.meta" "$home/state/task-a.meta"
+  window=$(awk -F= '$1=="window" {print $2}' "$home/state/task-a.meta")
+  printf '%s\n' "${window#*:}" > "$case_dir/agent-window"
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an observed Claude agent lost its seat: $out"
+  assert_equals 1 "$(key_count "$home/state/task-a.meta" 'quota_agent_observed=1')" "guard did not persist agent observation"
+  assert_absent "$home/state/task-b.meta" "observed agent allowed a second Claude record"
+  rm "$case_dir/agent-window"
+  (cd "$pane" && exec sleep 30) &
+  rooted_pid=$!
+  rc=0
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  kill "$rooted_pid" 2>/dev/null || true
+  wait "$rooted_pid" 2>/dev/null || true
+  expect_code "$DEFER_EXIT" "$rc" "an unreachable observed agent lost its seat: $out"
+  assert_equals 1 "$(canonical_count "$home/state/task-b.status" "$CAP_LINE")" "missing endpoint duplicated the cap line"
+  assert_absent "$home/state/task-b.meta" "unreachable agent allowed a second Claude record"
+  awk '$0 == "quota_agent_observed=1" { print "quota_agent_observed=2"; next } { print }' \
+    "$home/state/task-a.meta" > "$case_dir/malformed.meta"
+  mv "$case_dir/malformed.meta" "$home/state/task-a.meta"
+  rc=0
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-b "$case_dir/sample-project" \
+    --harness claude --model haiku --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 1 "$rc" "a malformed observation was accepted: $out"
+  assert_absent "$home/state/task-b.meta" "malformed observation allowed a second Claude record"
+  pass "an observed Claude agent keeps its seat across an unproven missing endpoint"
 }
 
 test_spawn_reroute_keeps_inferred_dispatch_rule() {
@@ -972,6 +1036,7 @@ test_spawn_refuses_opus_for_writing
 test_spawn_refuses_raw_opus_for_writing
 test_spawn_selected_opus_rule_defers
 test_spawn_keeps_published_claude_seat_during_delivery
+test_spawn_observed_agent_keeps_seat_when_endpoint_goes_missing
 test_spawn_reroute_keeps_inferred_dispatch_rule
 test_spawn_omitted_model_infers_dispatch_rule
 test_spawn_scheduled_reroute_skips_tried_profile

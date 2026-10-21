@@ -344,11 +344,39 @@ fm_cqg_pick_route() {
   printf 'claude\tsonnet\t\t\n'
 }
 
+fm_cqg_mark_observed() {
+  local meta=$1 state=$2 spawn_gen=$3 spawn_pid=$4 spawn_identity=$5 lock staged= observed_count result=0
+  [ -n "$spawn_gen" ] || return 1
+  lock=$(fm_meta_lock_path "$meta") || return 1
+  fm_lock_acquire_wait "$lock" || return 1
+  if ! fm_backlog_record_present "$meta" "task record" "$state" ||
+    [ "$(fm_meta_get "$meta" spawn_gen)" != "$spawn_gen" ] ||
+    [ "$(fm_meta_get "$meta" quota_spawn_pid)" != "$spawn_pid" ] ||
+    [ "$(fm_meta_get "$meta" quota_spawn_identity)" != "$spawn_identity" ]; then
+    result=1
+  else
+    observed_count=$(grep -c '^quota_agent_observed=' "$meta" || true)
+    if [ "$observed_count" = 0 ]; then
+      staged=$(mktemp "$state/.${meta##*/}.quota-observed.XXXXXX") || result=1
+      if [ "$result" = 0 ] &&
+        { ! awk '1; END { print "quota_agent_observed=1" }' "$meta" >"$staged" ||
+          ! fm_backlog_atomic_transition publish "$staged" "$meta" "task record" "$state"; }; then
+        result=1
+      fi
+    elif [ "$observed_count" != 1 ] || [ "$(fm_meta_get "$meta" quota_agent_observed)" != 1 ]; then
+      result=1
+    fi
+  fi
+  [ -z "$staged" ] || rm -f "$staged" 2>/dev/null || true
+  fm_lock_release "$lock" || result=1
+  return "$result"
+}
+
 # fm_cqg_count <state-dir> <self-id>
 # Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home whose
 # recorded endpoint has not been proven dead. Returns 1 when a record cannot be read.
 fm_cqg_count() {
-  local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity current_identity reserved
+  local state=$1 self=$2 list f id harness kind backend target socket alive proof spawn_pid spawn_identity spawn_gen current_identity reserved observed observed_count
   FM_CQG_OCCUPANTS=0
   if [ ! -d "$state" ] || [ ! -r "$state" ]; then
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
@@ -373,6 +401,13 @@ fm_cqg_count() {
       '' | ship | scout) ;;
       *) continue ;;
     esac
+    observed=$(fm_meta_get "$f" quota_agent_observed)
+    observed_count=$(grep -c '^quota_agent_observed=' "$f" || true)
+    if { [ "$observed_count" != 0 ] && [ "$observed_count" != 1 ]; } ||
+      { [ "$observed_count" = 1 ] && [ "$observed" != 1 ]; }; then
+      fm_cqg_die "cannot count Claude workers because an agent observation is malformed"
+      return 1
+    fi
     spawn_pid=$(fm_meta_get "$f" quota_spawn_pid)
     spawn_identity=$(fm_meta_get "$f" quota_spawn_identity)
     reserved=0
@@ -404,9 +439,21 @@ fm_cqg_count() {
     fi
     case "$alive" in
       dead) continue ;;
-      alive) FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1)); continue ;;
+      alive)
+        if [ "$reserved" = 1 ] && [ "$observed_count" = 0 ]; then
+          spawn_gen=$(fm_meta_get "$f" spawn_gen)
+          if ! fm_cqg_mark_observed "$f" "$state" "$spawn_gen" "$spawn_pid" "$spawn_identity"; then
+            fm_cqg_die "cannot count Claude workers because the agent observation could not be recorded"
+            return 1
+          fi
+        fi
+        FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
+        continue
+        ;;
     esac
-    [ "$reserved" = 0 ] || continue
+    if [ "$reserved" = 1 ] && [ "$observed_count" = 0 ]; then
+      continue
+    fi
     case "$alive" in
       missing)
         proof=$(fm_control_endpoint_absence_verdict "$backend" "$target" "$f")

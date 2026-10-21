@@ -6160,7 +6160,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen quota_spawn_pid quota_spawn_identity traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp base_branch model effort dispatch_rule dispatch_rule_fingerprint reasoning_class dispatch_provider fallback_reason realized_harness realized_model realized_effort account account_provider busy_gen spawn_gen quota_spawn_pid quota_spawn_identity quota_agent_observed traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal orca_view_handle orca_view_session orca_view_owned cmux_workspace_id cmux_surface_id home projects control_relaunch_tx tmux_socket", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -6925,7 +6925,7 @@ if [ -n "$SPAWN_DEFERRED_SIGNAL" ]; then
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$HARNESS" = claude ]; then
   SPAWN_META_TMP="$STATE/.$ID.meta.quota.${BASHPID:-$$}"
-  if ! awk -F= '$1 != "quota_spawn_pid" && $1 != "quota_spawn_identity"' "$STATE/$ID.meta" >"$SPAWN_META_TMP" ||
+  if ! awk -F= '$1 != "quota_spawn_pid" && $1 != "quota_spawn_identity" && $1 != "quota_agent_observed"' "$STATE/$ID.meta" >"$SPAWN_META_TMP" ||
     ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" "$STATE"; then
     echo "error: could not finish Claude launch reservation for $ID" >&2
     exit 1

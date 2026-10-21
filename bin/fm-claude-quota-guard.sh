@@ -128,4 +128,8 @@ FM_HOME=$home
 FM_STATE_OVERRIDE=$state
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 fm_cqg_decide "$config" "$state" "$home" "$id" "$brief" "$model" "$verdict"
