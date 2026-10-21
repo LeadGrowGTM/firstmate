@@ -1515,7 +1515,7 @@ Any other key, a malformed file, or an unreadable file refuses the launch.
 For a fresh launch, after validating the config and before the task-type and cap checks, the guard runs `quota-axi --provider claude --no-credential-refresh` and reads the default TOON table.
 It uses the Claude `all_models` row with the lowest percent remaining.
 When that row is limited by `seven_day` or `weekly`, that row is the weekly window.
-Otherwise it reads `quota-axi --json` once and uses the tightest Claude window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
+Otherwise it reads one Claude JSON response and uses the tightest Claude window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
 When quota-axi is missing, times out, fails, or cannot be parsed, the pace check is skipped and the spawn output states that gap.
 That gap never refuses a launch by itself.
 The Opus-type check and the worker cap still run.
@@ -1550,7 +1550,7 @@ When the count is already at the cap, the spawn prints one `deferred:` line, exi
 That is the same exit project capacity uses, so a batch keeps the item queued.
 A launch the pace check would have sent to Sonnet, and that the cap then defers, records only the cap line.
 The pace line is recorded on a later attempt that is under the cap and still ahead of the window.
-The route deferral writes only its own status line, once per task, including on retry.
+A route deferral writes only its own status line.
 Each of those lines is appended once per task, and a retry appends nothing further.
 An Opus refusal appends no status line.
 The admitting spawn holds `state/.claude-quota-guard.lock` from the check until the task record is published, and releases it immediately when the route leaves Claude.
