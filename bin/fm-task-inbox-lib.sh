@@ -33,8 +33,9 @@
 #                              so later polls suppress another escalation wake
 #   <task>.inbox/.escalation-retry
 #                              stuck-busy retry generation: "<msg>\t<epoch>".
-#                              Written once when a busy deferral escalates.
-#                              Later non-busy due polls ring until acknowledgement.
+#                              Opened when a busy deferral escalates and
+#                              updated before each later non-busy due ring.
+#                              A matching legacy busy escalation can reopen it.
 #                              The escalation marker stays, so this generation
 #                              never queues another wake. Deleting .escalated
 #                              on an idle poll would reintroduce that wake.
@@ -67,9 +68,10 @@
 # record. Later due polls ring again once the pane is not busy, until the
 # worker acknowledges the record. Busy polls still defer and do not type.
 # The escalation marker is not removed on those polls, so the generation
-# cannot queue a second wake. A non-busy due check or acknowledgement resets
-# this budget. Fire-and-forget retries remain outside escalation. A positively
-# dead or missing endpoint skips delivery and the ladder and escalates directly.
+# cannot queue a second wake. Before escalation, a non-busy due check resets
+# the busy budget; acknowledgement clears it. Fire-and-forget retries remain
+# outside escalation. A positively dead or missing endpoint skips delivery
+# and the ladder and escalates directly.
 # This library owns the schedule, durable budgets, and escalation marker.
 # If ordinary delivery-attempt or busy-deferral bookkeeping fails while the record remains unhandled,
 # the caller surfaces that failure instead of retrying silently; a concurrently
@@ -573,7 +575,8 @@ fm_task_inbox_is_escalated() {  # <state-dir> <task-id> <record-path>
 
 # Open the one post-escalation doorbell generation for a stuck-busy record.
 # Epoch 0 means no ring in this generation yet, so the next due poll may ring.
-# A removed inbox is a quiet no-op. Failure leaves the caller to surface it.
+# A removed inbox is a quiet no-op. An initial escalation surfaces write failure;
+# legacy rearm stays quiet until it can persist the generation.
 fm_task_inbox_begin_escalation_retry() {  # <state-dir> <task-id> <record-path>
   local dir
   dir=$(fm_task_inbox_dir "$1" "$2")
