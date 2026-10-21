@@ -70,7 +70,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | [`fm-project-origin-lib.sh`](../bin/fm-project-origin-lib.sh) | Accepted origin-form owner shared by both remote provisioning boundaries |
 | `fm-spawn.sh`            | Spawn crewmates, scouts, `id=repo` batches, and secondmates on the resolved harness and runtime backend |
 | `fm-git-strip-ai-trailers.sh` | Install pane-scoped Git hooks and strip known AI commit trailers unless the home opts out |
-| `fm-private-names.sh` | Refresh the private-name list, and refuse or rewrite listed names at a launch's commit, push, and gh pull-request exits ([configuration.md](configuration.md#private-names-configprivate-names)) |
+| `fm-private-names.sh` | Refresh the private-name list and guard worker publication through Git, GitHub CLI, and no-mistakes ([configuration.md](configuration.md#private-names-configprivate-names)) |
 | `fm-private-names-lib.sh` | Own private-name matching, neutral ids, and repository visibility for the private-name guard |
 | `fm-private-names-scrub.sh` | Dry-run or apply neutral-id rewrites of existing PR text and removal of matching evidence-branch files without rewriting history |
 | `fm-backend.sh`          | Runtime-backend selection, meta helpers, selector resolution, and operation dispatch |
