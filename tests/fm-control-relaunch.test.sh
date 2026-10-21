@@ -927,6 +927,29 @@ test_direct_spawn_relaunch_keeps_the_profile_axes() {
   pass "direct spawn relaunch preserves recorded model and effort"
 }
 
+test_direct_spawn_relaunch_refuses_opus_writing() {
+  local dir out rc variant id
+  for variant in selected recorded; do
+    id="rl-opus-$variant"
+    dir=$(new_case "opus-$variant" "$id")
+    add_ship_task "$dir" "$id" claude
+    printf '\n## Task type\nName: writing\n' >> "$dir/home/data/$id/brief.md"
+    printf zsh > "$dir/fake/command"
+    if [ "$variant" = recorded ]; then
+      sed 's/^model=default$/model=opus/' "$dir/home/state/$id.meta" > "$dir/home/state/$id.meta.tmp"
+      mv "$dir/home/state/$id.meta.tmp" "$dir/home/state/$id.meta"
+      out=$(run_spawn "$dir" "$id" --relaunch); rc=$?
+    else
+      out=$(run_spawn "$dir" "$id" --relaunch --model opus); rc=$?
+    fi
+    expect_code 1 "$rc" "an Opus writing relaunch succeeded: $out"
+    assert_contains "$out" "refused: Opus is not allowed for task type writing" "Opus refusal was not reached"
+    [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] || fail "refused relaunch sent terminal input"
+    [ ! -e "$dir/home/state/$id.status" ] || fail "refused relaunch wrote a status line"
+  done
+  pass "selected and recorded Opus models refuse writing relaunches before launch"
+}
+
 test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop() {
   local dir out rc variant
   for variant in unlisted weaker; do
@@ -1061,7 +1084,7 @@ test_reordered_rule_refuses_before_stop() {
   : > "$dir/fake/windows"
   printf zsh > "$dir/fake/command"
   fm_fake_exit0 "$dir/fakebin" treehouse
-  printf '%s\n' '{"enabled":false}' > "$dir/home/config/claude-quota-guard.json"
+  printf '%s\n' '{"pace_margin_points":100}' > "$dir/home/config/claude-quota-guard.json"
   out=$(run_spawn "$dir" "$id" "$dir/proj" --harness claude --model opus --effort xhigh \
     --mode no-mistakes --yolo off --dispatch-rule '{"rule":"rule_1"}'); rc=$?
   expect_code 0 "$rc" "configured spawn should publish the selected rule"$'\n'"$out"
@@ -4610,6 +4633,7 @@ test_harness_switch_resolves_a_prefixed_recorded_harness
 test_prefixed_recorded_harness_requires_explicit_replacement
 test_same_harness_relaunch_keeps_the_profile_axes
 test_direct_spawn_relaunch_keeps_the_profile_axes
+test_direct_spawn_relaunch_refuses_opus_writing
 test_configured_fallback_refuses_unlisted_and_weaker_profiles_before_stop
 test_fallback_policy_changes
 test_configured_fallback_refuses_an_omitted_effort_before_stop

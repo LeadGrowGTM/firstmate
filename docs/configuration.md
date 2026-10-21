@@ -1498,13 +1498,11 @@ A fresh Claude ship or scout reads `config/claude-quota-guard.json` before launc
 [`bin/fm-claude-quota-guard.sh`](../bin/fm-claude-quota-guard.sh) owns the decision and [`bin/fm-spawn.sh`](../bin/fm-spawn.sh) applies it.
 An absent file turns the guard on with the defaults below.
 The subscription can be spent while no file exists, so protection that starts only after a file is created would leave that hole open.
-`"enabled": false` is the opt-out and restores an uncapped Claude launch.
-A relaunch and a `--secondmate` spawn are exempt.
+A relaunch checks the Opus refusal; a `--secondmate` spawn is exempt.
 The file belongs to one home and is not copied into a second mate home.
 
 ```json
 {
-  "enabled": true,
   "pace_margin_points": 10,
   "concurrent_claude_cap": 4,
   "weekly_window_seconds": 604800,
@@ -1512,11 +1510,10 @@ The file belongs to one home and is not copied into a second mate home.
 }
 ```
 
-`enabled` is a boolean and defaults to true.
 `pace_margin_points` is a number greater than or equal to zero and defaults to 10.
-`concurrent_claude_cap` is a whole number greater than or equal to 1, or null when only the cap is off, and defaults to 4.
+`concurrent_claude_cap` is a whole number greater than or equal to 1 and defaults to 4.
 `weekly_window_seconds` is a whole number greater than or equal to 1 and defaults to 604800, which is seven days.
-`opus_refused_types`, when present, replaces the default list entirely, including when the array is empty.
+`opus_refused_types`, when present, replaces the default list entirely and must be non-empty.
 Each type name matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`.
 The default refused types are `writing`, `execution`, `copy-draft`, `list-build`, and `bison-launch`.
 An omitted key keeps its default.
@@ -1536,6 +1533,7 @@ Elapsed time is the fraction of `weekly_window_seconds` already gone before `res
 The pace check trips only when usage minus elapsed time is strictly greater than `pace_margin_points`.
 A reset time in the past, or one that cannot be parsed, is treated as a missing reading and the launch continues.
 When the check trips, the launch goes to the first available preference: Grok, then Muse, then Claude Sonnet.
+With a selected dispatch rule, only profiles listed by that rule are eligible; when none is available, the launch exits 75 and leaves its backlog item queued.
 Grok is skipped when the launch carries client data, which [`bin/fm-muse-client-lib.sh`](../bin/fm-muse-client-lib.sh) decides, and when `grok` is not on `PATH`.
 Muse is skipped when `muse` is not on `PATH`.
 A Muse route uses the normal Muse launch, so contributor mode stays off when the launch carries client data.
@@ -1545,15 +1543,16 @@ Sonnet stays on Claude and still counts toward the cap.
 A requested model whose name contains `opus` is refused, with exit 1 and no launch, when the brief's task type is in the refused list and the pace check did not already choose another route.
 An empty model and the model name `default` are not Opus.
 A missing brief is untyped, so Opus stays allowed.
-The check reads the spawn's model flag, not a model name buried inside a raw command string.
+The check reads the effective model, including a raw Claude command's model and a relaunch's recorded or selected model.
 
-The cap counts Claude ship and scout records in this home's own state directory that have no recorded `pr`.
+The cap counts Claude ship and scout records in this home's own state directory whose recorded endpoint has not been proven dead, including records with a `pr`.
 A second mate record is not counted, and neither is the task being launched.
 An unreadable state directory or task record refuses the launch.
 When the count is already at the cap, the spawn prints one `deferred:` line, exits 75, and leaves the backlog item queued.
 That is the same exit project capacity uses, so a batch keeps the item queued.
 A launch the pace check would have sent to Sonnet, and that the cap then defers, records only the cap line.
 The pace line is recorded on a later attempt that is under the cap and still ahead of the window.
+The route deferral writes only its own status line, once per task, including on retry.
 Each of those lines is appended once per task, and a retry appends nothing further.
 An Opus refusal appends no status line.
 The admitting spawn holds `state/.claude-quota-guard.lock` from the check until the task record is published, and releases it immediately when the route leaves Claude.

@@ -8,16 +8,14 @@
 #
 # An absent config file turns the guard on with the built-in defaults. The
 # subscription was spent while no file existed, so a file that must be created
-# before anything is protected would leave that hole open. "enabled": false is
-# the opt-out and restores an uncapped Claude launch.
+# before anything is protected would leave that hole open.
 #
 # Missing quota evidence never refuses a launch. The command prints one gap
 # line and continues with the Opus-type and concurrency checks, which do not
 # need a usage reading. A malformed config file or an unreadable task record
 # refuses the launch instead of guessing.
 
-# Built-in defaults. A present key replaces that default. opus_refused_types,
-# when present, replaces this list entirely, including when the array is empty.
+# Built-in defaults. A present key replaces that default.
 FM_CQG_DEFAULT_MARGIN=10
 FM_CQG_DEFAULT_CAP=4
 FM_CQG_DEFAULT_WINDOW=604800
@@ -28,6 +26,7 @@ FM_CQG_DEFAULT_TYPES=$'writing\nexecution\ncopy-draft\nlist-build\nbison-launch'
 # bin/fm-classify-lib.sh status_event_recorded owns that comparison.
 FM_CQG_PACE_STATUS='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so this launch was routed off the requested claude model'
 FM_CQG_CAP_STATUS='paused [key=claude-quota-cap]: claude worker cap deferred this launch'
+FM_CQG_ROUTE_STATUS='paused [key=claude-quota-route]: claude weekly usage is ahead of the window, and the selected dispatch rule allows no alternate worker, so this launch was deferred'
 
 # Same deferral as project capacity, so a batch keeps the item queued.
 FM_CQG_DEFER_EXIT=75
@@ -38,15 +37,12 @@ fm_cqg_die() {
 }
 
 # fm_cqg_load <config-dir>
-# Sets FM_CQG_ENABLED, FM_CQG_MARGIN, FM_CQG_CAP, FM_CQG_CAP_OFF,
-# FM_CQG_WINDOW, and FM_CQG_TYPES. Returns 1 when the file is present and
+# Sets FM_CQG_MARGIN, FM_CQG_CAP, FM_CQG_WINDOW, and FM_CQG_TYPES. Returns 1 when the file is present and
 # unusable. An absent file keeps the defaults and returns 0.
 fm_cqg_load() {
   local dir=$1 file
-  FM_CQG_ENABLED=1
   FM_CQG_MARGIN=$FM_CQG_DEFAULT_MARGIN
   FM_CQG_CAP=$FM_CQG_DEFAULT_CAP
-  FM_CQG_CAP_OFF=0
   FM_CQG_WINDOW=$FM_CQG_DEFAULT_WINDOW
   FM_CQG_TYPES=$FM_CQG_DEFAULT_TYPES
   file=$dir/claude-quota-guard.json
@@ -66,20 +62,17 @@ fm_cqg_load() {
     def num: type == "number" and (isinfinite | not) and (isnan | not);
     def whole: num and . == floor;
     if type != "object" then error("expected a JSON object")
-    elif (keys - ["enabled","pace_margin_points","concurrent_claude_cap","weekly_window_seconds","opus_refused_types"]) != []
+    elif (keys - ["pace_margin_points","concurrent_claude_cap","weekly_window_seconds","opus_refused_types"]) != []
       then error("unknown key")
     else
       {
-        enabled: (if has("enabled") then (if (.enabled | type) == "boolean" then .enabled else error("enabled") end) else true end),
         margin: (if has("pace_margin_points") then (if (.pace_margin_points | num) and .pace_margin_points >= 0 then .pace_margin_points else error("pace_margin_points") end) else 10 end),
-        cap_off: (if has("concurrent_claude_cap") and .concurrent_claude_cap == null then true else false end),
-        cap: (if has("concurrent_claude_cap") and .concurrent_claude_cap == null then 0
-              elif has("concurrent_claude_cap") then (if (.concurrent_claude_cap | whole) and .concurrent_claude_cap >= 1 then .concurrent_claude_cap else error("concurrent_claude_cap") end)
+        cap: (if has("concurrent_claude_cap") then (if (.concurrent_claude_cap | whole) and .concurrent_claude_cap >= 1 then .concurrent_claude_cap else error("concurrent_claude_cap") end)
               else 4 end),
         window: (if has("weekly_window_seconds") then (if (.weekly_window_seconds | whole) and .weekly_window_seconds >= 1 then .weekly_window_seconds else error("weekly_window_seconds") end) else 604800 end),
         types_set: has("opus_refused_types"),
         types: (if has("opus_refused_types") then
-                  (if (.opus_refused_types | type) == "array"
+                  (if (.opus_refused_types | type) == "array" and (.opus_refused_types | length) > 0
                      and all(.opus_refused_types[]; type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"))
                    then .opus_refused_types else error("opus_refused_types") end)
                 else ["writing","execution","copy-draft","list-build","bison-launch"] end)
@@ -89,23 +82,12 @@ fm_cqg_load() {
     fm_cqg_die "config/claude-quota-guard.json is malformed; see docs/configuration.md \"Claude quota guard\""
     return 1
   fi
-  FM_CQG_ENABLED=$(jq -r '.enabled' <<<"$parsed")
   FM_CQG_MARGIN=$(jq -r '.margin' <<<"$parsed")
   FM_CQG_CAP=$(jq -r '.cap' <<<"$parsed")
   FM_CQG_WINDOW=$(jq -r '.window' <<<"$parsed")
-  if [ "$(jq -r '.cap_off' <<<"$parsed")" = true ]; then
-    FM_CQG_CAP_OFF=1
-  fi
   if [ "$(jq -r '.types_set' <<<"$parsed")" = true ]; then
     FM_CQG_TYPES=$(jq -r '.types[]' <<<"$parsed")
   fi
-  case "$FM_CQG_ENABLED" in
-    true) FM_CQG_ENABLED=1 ;;
-    false) FM_CQG_ENABLED=0 ;;
-    *) fm_cqg_die "config/claude-quota-guard.json is malformed; see docs/configuration.md \"Claude quota guard\""
-      return 1
-      ;;
-  esac
 }
 
 # fm_cqg_task_type <brief>
@@ -310,23 +292,45 @@ fm_cqg_ahead_of_margin() {
 # bin/fm-muse-client-lib.sh owns that decision. Sonnet needs no extra binary
 # because the launch is already Claude.
 fm_cqg_pick_route() {
-  local home=$1 brief=$2
+  local home=$1 brief=$2 config=$3 rule=$4 model=$5 effort=$6 profiles choice
+  if [ -f "$config/crew-dispatch.json" ]; then
+    profiles=$(jq -ce --arg rule "$rule" --arg model "$model" --arg effort "$effort" '
+      def profiles: if type == "array" then . else [.] end;
+      (if $rule != "" then ($rule | fromjson) else null end) as $selected |
+      ([.rules // [] | to_entries[] | {key:{rule:("rule_" + ((.key + 1) | tostring))}, items:(.value.use | profiles)}]
+       + (if has("default") then [{key:{default:true}, items:(.default | profiles)}] else [] end)) |
+      if $selected != null then map(select(.key == $selected))
+      else map(select(any(.items[]; .harness == "claude" and (.model // "default") == $model and (.effort // "default") == $effort))) end |
+      if length != 1 then error("selected dispatch rule is unavailable") else .[0].items end
+    ' "$config/crew-dispatch.json" 2>/dev/null) || return 1
+    if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
+      choice=$(jq -r '[.[] | select(.harness == "grok")] | if length == 0 then empty else .[0] | [.harness, (.model // "default"), (.effort // "default")] | @tsv end' <<<"$profiles")
+      [ -z "$choice" ] || { printf '%s\n' "$choice"; return 0; }
+    fi
+    if command -v muse >/dev/null 2>&1; then
+      choice=$(jq -r '[.[] | select(.harness == "muse")] | if length == 0 then empty else .[0] | [.harness, (.model // "default"), (.effort // "default")] | @tsv end' <<<"$profiles")
+      [ -z "$choice" ] || { printf '%s\n' "$choice"; return 0; }
+    fi
+    choice=$(jq -r '[.[] | select(.harness == "claude" and ((.model // "") | ascii_downcase | contains("sonnet")))] | if length == 0 then empty else .[0] | [.harness, .model, (.effort // "default")] | @tsv end' <<<"$profiles")
+    [ -z "$choice" ] || { printf '%s\n' "$choice"; return 0; }
+    return 1
+  fi
   if ! fm_muse_carries_client_data "$home" "$brief" && command -v grok >/dev/null 2>&1; then
-    printf '%s\n' grok
+    printf 'grok\t\t\n'
     return 0
   fi
   if command -v muse >/dev/null 2>&1; then
-    printf '%s\n' muse
+    printf 'muse\t\t\n'
     return 0
   fi
-  printf '%s\n' claude
+  printf 'claude\tsonnet\t\n'
 }
 
 # fm_cqg_count <state-dir> <self-id>
-# Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home with no
-# recorded pr. Returns 1 when a record cannot be read.
+# Sets FM_CQG_OCCUPANTS to Claude ship/scout records in this home whose
+# recorded endpoint has not been proven dead. Returns 1 when a record cannot be read.
 fm_cqg_count() {
-  local state=$1 self=$2 list f id harness kind pr
+  local state=$1 self=$2 list f id harness kind backend target socket alive
   FM_CQG_OCCUPANTS=0
   if [ ! -d "$state" ] || [ ! -r "$state" ]; then
     fm_cqg_die "cannot count Claude workers because the state directory is unreadable"
@@ -351,8 +355,15 @@ fm_cqg_count() {
       '' | ship | scout) ;;
       *) continue ;;
     esac
-    pr=$(fm_meta_get "$f" pr)
-    [ -z "$pr" ] || continue
+    backend=$(fm_backend_of_meta "$f")
+    target=$(fm_backend_target_of_meta "$f")
+    socket=$(fm_meta_get "$f" tmux_socket)
+    if [ "$backend" = tmux ] && grep -q '^tmux_socket=' "$f"; then
+      alive=$(fm_backend_agent_alive "$backend" "$target" "$socket")
+    else
+      alive=$(fm_backend_agent_alive "$backend" "$target")
+    fi
+    [ "$alive" != dead ] || continue
     FM_CQG_OCCUPANTS=$((FM_CQG_OCCUPANTS + 1))
   done <<<"$list"
 }
@@ -369,8 +380,8 @@ fm_cqg_status_once() {
 }
 
 fm_cqg_write_verdict() {
-  local path=$1 action=$2 harness=$3 model=$4
-  printf 'action=%s\nharness=%s\nmodel=%s\n' "$action" "$harness" "$model" >"$path"
+  local path=$1 action=$2 harness=$3 model=$4 effort=${5:-}
+  printf 'action=%s\nharness=%s\nmodel=%s\neffort=%s\n' "$action" "$harness" "$model" "$effort" >"$path"
 }
 
 # fm_cqg_decide <config-dir> <state-dir> <home> <id> <brief> <model> <verdict>
@@ -378,11 +389,18 @@ fm_cqg_write_verdict() {
 # 75 defer. Notices on stdout. Refusals and deferrals on stderr.
 fm_cqg_decide() {
   local config=$1 state=$2 home=$3 id=$4 brief=$5 model=$6 verdict=$7
-  local weekly rem reset ahead rc=0 route type_name
+  local weekly rem reset ahead route route_model route_effort type_name
   if ! fm_cqg_load "$config"; then
     return 1
   fi
-  if [ "$FM_CQG_ENABLED" = 0 ]; then
+  if [ "${FM_CQG_REFUSAL_ONLY:-0}" = 1 ]; then
+    if fm_cqg_model_is_opus "$model"; then
+      type_name=$(fm_cqg_task_type "$brief") || true
+      if fm_cqg_type_refused "$type_name"; then
+        printf 'refused: Opus is not allowed for task type %s; task %s was not launched\n' "$type_name" "$id" >&2
+        return 1
+      fi
+    fi
     fm_cqg_write_verdict "$verdict" proceed claude "$model"
     return 0
   fi
@@ -397,7 +415,11 @@ fm_cqg_decide() {
     if [ -z "$ahead" ]; then
       printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"
     elif fm_cqg_ahead_of_margin "$ahead"; then
-      route=$(fm_cqg_pick_route "$home" "$brief")
+      if ! route=$(fm_cqg_pick_route "$home" "$brief" "$config" "${FM_CQG_DISPATCH_RULE:-}" "$model" "${FM_CQG_EFFORT:-default}"); then
+        fm_cqg_status_once "$state" "$id" "$FM_CQG_ROUTE_STATUS" || return 1
+        printf 'deferred: selected dispatch rule allows no alternate worker for task %s\n' "$id" >&2
+        return "$FM_CQG_DEFER_EXIT"
+      fi
     fi
   fi
   if [ -z "$route" ] && fm_cqg_model_is_opus "$model"; then
@@ -407,27 +429,29 @@ fm_cqg_decide() {
       return 1
     fi
   fi
+  route_model=${route#*$'\t'}
+  route_effort=${route_model#*$'\t'}
+  route_model=${route_model%%$'\t'*}
+  route=${route%%$'\t'*}
   if [ "$route" = grok ] || [ "$route" = muse ]; then
     fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_STATUS" || return 1
     printf 'claude-quota-guard: weekly usage is ahead of the window; routing this launch to %s\n' "$route"
-    fm_cqg_write_verdict "$verdict" reroute "$route" ""
+    fm_cqg_write_verdict "$verdict" reroute "$route" "$route_model" "$route_effort"
     return 0
   fi
-  if [ "$FM_CQG_CAP_OFF" = 0 ]; then
-    if ! fm_cqg_count "$state" "$id"; then
-      return 1
-    fi
-    if [ "$FM_CQG_OCCUPANTS" -ge "$FM_CQG_CAP" ]; then
+  if ! fm_cqg_count "$state" "$id"; then
+    return 1
+  fi
+  if [ "$FM_CQG_OCCUPANTS" -ge "$FM_CQG_CAP" ]; then
       fm_cqg_status_once "$state" "$id" "$FM_CQG_CAP_STATUS" || return 1
       printf 'deferred: this home already holds %s Claude worker(s) and the cap is %s; task %s was not launched and its backlog item stays queued\n' \
         "$FM_CQG_OCCUPANTS" "$FM_CQG_CAP" "$id" >&2
       return "$FM_CQG_DEFER_EXIT"
-    fi
   fi
   if [ "$route" = claude ]; then
     fm_cqg_status_once "$state" "$id" "$FM_CQG_PACE_STATUS" || return 1
     printf '%s\n' "claude-quota-guard: weekly usage is ahead of the window; routing this launch to claude sonnet"
-    fm_cqg_write_verdict "$verdict" reroute claude sonnet
+    fm_cqg_write_verdict "$verdict" reroute claude "$route_model" "$route_effort"
     return 0
   fi
   fm_cqg_write_verdict "$verdict" proceed claude "$model"

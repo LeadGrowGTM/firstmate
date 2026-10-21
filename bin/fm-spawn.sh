@@ -212,16 +212,16 @@
 #   launch side effect, when the root home's state/disk-guard.pause is a
 #   regular file or symlink. bin/fm-disk-guard.sh owns that flag. A relaunch and a
 #   --secondmate spawn are not deferred by it.
-#   Claude quota guard: a fresh Claude ship or scout is also bounded by
+#   Claude quota guard: a Claude ship or scout is also bounded by
 #   config/claude-quota-guard.json. bin/fm-claude-quota-guard.sh owns the
 #   decision and docs/configuration.md "Claude quota guard" owns the file.
 #   An absent file uses the documented defaults. Opus on a refused task type is
 #   refused before any launch side effect. Weekly pace ahead of the window
-#   reroutes to grok, muse, or Claude sonnet. A home already at its Claude
-#   worker cap prints one deferred: line and exits 75. A relaunch and a
-#   --secondmate spawn are exempt. When quota-axi cannot report Claude weekly
-#   usage the launch continues and the gap is stated. enabled false restores
-#   unrestricted Claude launches. The admitting spawn holds
+#   reroutes through an allowed grok, muse, or Claude sonnet profile, or defers.
+#   A home already at its Claude worker cap prints one deferred: line and exits
+#   75. Relaunch checks only the Opus refusal; --secondmate remains exempt.
+#   When quota-axi cannot report Claude weekly usage the fresh launch continues
+#   and the gap is stated. The admitting spawn holds
 #   state/.claude-quota-guard.lock until the task record is published, or
 #   releases it immediately when the route leaves claude.
 #   With no harness arg, a crewmate/scout spawn resolves the CREW harness only when
@@ -1466,11 +1466,33 @@ SPAWN_CLAUDE_QUOTA_VERDICT=
 # the task record is published, or released now when the route leaves claude.
 # The guard command owns the decision; this function only applies its verdict.
 spawn_apply_claude_quota_guard() {
-  local quota_rc=0 line key value
-  local verdict_action='' verdict_harness='' verdict_model=''
-  [ "$RELAUNCH" -eq 0 ] || return 0
+  local quota_rc=0 line key value word expect_model=0 guard_model=$MODEL
+  local verdict_action='' verdict_harness='' verdict_model='' verdict_effort=''
+  local -a guard_args=()
   [ "$KIND" != secondmate ] || return 0
   [ "$HARNESS" = claude ] || return 0
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    for word in $ARG3; do
+      if [ "$expect_model" = 1 ]; then
+        guard_model=${word#\'}
+        guard_model=${guard_model%\'}
+        guard_model=${guard_model#\"}
+        guard_model=${guard_model%\"}
+        expect_model=0
+      elif [ "$word" = --model ]; then
+        expect_model=1
+      elif [[ "$word" == --model=* ]]; then
+        guard_model=${word#--model=}
+        guard_model=${guard_model#\'}
+        guard_model=${guard_model%\'}
+        guard_model=${guard_model#\"}
+        guard_model=${guard_model%\"}
+      fi
+    done
+  fi
+  if [ "$RELAUNCH" -eq 1 ]; then
+    guard_args+=(--refusal-only)
+  else
   if [ ! -d "$STATE" ] || [ ! -w "$STATE" ]; then
     echo "error: cannot admit a Claude launch because the state directory is not writable" >&2
     FM_LAUNCH_OUTCOME=unsafe-refusal
@@ -1485,6 +1507,8 @@ spawn_apply_claude_quota_guard() {
     exit 1
   fi
   SPAWN_CLAUDE_QUOTA_LOCK_HELD=1
+  guard_args+=(--apply-status)
+  fi
   SPAWN_CLAUDE_QUOTA_VERDICT=$(mktemp) || {
     echo "error: could not record the Claude quota decision" >&2
     FM_LAUNCH_OUTCOME=unsafe-refusal
@@ -1498,9 +1522,11 @@ spawn_apply_claude_quota_guard() {
     --home "$FM_HOME" \
     --id "$ID" \
     --brief "$DATA/$ID/brief.md" \
-    --model="$MODEL" \
+    --model="$guard_model" \
     --verdict "$SPAWN_CLAUDE_QUOTA_VERDICT" \
-    --apply-status || quota_rc=$?
+    --dispatch-rule "$DISPATCH_RULE" \
+    --effort "${EFFORT:-default}" \
+    "${guard_args[@]}" || quota_rc=$?
   if [ "$quota_rc" -ne 0 ]; then
     rm -f "$SPAWN_CLAUDE_QUOTA_VERDICT"
     SPAWN_CLAUDE_QUOTA_VERDICT=
@@ -1520,6 +1546,7 @@ spawn_apply_claude_quota_guard() {
       action) verdict_action=$value ;;
       harness) verdict_harness=$value ;;
       model) verdict_model=$value ;;
+      effort) verdict_effort=$value ;;
     esac
   done <"$SPAWN_CLAUDE_QUOTA_VERDICT"
   rm -f "$SPAWN_CLAUDE_QUOTA_VERDICT"
@@ -1537,7 +1564,7 @@ spawn_apply_claude_quota_guard() {
   case "$verdict_harness" in
     grok | muse) ;;
     claude)
-      if [ "$verdict_model" != sonnet ]; then
+      if [[ "${verdict_model,,}" != *sonnet* ]]; then
         echo "error: Claude quota guard returned an unusable verdict" >&2
         FM_LAUNCH_OUTCOME=unsafe-refusal
         FM_LAUNCH_OUTCOME_REASON=claude-quota-guard
@@ -1553,6 +1580,7 @@ spawn_apply_claude_quota_guard() {
   esac
   HARNESS=$verdict_harness
   MODEL=$verdict_model
+  EFFORT=$verdict_effort
   RAW_LAUNCH=0
   LAUNCH=$(launch_template "$HARNESS" "$KIND") || {
     echo "error: no launch template for harness '$HARNESS' after the Claude quota guard rerouted this launch" >&2

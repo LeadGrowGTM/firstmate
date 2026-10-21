@@ -38,7 +38,7 @@ make_case() {  # <name> <on|off>
   WT_DIR="$dir/wt"
   mkdir -p "$HOME_DIR/data/$TASK" "$HOME_DIR/projects" "$HOME_DIR/state" "$HOME_DIR/config" "$HOME_DIR/user-home"
   printf 'claude\n' > "$HOME_DIR/config/crew-harness"
-  printf '%s\n' '{"enabled":false}' > "$HOME_DIR/config/claude-quota-guard.json"
+  printf '%s\n' '{"pace_margin_points":100}' > "$HOME_DIR/config/claude-quota-guard.json"
   printf '%s\n' "$$" > "$HOME_DIR/state/.lock"
   touch "$HOME_DIR/state/.last-watcher-beat"
   [ "$2" = off ] || : > "$HOME_DIR/config/fleet-ledger"

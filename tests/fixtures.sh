@@ -300,7 +300,7 @@ fm_test_spawn_home() {
   mkdir -p "$home/data" "$home/projects" "$home/state" "$home/config"
   touch "$home/state/.last-watcher-beat"
   # A live subscription reading must not reroute a launch this fixture asserts.
-  printf '%s\n' '{"enabled":false}' > "$home/config/claude-quota-guard.json"
+  printf '%s\n' '{"pace_margin_points":100}' > "$home/config/claude-quota-guard.json"
   if [ -n "$harness" ]; then
     printf '%s\n' "$harness" > "$home/config/crew-harness"
   fi

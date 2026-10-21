@@ -1,5 +1,4 @@
 {
-  "enabled": true,
   "pace_margin_points": 10,
   "concurrent_claude_cap": 4,
   "weekly_window_seconds": 604800,

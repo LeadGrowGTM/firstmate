@@ -35,7 +35,7 @@ make_home() {  # <name> [<registry-line>...]
   projects="$TMP_ROOT/$name/projects"
   fakebin="$TMP_ROOT/$name/bin"
   mkdir -p "$home/data" "$home/state" "$home/config" "$projects/proj" "$fakebin"
-  printf '%s\n' '{"enabled":false}' > "$home/config/claude-quota-guard.json"
+  printf '%s\n' '{"pace_margin_points":100}' > "$home/config/claude-quota-guard.json"
   git -C "$projects/proj" init -q || fail "could not initialize project fixture"
   printf '#!/bin/sh\nexit 1\n' > "$fakebin/tmux"
   chmod +x "$fakebin/tmux"

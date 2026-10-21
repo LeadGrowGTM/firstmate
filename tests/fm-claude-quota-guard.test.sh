@@ -23,6 +23,7 @@ fi
 QUOTA_BIN=$(command -v quota-axi)
 PACE_LINE='working [key=claude-quota-pace]: claude weekly usage is ahead of the window, so this launch was routed off the requested claude model'
 CAP_LINE='paused [key=claude-quota-cap]: claude worker cap deferred this launch'
+ROUTE_LINE='paused [key=claude-quota-route]: claude weekly usage is ahead of the window, and the selected dispatch rule allows no alternate worker, so this launch was deferred'
 GAP_LINE='claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check'
 
 # Drop directories that contain a real grok or muse binary so a test chooses
@@ -230,13 +231,13 @@ test_opus_refused_for_writing_and_allowed_when_cleared() {
     "the refusal did not name the task type"
   assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota')" "an opus refusal wrote a status line"
 
-  printf '%s\n' '{"opus_refused_types":[]}' > "$home/config/claude-quota-guard.json"
+  printf '%s\n' '{"opus_refused_types":["execution"]}' > "$home/config/claude-quota-guard.json"
   rc=0
   FM_TEST_SNAP="$TMP_ROOT/opus-no/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
-  expect_code 0 "$rc" "an empty refused list still blocked opus: $out"
-  assert_equals proceed "$(verdict_field "$home/verdict" action)" "an empty refused list rerouted"
-  assert_equals opus "$(verdict_field "$home/verdict" model)" "an empty refused list changed the model"
-  pass "opus is refused for a configured writing type and allowed when that list is empty"
+  expect_code 0 "$rc" "a writing launch was refused despite an execution-only list: $out"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "an execution-only list rerouted"
+  assert_equals opus "$(verdict_field "$home/verdict" model)" "an execution-only list changed the model"
+  pass "opus is refused only for configured task types"
 }
 
 test_missing_quota_proceeds_and_still_checks_opus_and_cap() {
@@ -303,7 +304,7 @@ test_status_line_is_written_once() {
   pass "a pace reroute and a cap deferral each append one status line"
 }
 
-test_cap_ignores_landed_work_and_secondmates() {
+test_cap_counts_pr_workers_and_ignores_secondmates() {
   local home out rc=0
   home=$(make_home seats task-c engineering)
   prepare_fake seats quota
@@ -312,11 +313,23 @@ test_cap_ignores_landed_work_and_secondmates() {
   fm_write_meta "$home/state/occ-a.meta" harness=claude kind=ship pr=https://example.invalid/pull/1
   fm_write_meta "$home/state/occ-b.meta" harness=claude kind=secondmate
   fm_write_meta "$home/state/occ-c.meta" harness=claude kind=ship
+  fm_write_meta "$home/state/occ-d.meta" harness=claude kind=scout
+  fm_write_meta "$home/state/occ-e.meta" harness=claude kind=ship
   fm_write_meta "$home/state/task-c.meta" harness=claude kind=ship
+  out=$(run_check "$home" task-c haiku 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "a live or unverified PR worker did not hold a seat: $out"
+  fm_write_meta "$home/state/occ-a.meta" harness=claude kind=ship pr=https://example.invalid/pull/1 \
+    window=retired:fm-occ-a
+  cat > "$TMP_ROOT/current-fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+printf "can't find session: retired\n" >&2
+exit 1
+SH
+  chmod +x "$TMP_ROOT/current-fakebin/tmux"
+  rc=0
   out=$(run_check "$home" task-c haiku) || rc=$?
-  expect_code 0 "$rc" "landed work and a second mate filled the cap: $out"
-  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a free seat was deferred"
-  pass "a recorded pr and a second mate do not hold a Claude seat"
+  expect_code 0 "$rc" "a proven dead endpoint still filled a Claude seat: $out"
+  pass "a PR worker holds a seat until its endpoint is proven dead"
 }
 
 test_bad_config_and_unreadable_record_refuse() {
@@ -328,6 +341,13 @@ test_bad_config_and_unreadable_record_refuse() {
   expect_code 1 "$rc" "a malformed config was accepted: $out"
   assert_contains "$out" 'config/claude-quota-guard.json is malformed' "the malformed file was not named"
   assert_not_contains "$out" 'not-a-key' "the malformed file contents were printed"
+  local invalid
+  for invalid in '{"enabled":false}' '{"concurrent_claude_cap":null}' '{"opus_refused_types":[]}'; do
+    printf '%s\n' "$invalid" > "$home/config/claude-quota-guard.json"
+    rc=0
+    out=$(run_check "$home" task-w haiku 2>&1) || rc=$?
+    expect_code 1 "$rc" "a guard opt-out was accepted: $invalid"
+  done
 
   rm -f "$home/config/claude-quota-guard.json"
   fm_write_meta "$home/state/occ-a.meta" harness=claude kind=ship
@@ -340,18 +360,46 @@ test_bad_config_and_unreadable_record_refuse() {
   pass "a malformed config and an unreadable task record refuse the launch"
 }
 
-test_disabled_guard_keeps_the_requested_model() {
+test_selected_opus_rule_defers_without_alternate() {
   local home out rc=0
-  home=$(make_home off task-w writing)
+  home=$(make_home selected task-w engineering)
+  prepare_fake selected quota grok muse
+  write_snap "$TMP_ROOT/selected/snap.json" 30 259200
+  printf '%s\n' '{"default":[{"harness":"claude","model":"opus","effort":"high"}]}' > "$home/config/crew-dispatch.json"
+  FM_TEST_SNAP="$TMP_ROOT/selected/snap.json" out=$(run_check "$home" task-w opus \
+    --dispatch-rule '{"default":true}' --effort high --apply-status 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an Opus-only rule selected an unlisted worker: $out"
+  assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "route deferral did not write one line"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota-pace')" "route deferral wrote a pace line"
+  rc=0
+  FM_TEST_SNAP="$TMP_ROOT/selected/snap.json" out=$(run_check "$home" task-w opus \
+    --dispatch-rule '{"default":true}' --effort high --apply-status 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an Opus-only rule launched on retry: $out"
+  assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "route retry wrote another line"
+  pass "an Opus-only dispatch rule defers with one route line"
+}
+
+test_refusal_only_relaunch_model() {
+  local home out rc=0
+  home=$(make_home relaunch task-w writing)
+  prepare_fake relaunch quota
+  out=$(run_check "$home" task-w opus --refusal-only 2>&1) || rc=$?
+  expect_code 1 "$rc" "an Opus relaunch of a writing task was allowed: $out"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota')" "a refused relaunch wrote status"
+  pass "an Opus relaunch is refused without a pace or cap check"
+}
+
+test_valid_margin_keeps_allowed_model() {
+  local home out rc=0
+  home=$(make_home off task-w engineering)
   prepare_fake off quota grok
   write_snap "$TMP_ROOT/off/snap.json" 30 259200
-  printf '%s\n' '{"enabled":false}' > "$home/config/claude-quota-guard.json"
+  printf '%s\n' '{"pace_margin_points":100}' > "$home/config/claude-quota-guard.json"
   FM_TEST_SNAP="$TMP_ROOT/off/snap.json" out=$(run_check "$home" task-w opus) || rc=$?
-  expect_code 0 "$rc" "a disabled guard refused opus: $out"
-  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a disabled guard rerouted"
-  assert_equals opus "$(verdict_field "$home/verdict" model)" "a disabled guard changed the model"
-  assert_not_contains "$out" "claude-quota-guard:" "a disabled guard printed a notice"
-  pass "enabled false leaves the requested Claude model alone"
+  expect_code 0 "$rc" "a configured margin refused allowed opus: $out"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a configured margin rerouted"
+  assert_equals opus "$(verdict_field "$home/verdict" model)" "a configured margin changed the model"
+  pass "a configured margin keeps an allowed Claude model"
 }
 
 # --- spawn path ------------------------------------------------------------
@@ -380,6 +428,12 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
+  list-windows)
+    if [ -f "${FM_FAKE_CALL_LOG%/*}/inventory-unreadable" ]; then
+      printf 'unavailable\n' >&2
+      exit 1
+    fi
+    ;;
   display-message) printf 'firstmate\n'; exit 0 ;;
   send-keys)
     # A launch is typed as `. '<staged file>'`. Record that file so the test
@@ -467,13 +521,13 @@ run_spawn() { # <case> <pane> <args...>
 call_count() { wc -l < "$1/calls.log" | tr -d ' '; }
 
 assert_nothing_created() {
-  local case_dir=$1 id=$2 before=$3 worktrees=$4 after home
+  local case_dir=$1 id=$2 before=$3 worktrees=$4 home unexpected
   home="$case_dir/home"
   assert_absent "$home/state/$id.meta" "a refused spawn published a task record for $id"
   assert_absent "$home/data/$id/launch-brief.md" "a refused spawn rendered a launch brief for $id"
-  after=$(call_count "$case_dir")
-  [ "$after" -eq "$before" ] ||
-    fail "a refused spawn touched the terminal or worktree pool for $id: $(tail -n +"$((before + 1))" "$case_dir/calls.log")"
+  unexpected=$(tail -n +"$((before + 1))" "$case_dir/calls.log" | sed '/^list-windows /d')
+  [ -z "$unexpected" ] ||
+    fail "a refused spawn touched the terminal or worktree pool for $id: $unexpected"
   assert_equals "$worktrees" "$(git -C "$case_dir/sample-project" worktree list --porcelain)" \
     "a refused spawn left a git worktree for $id"
   if [ "$HAVE_TASKS_AXI" = 1 ]; then
@@ -499,6 +553,49 @@ test_spawn_refuses_opus_for_writing() {
   assert_nothing_created "$case_dir" task-w "$before" "$trees"
   assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota')" "spawn wrote a status line for an opus refusal"
   pass "spawn refuses opus for a writing task before creating the worker"
+}
+
+test_spawn_refuses_raw_opus_for_writing() {
+  local case_dir home out rc=0 before trees
+  case_dir=$(make_case raw-opus task-w writing)
+  home="$case_dir/home"
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-w "$case_dir/sample-project" \
+    'claude --model opus' --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code 1 "$rc" "a raw Opus writing launch was allowed: $out"
+  assert_contains "$out" "refused: Opus is not allowed for task type writing" "raw Opus refusal was not reached"
+  assert_nothing_created "$case_dir" task-w "$before" "$trees"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota')" "raw Opus refusal wrote status"
+  pass "a raw Claude Opus writing launch refuses before launch"
+}
+
+test_spawn_selected_opus_rule_defers() {
+  local case_dir home out rc=0 before trees
+  case_dir=$(make_case rule-only-opus task-w engineering)
+  home="$case_dir/home"
+  link_quota "$case_dir/fakebin"
+  fake_tool "$case_dir/fakebin" grok
+  fake_tool "$case_dir/fakebin" muse
+  write_snap "$case_dir/snap.json" 30 259200
+  printf '%s\n' '{"default":[{"harness":"claude","model":"opus","effort":"high"}]}' > "$home/config/crew-dispatch.json"
+  FM_TEST_SNAP="$case_dir/snap.json"
+  before=$(call_count "$case_dir")
+  trees=$(git -C "$case_dir/sample-project" worktree list --porcelain)
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-w "$case_dir/sample-project" \
+    --harness claude --model opus --effort high --dispatch-rule '{"default":true}' \
+    --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an Opus-only rule launched an unlisted worker: $out"
+  assert_nothing_created "$case_dir" task-w "$before" "$trees"
+  assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "spawn missed route line"
+  assert_equals 0 "$(key_count "$home/state/task-w.status" 'claude-quota-pace')" "spawn wrote pace line"
+  rc=0
+  out=$(run_spawn "$case_dir" "$case_dir/unused" task-w "$case_dir/sample-project" \
+    --harness claude --model opus --effort high --dispatch-rule '{"default":true}' \
+    --mode no-mistakes --yolo off 2>&1) || rc=$?
+  expect_code "$DEFER_EXIT" "$rc" "an Opus-only rule launched on retry: $out"
+  assert_equals 1 "$(canonical_count "$home/state/task-w.status" "$ROUTE_LINE")" "spawn retry duplicated route line"
+  pass "spawn leaves an Opus-only rule queued with one route line"
 }
 
 test_spawn_reroutes_hot_window() {
@@ -551,6 +648,7 @@ test_spawn_sonnet_and_cap() {
   assert_equals 1 "$(canonical_count "$home/state/task-s.status" "$PACE_LINE")" "the sonnet route skipped the pace line"
 
   case_dir=$(make_case cap task-c engineering)
+  touch "$case_dir/inventory-unreadable"
   home="$case_dir/home"
   link_quota "$case_dir/fakebin"
   write_snap "$case_dir/snap.json" 95 259200
@@ -577,6 +675,7 @@ test_spawn_sonnet_and_cap() {
   assert_equals 1 "$(canonical_count "$home/state/task-c.status" "$CAP_LINE")" "the cap retry appended another line"
 
   case_dir=$(make_case both task-b writing)
+  touch "$case_dir/inventory-unreadable"
   home="$case_dir/home"
   link_quota "$case_dir/fakebin"
   write_snap "$case_dir/snap.json" 30 259200
@@ -605,7 +704,7 @@ test_spawn_sonnet_and_cap() {
   pass "spawn defers at the cap with one line, and a later under-cap retry records the pace line once"
 }
 
-test_spawn_missing_quota_proceeds_and_disable_keeps_opus() {
+test_spawn_missing_quota_proceeds_and_allowed_opus() {
   local case_dir home pane out rc=0
   case_dir=$(make_case gap task-q engineering)
   home="$case_dir/home"
@@ -619,22 +718,21 @@ test_spawn_missing_quota_proceeds_and_disable_keeps_opus() {
   assert_grep  "--model 'haiku'" "$case_dir/calls.log" "the requested model was not kept"
   assert_equals 0 "$(key_count "$home/state/task-q.status" 'claude-quota-pace')" "a missing reading wrote a pace line"
 
-  case_dir=$(make_case disabled task-w writing)
+  case_dir=$(make_case allowed task-w engineering)
   home="$case_dir/home"
   link_quota "$case_dir/fakebin"
   fake_tool "$case_dir/fakebin" grok
   write_snap "$case_dir/snap.json" 30 259200
-  printf '%s\n' '{"enabled":false}' > "$home/config/claude-quota-guard.json"
+  printf '%s\n' '{"pace_margin_points":100}' > "$home/config/claude-quota-guard.json"
   pane=$(new_worktree "$case_dir" task-w)
   FM_TEST_SNAP="$case_dir/snap.json"
   rc=0
   out=$(run_spawn "$case_dir" "$pane" task-w "$case_dir/sample-project" \
     --harness claude --model opus --mode no-mistakes --yolo off) || rc=$?
-  expect_code 0 "$rc" "a disabled guard blocked opus: $out"
-  assert_not_contains "$out" "claude-quota-guard:" "a disabled guard announced a route"
-  assert_grep  "--model 'opus'" "$case_dir/calls.log" "a disabled guard did not keep opus"
-  assert_equals claude "$(awk -F= '$1=="harness"{print $2}' "$home/state/task-w.meta")" "a disabled guard left claude"
-  pass "spawn continues when quota is missing, and enabled false keeps opus"
+  expect_code 0 "$rc" "a configured margin blocked allowed opus: $out"
+  assert_grep  "--model 'opus'" "$case_dir/calls.log" "a configured margin did not keep opus"
+  assert_equals claude "$(awk -F= '$1=="harness"{print $2}' "$home/state/task-w.meta")" "a configured margin left claude"
+  pass "spawn continues when quota is missing and a configured margin keeps allowed opus"
 }
 
 test_spawn_ignores_non_claude() {
@@ -662,11 +760,15 @@ test_pace_prefers_grok_then_muse_then_sonnet
 test_opus_refused_for_writing_and_allowed_when_cleared
 test_missing_quota_proceeds_and_still_checks_opus_and_cap
 test_status_line_is_written_once
-test_cap_ignores_landed_work_and_secondmates
+test_cap_counts_pr_workers_and_ignores_secondmates
 test_bad_config_and_unreadable_record_refuse
-test_disabled_guard_keeps_the_requested_model
+test_selected_opus_rule_defers_without_alternate
+test_refusal_only_relaunch_model
+test_valid_margin_keeps_allowed_model
 test_spawn_refuses_opus_for_writing
+test_spawn_refuses_raw_opus_for_writing
+test_spawn_selected_opus_rule_defers
 test_spawn_reroutes_hot_window
 test_spawn_sonnet_and_cap
-test_spawn_missing_quota_proceeds_and_disable_keeps_opus
+test_spawn_missing_quota_proceeds_and_allowed_opus
 test_spawn_ignores_non_claude
