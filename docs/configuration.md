@@ -1520,8 +1520,9 @@ It uses the tightest Claude JSON window whose id is `seven_day`, or whose kind i
 That window must report `resetsAt` and a positive measured `windowSeconds`.
 The window id, including `seven_day`, does not supply a length.
 A selected window without a positive `windowSeconds` skips the pace check, even when another window reports a length.
-When quota-axi is missing, times out, fails, cannot be parsed, or the selected window has no measured length or reset time, the pace check is skipped and the spawn output states that gap.
-That gap never refuses a launch by itself.
+When quota-axi is missing, times out, fails, cannot be parsed, or the selected window has no measured length or reset time, the pace check is skipped.
+That gap is disclosed in the spawn output.
+It does not pace-reroute the launch, and it does not refuse the launch.
 The Opus-type check and the worker cap still run.
 
 Weekly usage is 100 minus percent remaining.
