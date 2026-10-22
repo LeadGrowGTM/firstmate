@@ -16,6 +16,9 @@
 # refuses the launch instead of guessing.
 # Env-wrapped and compound raw Claude launches, quoted command names, and quoted or escaped leading assignments are not guarded.
 
+# shellcheck source=bin/fm-quota-axi-lib.sh
+. "${BASH_SOURCE[0]%/*}/fm-quota-axi-lib.sh"
+
 # Built-in policy values. Supported config keys can override margin, cap, and types.
 FM_CQG_DEFAULT_MARGIN=10
 FM_CQG_DEFAULT_CAP=4
@@ -143,37 +146,48 @@ fm_cqg_iso_epoch() {
   date -u -d "$raw" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$raw" +%s 2>/dev/null
 }
 
-# fm_cqg_json_weekly <json>
-# Prints percentRemaining, resetsAt, and windowSeconds for the tightest Claude seven_day
-# window, or a weekly-kind window when seven_day is absent.
-# Prints nothing when that window has no positive measured windowSeconds.
+# fm_cqg_json_weekly <json> [model]
+# Prints percentRemaining, resetsAt, and windowSeconds for the launch account's
+# tightest seven_day window, or a weekly-kind window on that same row when
+# seven_day is absent.
+# The row comes from quota_row in bin/fm-quota-axi-lib.sh: the launch account
+# key from quota_lane, then the default row. No joined row prints nothing.
+# A stale joined row prints nothing. Another account's window is not read.
+# Prints nothing when the selected window has no positive measured windowSeconds.
 # A seven_day label does not supply a length.
 fm_cqg_json_weekly() {
-  jq -r '
-    def rows(which):
-      [.providers[]? | select(.provider == "claude" and .state.stale != true) | .windows[]?
-        | select(which)
-        | select(.percentRemaining | type == "number")];
-    (rows(.id == "seven_day")) as $named
-    | (if ($named | length) > 0 then $named else rows(.kind == "weekly") end)
-    | min_by(.percentRemaining) // empty
-    | select(.resetsAt | type == "string")
-    | if (.windowSeconds | type) == "number"
-        and .windowSeconds > 0
-        and (.windowSeconds | isinfinite | not)
-        and (.windowSeconds | isnan | not)
-      then "\(.percentRemaining)\t\(.resetsAt)\t\(.windowSeconds)"
-      else empty end
-  ' <<<"$1" 2>/dev/null || true
+  local json=$1 model=${2-} lane
+  lane=$(jq -rn --arg h claude --arg m "$model" "$FM_QUOTA_ROW_JQ"'quota_lane($h; $m)') || true
+  jq -r --arg lane "$lane" "$FM_QUOTA_ROW_JQ"'
+    quota_row(.; "claude"; $lane) as $row
+    | if $row == null or ($row.state.stale == true) then empty
+      else
+        def windows(which):
+          [$row.windows[]?
+            | select(which)
+            | select(.percentRemaining | type == "number")];
+        (windows(.id == "seven_day")) as $named
+        | (if ($named | length) > 0 then $named else windows(.kind == "weekly") end)
+        | min_by(.percentRemaining) // empty
+        | select(.resetsAt | type == "string")
+        | if (.windowSeconds | type) == "number"
+            and .windowSeconds > 0
+            and (.windowSeconds | isinfinite | not)
+            and (.windowSeconds | isnan | not)
+          then "\(.percentRemaining)\t\(.resetsAt)\t\(.windowSeconds)"
+          else empty end
+      end
+  ' <<<"$json" 2>/dev/null || true
 }
 
-# fm_cqg_read_weekly
-# Prints "remaining<TAB>resetsAt<TAB>windowSeconds" for the Claude weekly window, or nothing
-# when quota-axi cannot report it. Never returns a hard failure for missing
-# data. Callers treat an empty print as the gap: this function runs inside a
-# command substitution, so a flag set here would not reach them.
+# fm_cqg_read_weekly [model]
+# Prints "remaining<TAB>resetsAt<TAB>windowSeconds" for the launch account's
+# Claude weekly window, or nothing when quota-axi cannot report that row.
+# Never returns a hard failure for missing data. Callers treat an empty print
+# as the gap: this function runs inside a command substitution, so a flag set
+# here would not reach them.
 fm_cqg_read_weekly() {
-  local json rc=0 row
+  local model=${1-} json rc=0 row
   local -a quota_env=() quota_args=(--provider claude)
   if ! command -v quota-axi >/dev/null 2>&1; then
     return 0
@@ -194,7 +208,7 @@ fm_cqg_read_weekly() {
   if [ "$rc" -ne 0 ] || [ -z "$json" ]; then
     return 0
   fi
-  row=$(fm_cqg_json_weekly "$json") || true
+  row=$(fm_cqg_json_weekly "$json" "$model") || true
   if [ -z "$row" ]; then
     return 0
   fi
@@ -493,7 +507,7 @@ fm_cqg_decide() {
     fm_cqg_write_verdict "$verdict" proceed claude "$model"
     return 0
   fi
-  weekly=$(fm_cqg_read_weekly) || weekly=
+  weekly=$(fm_cqg_read_weekly "$model") || weekly=
   route=
   if [ -z "$weekly" ]; then
     printf '%s\n' "claude-quota-guard: quota-axi could not report Claude weekly usage; this launch continues without a pace check"

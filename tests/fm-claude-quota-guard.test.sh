@@ -461,6 +461,54 @@ test_json_skips_stale_claude_provider() {
   pass "JSON fallback uses fresh Claude quota and skips stale providers"
 }
 
+test_schema6_uses_the_launch_account_row() {
+  local home snap out rc=0 now reset
+  home=$(make_home account-row task-w engineering)
+  prepare_fake account-row quota grok
+  now=$(date +%s)
+  reset=$(date -u -d "@$((now + 302400))" +%Y-%m-%dT%H:%M:%SZ)
+  snap="$TMP_ROOT/account-row/snap.json"
+  cat > "$snap" <<EOF
+{
+  "schemaVersion": 6,
+  "providers": [
+    {
+      "provider": "claude",
+      "accountKey": "other",
+      "state": {"stale": false},
+      "windows": [
+        {"id": "seven_day", "kind": "weekly", "percentRemaining": 0, "resetsAt": "$reset", "windowSeconds": 604800}
+      ]
+    },
+    {
+      "provider": "claude",
+      "accountKey": "default",
+      "state": {"stale": false},
+      "windows": [
+        {"id": "seven_day", "kind": "weekly", "percentRemaining": 95, "resetsAt": "$reset", "windowSeconds": 604800}
+      ]
+    }
+  ]
+}
+EOF
+  FM_TEST_SNAP="$snap"
+  out=$(run_check "$home" task-w haiku) || rc=$?
+  expect_code 0 "$rc" "the launch account row refused the launch: $out"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "another account's empty window rerouted the launch"
+  assert_equals claude "$(verdict_field "$home/verdict" harness)" "another account's empty window changed the harness"
+  assert_equals haiku "$(verdict_field "$home/verdict" model)" "another account's empty window changed the model"
+
+  jq 'del(.providers[] | select(.accountKey == "default"))' "$snap" > "$TMP_ROOT/account-row/no-default.json"
+  FM_TEST_SNAP="$TMP_ROOT/account-row/no-default.json"
+  rc=0
+  out=$(run_check "$home" task-w haiku) || rc=$?
+  expect_code 0 "$rc" "a snapshot with no launch account row refused the launch: $out"
+  assert_contains "$out" "$GAP_LINE" "a snapshot with no launch account row hid the quota gap"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a snapshot with no launch account row drove the pace check"
+  assert_equals haiku "$(verdict_field "$home/verdict" model)" "a snapshot with no launch account row changed the model"
+  pass "pace uses the launch account row and ignores another account"
+}
+
 test_status_line_is_written_once() {
   local home out rc=0 file
   home=$(make_home once task-p writing)
@@ -1901,6 +1949,7 @@ test_hot_requested_sonnet_keeps_profile
 test_opus_refused_for_writing_and_allowed_when_cleared
 test_missing_quota_proceeds_and_still_checks_opus_and_cap
 test_json_skips_stale_claude_provider
+test_schema6_uses_the_launch_account_row
 test_status_line_is_written_once
 test_cap_counts_pr_workers_and_ignores_secondmates
 test_bad_config_and_unreadable_record_refuse

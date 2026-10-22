@@ -1516,7 +1516,8 @@ For a fresh launch, after validating the config and before the task-type and cap
 The JSON read uses `--no-credential-refresh`.
 A selected credential directory uses quota-axi's `--profile-only` selection.
 An ordinary pin unsets that directory and does not pass `--profile-only`, because quota-axi rejects the flag without one.
-It uses the tightest Claude JSON window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
+The pace window is the tightest `seven_day` window on the one Claude row from the [shared quota library](../bin/fm-quota-axi-lib.sh) account join, or the tightest weekly-kind window on that row when `seven_day` is absent.
+A snapshot with no joined row is a missing reading, and another account's window is not a pace reading.
 That window must report `resetsAt` and a positive measured `windowSeconds`.
 The window id, including `seven_day`, does not supply a length.
 A selected window without a positive `windowSeconds` skips the pace check, even when another window reports a length.
