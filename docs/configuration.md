@@ -1517,12 +1517,10 @@ The JSON read uses `--no-credential-refresh`.
 A selected credential directory uses quota-axi's `--profile-only` selection.
 An ordinary pin unsets that directory and does not pass `--profile-only`, because quota-axi rejects the flag without one.
 It uses the tightest Claude JSON window whose id is `seven_day`, or whose kind is `weekly` when no `seven_day` window is present.
-That window must report `resetsAt`.
-A positive `windowSeconds` on that window is its length.
-When the selected window's own id is `seven_day` and `windowSeconds` is absent, the pace check uses 604800 seconds with its reset time.
-A selected window whose id is not `seven_day` and that lacks `windowSeconds` skips the pace check, even if another window reports a length.
-A length that is present but not a positive number skips the pace check.
-When quota-axi is missing, times out, fails, or cannot be parsed, the pace check is skipped and the spawn output states that gap.
+That window must report `resetsAt` and a positive measured `windowSeconds`.
+The window id, including `seven_day`, does not supply a length.
+A selected window without a positive `windowSeconds` skips the pace check, even when another window reports a length.
+When quota-axi is missing, times out, fails, cannot be parsed, or the selected window has no measured length or reset time, the pace check is skipped and the spawn output states that gap.
 That gap never refuses a launch by itself.
 The Opus-type check and the worker cap still run.
 

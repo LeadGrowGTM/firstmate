@@ -229,16 +229,16 @@ test_reported_weekly_window_controls_pace() {
   expect_code 0 "$rc" "a weekly-kind window refused the launch: $out"
   assert_equals reroute "$(verdict_field "$home/verdict" action)" "the weekly-kind window lost its length"
 
-  write_snap "$TMP_ROOT/reported-window/fallback-base.json" 50 432000
+  write_snap "$TMP_ROOT/reported-window/measured-base.json" 50 432000
   jq 'del(.providers[0].windows[] | select(.id == "seven_day") | .windowSeconds)' \
-    "$TMP_ROOT/reported-window/fallback-base.json" \
+    "$TMP_ROOT/reported-window/measured-base.json" \
     > "$TMP_ROOT/reported-window/no-length.json"
   FM_TEST_SNAP="$TMP_ROOT/reported-window/no-length.json"
   rc=0
   out=$(run_check "$home" task-w haiku) || rc=$?
-  expect_code 0 "$rc" "a missing window length refused the launch: $out"
-  assert_not_contains "$out" "$GAP_LINE" "a seven_day window without a length skipped pace"
-  assert_equals reroute "$(verdict_field "$home/verdict" action)" "a seven_day window without a length did not use 604800 seconds"
+  expect_code 0 "$rc" "a seven_day window without a length refused the launch: $out"
+  assert_contains "$out" "$GAP_LINE" "a seven_day window without a length hid the quota gap"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a seven_day window without a length assumed a window length"
 
   jq '(.providers[0].windows[] | select(.id == "seven_day") | .id) = "rolling_week"' \
     "$TMP_ROOT/reported-window/no-length.json" > "$TMP_ROOT/reported-window/weekly-without-length.json"
@@ -286,10 +286,10 @@ test_reported_weekly_window_controls_pace() {
   FM_TEST_SNAP="$TMP_ROOT/reported-window/tighter-without-length.json"
   rc=0
   out=$(run_check "$home" task-w haiku) || rc=$?
-  expect_code 0 "$rc" "a tighter window without length refused the launch: $out"
-  assert_not_contains "$out" "$GAP_LINE" "a reported reset time without a length skipped pace"
-  assert_equals proceed "$(verdict_field "$home/verdict" action)" "the guard borrowed a shorter length from another window"
-  pass "pace uses the selected length and only seven_day gets the absent-length fallback"
+  expect_code 0 "$rc" "a tighter seven_day window without length refused the launch: $out"
+  assert_contains "$out" "$GAP_LINE" "a selected seven_day window without a length hid the quota gap"
+  assert_equals proceed "$(verdict_field "$home/verdict" action)" "a selected seven_day window without a length assumed a window length"
+  pass "pace uses a measured window length and treats a missing length as a quota gap"
 }
 
 test_pace_prefers_grok_then_muse_then_sonnet() {

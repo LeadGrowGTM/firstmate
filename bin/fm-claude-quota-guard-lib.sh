@@ -146,6 +146,8 @@ fm_cqg_iso_epoch() {
 # fm_cqg_json_weekly <json>
 # Prints percentRemaining, resetsAt, and windowSeconds for the tightest Claude seven_day
 # window, or a weekly-kind window when seven_day is absent.
+# Prints nothing when that window has no positive measured windowSeconds.
+# A seven_day label does not supply a length.
 fm_cqg_json_weekly() {
   jq -r '
     def rows(which):
@@ -161,8 +163,6 @@ fm_cqg_json_weekly() {
         and (.windowSeconds | isinfinite | not)
         and (.windowSeconds | isnan | not)
       then "\(.percentRemaining)\t\(.resetsAt)\t\(.windowSeconds)"
-      elif .id == "seven_day" and (has("windowSeconds") | not)
-      then "\(.percentRemaining)\t\(.resetsAt)\t604800"
       else empty end
   ' <<<"$1" 2>/dev/null || true
 }
